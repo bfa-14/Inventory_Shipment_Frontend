@@ -137,6 +137,15 @@ function defaultMessage(status: number, problem: ProblemDetails | null): string 
       return 'This account is temporarily locked.'
     case 429:
       return 'Too many attempts. Please wait a minute and try again.'
+    // The gateway statuses, with no problem detail of their own, mean the request never reached the
+    // API: the Vite proxy (dev) or the reverse proxy (production) had nothing to forward to. Saying
+    // "the server ran into a problem" here sends the reader hunting for a bug in an API that is not
+    // even running. The dev proxy answers 503 with its own detail, which the first line returns; this
+    // is the fallback for every other gateway that does not.
+    case 502:
+    case 503:
+    case 504:
+      return 'The API is not reachable. Make sure Inventory_Shipment.API is running (https://localhost:7089).'
     default:
       return status >= 500 ? 'The server ran into a problem. Please try again.' : (problem?.title ?? `Request failed (${status}).`)
   }

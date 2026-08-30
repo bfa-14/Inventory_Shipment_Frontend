@@ -5,18 +5,65 @@ The frontend for `Inventory_Shipment.API`. Open **this folder** in VS Code (`Fil
 ## Requirements
 
 - **Node.js 20.19+ or 22.12+** — check with `node --version`. (Download from https://nodejs.org if needed.)
-- The API running from Visual Studio (F5 on `Inventory_Shipment.API`, which opens the Scalar docs at `https://localhost:7089/scalar/`).
+- The **.NET 10 SDK**, so `npm run dev` can start the API. (Running it from Visual Studio instead is fine — use the **https** launch profile.)
 
-## Run it
+## Running in development
+
+Two processes have to be up: the **API** on `https://localhost:7089` and the **web dev server** on
+`http://localhost:5173`. The dev server proxies `/api` and `/health` to the API, so the browser stays on one
+origin.
 
 ```bash
-npm install      # first time only
-npm run dev      # http://localhost:5173
+npm run dev        # starts the API if it is not already up, then the web dev server
 ```
 
-or press **F5** in VS Code (`Run in Edge` / `Run in Chrome`) — it starts the dev server and opens the browser.
+`npm run dev` probes `<VITE_API_PROXY_TARGET>/health` first:
 
-Sign in with the seeded administrator: **admin / Admin@12345** (change it on the dashboard).
+- **answered** → prints `[dev] API already running ... - starting web only` and starts only Vite. This is the
+  normal case when the API is already running from Visual Studio.
+- **no answer** → runs `dotnet run --project ../Inventory_Shipment/Inventory_Shipment.API --launch-profile https`,
+  streams its output prefixed `[api] `, waits for `/health` (up to 90 s), and only then starts Vite (`[web] `).
+  If the API dies during start-up you get its exit code and the `[api] ` lines that explain why, and Vite is
+  not started. `Ctrl+C` stops both.
+
+| Command | What it does |
+|---------|--------------|
+| `npm run dev` | API (when needed) + web |
+| `npm run dev:web` | Web only — use it when the API is already running from Visual Studio |
+| `npm run dev:api` | API only, on the `https` profile |
+
+### Ports
+
+| Port | What |
+|------|------|
+| `7089` | API, HTTPS — what the proxy targets |
+| `5121` | API, HTTP |
+| `5173` | web dev server |
+
+**Start the API on the `https` profile, not `IIS Express`.** The IIS Express profile binds `44395`/`49677`
+instead, so the proxy finds nothing on `7089` and every API call fails. In Visual Studio pick the **https**
+profile from the run-button dropdown (or press F5 with it selected).
+
+To use a different API port, change it in `.env.development` — `npm run dev`, the proxy and the health probe
+all read the same value:
+
+```
+VITE_API_PROXY_TARGET=https://localhost:7089
+```
+
+If the API lives somewhere other than `..\Inventory_Shipment\Inventory_Shipment.API`, point `API_PROJECT_DIR`
+at it.
+
+Sign in with the seeded administrator: **admin / Admin@12345**.
+
+### When the API is not reachable
+
+The proxy answers `503` with `code: "API_UNREACHABLE"` and the page shows *"The API is not reachable. Make sure
+Inventory_Shipment.API is running (https://localhost:7089)."* — rather than the old bare `502`, which surfaced
+as a generic "the server ran into a problem". The dev-server terminal prints the same thing in red.
+
+`dotnet dev-certs https --trust` only matters for opening `https://localhost:7089/scalar` directly; the proxy
+sets `secure: false` and does not care.
 
 ## How it talks to the API
 
@@ -32,7 +79,9 @@ If the API runs on a different port, change it there. To call the API directly i
 
 | Command | What it does |
 |---------|--------------|
-| `npm run dev` | Start the dev server with hot reload |
+| `npm run dev` | Start the API (when it is not already up) and the web dev server |
+| `npm run dev:web` | Web dev server only |
+| `npm run dev:api` | API only, on the `https` profile |
 | `npm run build` | Type-check and build to `dist/` |
 | `npm run preview` | Serve the production build locally (port 4173) |
 | `npm run typecheck` | Type-check only |
