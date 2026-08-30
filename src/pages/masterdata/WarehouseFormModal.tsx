@@ -1,12 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
+import { Alert, Anchor, Checkbox, Group, Select, Switch, Textarea, TextInput } from '@mantine/core'
+import { useForm } from '@mantine/form'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, SaveWarehouseRequest, WarehouseDto } from '../../api/types'
-import { Alert } from '../../components/Alert'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { Modal } from '../../components/ui/Modal'
 import { branchLabel } from '../../components/format'
+import { confirm } from '../../components/ui/confirm'
+import { FormModal } from '../../components/ui/FormModal'
 
 interface WarehouseFormModalProps {
   mode: 'create' | 'edit'
@@ -15,11 +16,13 @@ interface WarehouseFormModalProps {
   onSaved(warehouse: WarehouseDto): void
 }
 
-interface FieldErrors {
-  warehouseCode?: string
-  warehouseName?: string
-  branchId?: string
-  address?: string
+interface FormValues {
+  warehouseCode: string
+  warehouseName: string
+  branchId: string | null
+  address: string
+  isMainWarehouse: boolean
+  isActive: boolean
 }
 
 const MAX_CODE = 20
@@ -27,22 +30,39 @@ const MAX_NAME = 150
 const MAX_ADDRESS = 500
 
 export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: WarehouseFormModalProps) {
-  const [warehouseCode, setWarehouseCode] = useState(warehouse?.warehouseCode ?? '')
-  const [warehouseName, setWarehouseName] = useState(warehouse?.warehouseName ?? '')
-  const [branchId, setBranchId] = useState(warehouse ? String(warehouse.branchId) : '')
-  const [address, setAddress] = useState(warehouse?.address ?? '')
-  const [isMainWarehouse, setIsMainWarehouse] = useState(warehouse?.isMainWarehouse ?? false)
-  const [isActive, setIsActive] = useState(warehouse?.isActive ?? true)
   const [rowVersion, setRowVersion] = useState(warehouse?.rowVersion ?? null)
-
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
-  const [formErrors, setFormErrors] = useState<string[]>([])
+  const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [replacePrompt, setReplacePrompt] = useState<WarehouseDto | null>(null)
 
-  const title = mode === 'create' ? 'New Warehouse' : 'Edit Warehouse'
+  const form = useForm<FormValues>({
+    initialValues: {
+      warehouseCode: warehouse?.warehouseCode ?? '',
+      warehouseName: warehouse?.warehouseName ?? '',
+      branchId: warehouse ? String(warehouse.branchId) : null,
+      address: warehouse?.address ?? '',
+      isMainWarehouse: warehouse?.isMainWarehouse ?? false,
+      isActive: warehouse?.isActive ?? true,
+    },
+    validate: {
+      warehouseCode: (value) => {
+        const code = value.trim()
+        if (!code) return 'Warehouse Code is required.'
+        if (code.length > MAX_CODE) return `Warehouse Code cannot be longer than ${MAX_CODE} characters.`
+        return null
+      },
+      warehouseName: (value) => {
+        const name = value.trim()
+        if (!name) return 'Warehouse Name is required.'
+        if (name.length > MAX_NAME) return `Warehouse Name cannot be longer than ${MAX_NAME} characters.`
+        return null
+      },
+      branchId: (value) => (value ? null : 'Branch / Site is required.'),
+      address: (value) =>
+        value.trim().length > MAX_ADDRESS ? `Address cannot be longer than ${MAX_ADDRESS} characters.` : null,
+    },
+  })
 
   // Active branches only, plus the one this warehouse already points at even if it went inactive.
   useEffect(() => {
@@ -50,53 +70,30 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       .lookup(true, warehouse?.branchId)
       .then(setBranches)
       .catch((error: unknown) => {
-        setFormErrors(error instanceof ApiError ? error.messages : ['The branches could not be loaded.'])
+        setFormError(error instanceof ApiError ? error.messages.join(' ') : 'The branches could not be loaded.')
       })
   }, [warehouse?.branchId])
 
-  /** A field stops showing its error as soon as the user edits it. */
-  function clearError(field: keyof FieldErrors) {
-    setFieldErrors((errors) => (errors[field] ? { ...errors, [field]: undefined } : errors))
-  }
-
-  function validate(): FieldErrors {
-    const errors: FieldErrors = {}
-    const code = warehouseCode.trim()
-    const name = warehouseName.trim()
-
-    if (!code) errors.warehouseCode = 'Warehouse Code is required.'
-    else if (code.length > MAX_CODE) errors.warehouseCode = `Warehouse Code cannot be longer than ${MAX_CODE} characters.`
-
-    if (!name) errors.warehouseName = 'Warehouse Name is required.'
-    else if (name.length > MAX_NAME) errors.warehouseName = `Warehouse Name cannot be longer than ${MAX_NAME} characters.`
-
-    if (!branchId) errors.branchId = 'Branch / Site is required.'
-
-    if (address.trim().length > MAX_ADDRESS) errors.address = `Address cannot be longer than ${MAX_ADDRESS} characters.`
-
-    return errors
-  }
-
-  function buildPayload(replaceMainWarehouse: boolean): SaveWarehouseRequest {
+  function buildPayload(values: FormValues, replaceMainWarehouse: boolean): SaveWarehouseRequest {
     return {
-      warehouseCode: warehouseCode.trim(),
-      warehouseName: warehouseName.trim(),
-      branchId: Number(branchId),
-      address: address.trim() ? address.trim() : null,
-      isMainWarehouse,
-      isActive,
+      warehouseCode: values.warehouseCode.trim(),
+      warehouseName: values.warehouseName.trim(),
+      branchId: Number(values.branchId),
+      address: values.address.trim() ? values.address.trim() : null,
+      isMainWarehouse: values.isMainWarehouse,
+      isActive: values.isActive,
       replaceMainWarehouse,
       ...(mode === 'edit' ? { rowVersion } : {}),
     }
   }
 
-  async function save(replaceMainWarehouse: boolean) {
+  async function save(values: FormValues, replaceMainWarehouse: boolean) {
     setSaving(true)
-    setFormErrors([])
+    setFormError(null)
     setStale(false)
 
     try {
-      const payload = buildPayload(replaceMainWarehouse)
+      const payload = buildPayload(values, replaceMainWarehouse)
       const saved =
         mode === 'create'
           ? await warehousesApi.create(payload)
@@ -104,44 +101,49 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
 
       onSaved(saved)
     } catch (error) {
-      handleError(error)
+      await handleError(error, values)
     } finally {
       setSaving(false)
     }
   }
 
-  function handleError(error: unknown) {
+  async function handleError(error: unknown, values: FormValues) {
     if (!(error instanceof ApiError)) {
-      setFormErrors(['The warehouse could not be saved.'])
+      setFormError('The warehouse could not be saved.')
       return
     }
 
     if (error.code === 'MAIN_WAREHOUSE_EXISTS') {
       const current = (error.data as { currentMainWarehouse?: WarehouseDto } | undefined)?.currentMainWarehouse
       if (current) {
-        setReplacePrompt(current)
+        const replace = await confirm({
+          title: 'Replace Main Warehouse',
+          message: `${current.warehouseCode} - ${current.warehouseName} is currently the Main Warehouse. Make ${values.warehouseCode.trim()} the Main Warehouse instead?`,
+          confirmLabel: 'Replace Main Warehouse',
+        })
+        if (replace) await save(values, true)
         return
       }
     }
 
     if (error.code === 'DUPLICATE_CODE') {
-      setFieldErrors({ warehouseCode: 'A warehouse with this Warehouse Code already exists.' })
+      form.setErrors({ warehouseCode: 'A warehouse with this Warehouse Code already exists.' })
       return
     }
 
     if (error.code === 'BRANCH_INACTIVE') {
-      setFieldErrors({ branchId: error.messages[0] })
+      form.setErrors({ branchId: error.messages[0] })
       return
     }
 
     if (error.code === 'CONCURRENCY') {
       setStale(true)
-      setFormErrors(error.messages)
+      setFormError(error.messages.join(' '))
       return
     }
 
     // ASP.NET model validation: map the messages back onto the fields they belong to.
-    const mapped: FieldErrors = {}
+    const mapped: Record<string, string> = {}
     for (const [field, messages] of Object.entries(error.fieldErrors)) {
       const key = field.toLowerCase()
       const message = messages.join(' ')
@@ -152,21 +154,11 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
     }
 
     if (Object.keys(mapped).length > 0) {
-      setFieldErrors(mapped)
+      form.setErrors(mapped)
       return
     }
 
-    setFormErrors(error.messages)
-  }
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault()
-
-    const errors = validate()
-    setFieldErrors(errors)
-    if (Object.keys(errors).length > 0) return
-
-    await save(false)
+    setFormError(error.messages.join(' '))
   }
 
   /** After a concurrency conflict: pull the current row back into the form. */
@@ -174,176 +166,102 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
     if (!warehouse) return
     try {
       const fresh = await warehousesApi.get(warehouse.id)
-      setWarehouseCode(fresh.warehouseCode)
-      setWarehouseName(fresh.warehouseName)
-      setBranchId(String(fresh.branchId))
-      setAddress(fresh.address ?? '')
-      setIsMainWarehouse(fresh.isMainWarehouse)
-      setIsActive(fresh.isActive)
+      form.setValues({
+        warehouseCode: fresh.warehouseCode,
+        warehouseName: fresh.warehouseName,
+        branchId: String(fresh.branchId),
+        address: fresh.address ?? '',
+        isMainWarehouse: fresh.isMainWarehouse,
+        isActive: fresh.isActive,
+      })
       setRowVersion(fresh.rowVersion)
       setStale(false)
-      setFormErrors([])
+      setFormError(null)
     } catch (error) {
-      setFormErrors(error instanceof ApiError ? error.messages : ['The warehouse could not be reloaded.'])
+      setFormError(error instanceof ApiError ? error.messages.join(' ') : 'The warehouse could not be reloaded.')
     }
   }
 
   return (
-    <>
-      <Modal
-        title={title}
-        onClose={onClose}
-        footer={
-          <>
-            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" form="warehouse-form" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Saving...' : 'Save Warehouse'}
-            </button>
-          </>
-        }
-      >
-        <form id="warehouse-form" className="branch-form" onSubmit={handleSubmit} noValidate>
-          <div className="branch-form__row">
-            <label className="field">
-              <span className="field__label">
-                Warehouse Code <span className="field__required">*</span>
-              </span>
-              <input
-                type="text"
-                value={warehouseCode}
-                maxLength={MAX_CODE}
-                placeholder="WH-002"
-                aria-invalid={fieldErrors.warehouseCode ? true : undefined}
-                onChange={(e) => {
-                  setWarehouseCode(e.target.value)
-                  clearError('warehouseCode')
-                }}
-              />
-              {fieldErrors.warehouseCode ? <span className="field__error">{fieldErrors.warehouseCode}</span> : null}
-            </label>
+    <FormModal
+      opened
+      title={mode === 'create' ? 'New Warehouse' : 'Edit Warehouse'}
+      saveLabel="Save Warehouse"
+      saving={saving}
+      onClose={onClose}
+      onSubmit={() => form.onSubmit((values) => void save(values, false))()}
+    >
+      <Group grow align="flex-start">
+        <TextInput
+          label="Warehouse Code"
+          placeholder="WH-002"
+          withAsterisk
+          maxLength={MAX_CODE}
+          {...form.getInputProps('warehouseCode')}
+        />
+        <TextInput
+          label="Warehouse Name"
+          placeholder="Kolwezi Depot"
+          withAsterisk
+          maxLength={MAX_NAME}
+          {...form.getInputProps('warehouseName')}
+        />
+      </Group>
 
-            <label className="field">
-              <span className="field__label">
-                Warehouse Name <span className="field__required">*</span>
-              </span>
-              <input
-                type="text"
-                value={warehouseName}
-                maxLength={MAX_NAME}
-                placeholder="Kolwezi Depot"
-                aria-invalid={fieldErrors.warehouseName ? true : undefined}
-                onChange={(e) => {
-                  setWarehouseName(e.target.value)
-                  clearError('warehouseName')
-                }}
-              />
-              {fieldErrors.warehouseName ? <span className="field__error">{fieldErrors.warehouseName}</span> : null}
-            </label>
-          </div>
+      <Select
+        label="Branch / Site"
+        placeholder="Select branch / site"
+        withAsterisk
+        searchable
+        nothingFoundMessage="No branch found"
+        data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
+        {...form.getInputProps('branchId')}
+      />
 
-          <label className="field">
-            <span className="field__label">
-              Branch / Site <span className="field__required">*</span>
-            </span>
-            <select
-              value={branchId}
-              aria-invalid={fieldErrors.branchId ? true : undefined}
-              onChange={(e) => {
-                setBranchId(e.target.value)
-                clearError('branchId')
-              }}
-            >
-              <option value="">Select branch / site</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branchLabel(branch)}
-                </option>
-              ))}
-            </select>
-            {fieldErrors.branchId ? <span className="field__error">{fieldErrors.branchId}</span> : null}
-          </label>
+      <Textarea
+        label="Address"
+        placeholder="Street, city, country"
+        autosize
+        minRows={3}
+        maxLength={MAX_ADDRESS}
+        {...form.getInputProps('address')}
+      />
 
-          <label className="field">
-            <span className="field__label">Address</span>
-            <textarea
-              rows={3}
-              value={address}
-              maxLength={MAX_ADDRESS}
-              placeholder="Street, city, country"
-              aria-invalid={fieldErrors.address ? true : undefined}
-              onChange={(e) => {
-                setAddress(e.target.value)
-                clearError('address')
-              }}
-            />
-            {fieldErrors.address ? <span className="field__error">{fieldErrors.address}</span> : null}
-          </label>
-
-          <div className="branch-form__row">
-            <div className="field">
-              <span className="field__label">
-                Is Main Warehouse <span className="field__required">*</span>
-              </span>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={isMainWarehouse}
-                  onChange={(e) => {
-                    setIsMainWarehouse(e.target.checked)
-                    // The API refuses an inactive main warehouse, so keep the pair valid here.
-                    if (e.target.checked) setIsActive(true)
-                  }}
-                />
-                <span>Yes, this is the main warehouse</span>
-              </label>
-            </div>
-
-            <div className="field">
-              <span className="field__label">
-                Active <span className="field__required">*</span>
-              </span>
-              <label className="switch-row">
-                <input
-                  type="checkbox"
-                  checked={isActive}
-                  disabled={isMainWarehouse}
-                  onChange={(e) => setIsActive(e.target.checked)}
-                />
-                <span className="switch" aria-hidden="true" />
-                <span>Active</span>
-              </label>
-              {isMainWarehouse ? <span className="field__hint">The main warehouse is always active.</span> : null}
-            </div>
-          </div>
-
-          <Alert kind="error" messages={formErrors} />
-
-          {stale ? (
-            <p className="field__hint">
-              <button type="button" className="link-button" onClick={reload}>
-                Reload
-              </button>{' '}
-              the warehouse to get the latest values and try again.
-            </p>
-          ) : null}
-        </form>
-      </Modal>
-
-      {replacePrompt ? (
-        <ConfirmDialog
-          title="Replace Main Warehouse"
-          message={`${replacePrompt.warehouseCode} - ${replacePrompt.warehouseName} is currently the Main Warehouse. Make ${warehouseCode.trim()} the Main Warehouse instead?`}
-          confirmLabel="Replace Main Warehouse"
-          busy={saving}
-          onCancel={() => setReplacePrompt(null)}
-          onConfirm={async () => {
-            setReplacePrompt(null)
-            await save(true)
+      <Group grow align="flex-start">
+        <Checkbox
+          label="Yes, this is the main warehouse"
+          description="Is Main Warehouse"
+          {...form.getInputProps('isMainWarehouse', { type: 'checkbox' })}
+          onChange={(event) => {
+            const checked = event.currentTarget.checked
+            form.setFieldValue('isMainWarehouse', checked)
+            // The API refuses an inactive main warehouse, so keep the pair valid here.
+            if (checked) form.setFieldValue('isActive', true)
           }}
         />
+
+        <Switch
+          label="Active"
+          description={form.values.isMainWarehouse ? 'The main warehouse is always active.' : undefined}
+          disabled={form.values.isMainWarehouse}
+          {...form.getInputProps('isActive', { type: 'checkbox' })}
+        />
+      </Group>
+
+      {formError ? (
+        <Alert color="red">
+          {formError}
+          {stale ? (
+            <>
+              {' '}
+              <Anchor component="button" type="button" onClick={reload}>
+                Reload
+              </Anchor>{' '}
+              the warehouse to get the latest values and try again.
+            </>
+          ) : null}
+        </Alert>
       ) : null}
-    </>
+    </FormModal>
   )
 }

@@ -1,34 +1,31 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Alert, Button, Group, Paper, Select, TextInput } from '@mantine/core'
+import { IconFilter, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import type { BranchDto, BranchSortBy, PagedResult } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
-import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/layout/PageHeader'
-import {
-  EmptyRow,
-  MainFlagCell,
-  RowActions,
-  SkeletonRows,
-  SortableHeader,
-  StatusPill,
-  TableFooter,
-} from '../../components/masterdata/MasterDataTable'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { MoreActionsMenu } from '../../components/masterdata/MoreActionsMenu'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { Icon } from '../../components/ui/Icon'
-import { Modal } from '../../components/ui/Modal'
-import { useToast } from '../../components/ui/useToast'
-import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '../../config'
+import { columnFilter } from '../../components/ui/columnFilter'
+import { confirm } from '../../components/ui/confirm'
+import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { FilterBar } from '../../components/ui/FilterBar'
+import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
+import { notify } from '../../components/ui/notify'
+import { PageHeader } from '../../components/ui/PageHeader'
+import { RowActions } from '../../components/ui/RowActions'
+import { MainFlag, StatusBadge } from '../../components/ui/StatusBadge'
+import { PAGE_SIZE_DEFAULT } from '../../config'
 import { PERMISSIONS } from '../../navigation'
 import { BranchFormModal } from './BranchFormModal'
 
 /** Everything that decides which rows the API returns. */
 interface Query {
   search: string
-  isActive: '' | 'true' | 'false'
-  isMainBranch: '' | 'true' | 'false'
+  isActive: string | null
+  isMainBranch: string | null
   sortBy: BranchSortBy
   sortDir: 'asc' | 'desc'
   page: number
@@ -37,47 +34,29 @@ interface Query {
 
 const DEFAULT_QUERY: Query = {
   search: '',
-  isActive: '',
-  isMainBranch: '',
+  isActive: null,
+  isMainBranch: null,
   sortBy: 'BranchCode',
   sortDir: 'asc',
   page: 1,
   pageSize: PAGE_SIZE_DEFAULT,
 }
 
-type Dialog =
-  | { kind: 'create' }
-  | { kind: 'edit'; branch: BranchDto }
-  | { kind: 'delete'; branch: BranchDto }
-  | { kind: 'status'; branch: BranchDto }
-  | { kind: 'referenced'; branch: BranchDto; message: string }
-  | null
-
-const COLUMNS: { key: BranchSortBy; header: string }[] = [
-  { key: 'BranchCode', header: 'Branch Code' },
-  { key: 'BranchName', header: 'Branch Name' },
-  { key: 'Address', header: 'Address' },
-  { key: 'IsMainBranch', header: 'Is Main Branch' },
-  { key: 'IsActive', header: 'Status' },
-]
-
-const COLUMN_COUNT = COLUMNS.length + 2 // the leading "#" and the trailing "Actions"
+type Dialog = { kind: 'create' } | { kind: 'edit'; branch: BranchDto } | null
 
 export function BranchesPage() {
   const { hasPermission } = useAuth()
-  const { showToast } = useToast()
 
   const [query, setQuery] = useState<Query>(DEFAULT_QUERY)
   // The filter inputs are only copied into `query` when the user applies them.
   const [draftSearch, setDraftSearch] = useState('')
-  const [draftActive, setDraftActive] = useState<Query['isActive']>('')
-  const [draftMain, setDraftMain] = useState<Query['isMainBranch']>('')
+  const [draftActive, setDraftActive] = useState<string | null>(null)
+  const [draftMain, setDraftMain] = useState<string | null>(null)
 
   const [data, setData] = useState<PagedResult<BranchDto> | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [busy, setBusy] = useState(false)
 
   const canCreate = hasPermission(PERMISSIONS.branchesCreate)
   const canEdit = hasPermission(PERMISSIONS.branchesEdit)
@@ -88,17 +67,17 @@ export function BranchesPage() {
     try {
       const page = await branchesApi.search({
         search: query.search || undefined,
-        isActive: query.isActive === '' ? undefined : query.isActive === 'true',
-        isMainBranch: query.isMainBranch === '' ? undefined : query.isMainBranch === 'true',
+        isActive: query.isActive === null ? undefined : query.isActive === 'true',
+        isMainBranch: query.isMainBranch === null ? undefined : query.isMainBranch === 'true',
         sortBy: query.sortBy,
         sortDir: query.sortDir,
         page: query.page,
         pageSize: query.pageSize,
       })
       setData(page)
-      setError([])
+      setError(null)
     } catch (err) {
-      setError(err instanceof ApiError ? err.messages : ['The branches could not be loaded.'])
+      setError(err instanceof ApiError ? err.messages.join(' ') : 'The branches could not be loaded.')
     } finally {
       setLoading(false)
     }
@@ -106,7 +85,7 @@ export function BranchesPage() {
 
   useEffect(() => {
     // Fetching the page is exactly the "synchronize with an external system" case; load() flips the
-    // loading flag before it awaits so the skeleton rows appear straight away.
+    // loading flag before it awaits so the grid shows its spinner straight away.
     // eslint-disable-next-line react/set-state-in-effect
     void load()
   }, [load])
@@ -117,18 +96,27 @@ export function BranchesPage() {
 
   function clearFilters() {
     setDraftSearch('')
-    setDraftActive('')
-    setDraftMain('')
+    setDraftActive(null)
+    setDraftMain(null)
     setQuery(DEFAULT_QUERY)
   }
 
-  function toggleSort(column: BranchSortBy) {
-    setQuery((q) => ({
-      ...q,
-      sortBy: column,
-      sortDir: q.sortBy === column && q.sortDir === 'asc' ? 'desc' : 'asc',
-      page: 1,
-    }))
+  /**
+   * The column funnels and the filter bar's dropdowns are two ways into the SAME query parameter,
+   * so a funnel moves the bar's control with it - a header reading "Active" above a bar reading
+   * "All" would be two controls disagreeing about one filter.
+   *
+   * A funnel applies straight away, where the bar still waits for its Filter button: the popover has
+   * its own OK, and asking for a second confirmation of a confirmed choice is one click too many.
+   */
+  function applyStatus(value: string | null) {
+    setDraftActive(value)
+    setQuery((q) => ({ ...q, isActive: value, page: 1 }))
+  }
+
+  function applyMain(value: string | null) {
+    setDraftMain(value)
+    setQuery((q) => ({ ...q, isMainBranch: value, page: 1 }))
   }
 
   function exportCsv() {
@@ -147,42 +135,132 @@ export function BranchesPage() {
 
   async function afterSave(message: string) {
     setDialog(null)
-    showToast(message)
+    notify.success(message)
     await load()
   }
 
-  async function confirmDelete(branch: BranchDto) {
-    setBusy(true)
+  async function handleDelete(branch: BranchDto) {
+    const confirmed = await confirm({
+      title: 'Delete branch',
+      message: `Delete branch ${branch.branchCode} - ${branch.branchName}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!confirmed) return
+
     try {
       await branchesApi.remove(branch.id)
       await afterSave('Branch deleted successfully.')
     } catch (err) {
       if (err instanceof ApiError && err.code === 'REFERENCED') {
-        setDialog({ kind: 'referenced', branch, message: err.messages[0] as string })
-      } else {
-        setDialog(null)
-        showToast(err instanceof ApiError ? (err.messages[0] as string) : 'The branch could not be deleted.', 'error')
+        const deactivate = await confirm({
+          title: 'Branch cannot be deleted',
+          message: err.messages[0] as string,
+          confirmLabel: 'Deactivate instead',
+        })
+        if (deactivate) await setStatus(branch, false)
+        return
       }
-    } finally {
-      setBusy(false)
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The branch could not be deleted.')
     }
   }
 
   async function setStatus(branch: BranchDto, isActive: boolean) {
-    setBusy(true)
     try {
       await branchesApi.setStatus(branch.id, isActive)
       await afterSave(isActive ? 'Branch activated.' : 'Branch deactivated.')
     } catch (err) {
-      setDialog(null)
-      showToast(err instanceof ApiError ? (err.messages[0] as string) : 'The branch could not be updated.', 'error')
-    } finally {
-      setBusy(false)
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The branch could not be updated.')
     }
   }
 
-  const rows = data?.items ?? []
-  const filtered = query.search !== '' || query.isActive !== '' || query.isMainBranch !== ''
+  async function handleToggleStatus(branch: BranchDto) {
+    const activating = !branch.isActive
+    const confirmed = await confirm({
+      title: activating ? 'Activate branch' : 'Deactivate branch',
+      message: activating
+        ? `Activate ${branch.branchCode} - ${branch.branchName}?`
+        : `Deactivate ${branch.branchCode} - ${branch.branchName}? It will no longer be selectable.`,
+      confirmLabel: activating ? 'Activate' : 'Deactivate',
+    })
+    if (confirmed) await setStatus(branch, activating)
+  }
+
+  const columns: DataTableColumn<BranchDto>[] = [
+    rowNumberColumn<BranchDto>(query.page, query.pageSize),
+    /* Branch Code, Branch Name and Address carry no header filter: this grid pages on the server and
+       the search endpoint takes one free-text parameter that matches code OR name, so a per-column
+       box here could only narrow by something other than the column it sits on. The search box in
+       the filter bar is that parameter, under its own name. See docs/frontend-conventions.md. */
+    { accessor: 'branchCode', title: 'Branch Code', sortable: true, width: 150 },
+    { accessor: 'branchName', title: 'Branch Name', sortable: true },
+    {
+      accessor: 'address',
+      title: 'Address',
+      sortable: true,
+      render: (b) => b.address ?? '-',
+    },
+    {
+      accessor: 'isMainBranch',
+      title: 'Is Main Branch',
+      sortable: true,
+      width: 190,
+      ...columnFilter({
+        label: 'Is Main Branch',
+        value: triStateFilter(query.isMainBranch, 'Yes', 'No'),
+        onApply: (next) => applyMain(triStateQuery(next, 'Yes')),
+        options: YES_NO_VALUES,
+        withText: false,
+      }),
+      render: (b) => <MainFlag isMain={b.isMainBranch} />,
+    },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      sortable: true,
+      width: 150,
+      ...columnFilter({
+        label: 'Status',
+        value: triStateFilter(query.isActive, 'Active', 'Inactive'),
+        onApply: (next) => applyStatus(triStateQuery(next, 'Active')),
+        options: STATUS_VALUES,
+        withText: false,
+      }),
+      render: (b) => <StatusBadge active={b.isActive} />,
+    },
+    {
+      accessor: 'actions',
+      title: 'Actions',
+      width: 130,
+      textAlign: 'right',
+      render: (branch) => (
+        <RowActions
+          label={branch.branchCode}
+          edit={{ visible: canEdit, onClick: () => setDialog({ kind: 'edit', branch }) }}
+          toggleStatus={{
+            visible: canEdit,
+            active: branch.isActive,
+            disabled: branch.isMainBranch && branch.isActive,
+            disabledReason: 'The main branch cannot be deactivated',
+            onClick: () => void handleToggleStatus(branch),
+          }}
+          remove={{
+            visible: canDelete,
+            disabled: branch.isMainBranch,
+            disabledReason: 'The main branch cannot be deleted',
+            onClick: () => void handleDelete(branch),
+          }}
+        />
+      ),
+    },
+  ]
+
+  const sortStatus: DataTableSortStatus<BranchDto> = {
+    columnAccessor: SORT_TO_ACCESSOR[query.sortBy] ?? 'branchCode',
+    direction: query.sortDir,
+  }
+
+  const filtered = query.search !== '' || query.isActive !== null || query.isMainBranch !== null
 
   return (
     <>
@@ -191,205 +269,143 @@ export function BranchesPage() {
         subtitle="View and manage company branches / sites."
         actions={
           <>
-            <MoreActionsMenu onRefresh={() => void load()} onExport={exportCsv} />
+            <MoreActionsMenu
+              actions={[
+                { label: 'Refresh', icon: <IconRefresh size={16} />, onClick: () => void load() },
+                { label: 'Export CSV', icon: <IconTableExport size={16} />, onClick: exportCsv },
+              ]}
+            />
             {canCreate ? (
-              <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: 'create' })}>
-                <Icon name="plus" />
+              <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
                 New Branch
-              </button>
+              </Button>
             ) : null}
           </>
         }
       />
 
-      <section className="card">
-        <div className="filter-row">
-          <div className="search-input filter-row__search">
-            <Icon name="search" />
-            <input
-              type="search"
-              aria-label="Search branches"
-              placeholder="Search by branch code or name..."
-              value={draftSearch}
-              onChange={(e) => setDraftSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') applyFilters()
-              }}
-            />
-          </div>
+      <FilterBar>
+        <FilterBar.Col span={4}>
+          <TextInput
+            placeholder="Search by branch code or name..."
+            leftSection={<IconSearch size={16} />}
+            aria-label="Search branches"
+            value={draftSearch}
+            onChange={(e) => setDraftSearch(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') applyFilters()
+            }}
+          />
+        </FilterBar.Col>
 
-          <select
+        <FilterBar.Col span={2}>
+          <Select
             aria-label="Status"
-            className="filter-row__select"
+            placeholder="All"
+            data={STATUS_OPTIONS}
             value={draftActive}
-            onChange={(e) => setDraftActive(e.target.value as Query['isActive'])}
-          >
-            <option value="">All</option>
-            <option value="true">Active</option>
-            <option value="false">Inactive</option>
-          </select>
+            onChange={setDraftActive}
+            clearable
+          />
+        </FilterBar.Col>
 
-          <select
+        <FilterBar.Col span={2}>
+          <Select
             aria-label="Is Main Branch"
-            className="filter-row__select"
+            placeholder="All"
+            data={YES_NO_OPTIONS}
             value={draftMain}
-            onChange={(e) => setDraftMain(e.target.value as Query['isMainBranch'])}
-          >
-            <option value="">All</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
+            onChange={setDraftMain}
+            clearable
+          />
+        </FilterBar.Col>
 
-          <button type="button" className="btn btn-ghost" onClick={clearFilters}>
-            <Icon name="refresh" />
-            Clear Filters
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={applyFilters}>
-            <Icon name="filter" />
-            Filter
-          </button>
-        </div>
+        <FilterBar.Col span={4}>
+          <Group gap="sm">
+            <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={clearFilters}>
+              Clear Filters
+            </Button>
+            <Button variant="default" leftSection={<IconFilter size={16} />} onClick={applyFilters}>
+              Filter
+            </Button>
+          </Group>
+        </FilterBar.Col>
+      </FilterBar>
 
-        <Alert kind="error" messages={error} />
+      {error ? (
+        <Alert color="red" mb="md" title="Could not load branches">
+          {error}
+        </Alert>
+      ) : null}
 
-        <div className="table-scroll">
-          <table className="data-table branches-table">
-            <thead>
-              <tr>
-                <th className="col-index">#</th>
-                {COLUMNS.map((column) => (
-                  <SortableHeader
-                    key={column.key}
-                    column={column.key}
-                    label={column.header}
-                    activeColumn={query.sortBy}
-                    direction={query.sortDir}
-                    onSort={toggleSort}
-                  />
-                ))}
-                <th className="col-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <SkeletonRows columns={COLUMN_COUNT} />
-              ) : rows.length === 0 ? (
-                <EmptyRow columns={COLUMN_COUNT}>
-                  No branches found.
-                  {filtered ? ' Try clearing the filters to see every branch.' : ''}
-                </EmptyRow>
-              ) : (
-                rows.map((branch, index) => (
-                  <tr key={branch.id}>
-                    <td className="col-index">{(query.page - 1) * query.pageSize + index + 1}</td>
-                    <td className="mono">{branch.branchCode}</td>
-                    <td>{branch.branchName}</td>
-                    <td className="branches-table__address">{branch.address ?? <span className="muted">-</span>}</td>
-                    <td>
-                      <MainFlagCell isMain={branch.isMainBranch} />
-                    </td>
-                    <td>
-                      <StatusPill isActive={branch.isActive} />
-                    </td>
-                    <td className="col-actions">
-                      <RowActions
-                        code={branch.branchCode}
-                        isActive={branch.isActive}
-                        canEdit={canEdit}
-                        canDelete={canDelete}
-                        isProtected={branch.isMainBranch}
-                        protectedDeactivateTitle="The main branch cannot be deactivated"
-                        protectedDeleteTitle="The main branch cannot be deleted"
-                        onEdit={() => setDialog({ kind: 'edit', branch })}
-                        onToggleStatus={() => setDialog({ kind: 'status', branch })}
-                        onDelete={() => setDialog({ kind: 'delete', branch })}
-                      />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <TableFooter
+      <Paper radius="lg" p="md" withBorder>
+        <DataTable<BranchDto>
+          records={data?.items ?? []}
+          columns={columns}
+          totalRecords={data?.totalCount ?? 0}
           page={query.page}
-          pageSize={query.pageSize}
-          totalCount={data?.totalCount ?? 0}
-          totalPages={data?.totalPages ?? 0}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          recordsPerPage={query.pageSize}
           onPageChange={(page) => setQuery((q) => ({ ...q, page }))}
-          onPageSizeChange={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
-        />
-      </section>
-
-      {dialog?.kind === 'create' ? (
-        <BranchFormModal
-          mode="create"
-          onClose={() => setDialog(null)}
-          onSaved={() => void afterSave('Branch created successfully.')}
-        />
-      ) : null}
-
-      {dialog?.kind === 'edit' ? (
-        <BranchFormModal
-          mode="edit"
-          branch={dialog.branch}
-          onClose={() => setDialog(null)}
-          onSaved={() => void afterSave('Branch updated successfully.')}
-        />
-      ) : null}
-
-      {dialog?.kind === 'delete' ? (
-        <ConfirmDialog
-          title="Delete branch"
-          message={`Delete branch ${dialog.branch.branchCode} - ${dialog.branch.branchName}? This cannot be undone.`}
-          confirmLabel="Delete"
-          danger
-          busy={busy}
-          onCancel={() => setDialog(null)}
-          onConfirm={() => void confirmDelete(dialog.branch)}
-        />
-      ) : null}
-
-      {dialog?.kind === 'status' ? (
-        <ConfirmDialog
-          title={dialog.branch.isActive ? 'Deactivate branch' : 'Activate branch'}
-          message={
-            dialog.branch.isActive
-              ? `Deactivate ${dialog.branch.branchCode} - ${dialog.branch.branchName}? It will no longer be selectable.`
-              : `Activate ${dialog.branch.branchCode} - ${dialog.branch.branchName}?`
+          onRecordsPerPageChange={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
+          sortStatus={sortStatus}
+          onSortStatusChange={(status) =>
+            setQuery((q) => ({
+              ...q,
+              sortBy: ACCESSOR_TO_SORT[status.columnAccessor as string] ?? q.sortBy,
+              sortDir: status.direction,
+              page: 1,
+            }))
           }
-          confirmLabel={dialog.branch.isActive ? 'Deactivate' : 'Activate'}
-          busy={busy}
-          onCancel={() => setDialog(null)}
-          onConfirm={() => void setStatus(dialog.branch, !dialog.branch.isActive)}
-        />
-      ) : null}
-
-      {dialog?.kind === 'referenced' ? (
-        <Modal
-          title="Branch cannot be deleted"
-          onClose={() => setDialog(null)}
-          footer={
-            <>
-              <button type="button" className="btn btn-secondary" onClick={() => setDialog(null)} disabled={busy}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={busy}
-                onClick={() => void setStatus(dialog.branch, false)}
-              >
-                Deactivate instead
-              </button>
-            </>
+          fetching={loading}
+          noRecordsText={
+            filtered ? 'No branches found. Try clearing the filters to see every branch.' : 'No branches found.'
           }
-        >
-          <Alert kind="error" messages={dialog.message} />
-        </Modal>
+        />
+      </Paper>
+
+      {dialog ? (
+        <BranchFormModal
+          mode={dialog.kind}
+          branch={dialog.kind === 'edit' ? dialog.branch : undefined}
+          onClose={() => setDialog(null)}
+          onSaved={() =>
+            void afterSave(dialog.kind === 'create' ? 'Branch created successfully.' : 'Branch updated successfully.')
+          }
+        />
       ) : null}
     </>
   )
+}
+
+const STATUS_OPTIONS = [
+  { value: 'true', label: 'Active' },
+  { value: 'false', label: 'Inactive' },
+]
+
+const YES_NO_OPTIONS = [
+  { value: 'true', label: 'Yes' },
+  { value: 'false', label: 'No' },
+]
+
+/** The words the two header funnels offer - the labels above, as the cells print them. */
+const STATUS_VALUES = ['Active', 'Inactive']
+const YES_NO_VALUES = ['Yes', 'No']
+
+/** The grid sorts by DTO field; the API sorts by its own column names. */
+const SORT_TO_ACCESSOR: Record<BranchSortBy, string> = {
+  BranchCode: 'branchCode',
+  BranchName: 'branchName',
+  Address: 'address',
+  IsMainBranch: 'isMainBranch',
+  IsActive: 'isActive',
+  CreatedAtUtc: 'createdAtUtc',
+}
+
+const ACCESSOR_TO_SORT: Record<string, BranchSortBy> = {
+  branchCode: 'BranchCode',
+  branchName: 'BranchName',
+  address: 'Address',
+  isMainBranch: 'IsMainBranch',
+  isActive: 'IsActive',
+  createdAtUtc: 'CreatedAtUtc',
 }

@@ -1,21 +1,35 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  Code,
+  Grid,
+  Group,
+  NavLink,
+  Paper,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core'
+import { useForm } from '@mantine/form'
+import { IconPlus } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { permissionsApi } from '../../api/permissions'
 import { rolesApi } from '../../api/roles'
 import type { PermissionModuleDto, RoleDetailDto, RoleDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
-import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/layout/PageHeader'
-import { RequirePermission } from '../../components/RequirePermission'
-import { Badge } from '../../components/ui/Badge'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { Modal } from '../../components/ui/Modal'
-import { useToast } from '../../components/ui/useToast'
+import { confirm } from '../../components/ui/confirm'
+import { FormModal } from '../../components/ui/FormModal'
+import { notify } from '../../components/ui/notify'
+import { PageHeader } from '../../components/ui/PageHeader'
 import { PERMISSIONS } from '../../navigation'
 
 export function RolesPage() {
   const { hasPermission } = useAuth()
-  const { showToast } = useToast()
   const canManage = hasPermission(PERMISSIONS.rolesManage)
 
   const [roles, setRoles] = useState<RoleDto[]>([])
@@ -23,25 +37,23 @@ export function RolesPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [detail, setDetail] = useState<RoleDetailDto | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const loadRoles = useCallback(async (selectAfter?: number) => {
     try {
       const list = await rolesApi.list()
       setRoles(list)
-      setLoadError([])
+      setLoadError(null)
       setSelectedId((current) => selectAfter ?? current ?? list[0]?.id ?? null)
     } catch (error) {
-      setLoadError(error instanceof ApiError ? error.messages : ['The roles could not be loaded.'])
+      setLoadError(error instanceof ApiError ? error.messages.join(' ') : 'The roles could not be loaded.')
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    // loadRoles awaits before touching state, so no update happens during this effect.
     // eslint-disable-next-line react/set-state-in-effect
     void loadRoles()
   }, [loadRoles])
@@ -85,53 +97,88 @@ export function RolesPage() {
     }
   }
 
+  async function handleDelete(role: RoleDetailDto) {
+    const confirmed = await confirm({
+      title: 'Delete role',
+      message: `Delete the role "${role.name}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!confirmed) return
+
+    try {
+      await rolesApi.remove(role.id)
+      notify.success('Role deleted.')
+      setSelectedId(null)
+      setDetail(null)
+      await loadRoles()
+    } catch (error) {
+      notify.error(error instanceof ApiError ? (error.messages[0] as string) : 'The role could not be deleted.')
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Roles"
         subtitle="A role is a named bundle of permissions. Assign roles to users on the Users page."
         actions={
-          <RequirePermission code={PERMISSIONS.rolesManage}>
-            <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+          canManage ? (
+            <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
               New role
-            </button>
-          </RequirePermission>
+            </Button>
+          ) : null
         }
       />
 
-      <Alert kind="error" messages={loadError} />
+      {loadError ? (
+        <Alert color="red" mb="md" title="Could not load roles">
+          {loadError}
+        </Alert>
+      ) : null}
 
-      <div className="master-detail">
-        <section className="card master-detail__list">
-          <h3 className="card__title">All roles</h3>
-          {loading ? (
-            <p className="muted">Loading...</p>
-          ) : (
-            <ul className="role-list">
-              {roles.map((role) => (
-                <li key={role.id}>
-                  <button
-                    type="button"
-                    className={`role-list__item${role.id === selectedId ? ' role-list__item--active' : ''}`}
+      <Grid gap="md" align="flex-start">
+        <Grid.Col span={{ base: 12, md: 4 }}>
+          <Paper radius="lg" p="md" withBorder>
+            <Title order={5} mb="sm">
+              All roles
+            </Title>
+            {loading ? (
+              <Text c="dimmed" fz="sm">
+                Loading...
+              </Text>
+            ) : (
+              <Stack gap={2}>
+                {roles.map((role) => (
+                  <NavLink
+                    key={role.id}
+                    active={role.id === selectedId}
                     onClick={() => setSelectedId(role.id)}
-                  >
-                    <span className="role-list__name">
-                      {role.name}
-                      {role.isSystem ? <Badge tone="info">System</Badge> : null}
-                      {!role.isActive ? <Badge tone="danger">Inactive</Badge> : null}
-                    </span>
-                    <span className="role-list__meta muted">
-                      {role.userCount} user{role.userCount === 1 ? '' : 's'} &middot; {role.permissionCount} permission
-                      {role.permissionCount === 1 ? '' : 's'}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                    styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
+                    label={
+                      <Group gap="xs">
+                        {role.name}
+                        {role.isSystem ? (
+                          <Badge size="xs" variant="light" color="blue">
+                            System
+                          </Badge>
+                        ) : null}
+                        {!role.isActive ? (
+                          <Badge size="xs" variant="light" color="red">
+                            Inactive
+                          </Badge>
+                        ) : null}
+                      </Group>
+                    }
+                    description={`${role.userCount} user${role.userCount === 1 ? '' : 's'} · ${role.permissionCount} permission${role.permissionCount === 1 ? '' : 's'}`}
+                  />
+                ))}
+              </Stack>
+            )}
+          </Paper>
+        </Grid.Col>
 
-        <section className="master-detail__detail">
+        <Grid.Col span={{ base: 12, md: 8 }}>
           {detail ? (
             <RoleDetail
               key={detail.id}
@@ -139,18 +186,18 @@ export function RolesPage() {
               modules={modules}
               canManage={canManage}
               onSaved={async (message) => {
-                showToast(message)
+                notify.success(message)
                 await reload()
               }}
-              onRequestDelete={() => setConfirmDelete(true)}
+              onRequestDelete={() => void handleDelete(detail)}
             />
           ) : (
-            <div className="card">
-              <p className="muted">Select a role to see its permissions.</p>
-            </div>
+            <Paper radius="lg" p="lg" withBorder>
+              <Text c="dimmed">Select a role to see its permissions.</Text>
+            </Paper>
           )}
-        </section>
-      </div>
+        </Grid.Col>
+      </Grid>
 
       {creating ? (
         <CreateRoleDialog
@@ -158,22 +205,8 @@ export function RolesPage() {
           onClose={() => setCreating(false)}
           onCreated={async (id) => {
             setCreating(false)
-            showToast('Role created.')
+            notify.success('Role created.')
             await reload(id)
-          }}
-        />
-      ) : null}
-
-      {confirmDelete && detail ? (
-        <DeleteRoleDialog
-          role={detail}
-          onClose={() => setConfirmDelete(false)}
-          onDeleted={async () => {
-            setConfirmDelete(false)
-            showToast('Role deleted.')
-            setSelectedId(null)
-            setDetail(null)
-            await loadRoles()
           }}
         />
       ) : null}
@@ -194,14 +227,16 @@ function RoleDetail({
   onSaved(message: string): Promise<void>
   onRequestDelete(): void
 }) {
-  const [name, setName] = useState(role.name)
-  const [description, setDescription] = useState(role.description ?? '')
-  const [isActive, setIsActive] = useState(role.isActive)
-  const [selected, setSelected] = useState<number[]>(role.permissionIds)
-  const [formErrors, setFormErrors] = useState<string[]>([])
-  const [permErrors, setPermErrors] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>(role.permissionIds.map(String))
+  const [formError, setFormError] = useState<string | null>(null)
+  const [permError, setPermError] = useState<string | null>(null)
   const [savingForm, setSavingForm] = useState(false)
   const [savingPerms, setSavingPerms] = useState(false)
+
+  const form = useForm({
+    initialValues: { name: role.name, description: role.description ?? '', isActive: role.isActive },
+    validate: { name: (v) => (v.trim() ? null : 'Name is required.') },
+  })
 
   const deleteBlocked = role.isSystem || role.userCount > 0
   const deleteReason = role.isSystem
@@ -210,153 +245,158 @@ function RoleDetail({
       ? 'Remove the role from its users first.'
       : undefined
 
-  async function handleSaveForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setFormErrors([])
+  async function handleSaveForm(values: typeof form.values) {
+    setFormError(null)
     setSavingForm(true)
     try {
-      await rolesApi.update(role.id, { name: name.trim(), description: description.trim() || null, isActive })
+      await rolesApi.update(role.id, {
+        name: values.name.trim(),
+        description: values.description.trim() || null,
+        isActive: values.isActive,
+      })
       await onSaved('Role saved.')
     } catch (error) {
-      setFormErrors(error instanceof ApiError ? error.messages : ['The role could not be saved.'])
+      setFormError(error instanceof ApiError ? error.messages.join(' ') : 'The role could not be saved.')
     } finally {
       setSavingForm(false)
     }
   }
 
   async function handleSavePermissions() {
-    setPermErrors([])
+    setPermError(null)
     setSavingPerms(true)
     try {
-      await rolesApi.setPermissions(role.id, selected)
+      await rolesApi.setPermissions(role.id, selected.map(Number))
       await onSaved('Permissions saved.')
     } catch (error) {
-      setPermErrors(error instanceof ApiError ? error.messages : ['The permissions could not be saved.'])
+      setPermError(error instanceof ApiError ? error.messages.join(' ') : 'The permissions could not be saved.')
     } finally {
       setSavingPerms(false)
     }
   }
 
   return (
-    <>
-      <section className="card">
-        <h3 className="card__title">{role.name}</h3>
-        <form onSubmit={handleSaveForm} noValidate className="form-grid">
-          <label htmlFor="rd-name">Name</label>
-          <input
-            id="rd-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            readOnly={role.isSystem}
-            disabled={!canManage}
-            required
-          />
-
-          <label htmlFor="rd-description">Description</label>
-          <input
-            id="rd-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={!canManage}
-          />
-
-          <label className="checkbox-row checkbox-row--inline">
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              disabled={!canManage || role.isSystem}
+    <Stack gap="md">
+      <Paper radius="lg" p="lg" withBorder>
+        <Title order={5} mb="md">
+          {role.name}
+        </Title>
+        <form onSubmit={form.onSubmit((values) => void handleSaveForm(values))} noValidate>
+          <Stack gap="md">
+            <TextInput
+              label="Name"
+              withAsterisk
+              readOnly={role.isSystem}
+              disabled={!canManage}
+              {...form.getInputProps('name')}
             />
-            <span>Active</span>
-          </label>
+            <TextInput label="Description" disabled={!canManage} {...form.getInputProps('description')} />
+            <Switch
+              label="Active"
+              disabled={!canManage || role.isSystem}
+              {...form.getInputProps('isActive', { type: 'checkbox' })}
+            />
 
-          <Alert kind="error" messages={formErrors} />
+            {formError ? <Alert color="red">{formError}</Alert> : null}
 
-          {canManage ? (
-            <div className="form-actions">
-              <button type="submit" className="btn btn-primary" disabled={savingForm}>
-                {savingForm ? 'Saving...' : 'Save'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger-solid"
-                onClick={onRequestDelete}
-                disabled={deleteBlocked}
-                title={deleteReason}
-              >
-                Delete role
-              </button>
-            </div>
-          ) : null}
+            {canManage ? (
+              <Group>
+                <Button type="submit" loading={savingForm}>
+                  Save
+                </Button>
+                <Button color="red" variant="light" onClick={onRequestDelete} disabled={deleteBlocked} title={deleteReason}>
+                  Delete role
+                </Button>
+              </Group>
+            ) : null}
+          </Stack>
         </form>
-      </section>
+      </Paper>
 
-      <section className="card">
-        <h3 className="card__title">Permissions</h3>
-        {role.isSystem ? <p className="notice">System roles always hold every permission.</p> : null}
+      <Paper radius="lg" p="lg" withBorder>
+        <Title order={5} mb="sm">
+          Permissions
+        </Title>
+        {role.isSystem ? (
+          <Alert color="blue" mb="md">
+            System roles always hold every permission.
+          </Alert>
+        ) : null}
 
         {modules.length === 0 ? (
-          <p className="muted">The permission catalog is not available to you.</p>
+          <Text c="dimmed" fz="sm">
+            The permission catalog is not available to you.
+          </Text>
         ) : (
-          modules.map((module) => {
-            const ids = module.permissions.map((p) => p.id)
-            const allSelected = ids.every((id) => role.isSystem || selected.includes(id))
-            return (
-              <div className="perm-module" key={module.module}>
-                <div className="perm-module__head">
-                  <h4>{module.module}</h4>
-                  {canManage && !role.isSystem ? (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() =>
-                        setSelected((current) =>
-                          allSelected ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])],
-                        )
-                      }
-                    >
-                      {allSelected ? 'Clear all' : 'Select all'}
-                    </button>
-                  ) : null}
-                </div>
+          <Checkbox.Group value={role.isSystem ? modules.flatMap((m) => m.permissions.map((p) => String(p.id))) : selected} onChange={setSelected}>
+            <Stack gap="lg">
+              {modules.map((module) => {
+                const ids = module.permissions.map((p) => String(p.id))
+                const allSelected = ids.every((id) => role.isSystem || selected.includes(id))
+                return (
+                  <Stack key={module.module} gap="xs">
+                    <Group justify="space-between">
+                      <Title order={6}>{module.module}</Title>
+                      {canManage && !role.isSystem ? (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() =>
+                            setSelected((current) =>
+                              allSelected
+                                ? current.filter((id) => !ids.includes(id))
+                                : [...new Set([...current, ...ids])],
+                            )
+                          }
+                        >
+                          {allSelected ? 'Clear all' : 'Select all'}
+                        </Button>
+                      ) : null}
+                    </Group>
 
-                <div className="checkbox-list">
-                  {module.permissions.map((p) => (
-                    <label className="checkbox-row" key={p.id}>
-                      <input
-                        type="checkbox"
-                        checked={role.isSystem || selected.includes(p.id)}
-                        disabled={role.isSystem || !canManage}
-                        onChange={() =>
-                          setSelected((current) =>
-                            current.includes(p.id) ? current.filter((x) => x !== p.id) : [...current, p.id],
-                          )
-                        }
-                      />
-                      <span>
-                        <strong>{p.name}</strong>
-                        <code className="mono perm-code">{p.code}</code>
-                        {p.description ? <span className="muted perm-desc">{p.description}</span> : null}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )
-          })
+                    <Stack gap="xs">
+                      {module.permissions.map((p) => (
+                        <Checkbox
+                          key={p.id}
+                          value={String(p.id)}
+                          disabled={role.isSystem || !canManage}
+                          label={
+                            <Stack gap={0}>
+                              <Text fz="sm" fw={600}>
+                                {p.name} <Code>{p.code}</Code>
+                              </Text>
+                              {p.description ? (
+                                <Text fz="xs" c="dimmed">
+                                  {p.description}
+                                </Text>
+                              ) : null}
+                            </Stack>
+                          }
+                        />
+                      ))}
+                    </Stack>
+                  </Stack>
+                )
+              })}
+            </Stack>
+          </Checkbox.Group>
         )}
 
-        <Alert kind="error" messages={permErrors} />
+        {permError ? (
+          <Alert color="red" mt="md">
+            {permError}
+          </Alert>
+        ) : null}
 
         {canManage && !role.isSystem && modules.length > 0 ? (
-          <div className="form-actions">
-            <button type="button" className="btn btn-primary" onClick={handleSavePermissions} disabled={savingPerms}>
-              {savingPerms ? 'Saving...' : 'Save permissions'}
-            </button>
-          </div>
+          <Group mt="md">
+            <Button loading={savingPerms} onClick={() => void handleSavePermissions()}>
+              Save permissions
+            </Button>
+          </Group>
         ) : null}
-      </section>
-    </>
+      </Paper>
+    </Stack>
   )
 }
 
@@ -369,128 +409,72 @@ function CreateRoleDialog({
   onClose(): void
   onCreated(id: number): void
 }) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [selected, setSelected] = useState<number[]>([])
-  const [errors, setErrors] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setErrors([])
+  const form = useForm({
+    initialValues: { name: '', description: '' },
+    validate: { name: (v) => (v.trim() ? null : 'Name is required.') },
+  })
+
+  async function submit(values: typeof form.values) {
+    setError(null)
     setBusy(true)
     try {
       const created = await rolesApi.create({
-        name: name.trim(),
-        description: description.trim() || null,
-        permissionIds: selected,
+        name: values.name.trim(),
+        description: values.description.trim() || null,
+        permissionIds: selected.map(Number),
       })
       onCreated(created.id)
-    } catch (error) {
-      setErrors(error instanceof ApiError ? error.messages : ['The role could not be created.'])
+    } catch (err) {
+      setError(err instanceof ApiError ? err.messages.join(' ') : 'The role could not be created.')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Modal
+    <FormModal
+      opened
       title="New role"
-      wide
+      saveLabel="Create role"
+      saving={busy}
       onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
-          <button type="submit" form="create-role-form" className="btn btn-primary" disabled={busy}>
-            {busy ? 'Creating...' : 'Create role'}
-          </button>
-        </>
-      }
+      onSubmit={() => form.onSubmit((values) => void submit(values))()}
     >
-      <form id="create-role-form" onSubmit={handleSubmit} noValidate className="form-grid">
-        <label htmlFor="cr-name">Name</label>
-        <input id="cr-name" value={name} onChange={(e) => setName(e.target.value)} required />
+      <TextInput label="Name" withAsterisk {...form.getInputProps('name')} />
+      <TextInput label="Description" {...form.getInputProps('description')} />
 
-        <label htmlFor="cr-description">Description</label>
-        <input id="cr-description" value={description} onChange={(e) => setDescription(e.target.value)} />
-
-        <span className="form-label">Permissions</span>
-        {modules.length === 0 ? (
-          <p className="muted">The permission catalog is not available to you.</p>
-        ) : (
-          modules.map((module) => (
-            <div className="perm-module" key={module.module}>
-              <h4>{module.module}</h4>
-              <div className="checkbox-list">
+      {modules.length === 0 ? (
+        <Text c="dimmed" fz="sm">
+          The permission catalog is not available to you.
+        </Text>
+      ) : (
+        <Checkbox.Group label="Permissions" value={selected} onChange={setSelected}>
+          <Stack gap="lg" mt="xs">
+            {modules.map((module) => (
+              <Stack key={module.module} gap="xs">
+                <Title order={6}>{module.module}</Title>
                 {module.permissions.map((p) => (
-                  <label className="checkbox-row" key={p.id}>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(p.id)}
-                      onChange={() =>
-                        setSelected((c) => (c.includes(p.id) ? c.filter((x) => x !== p.id) : [...c, p.id]))
-                      }
-                    />
-                    <span>
-                      <strong>{p.name}</strong>
-                      <code className="mono perm-code">{p.code}</code>
-                    </span>
-                  </label>
+                  <Checkbox
+                    key={p.id}
+                    value={String(p.id)}
+                    label={
+                      <Text fz="sm">
+                        {p.name} <Code>{p.code}</Code>
+                      </Text>
+                    }
+                  />
                 ))}
-              </div>
-            </div>
-          ))
-        )}
+              </Stack>
+            ))}
+          </Stack>
+        </Checkbox.Group>
+      )}
 
-        <Alert kind="error" messages={errors} />
-      </form>
-    </Modal>
-  )
-}
-
-function DeleteRoleDialog({ role, onClose, onDeleted }: { role: RoleDto; onClose(): void; onDeleted(): void }) {
-  const [errors, setErrors] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
-
-  async function handleConfirm() {
-    setErrors([])
-    setBusy(true)
-    try {
-      await rolesApi.remove(role.id)
-      onDeleted()
-    } catch (error) {
-      setErrors(error instanceof ApiError ? error.messages : ['The role could not be deleted.'])
-      setBusy(false)
-    }
-  }
-
-  if (errors.length > 0) {
-    return (
-      <Modal
-        title="Delete role"
-        onClose={onClose}
-        footer={
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Close
-          </button>
-        }
-      >
-        <Alert kind="error" messages={errors} />
-      </Modal>
-    )
-  }
-
-  return (
-    <ConfirmDialog
-      title="Delete role"
-      message={`Delete the role "${role.name}"? This cannot be undone.`}
-      confirmLabel="Delete"
-      danger
-      busy={busy}
-      onConfirm={handleConfirm}
-      onCancel={onClose}
-    />
+      {error ? <Alert color="red">{error}</Alert> : null}
+    </FormModal>
   )
 }

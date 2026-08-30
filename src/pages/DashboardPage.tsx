@@ -1,7 +1,9 @@
+import { Avatar, Badge, Card, Group, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { IconArrowRight } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { useAuth } from '../auth/useAuth'
-import { PageHeader } from '../components/layout/PageHeader'
 import { formatDateTime, initials } from '../components/format'
+import { PageHeader } from '../components/ui/PageHeader'
 import { navLeaves, visibleNavigation } from '../navigation'
 
 export function DashboardPage() {
@@ -9,61 +11,71 @@ export function DashboardPage() {
   if (!user) return null
 
   // One card per screen this user may actually open, grouped the way the sidebar groups them.
-  const groups = new Map<string, string[]>()
+  const groups = new Map<string, { label: string; to: string }[]>()
   for (const leaf of navLeaves(visibleNavigation(hasPermission))) {
     if (leaf.item.to === '/') continue
     const heading = leaf.group?.label ?? leaf.section.breadcrumb ?? leaf.section.title ?? 'Sections'
-    groups.set(heading, [...(groups.get(heading) ?? []), leaf.item.label])
+    groups.set(heading, [...(groups.get(heading) ?? []), { label: leaf.item.label, to: leaf.item.to as string }])
   }
-
-  const routeOf = new Map(navLeaves().map((leaf) => [leaf.item.label, leaf.item.to as string]))
-  const reachable = [...groups].map(([title, items]) => ({ title, items }))
 
   return (
     <>
-      <PageHeader title={`Welcome, ${user.fullName}`} subtitle="Katanga TVS Inventory &amp; Shipment" />
+      <PageHeader title={`Welcome, ${user.fullName}`} subtitle="Katanga TVS Inventory & Shipment" />
 
-      <section className="card dashboard-hero">
-        <span className="dashboard-hero__avatar" aria-hidden="true">
-          {initials(user.fullName)}
-        </span>
-        <div>
-          <h2>{user.fullName}</h2>
-          <p className="muted">
-            {user.username} &middot; {user.email}
-          </p>
-          <div className="chip-row">
-            {user.roles.length === 0 ? (
-              <span className="muted">No roles assigned</span>
-            ) : (
-              user.roles.map((r) => (
-                <span className="chip" key={r}>
-                  {r}
-                </span>
-              ))
-            )}
-          </div>
-          <p className="muted dashboard-hero__last">Last sign-in: {formatDateTime(user.lastLoginAtUtc)}</p>
-        </div>
-      </section>
+      <Paper radius="lg" p="lg" withBorder mb="lg">
+        <Group align="flex-start" gap="lg" wrap="nowrap">
+          <Avatar color="brand" radius="xl" size={64}>
+            {initials(user.fullName)}
+          </Avatar>
+          <Stack gap={6}>
+            <Title order={3}>{user.fullName}</Title>
+            <Text c="dimmed" fz="sm">
+              {user.username} &middot; {user.email}
+            </Text>
+            <Group gap="xs">
+              {user.roles.length === 0 ? (
+                <Text c="dimmed" fz="sm">
+                  No roles assigned
+                </Text>
+              ) : (
+                user.roles.map((role) => (
+                  <Badge key={role} variant="light">
+                    {role}
+                  </Badge>
+                ))
+              )}
+            </Group>
+            <Text c="dimmed" fz="xs">
+              Last sign-in: {formatDateTime(user.lastLoginAtUtc)}
+            </Text>
+          </Stack>
+        </Group>
+      </Paper>
 
-      {reachable.length === 0 ? (
-        <section className="card">
-          <p className="muted">You have no sections available yet. Ask an administrator for access.</p>
-        </section>
+      {groups.size === 0 ? (
+        <Paper radius="lg" p="lg" withBorder>
+          <Text c="dimmed">You have no sections available yet. Ask an administrator for access.</Text>
+        </Paper>
       ) : (
-        reachable.map((section) => (
-          <section key={section.title}>
-            <h3 className="section-title">{section.title}</h3>
-            <div className="card-grid">
-              {section.items.map((label) => (
-                <Link className="card link-card" to={routeOf.get(label) as string} key={label}>
-                  <strong>{label}</strong>
-                  <span className="muted">Open {label.toLowerCase()}</span>
-                </Link>
+        [...groups].map(([heading, items]) => (
+          <Stack key={heading} gap="sm" mb="lg">
+            <Title order={4}>{heading}</Title>
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+              {items.map((item) => (
+                <Card key={item.label} component={Link} to={item.to} radius="lg" padding="lg" withBorder>
+                  <Group justify="space-between" wrap="nowrap">
+                    <Stack gap={2}>
+                      <Text fw={600}>{item.label}</Text>
+                      <Text c="dimmed" fz="sm">
+                        Open {item.label.toLowerCase()}
+                      </Text>
+                    </Stack>
+                    <IconArrowRight size={18} />
+                  </Group>
+                </Card>
               ))}
-            </div>
-          </section>
+            </SimpleGrid>
+          </Stack>
         ))
       )}
     </>

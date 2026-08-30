@@ -39,31 +39,9 @@ body,
   margin: 0;
 }
 
-body {
-  background:
-    radial-gradient(1200px 600px at 10% -10%, #1d4ed8 0%, transparent 60%),
-    radial-gradient(900px 500px at 110% 110%, #0ea5e9 0%, transparent 55%),
-    linear-gradient(160deg, var(--bg), var(--bg-accent));
-  background-attachment: fixed;
-}
+/* The shell paints its own background; only the sign-in screen sets a full-page one. */
 
-h1 {
-  font-size: 1.25rem;
-  margin: 0;
-}
-
-h2 {
-  font-size: 1.05rem;
-  margin: 0;
-}
-
-.muted {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin: 2px 0 0;
-}
-
-/* ---------- alerts (used by the Alert component everywhere) ---------- */
+/* ---------- alerts (sign-in screen only; the rest of the app uses Mantine) ---------- */
 
 .alert {
   margin-top: 14px;

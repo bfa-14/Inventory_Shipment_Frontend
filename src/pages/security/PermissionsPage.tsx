@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Alert, Badge, Code, Group, Paper, Stack, Table, Text, TextInput, Title } from '@mantine/core'
+import { IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { permissionsApi } from '../../api/permissions'
 import type { PermissionModuleDto } from '../../api/types'
-import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/layout/PageHeader'
-import { SearchInput } from '../../components/ui/SearchInput'
+import { FilterBar } from '../../components/ui/FilterBar'
+import { PageHeader } from '../../components/ui/PageHeader'
 
 export function PermissionsPage() {
   const [modules, setModules] = useState<PermissionModuleDto[]>([])
   const [loading, setLoading] = useState(true)
-  const [errors, setErrors] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
 
   useEffect(() => {
@@ -18,8 +19,8 @@ export function PermissionsPage() {
       try {
         const catalog = await permissionsApi.catalog()
         if (!cancelled) setModules(catalog)
-      } catch (error) {
-        if (!cancelled) setErrors(error instanceof ApiError ? error.messages : ['The catalog could not be loaded.'])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof ApiError ? err.messages.join(' ') : 'The catalog could not be loaded.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -49,65 +50,89 @@ export function PermissionsPage() {
     <>
       <PageHeader title="Permissions" subtitle="Everything the application can guard, grouped by module." />
 
-      <section className="card">
-        <p className="notice">
-          Permissions are defined by the application; assign them to roles on the Roles page.
-        </p>
+      <Alert color="blue" mb="md">
+        Permissions are defined by the application; assign them to roles on the Roles page.
+      </Alert>
 
-        <div className="card__toolbar">
-          <SearchInput value={filter} onChange={setFilter} placeholder="Filter by code, name or description" />
-        </div>
+      <FilterBar>
+        <FilterBar.Col span={5}>
+          <TextInput
+            placeholder="Filter by code, name or description"
+            leftSection={<IconSearch size={16} />}
+            aria-label="Filter permissions"
+            value={filter}
+            onChange={(e) => setFilter(e.currentTarget.value)}
+          />
+        </FilterBar.Col>
+      </FilterBar>
 
-        <Alert kind="error" messages={errors} />
+      {error ? (
+        <Alert color="red" mb="md" title="Could not load the catalog">
+          {error}
+        </Alert>
+      ) : null}
 
-        {loading ? (
-          <p className="table-state muted">Loading...</p>
-        ) : filtered.length === 0 ? (
-          <p className="table-state muted">No permission matches your filter.</p>
-        ) : (
-          filtered.map((module) => (
-            <div className="perm-module" key={module.module}>
-              <h3 className="card__title">{module.module}</h3>
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Code</th>
-                      <th>Name</th>
-                      <th className="col-secondary">Description</th>
-                      <th>Roles</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+      {loading ? (
+        <Paper radius="lg" p="lg" withBorder>
+          <Text c="dimmed">Loading...</Text>
+        </Paper>
+      ) : filtered.length === 0 ? (
+        <Paper radius="lg" p="lg" withBorder>
+          <Text c="dimmed">No permission matches your filter.</Text>
+        </Paper>
+      ) : (
+        <Stack gap="md">
+          {filtered.map((module) => (
+            <Paper key={module.module} radius="lg" p="md" withBorder>
+              <Title order={5} mb="sm">
+                {module.module}
+              </Title>
+              <Table.ScrollContainer minWidth={640}>
+                <Table highlightOnHover withColumnBorders>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Code</Table.Th>
+                      <Table.Th>Name</Table.Th>
+                      <Table.Th>Description</Table.Th>
+                      <Table.Th>Roles</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
                     {module.permissions.map((p) => (
-                      <tr key={p.id}>
-                        <td>
-                          <code className="mono">{p.code}</code>
-                        </td>
-                        <td>{p.name}</td>
-                        <td className="col-secondary muted">{p.description}</td>
-                        <td>
+                      <Table.Tr key={p.id}>
+                        <Table.Td>
+                          <Code>{p.code}</Code>
+                        </Table.Td>
+                        <Table.Td>{p.name}</Table.Td>
+                        <Table.Td>
+                          <Text fz="sm" c="dimmed">
+                            {p.description}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
                           {p.roles.length === 0 ? (
-                            <span className="muted">No role</span>
+                            <Text fz="sm" c="dimmed">
+                              No role
+                            </Text>
                           ) : (
-                            <span className="chip-row">
+                            <Group gap={4}>
                               {p.roles.map((r) => (
-                                <span className="chip" key={r}>
+                                <Badge key={r} variant="light" size="sm">
                                   {r}
-                                </span>
+                                </Badge>
                               ))}
-                            </span>
+                            </Group>
                           )}
-                        </td>
-                      </tr>
+                        </Table.Td>
+                      </Table.Tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))
-        )}
-      </section>
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </Paper>
+          ))}
+        </Stack>
+      )}
     </>
   )
 }

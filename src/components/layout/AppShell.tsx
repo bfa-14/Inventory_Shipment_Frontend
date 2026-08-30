@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
+import { AppShell as MantineAppShell, Burger, Group } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
 import { Outlet, useLocation } from 'react-router'
-import { breadcrumbFor } from '../../navigation'
+import { CONTENT_BG } from '../../theme'
 import { AppFooter } from './AppFooter'
-import { Sidebar } from './Sidebar'
-import { Topbar } from './Topbar'
+import { AppHeader } from './AppHeader'
+import { AppNavbar } from './AppNavbar'
 
 const COLLAPSE_KEY = 'inventory_shipment.sidebarCollapsed'
+
+const NAVBAR_WIDTH = 240
+const NAVBAR_COLLAPSED = 72
 
 function readCollapsed(): boolean {
   try {
@@ -19,14 +24,13 @@ function readCollapsed(): boolean {
 export function AppShell() {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(readCollapsed)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] = useDisclosure(false)
   const [lastPath, setLastPath] = useState(location.pathname)
-  const breadcrumb = breadcrumbFor(location.pathname)
 
   // Navigating (including browser back/forward) closes the mobile drawer.
   if (lastPath !== location.pathname) {
     setLastPath(location.pathname)
-    setDrawerOpen(false)
+    closeMobile()
   }
 
   useEffect(() => {
@@ -38,23 +42,36 @@ export function AppShell() {
   }, [collapsed])
 
   return (
-    <div className={`app-shell${collapsed ? ' app-shell--collapsed' : ''}`}>
-      <Sidebar
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((v) => !v)}
-        drawerOpen={drawerOpen}
-        onNavigate={() => setDrawerOpen(false)}
-      />
+    <MantineAppShell
+      layout="alt"
+      header={{ height: 64 }}
+      navbar={{
+        width: collapsed ? NAVBAR_COLLAPSED : NAVBAR_WIDTH,
+        breakpoint: 'sm',
+        collapsed: { mobile: !mobileOpened },
+      }}
+      footer={{ height: 44 }}
+      padding="md"
+      styles={{ main: { background: CONTENT_BG } }}
+    >
+      <MantineAppShell.Header>
+        <Group h="100%" px="md" wrap="nowrap" gap="sm">
+          <Burger opened={mobileOpened} onClick={toggleMobile} hiddenFrom="sm" size="sm" aria-label="Open navigation" />
+          <AppHeader />
+        </Group>
+      </MantineAppShell.Header>
 
-      {drawerOpen ? <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} /> : null}
+      <MantineAppShell.Navbar>
+        <AppNavbar collapsed={collapsed} onToggleCollapsed={() => setCollapsed((v) => !v)} onNavigate={closeMobile} />
+      </MantineAppShell.Navbar>
 
-      <div className="app-shell__main">
-        <Topbar breadcrumb={breadcrumb} onOpenDrawer={() => setDrawerOpen(true)} />
-        <main className="app-content">
-          <Outlet />
-        </main>
+      <MantineAppShell.Main>
+        <Outlet />
+      </MantineAppShell.Main>
+
+      <MantineAppShell.Footer>
         <AppFooter />
-      </div>
-    </div>
+      </MantineAppShell.Footer>
+    </MantineAppShell>
   )
 }

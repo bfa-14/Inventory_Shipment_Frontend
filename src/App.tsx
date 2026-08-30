@@ -2,7 +2,6 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/layout/AppShell'
-import { ToastProvider } from './components/ui/ToastProvider'
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -19,42 +18,40 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <ToastProvider>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
 
-            {/* Everything below requires a signed-in user. */}
-            <Route element={<ProtectedRoute />}>
-              <Route element={<AppShell />}>
-                <Route index element={<DashboardPage />} />
-                <Route path="/account/password" element={<ChangePasswordPage />} />
-                <Route path="/forbidden" element={<ForbiddenPage />} />
+          {/* Everything below requires a signed-in user. */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppShell />}>
+              <Route index element={<DashboardPage />} />
+              <Route path="/account/password" element={<ChangePasswordPage />} />
+              <Route path="/forbidden" element={<ForbiddenPage />} />
 
-                <Route element={<ProtectedRoute permission={PERMISSIONS.branchesView} />}>
-                  <Route path="/setup/master-data/branches" element={<BranchesPage />} />
-                </Route>
-                <Route element={<ProtectedRoute permission={PERMISSIONS.warehousesView} />}>
-                  <Route path="/setup/master-data/warehouses" element={<WarehousesPage />} />
-                </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.branchesView} />}>
+                <Route path="/setup/master-data/branches" element={<BranchesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.warehousesView} />}>
+                <Route path="/setup/master-data/warehouses" element={<WarehousesPage />} />
+              </Route>
 
-                <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>
-                  <Route path="/security/users" element={<UsersPage />} />
-                </Route>
-                <Route element={<ProtectedRoute permission={PERMISSIONS.rolesView} />}>
-                  <Route path="/security/roles" element={<RolesPage />} />
-                </Route>
-                <Route element={<ProtectedRoute permission={PERMISSIONS.permissionsView} />}>
-                  <Route path="/security/permissions" element={<PermissionsPage />} />
-                </Route>
-                <Route element={<ProtectedRoute permission={PERMISSIONS.auditView} />}>
-                  <Route path="/security/login-audit" element={<LoginAuditPage />} />
-                </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>
+                <Route path="/security/users" element={<UsersPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.rolesView} />}>
+                <Route path="/security/roles" element={<RolesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.permissionsView} />}>
+                <Route path="/security/permissions" element={<PermissionsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.auditView} />}>
+                <Route path="/security/login-audit" element={<LoginAuditPage />} />
               </Route>
             </Route>
+          </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </ToastProvider>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </AuthProvider>
     </BrowserRouter>
   )

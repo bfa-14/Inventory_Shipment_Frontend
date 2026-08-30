@@ -1,38 +1,40 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
+import { Alert, Button, Group, Paper, PasswordInput, Stack } from '@mantine/core'
+import { useForm } from '@mantine/form'
 import { useNavigate } from 'react-router'
 import { authApi } from '../api/auth'
 import { ApiError } from '../api/http'
 import { useAuth } from '../auth/useAuth'
-import { Alert } from '../components/Alert'
-import { PageHeader } from '../components/layout/PageHeader'
+import { PageHeader } from '../components/ui/PageHeader'
+
+const PASSWORD_HINT = 'At least 8 characters with upper and lower case, a digit and a symbol.'
 
 export function ChangePasswordPage() {
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
   const [errors, setErrors] = useState<string[]>([])
   const [success, setSuccess] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const { logout } = useAuth()
   const navigate = useNavigate()
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  const form = useForm({
+    initialValues: { currentPassword: '', newPassword: '', confirmPassword: '' },
+    validate: {
+      currentPassword: (value) => (value ? null : 'Enter your current password.'),
+      newPassword: (value) => (value ? null : 'Enter a new password.'),
+      confirmPassword: (value, values) =>
+        value === values.newPassword ? null : 'The new password and its confirmation do not match.',
+    },
+  })
+
+  async function handleSubmit(values: typeof form.values) {
     setErrors([])
     setSuccess(null)
-
-    if (newPassword !== confirmPassword) {
-      setErrors(['The new password and its confirmation do not match.'])
-      return
-    }
-
     setSubmitting(true)
+
     try {
-      await authApi.changePassword({ currentPassword, newPassword })
+      await authApi.changePassword({ currentPassword: values.currentPassword, newPassword: values.newPassword })
       setSuccess('Password changed. All other sessions were signed out - please sign in again.')
-      setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
+      form.reset()
       // The API revoked every refresh token; a clean re-login avoids surprises.
       window.setTimeout(async () => {
         await logout()
@@ -47,53 +49,44 @@ export function ChangePasswordPage() {
 
   return (
     <>
-      <PageHeader
-        title="Change password"
-        subtitle="At least 8 characters with upper and lower case, a digit and a symbol."
-      />
+      <PageHeader title="Change password" subtitle={PASSWORD_HINT} />
 
-      <section className="card card--narrow">
-        <form onSubmit={handleSubmit} noValidate className="form-grid">
-          <label htmlFor="currentPassword">Current password</label>
-          <input
-            id="currentPassword"
-            type="password"
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            required
-          />
+      <Paper radius="lg" p="lg" withBorder maw={480}>
+        <form onSubmit={form.onSubmit((values) => void handleSubmit(values))} noValidate>
+          <Stack gap="md">
+            <PasswordInput
+              label="Current password"
+              autoComplete="current-password"
+              withAsterisk
+              {...form.getInputProps('currentPassword')}
+            />
+            <PasswordInput
+              label="New password"
+              description={PASSWORD_HINT}
+              autoComplete="new-password"
+              withAsterisk
+              {...form.getInputProps('newPassword')}
+            />
+            <PasswordInput
+              label="Confirm new password"
+              autoComplete="new-password"
+              withAsterisk
+              {...form.getInputProps('confirmPassword')}
+            />
 
-          <label htmlFor="newPassword">New password</label>
-          <input
-            id="newPassword"
-            type="password"
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            required
-          />
+            {errors.length > 0 ? (
+              <Alert color="red">{errors.join(' ')}</Alert>
+            ) : null}
+            {success ? <Alert color="green">{success}</Alert> : null}
 
-          <label htmlFor="confirmPassword">Confirm new password</label>
-          <input
-            id="confirmPassword"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-          />
-
-          <Alert kind="error" messages={errors} />
-          <Alert kind="success" messages={success} />
-
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Saving...' : 'Change password'}
-            </button>
-          </div>
+            <Group justify="flex-end">
+              <Button type="submit" loading={submitting}>
+                Change password
+              </Button>
+            </Group>
+          </Stack>
         </form>
-      </section>
+      </Paper>
     </>
   )
 }

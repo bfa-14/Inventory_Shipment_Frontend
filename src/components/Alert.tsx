@@ -3,7 +3,10 @@ interface AlertProps {
   messages: string[] | string | null | undefined
 }
 
-/** Inline notice; renders nothing when there is no message. */
+/**
+ * Inline notice used by the customer-approved sign-in screen, which is deliberately kept off
+ * Mantine. Everywhere else use Mantine's <Alert> or notify().
+ */
 export function Alert({ kind, messages }: AlertProps) {
   const list = (Array.isArray(messages) ? messages : [messages]).filter((m): m is string => !!m)
   if (list.length === 0) return null

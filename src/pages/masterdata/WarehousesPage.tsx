@@ -1,37 +1,34 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Alert, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
+import { IconFilter, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, PagedResult, WarehouseDto, WarehouseSortBy } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
-import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/layout/PageHeader'
-import {
-  EmptyRow,
-  MainFlagCell,
-  RowActions,
-  SkeletonRows,
-  SortableHeader,
-  StatusPill,
-  TableFooter,
-} from '../../components/masterdata/MasterDataTable'
-import { downloadCsv } from '../../components/masterdata/csv'
-import { MoreActionsMenu } from '../../components/masterdata/MoreActionsMenu'
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
-import { Icon } from '../../components/ui/Icon'
-import { Modal } from '../../components/ui/Modal'
-import { useToast } from '../../components/ui/useToast'
-import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '../../config'
-import { PERMISSIONS } from '../../navigation'
 import { branchLabel } from '../../components/format'
+import { downloadCsv } from '../../components/masterdata/csv'
+import { confirm } from '../../components/ui/confirm'
+import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { columnFilter } from '../../components/ui/columnFilter'
+import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { FilterBar } from '../../components/ui/FilterBar'
+import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
+import { notify } from '../../components/ui/notify'
+import { PageHeader } from '../../components/ui/PageHeader'
+import { RowActions } from '../../components/ui/RowActions'
+import { MainFlag, StatusBadge } from '../../components/ui/StatusBadge'
+import { PAGE_SIZE_DEFAULT } from '../../config'
+import { PERMISSIONS } from '../../navigation'
 import { WarehouseFormModal } from './WarehouseFormModal'
 
 /** Everything that decides which rows the API returns. */
 interface Query {
   search: string
-  branchId: string
-  isActive: '' | 'true' | 'false'
-  isMainWarehouse: '' | 'true' | 'false'
+  branchId: string | null
+  isActive: string | null
+  isMainWarehouse: string | null
   sortBy: WarehouseSortBy
   sortDir: 'asc' | 'desc'
   page: number
@@ -40,51 +37,31 @@ interface Query {
 
 const DEFAULT_QUERY: Query = {
   search: '',
-  branchId: '',
-  isActive: '',
-  isMainWarehouse: '',
+  branchId: null,
+  isActive: null,
+  isMainWarehouse: null,
   sortBy: 'WarehouseCode',
   sortDir: 'asc',
   page: 1,
   pageSize: PAGE_SIZE_DEFAULT,
 }
 
-type Dialog =
-  | { kind: 'create' }
-  | { kind: 'edit'; warehouse: WarehouseDto }
-  | { kind: 'delete'; warehouse: WarehouseDto }
-  | { kind: 'status'; warehouse: WarehouseDto }
-  | { kind: 'referenced'; warehouse: WarehouseDto; message: string }
-  | null
-
-const COLUMNS: { key: WarehouseSortBy; header: string }[] = [
-  { key: 'WarehouseCode', header: 'Warehouse Code' },
-  { key: 'WarehouseName', header: 'Warehouse Name' },
-  { key: 'BranchName', header: 'Branch / Site' },
-  { key: 'Address', header: 'Address' },
-  { key: 'IsMainWarehouse', header: 'Is Main Warehouse' },
-  { key: 'IsActive', header: 'Status' },
-]
-
-const COLUMN_COUNT = COLUMNS.length + 2 // the leading "#" and the trailing "Actions"
+type Dialog = { kind: 'create' } | { kind: 'edit'; warehouse: WarehouseDto } | null
 
 export function WarehousesPage() {
   const { hasPermission } = useAuth()
-  const { showToast } = useToast()
 
   const [query, setQuery] = useState<Query>(DEFAULT_QUERY)
-  // The filter inputs are only copied into `query` when the user applies them.
   const [draftSearch, setDraftSearch] = useState('')
-  const [draftBranch, setDraftBranch] = useState('')
-  const [draftActive, setDraftActive] = useState<Query['isActive']>('')
-  const [draftMain, setDraftMain] = useState<Query['isMainWarehouse']>('')
+  const [draftBranch, setDraftBranch] = useState<string | null>(null)
+  const [draftActive, setDraftActive] = useState<string | null>(null)
+  const [draftMain, setDraftMain] = useState<string | null>(null)
 
   const [data, setData] = useState<PagedResult<WarehouseDto> | null>(null)
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [busy, setBusy] = useState(false)
 
   const canCreate = hasPermission(PERMISSIONS.warehousesCreate)
   const canEdit = hasPermission(PERMISSIONS.warehousesEdit)
@@ -95,26 +72,24 @@ export function WarehousesPage() {
     try {
       const page = await warehousesApi.search({
         search: query.search || undefined,
-        branchId: query.branchId === '' ? undefined : Number(query.branchId),
-        isActive: query.isActive === '' ? undefined : query.isActive === 'true',
-        isMainWarehouse: query.isMainWarehouse === '' ? undefined : query.isMainWarehouse === 'true',
+        branchId: query.branchId === null ? undefined : Number(query.branchId),
+        isActive: query.isActive === null ? undefined : query.isActive === 'true',
+        isMainWarehouse: query.isMainWarehouse === null ? undefined : query.isMainWarehouse === 'true',
         sortBy: query.sortBy,
         sortDir: query.sortDir,
         page: query.page,
         pageSize: query.pageSize,
       })
       setData(page)
-      setError([])
+      setError(null)
     } catch (err) {
-      setError(err instanceof ApiError ? err.messages : ['The warehouses could not be loaded.'])
+      setError(err instanceof ApiError ? err.messages.join(' ') : 'The warehouses could not be loaded.')
     } finally {
       setLoading(false)
     }
   }, [query])
 
   useEffect(() => {
-    // Fetching the page is exactly the "synchronize with an external system" case; load() flips the
-    // loading flag before it awaits so the skeleton rows appear straight away.
     // eslint-disable-next-line react/set-state-in-effect
     void load()
   }, [load])
@@ -125,7 +100,7 @@ export function WarehousesPage() {
       .lookup(false)
       .then(setBranches)
       .catch(() => {
-        // Not fatal: the filter simply offers "All" until the next reload.
+        // Not fatal: the filter simply offers no branches until the next reload.
       })
   }, [])
 
@@ -142,19 +117,33 @@ export function WarehousesPage() {
 
   function clearFilters() {
     setDraftSearch('')
-    setDraftBranch('')
-    setDraftActive('')
-    setDraftMain('')
+    setDraftBranch(null)
+    setDraftActive(null)
+    setDraftMain(null)
     setQuery(DEFAULT_QUERY)
   }
 
-  function toggleSort(column: WarehouseSortBy) {
-    setQuery((q) => ({
-      ...q,
-      sortBy: column,
-      sortDir: q.sortBy === column && q.sortDir === 'asc' ? 'desc' : 'asc',
-      page: 1,
-    }))
+  /**
+   * The column funnels and the filter bar's dropdowns are two ways into the SAME query parameter,
+   * so a funnel moves the bar's control with it - a header reading "Active" above a bar reading
+   * "All" would be two controls disagreeing about one filter.
+   *
+   * A funnel applies straight away, where the bar still waits for its Filter button: the popover has
+   * its own OK, and asking for a second confirmation of a confirmed choice is one click too many.
+   */
+  function applyBranch(value: string | null) {
+    setDraftBranch(value)
+    setQuery((q) => ({ ...q, branchId: value, page: 1 }))
+  }
+
+  function applyStatus(value: string | null) {
+    setDraftActive(value)
+    setQuery((q) => ({ ...q, isActive: value, page: 1 }))
+  }
+
+  function applyMain(value: string | null) {
+    setDraftMain(value)
+    setQuery((q) => ({ ...q, isMainWarehouse: value, page: 1 }))
   }
 
   function exportCsv() {
@@ -174,43 +163,152 @@ export function WarehousesPage() {
 
   async function afterSave(message: string) {
     setDialog(null)
-    showToast(message)
+    notify.success(message)
     await load()
   }
 
-  async function confirmDelete(warehouse: WarehouseDto) {
-    setBusy(true)
+  async function setStatus(warehouse: WarehouseDto, isActive: boolean) {
+    try {
+      await warehousesApi.setStatus(warehouse.id, isActive)
+      await afterSave(isActive ? 'Warehouse activated.' : 'Warehouse deactivated.')
+    } catch (err) {
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The warehouse could not be updated.')
+    }
+  }
+
+  async function handleDelete(warehouse: WarehouseDto) {
+    const confirmed = await confirm({
+      title: 'Delete warehouse',
+      message: `Delete warehouse ${warehouse.warehouseCode} - ${warehouse.warehouseName}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!confirmed) return
+
     try {
       await warehousesApi.remove(warehouse.id)
       await afterSave('Warehouse deleted successfully.')
     } catch (err) {
       if (err instanceof ApiError && err.code === 'REFERENCED') {
-        setDialog({ kind: 'referenced', warehouse, message: err.messages[0] as string })
-      } else {
-        setDialog(null)
-        showToast(err instanceof ApiError ? (err.messages[0] as string) : 'The warehouse could not be deleted.', 'error')
+        const deactivate = await confirm({
+          title: 'Warehouse cannot be deleted',
+          message: err.messages[0] as string,
+          confirmLabel: 'Deactivate instead',
+        })
+        if (deactivate) await setStatus(warehouse, false)
+        return
       }
-    } finally {
-      setBusy(false)
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The warehouse could not be deleted.')
     }
   }
 
-  async function setStatus(warehouse: WarehouseDto, isActive: boolean) {
-    setBusy(true)
-    try {
-      await warehousesApi.setStatus(warehouse.id, isActive)
-      await afterSave(isActive ? 'Warehouse activated.' : 'Warehouse deactivated.')
-    } catch (err) {
-      setDialog(null)
-      showToast(err instanceof ApiError ? (err.messages[0] as string) : 'The warehouse could not be updated.', 'error')
-    } finally {
-      setBusy(false)
-    }
+  async function handleToggleStatus(warehouse: WarehouseDto) {
+    const activating = !warehouse.isActive
+    const confirmed = await confirm({
+      title: activating ? 'Activate warehouse' : 'Deactivate warehouse',
+      message: activating
+        ? `Activate ${warehouse.warehouseCode} - ${warehouse.warehouseName}?`
+        : `Deactivate ${warehouse.warehouseCode} - ${warehouse.warehouseName}? It will no longer be selectable.`,
+      confirmLabel: activating ? 'Activate' : 'Deactivate',
+    })
+    if (confirmed) await setStatus(warehouse, activating)
   }
 
-  const rows = data?.items ?? []
+  /* The Branch funnel picks ONE branch, because the endpoint filters by a single branchId - see
+     the `single` note on ColumnFilter. Its options carry the branch code as well as the name, which
+     the cell has no room for, so two branches sharing a name stay tellable apart. */
+  const branchOptions = branches.map(branchLabel)
+  const filteredBranch = branches.find((b) => String(b.id) === query.branchId)
+
+  const columns: DataTableColumn<WarehouseDto>[] = [
+    rowNumberColumn<WarehouseDto>(query.page, query.pageSize),
+    /* Warehouse Code, Warehouse Name and Address carry no header filter: this grid pages on the
+       server and the search endpoint takes one free-text parameter that matches code OR name, so a
+       per-column box here could only narrow by something other than the column it sits on. The
+       search box in the filter bar is that parameter, under its own name. */
+    { accessor: 'warehouseCode', title: 'Warehouse Code', sortable: true, width: 160 },
+    { accessor: 'warehouseName', title: 'Warehouse Name', sortable: true },
+    {
+      accessor: 'branchName',
+      title: 'Branch / Site',
+      sortable: true,
+      ...columnFilter({
+        label: 'Branch / Site',
+        value: filteredBranch ? { values: [branchLabel(filteredBranch)] } : undefined,
+        onApply: (next) => {
+          const picked = next?.values?.[0]
+          const branch = picked ? branches.find((b) => branchLabel(b) === picked) : undefined
+          applyBranch(branch ? String(branch.id) : null)
+        },
+        options: branchOptions,
+        withText: false,
+        single: true,
+      }),
+      render: (w) => <Text fz="sm" title={w.branchCode}>{w.branchName}</Text>,
+    },
+    { accessor: 'address', title: 'Address', sortable: true, render: (w) => w.address ?? '-' },
+    {
+      accessor: 'isMainWarehouse',
+      title: 'Is Main Warehouse',
+      sortable: true,
+      width: 205,
+      ...columnFilter({
+        label: 'Is Main Warehouse',
+        value: triStateFilter(query.isMainWarehouse, 'Yes', 'No'),
+        onApply: (next) => applyMain(triStateQuery(next, 'Yes')),
+        options: YES_NO_VALUES,
+        withText: false,
+      }),
+      render: (w) => <MainFlag isMain={w.isMainWarehouse} />,
+    },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      sortable: true,
+      width: 150,
+      ...columnFilter({
+        label: 'Status',
+        value: triStateFilter(query.isActive, 'Active', 'Inactive'),
+        onApply: (next) => applyStatus(triStateQuery(next, 'Active')),
+        options: STATUS_VALUES,
+        withText: false,
+      }),
+      render: (w) => <StatusBadge active={w.isActive} />,
+    },
+    {
+      accessor: 'actions',
+      title: 'Actions',
+      width: 130,
+      textAlign: 'right',
+      render: (warehouse) => (
+        <RowActions
+          label={warehouse.warehouseCode}
+          edit={{ visible: canEdit, onClick: () => setDialog({ kind: 'edit', warehouse }) }}
+          toggleStatus={{
+            visible: canEdit,
+            active: warehouse.isActive,
+            disabled: warehouse.isMainWarehouse && warehouse.isActive,
+            disabledReason: 'The main warehouse cannot be deactivated',
+            onClick: () => void handleToggleStatus(warehouse),
+          }}
+          remove={{
+            visible: canDelete,
+            disabled: warehouse.isMainWarehouse,
+            disabledReason: 'The main warehouse cannot be deleted',
+            onClick: () => void handleDelete(warehouse),
+          }}
+        />
+      ),
+    },
+  ]
+
+  const sortStatus: DataTableSortStatus<WarehouseDto> = {
+    columnAccessor: SORT_TO_ACCESSOR[query.sortBy] ?? 'warehouseCode',
+    direction: query.sortDir,
+  }
+
   const filtered =
-    query.search !== '' || query.branchId !== '' || query.isActive !== '' || query.isMainWarehouse !== ''
+    query.search !== '' || query.branchId !== null || query.isActive !== null || query.isMainWarehouse !== null
 
   return (
     <>
@@ -219,220 +317,160 @@ export function WarehousesPage() {
         subtitle="View and manage warehouses."
         actions={
           <>
-            <MoreActionsMenu onRefresh={() => void load()} onExport={exportCsv} />
+            <MoreActionsMenu
+              actions={[
+                { label: 'Refresh', icon: <IconRefresh size={16} />, onClick: () => void load() },
+                { label: 'Export CSV', icon: <IconTableExport size={16} />, onClick: exportCsv },
+              ]}
+            />
             {canCreate ? (
-              <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: 'create' })}>
-                <Icon name="plus" />
+              <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
                 New Warehouse
-              </button>
+              </Button>
             ) : null}
           </>
         }
       />
 
-      <section className="card">
-        <div className="filter-row">
-          <div className="search-input filter-row__search">
-            <Icon name="search" />
-            <input
-              type="search"
-              aria-label="Search warehouses"
-              placeholder="Search by warehouse code or name..."
-              value={draftSearch}
-              onChange={(e) => setDraftSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') applyFilters()
-              }}
-            />
-          </div>
+      <FilterBar>
+        <FilterBar.Col span={3}>
+          <TextInput
+            placeholder="Search by warehouse code or name..."
+            leftSection={<IconSearch size={16} />}
+            aria-label="Search warehouses"
+            value={draftSearch}
+            onChange={(e) => setDraftSearch(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') applyFilters()
+            }}
+          />
+        </FilterBar.Col>
 
-          <select
+        <FilterBar.Col span={3}>
+          <Select
             aria-label="Branch / Site"
-            className="filter-row__select"
+            placeholder="All"
+            searchable
+            clearable
+            nothingFoundMessage="No branch found"
+            data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
             value={draftBranch}
-            onChange={(e) => setDraftBranch(e.target.value)}
-          >
-            <option value="">All</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branchLabel(branch)}
-              </option>
-            ))}
-          </select>
+            onChange={setDraftBranch}
+          />
+        </FilterBar.Col>
 
-          <select
+        <FilterBar.Col span={2}>
+          <Select
             aria-label="Status"
-            className="filter-row__select"
+            placeholder="All"
+            data={STATUS_OPTIONS}
             value={draftActive}
-            onChange={(e) => setDraftActive(e.target.value as Query['isActive'])}
-          >
-            <option value="">All</option>
-            <option value="true">Active</option>
-            <option value="false">Inactive</option>
-          </select>
+            onChange={setDraftActive}
+            clearable
+          />
+        </FilterBar.Col>
 
-          <select
+        <FilterBar.Col span={2}>
+          <Select
             aria-label="Is Main Warehouse"
-            className="filter-row__select"
+            placeholder="All"
+            data={YES_NO_OPTIONS}
             value={draftMain}
-            onChange={(e) => setDraftMain(e.target.value as Query['isMainWarehouse'])}
-          >
-            <option value="">All</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
+            onChange={setDraftMain}
+            clearable
+          />
+        </FilterBar.Col>
 
-          <button type="button" className="btn btn-ghost" onClick={clearFilters}>
-            <Icon name="refresh" />
-            Clear Filters
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={applyFilters}>
-            <Icon name="filter" />
-            Filter
-          </button>
-        </div>
+        <FilterBar.Col span={2}>
+          <Group gap="sm">
+            <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={clearFilters}>
+              Clear Filters
+            </Button>
+            <Button variant="default" leftSection={<IconFilter size={16} />} onClick={applyFilters}>
+              Filter
+            </Button>
+          </Group>
+        </FilterBar.Col>
+      </FilterBar>
 
-        <Alert kind="error" messages={error} />
+      {error ? (
+        <Alert color="red" mb="md" title="Could not load warehouses">
+          {error}
+        </Alert>
+      ) : null}
 
-        <div className="table-scroll">
-          <table className="data-table branches-table warehouses-table">
-            <thead>
-              <tr>
-                <th className="col-index">#</th>
-                {COLUMNS.map((column) => (
-                  <SortableHeader
-                    key={column.key}
-                    column={column.key}
-                    label={column.header}
-                    activeColumn={query.sortBy}
-                    direction={query.sortDir}
-                    onSort={toggleSort}
-                  />
-                ))}
-                <th className="col-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <SkeletonRows columns={COLUMN_COUNT} />
-              ) : rows.length === 0 ? (
-                <EmptyRow columns={COLUMN_COUNT}>
-                  No warehouses found.
-                  {filtered ? ' Try clearing the filters to see every warehouse.' : ''}
-                </EmptyRow>
-              ) : (
-                rows.map((warehouse, index) => (
-                  <tr key={warehouse.id}>
-                    <td className="col-index">{(query.page - 1) * query.pageSize + index + 1}</td>
-                    <td className="mono">{warehouse.warehouseCode}</td>
-                    <td>{warehouse.warehouseName}</td>
-                    <td title={warehouse.branchCode}>{warehouse.branchName}</td>
-                    <td className="branches-table__address">{warehouse.address ?? <span className="muted">-</span>}</td>
-                    <td>
-                      <MainFlagCell isMain={warehouse.isMainWarehouse} />
-                    </td>
-                    <td>
-                      <StatusPill isActive={warehouse.isActive} />
-                    </td>
-                    <td className="col-actions">
-                      <RowActions
-                        code={warehouse.warehouseCode}
-                        isActive={warehouse.isActive}
-                        canEdit={canEdit}
-                        canDelete={canDelete}
-                        isProtected={warehouse.isMainWarehouse}
-                        protectedDeactivateTitle="The main warehouse cannot be deactivated"
-                        protectedDeleteTitle="The main warehouse cannot be deleted"
-                        onEdit={() => setDialog({ kind: 'edit', warehouse })}
-                        onToggleStatus={() => setDialog({ kind: 'status', warehouse })}
-                        onDelete={() => setDialog({ kind: 'delete', warehouse })}
-                      />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <TableFooter
+      <Paper radius="lg" p="md" withBorder>
+        <DataTable<WarehouseDto>
+          records={data?.items ?? []}
+          columns={columns}
+          totalRecords={data?.totalCount ?? 0}
           page={query.page}
-          pageSize={query.pageSize}
-          totalCount={data?.totalCount ?? 0}
-          totalPages={data?.totalPages ?? 0}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          recordsPerPage={query.pageSize}
           onPageChange={(page) => setQuery((q) => ({ ...q, page }))}
-          onPageSizeChange={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
-        />
-      </section>
-
-      {dialog?.kind === 'create' ? (
-        <WarehouseFormModal
-          mode="create"
-          onClose={() => setDialog(null)}
-          onSaved={() => void afterSave('Warehouse created successfully.')}
-        />
-      ) : null}
-
-      {dialog?.kind === 'edit' ? (
-        <WarehouseFormModal
-          mode="edit"
-          warehouse={dialog.warehouse}
-          onClose={() => setDialog(null)}
-          onSaved={() => void afterSave('Warehouse updated successfully.')}
-        />
-      ) : null}
-
-      {dialog?.kind === 'delete' ? (
-        <ConfirmDialog
-          title="Delete warehouse"
-          message={`Delete warehouse ${dialog.warehouse.warehouseCode} - ${dialog.warehouse.warehouseName}? This cannot be undone.`}
-          confirmLabel="Delete"
-          danger
-          busy={busy}
-          onCancel={() => setDialog(null)}
-          onConfirm={() => void confirmDelete(dialog.warehouse)}
-        />
-      ) : null}
-
-      {dialog?.kind === 'status' ? (
-        <ConfirmDialog
-          title={dialog.warehouse.isActive ? 'Deactivate warehouse' : 'Activate warehouse'}
-          message={
-            dialog.warehouse.isActive
-              ? `Deactivate ${dialog.warehouse.warehouseCode} - ${dialog.warehouse.warehouseName}? It will no longer be selectable.`
-              : `Activate ${dialog.warehouse.warehouseCode} - ${dialog.warehouse.warehouseName}?`
+          onRecordsPerPageChange={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
+          sortStatus={sortStatus}
+          onSortStatusChange={(status) =>
+            setQuery((q) => ({
+              ...q,
+              sortBy: ACCESSOR_TO_SORT[status.columnAccessor as string] ?? q.sortBy,
+              sortDir: status.direction,
+              page: 1,
+            }))
           }
-          confirmLabel={dialog.warehouse.isActive ? 'Deactivate' : 'Activate'}
-          busy={busy}
-          onCancel={() => setDialog(null)}
-          onConfirm={() => void setStatus(dialog.warehouse, !dialog.warehouse.isActive)}
-        />
-      ) : null}
-
-      {dialog?.kind === 'referenced' ? (
-        <Modal
-          title="Warehouse cannot be deleted"
-          onClose={() => setDialog(null)}
-          footer={
-            <>
-              <button type="button" className="btn btn-secondary" onClick={() => setDialog(null)} disabled={busy}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={busy}
-                onClick={() => void setStatus(dialog.warehouse, false)}
-              >
-                Deactivate instead
-              </button>
-            </>
+          fetching={loading}
+          noRecordsText={
+            filtered ? 'No warehouses found. Try clearing the filters to see every warehouse.' : 'No warehouses found.'
           }
-        >
-          <Alert kind="error" messages={dialog.message} />
-        </Modal>
+        />
+      </Paper>
+
+      {dialog ? (
+        <WarehouseFormModal
+          mode={dialog.kind}
+          warehouse={dialog.kind === 'edit' ? dialog.warehouse : undefined}
+          onClose={() => setDialog(null)}
+          onSaved={() =>
+            void afterSave(
+              dialog.kind === 'create' ? 'Warehouse created successfully.' : 'Warehouse updated successfully.',
+            )
+          }
+        />
       ) : null}
     </>
   )
+}
+
+const STATUS_OPTIONS = [
+  { value: 'true', label: 'Active' },
+  { value: 'false', label: 'Inactive' },
+]
+
+/** The words the header funnels offer - the labels below, as the cells print them. */
+const STATUS_VALUES = ['Active', 'Inactive']
+const YES_NO_VALUES = ['Yes', 'No']
+
+const YES_NO_OPTIONS = [
+  { value: 'true', label: 'Yes' },
+  { value: 'false', label: 'No' },
+]
+
+/** The grid sorts by DTO field; the API sorts by its own column names. */
+const SORT_TO_ACCESSOR: Record<WarehouseSortBy, string> = {
+  WarehouseCode: 'warehouseCode',
+  WarehouseName: 'warehouseName',
+  BranchName: 'branchName',
+  Address: 'address',
+  IsMainWarehouse: 'isMainWarehouse',
+  IsActive: 'isActive',
+  CreatedAtUtc: 'createdAtUtc',
+}
+
+const ACCESSOR_TO_SORT: Record<string, WarehouseSortBy> = {
+  warehouseCode: 'WarehouseCode',
+  warehouseName: 'WarehouseName',
+  branchName: 'BranchName',
+  address: 'Address',
+  isMainWarehouse: 'IsMainWarehouse',
+  isActive: 'IsActive',
+  createdAtUtc: 'CreatedAtUtc',
 }

@@ -1,0 +1,22 @@
+/* ============================================================================
+   Brand touches on top of Mantine: the customer figures ask for a light-blue
+   active menu item and a specific footer. Everything else comes from the theme.
+   ========================================================================= */
+
+.mantine-NavLink-root[data-active] {
+  background-color: var(--mantine-color-brand-0);
+  color: var(--mantine-color-brand-6);
+}
+
+.mantine-NavLink-root[data-active] .mantine-NavLink-label {
+  font-weight: 600;
+}
+
+.mantine-NavLink-root[data-active] .mantine-NavLink-section svg {
+  color: var(--mantine-color-brand-6);
+}
+
+/* The grid keeps its own rounded border; the surrounding card must not clip it. */
+.mantine-datatable {
+  --mantine-datatable-color-border: var(--mantine-color-gray-3);
+}
