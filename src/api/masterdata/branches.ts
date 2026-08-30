@@ -19,8 +19,9 @@ function toQueryString(query: BranchQuery): string {
 
 /** Branches / sites master data - guarded by the masterdata.branches.* permissions. */
 export const branchesApi = {
-  search: (query: BranchQuery = {}) =>
-    request<PagedResult<BranchDto>>(`/api/masterdata/branches${toQueryString(query)}`),
+  /** `signal` lets a grid abandon this request when the reader edits the filters again. */
+  search: (query: BranchQuery = {}, signal?: AbortSignal) =>
+    request<PagedResult<BranchDto>>(`/api/masterdata/branches${toQueryString(query)}`, { signal }),
 
   get: (id: number) => request<BranchDto>(`/api/masterdata/branches/${id}`),
 

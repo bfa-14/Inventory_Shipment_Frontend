@@ -20,8 +20,9 @@ function toQueryString(query: WarehouseQuery): string {
 
 /** Warehouses master data - guarded by the masterdata.warehouses.* permissions (except the lookup). */
 export const warehousesApi = {
-  search: (query: WarehouseQuery = {}) =>
-    request<PagedResult<WarehouseDto>>(`/api/masterdata/warehouses${toQueryString(query)}`),
+  /** `signal` lets a grid abandon this request when the reader edits the filters again. */
+  search: (query: WarehouseQuery = {}, signal?: AbortSignal) =>
+    request<PagedResult<WarehouseDto>>(`/api/masterdata/warehouses${toQueryString(query)}`, { signal }),
 
   get: (id: number) => request<WarehouseDto>(`/api/masterdata/warehouses/${id}`),
 

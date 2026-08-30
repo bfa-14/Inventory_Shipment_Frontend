@@ -1,51 +1,71 @@
-import { useCallback, useEffect, useState } from 'react'
-import {
-  Alert,
-  Badge,
-  Button,
-  Checkbox,
-  Code,
-  Grid,
-  Group,
-  NavLink,
-  Paper,
-  Stack,
-  Switch,
-  Text,
-  TextInput,
-  Title,
-} from '@mantine/core'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Badge, Button, Group, Paper, Switch, Text, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { IconPlus } from '@tabler/icons-react'
+import { IconPlus, IconShieldCheck } from '@tabler/icons-react'
+import { useNavigate } from 'react-router'
 import { ApiError } from '../../api/http'
-import { permissionsApi } from '../../api/permissions'
 import { rolesApi } from '../../api/roles'
-import type { PermissionModuleDto, RoleDetailDto, RoleDto } from '../../api/types'
+import type { RoleDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
+import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
 import { FormModal } from '../../components/ui/FormModal'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { RowActions } from '../../components/ui/RowActions'
+import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { StatusBadge } from '../../components/ui/StatusBadge'
+import { PAGE_SIZE_DEFAULT } from '../../config'
 import { PERMISSIONS } from '../../navigation'
+import { rolePermissionsRoute } from './rolePermissionsRoute'
+
+/**
+ * Roles - the DEFINITION of a role only.
+ *
+ * What a role IS (name, description, active) lives here; what it may DO lives on Role Permissions.
+ * The two were one screen, which read as a long form whose most important control - a hundred-odd
+ * checkboxes - sat below a three-field form you had to scroll past to reach it.
+ */
+
+/** What each column SHOWS for a role - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<RoleDto>> = {
+  name: (r) => r.name,
+  description: (r) => r.description ?? '',
+  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
+}
+
+/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
+const STATUS_VALUES = ['Active', 'Inactive']
+
+type Dialog = { kind: 'create' } | { kind: 'edit'; role: RoleDto } | null
 
 export function RolesPage() {
   const { hasPermission } = useAuth()
+  const navigate = useNavigate()
   const canManage = hasPermission(PERMISSIONS.rolesManage)
 
   const [roles, setRoles] = useState<RoleDto[]>([])
-  const [modules, setModules] = useState<PermissionModuleDto[]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [detail, setDetail] = useState<RoleDetailDto | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [dialog, setDialog] = useState<Dialog>(null)
 
-  const loadRoles = useCallback(async (selectAfter?: number) => {
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<RoleDto>>({
+    columnAccessor: 'name',
+    direction: 'asc',
+  })
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const grid = useGridFilters(COLUMN_TEXT, () => setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = grid
+
+  const load = useCallback(async () => {
+    setLoading(true)
     try {
-      const list = await rolesApi.list()
-      setRoles(list)
+      setRoles(await rolesApi.list())
       setLoadError(null)
-      setSelectedId((current) => selectAfter ?? current ?? list[0]?.id ?? null)
     } catch (error) {
       setLoadError(error instanceof ApiError ? error.messages.join(' ') : 'The roles could not be loaded.')
     } finally {
@@ -55,49 +75,30 @@ export function RolesPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect
-    void loadRoles()
-  }, [loadRoles])
+    void load()
+  }, [load])
 
-  // The permission matrix is only fetchable with security.permissions.view.
-  useEffect(() => {
-    if (!hasPermission(PERMISSIONS.permissionsView)) return
-    void (async () => {
-      try {
-        setModules(await permissionsApi.catalog())
-      } catch {
-        // The role form still works; only the matrix stays empty.
-      }
-    })()
-  }, [hasPermission])
+  /** The endpoint returns every role at once, so filtering, sorting and paging all happen here. */
+  const filtered = useMemo(() => {
+    const narrowed = applyColumnFilters(roles)
+    const key = sortStatus.columnAccessor as keyof RoleDto
+    const sorted = [...narrowed].sort((a, b) => {
+      const left = a[key]
+      const right = b[key]
+      // The count columns are numbers: compared as text, 10 would sort before 9.
+      if (typeof left === 'number' && typeof right === 'number') return left - right
+      return String(left ?? '').localeCompare(String(right ?? ''))
+    })
+    if (sortStatus.direction === 'desc') sorted.reverse()
+    return sorted
+  }, [roles, sortStatus, applyColumnFilters])
 
-  useEffect(() => {
-    if (selectedId === null) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const d = await rolesApi.get(selectedId)
-        if (!cancelled) setDetail(d)
-      } catch {
-        if (!cancelled) setDetail(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId])
+  const records = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  async function reload(selectAfter?: number) {
-    await loadRoles(selectAfter)
-    if (selectedId !== null) {
-      try {
-        setDetail(await rolesApi.get(selectAfter ?? selectedId))
-      } catch {
-        setDetail(null)
-      }
-    }
-  }
+  /** The tick list comes from EVERY role, not from the rows surviving the filters. */
+  const nameOptions = useMemo(() => columnOptions(roles, 'name'), [roles, columnOptions])
 
-  async function handleDelete(role: RoleDetailDto) {
+  async function handleDelete(role: RoleDto) {
     const confirmed = await confirm({
       title: 'Delete role',
       message: `Delete the role "${role.name}"? This cannot be undone.`,
@@ -109,22 +110,120 @@ export function RolesPage() {
     try {
       await rolesApi.remove(role.id)
       notify.success('Role deleted.')
-      setSelectedId(null)
-      setDetail(null)
-      await loadRoles()
+      await load()
     } catch (error) {
       notify.error(error instanceof ApiError ? (error.messages[0] as string) : 'The role could not be deleted.')
     }
   }
 
+  /**
+   * A new role holds nothing, so the one thing its author almost certainly wants next is the other
+   * page. Offered rather than forced - the answer is sometimes "later".
+   */
+  async function offerPermissions(id: number, name: string) {
+    const go = await confirm({
+      title: 'Assign permissions?',
+      message: `"${name}" has no permissions yet, so nobody holding it can do anything. Assign them now?`,
+      confirmLabel: 'Assign permissions',
+      cancelLabel: 'Not now',
+    })
+    if (go) navigate(rolePermissionsRoute(id))
+  }
+
+  const columns: DataTableColumn<RoleDto>[] = [
+    rowNumberColumn<RoleDto>(page, pageSize),
+    {
+      accessor: 'name',
+      title: 'Role name',
+      sortable: true,
+      width: 250,
+      ...columnFilter({ ...grid.bind('name'), label: 'Role name', options: nameOptions }),
+      render: (role) => (
+        <Group gap="xs" wrap="nowrap">
+          <Text fz="sm" fw={600}>
+            {role.name}
+          </Text>
+          {role.isSystem ? (
+            <Badge size="xs" variant="light" color="blue">
+              System
+            </Badge>
+          ) : null}
+        </Group>
+      ),
+    },
+    {
+      accessor: 'description',
+      title: 'Description',
+      sortable: true,
+      // No tick list: a description is prose, one string per role, so the box is the control that helps.
+      ...columnFilter({ ...grid.bind('description'), label: 'Description' }),
+      render: (role) => role.description ?? '-',
+    },
+    { accessor: 'userCount', title: 'Users', sortable: true, width: 110, textAlign: 'right' },
+    {
+      accessor: 'permissionCount',
+      title: 'Permissions',
+      sortable: true,
+      width: 140,
+      textAlign: 'right',
+      // A system role's stored count says nothing: it holds everything by definition.
+      render: (role) =>
+        role.isSystem ? (
+          <Text fz="sm" c="dimmed">
+            All
+          </Text>
+        ) : (
+          role.permissionCount
+        ),
+    },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      sortable: true,
+      width: 150,
+      ...columnFilter({ ...grid.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
+      render: (role) => <StatusBadge active={role.isActive} />,
+    },
+    {
+      accessor: 'actions',
+      title: 'Actions',
+      width: 150,
+      textAlign: 'right',
+      render: (role) => (
+        <RowActions
+          label={role.name}
+          edit={{ visible: canManage, onClick: () => setDialog({ kind: 'edit', role }) }}
+          // Visible to a reader without rolesManage too: the other page opens read-only for them,
+          // which is the same trust the route itself grants.
+          custom={[
+            {
+              icon: <IconShieldCheck size={17} />,
+              tooltip: 'Assign permissions',
+              color: 'grape',
+              onClick: () => navigate(rolePermissionsRoute(role.id)),
+            },
+          ]}
+          remove={{
+            visible: canManage,
+            disabled: role.isSystem || role.userCount > 0,
+            disabledReason: role.isSystem
+              ? 'A system role cannot be deleted.'
+              : 'Remove the role from its users first.',
+            onClick: () => void handleDelete(role),
+          }}
+        />
+      ),
+    },
+  ]
+
   return (
     <>
       <PageHeader
         title="Roles"
-        subtitle="A role is a named bundle of permissions. Assign roles to users on the Users page."
+        subtitle="A role is a named bundle of permissions. Assign roles to users on the Users page; assign permissions on the Role Permissions page."
         actions={
           canManage ? (
-            <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
+            <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
               New role
             </Button>
           ) : null
@@ -137,76 +236,43 @@ export function RolesPage() {
         </Alert>
       ) : null}
 
-      <Grid gap="md" align="flex-start">
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <Paper radius="lg" p="md" withBorder>
-            <Title order={5} mb="sm">
-              All roles
-            </Title>
-            {loading ? (
-              <Text c="dimmed" fz="sm">
-                Loading...
-              </Text>
-            ) : (
-              <Stack gap={2}>
-                {roles.map((role) => (
-                  <NavLink
-                    key={role.id}
-                    active={role.id === selectedId}
-                    onClick={() => setSelectedId(role.id)}
-                    styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
-                    label={
-                      <Group gap="xs">
-                        {role.name}
-                        {role.isSystem ? (
-                          <Badge size="xs" variant="light" color="blue">
-                            System
-                          </Badge>
-                        ) : null}
-                        {!role.isActive ? (
-                          <Badge size="xs" variant="light" color="red">
-                            Inactive
-                          </Badge>
-                        ) : null}
-                      </Group>
-                    }
-                    description={`${role.userCount} user${role.userCount === 1 ? '' : 's'} · ${role.permissionCount} permission${role.permissionCount === 1 ? '' : 's'}`}
-                  />
-                ))}
-              </Stack>
-            )}
-          </Paper>
-        </Grid.Col>
+      <Paper radius="lg" p="md" withBorder>
+        <DataTable<RoleDto>
+          records={records}
+          columns={columns}
+          totalRecords={filtered.length}
+          page={page}
+          recordsPerPage={pageSize}
+          onPageChange={setPage}
+          onRecordsPerPageChange={(size) => {
+            setPageSize(size)
+            setPage(1)
+          }}
+          sortStatus={sortStatus}
+          onSortStatusChange={(status) => {
+            setSortStatus(status)
+            setPage(1)
+          }}
+          fetching={loading}
+          filters={grid}
+          noRecordsText={roles.length === 0 ? 'No roles yet.' : 'No role matches your filters.'}
+        />
+      </Paper>
 
-        <Grid.Col span={{ base: 12, md: 8 }}>
-          {detail ? (
-            <RoleDetail
-              key={detail.id}
-              role={detail}
-              modules={modules}
-              canManage={canManage}
-              onSaved={async (message) => {
-                notify.success(message)
-                await reload()
-              }}
-              onRequestDelete={() => void handleDelete(detail)}
-            />
-          ) : (
-            <Paper radius="lg" p="lg" withBorder>
-              <Text c="dimmed">Select a role to see its permissions.</Text>
-            </Paper>
-          )}
-        </Grid.Col>
-      </Grid>
-
-      {creating ? (
-        <CreateRoleDialog
-          modules={modules}
-          onClose={() => setCreating(false)}
-          onCreated={async (id) => {
-            setCreating(false)
-            notify.success('Role created.')
-            await reload(id)
+      {dialog ? (
+        <RoleFormModal
+          mode={dialog.kind}
+          role={dialog.kind === 'edit' ? dialog.role : undefined}
+          onClose={() => setDialog(null)}
+          onSaved={async (created) => {
+            setDialog(null)
+            await load()
+            if (created) {
+              notify.success(`Role "${created.name}" created.`)
+              await offerPermissions(created.id, created.name)
+            } else {
+              notify.success('Role saved.')
+            }
           }}
         />
       ) : null}
@@ -214,265 +280,96 @@ export function RolesPage() {
   )
 }
 
-function RoleDetail({
+/**
+ * New / edit a role: the three fields the old inline form carried, and nothing else. Permissions
+ * moved out, so a role is created empty and its author is offered the other page straight after.
+ */
+function RoleFormModal({
+  mode,
   role,
-  modules,
-  canManage,
-  onSaved,
-  onRequestDelete,
-}: {
-  role: RoleDetailDto
-  modules: PermissionModuleDto[]
-  canManage: boolean
-  onSaved(message: string): Promise<void>
-  onRequestDelete(): void
-}) {
-  const [selected, setSelected] = useState<string[]>(role.permissionIds.map(String))
-  const [formError, setFormError] = useState<string | null>(null)
-  const [permError, setPermError] = useState<string | null>(null)
-  const [savingForm, setSavingForm] = useState(false)
-  const [savingPerms, setSavingPerms] = useState(false)
-
-  const form = useForm({
-    initialValues: { name: role.name, description: role.description ?? '', isActive: role.isActive },
-    validate: { name: (v) => (v.trim() ? null : 'Name is required.') },
-  })
-
-  const deleteBlocked = role.isSystem || role.userCount > 0
-  const deleteReason = role.isSystem
-    ? 'A system role cannot be deleted.'
-    : role.userCount > 0
-      ? 'Remove the role from its users first.'
-      : undefined
-
-  async function handleSaveForm(values: typeof form.values) {
-    setFormError(null)
-    setSavingForm(true)
-    try {
-      await rolesApi.update(role.id, {
-        name: values.name.trim(),
-        description: values.description.trim() || null,
-        isActive: values.isActive,
-      })
-      await onSaved('Role saved.')
-    } catch (error) {
-      setFormError(error instanceof ApiError ? error.messages.join(' ') : 'The role could not be saved.')
-    } finally {
-      setSavingForm(false)
-    }
-  }
-
-  async function handleSavePermissions() {
-    setPermError(null)
-    setSavingPerms(true)
-    try {
-      await rolesApi.setPermissions(role.id, selected.map(Number))
-      await onSaved('Permissions saved.')
-    } catch (error) {
-      setPermError(error instanceof ApiError ? error.messages.join(' ') : 'The permissions could not be saved.')
-    } finally {
-      setSavingPerms(false)
-    }
-  }
-
-  return (
-    <Stack gap="md">
-      <Paper radius="lg" p="lg" withBorder>
-        <Title order={5} mb="md">
-          {role.name}
-        </Title>
-        <form onSubmit={form.onSubmit((values) => void handleSaveForm(values))} noValidate>
-          <Stack gap="md">
-            <TextInput
-              label="Name"
-              withAsterisk
-              readOnly={role.isSystem}
-              disabled={!canManage}
-              {...form.getInputProps('name')}
-            />
-            <TextInput label="Description" disabled={!canManage} {...form.getInputProps('description')} />
-            <Switch
-              label="Active"
-              disabled={!canManage || role.isSystem}
-              {...form.getInputProps('isActive', { type: 'checkbox' })}
-            />
-
-            {formError ? <Alert color="red">{formError}</Alert> : null}
-
-            {canManage ? (
-              <Group>
-                <Button type="submit" loading={savingForm}>
-                  Save
-                </Button>
-                <Button color="red" variant="light" onClick={onRequestDelete} disabled={deleteBlocked} title={deleteReason}>
-                  Delete role
-                </Button>
-              </Group>
-            ) : null}
-          </Stack>
-        </form>
-      </Paper>
-
-      <Paper radius="lg" p="lg" withBorder>
-        <Title order={5} mb="sm">
-          Permissions
-        </Title>
-        {role.isSystem ? (
-          <Alert color="blue" mb="md">
-            System roles always hold every permission.
-          </Alert>
-        ) : null}
-
-        {modules.length === 0 ? (
-          <Text c="dimmed" fz="sm">
-            The permission catalog is not available to you.
-          </Text>
-        ) : (
-          <Checkbox.Group value={role.isSystem ? modules.flatMap((m) => m.permissions.map((p) => String(p.id))) : selected} onChange={setSelected}>
-            <Stack gap="lg">
-              {modules.map((module) => {
-                const ids = module.permissions.map((p) => String(p.id))
-                const allSelected = ids.every((id) => role.isSystem || selected.includes(id))
-                return (
-                  <Stack key={module.module} gap="xs">
-                    <Group justify="space-between">
-                      <Title order={6}>{module.module}</Title>
-                      {canManage && !role.isSystem ? (
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          onClick={() =>
-                            setSelected((current) =>
-                              allSelected
-                                ? current.filter((id) => !ids.includes(id))
-                                : [...new Set([...current, ...ids])],
-                            )
-                          }
-                        >
-                          {allSelected ? 'Clear all' : 'Select all'}
-                        </Button>
-                      ) : null}
-                    </Group>
-
-                    <Stack gap="xs">
-                      {module.permissions.map((p) => (
-                        <Checkbox
-                          key={p.id}
-                          value={String(p.id)}
-                          disabled={role.isSystem || !canManage}
-                          label={
-                            <Stack gap={0}>
-                              <Text fz="sm" fw={600}>
-                                {p.name} <Code>{p.code}</Code>
-                              </Text>
-                              {p.description ? (
-                                <Text fz="xs" c="dimmed">
-                                  {p.description}
-                                </Text>
-                              ) : null}
-                            </Stack>
-                          }
-                        />
-                      ))}
-                    </Stack>
-                  </Stack>
-                )
-              })}
-            </Stack>
-          </Checkbox.Group>
-        )}
-
-        {permError ? (
-          <Alert color="red" mt="md">
-            {permError}
-          </Alert>
-        ) : null}
-
-        {canManage && !role.isSystem && modules.length > 0 ? (
-          <Group mt="md">
-            <Button loading={savingPerms} onClick={() => void handleSavePermissions()}>
-              Save permissions
-            </Button>
-          </Group>
-        ) : null}
-      </Paper>
-    </Stack>
-  )
-}
-
-function CreateRoleDialog({
-  modules,
   onClose,
-  onCreated,
+  onSaved,
 }: {
-  modules: PermissionModuleDto[]
+  mode: 'create' | 'edit'
+  role?: RoleDto
   onClose(): void
-  onCreated(id: number): void
+  /** Given the created role on create, null on edit. */
+  onSaved(created: { id: number; name: string } | null): void
 }) {
-  const [selected, setSelected] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const isSystem = role?.isSystem ?? false
 
   const form = useForm({
-    initialValues: { name: '', description: '' },
-    validate: { name: (v) => (v.trim() ? null : 'Name is required.') },
+    initialValues: {
+      name: role?.name ?? '',
+      description: role?.description ?? '',
+      isActive: role?.isActive ?? true,
+    },
+    validate: { name: (value) => (value.trim() ? null : 'Name is required.') },
   })
 
   async function submit(values: typeof form.values) {
     setError(null)
-    setBusy(true)
+    setSaving(true)
     try {
-      const created = await rolesApi.create({
-        name: values.name.trim(),
-        description: values.description.trim() || null,
-        permissionIds: selected.map(Number),
-      })
-      onCreated(created.id)
+      if (mode === 'create') {
+        const created = await rolesApi.create({
+          name: values.name.trim(),
+          description: values.description.trim() || null,
+          // Empty on purpose: filling this is the Role Permissions page's job now.
+          permissionIds: [],
+        })
+        onSaved({ id: created.id, name: created.name })
+      } else if (role) {
+        await rolesApi.update(role.id, {
+          name: values.name.trim(),
+          description: values.description.trim() || null,
+          isActive: values.isActive,
+        })
+        onSaved(null)
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.messages.join(' ') : 'The role could not be created.')
+      if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
+        form.setErrors(
+          Object.fromEntries(Object.entries(err.fieldErrors).map(([field, messages]) => [field, messages.join(' ')])),
+        )
+      } else {
+        setError(err instanceof ApiError ? err.messages.join(' ') : 'The role could not be saved.')
+      }
     } finally {
-      setBusy(false)
+      setSaving(false)
     }
   }
 
   return (
     <FormModal
       opened
-      title="New role"
-      saveLabel="Create role"
-      saving={busy}
+      title={mode === 'create' ? 'New role' : `Edit ${role?.name ?? 'role'}`}
+      saveLabel={mode === 'create' ? 'Create role' : 'Save'}
+      saving={saving}
       onClose={onClose}
       onSubmit={() => form.onSubmit((values) => void submit(values))()}
     >
-      <TextInput label="Name" withAsterisk {...form.getInputProps('name')} />
-      <TextInput label="Description" {...form.getInputProps('description')} />
+      <TextInput
+        label="Name"
+        withAsterisk
+        readOnly={isSystem}
+        description={isSystem ? 'A system role cannot be renamed.' : undefined}
+        {...form.getInputProps('name')}
+      />
+      <Textarea label="Description" autosize minRows={3} {...form.getInputProps('description')} />
 
-      {modules.length === 0 ? (
-        <Text c="dimmed" fz="sm">
-          The permission catalog is not available to you.
-        </Text>
-      ) : (
-        <Checkbox.Group label="Permissions" value={selected} onChange={setSelected}>
-          <Stack gap="lg" mt="xs">
-            {modules.map((module) => (
-              <Stack key={module.module} gap="xs">
-                <Title order={6}>{module.module}</Title>
-                {module.permissions.map((p) => (
-                  <Checkbox
-                    key={p.id}
-                    value={String(p.id)}
-                    label={
-                      <Text fz="sm">
-                        {p.name} <Code>{p.code}</Code>
-                      </Text>
-                    }
-                  />
-                ))}
-              </Stack>
-            ))}
-          </Stack>
-        </Checkbox.Group>
-      )}
+      {/* No Active field on create: the API's create request carries none. A new role is active, and
+          switching it off is an edit. */}
+      {mode === 'edit' ? (
+        <Switch
+          label="Active"
+          disabled={isSystem}
+          description={isSystem ? 'A system role is always active.' : undefined}
+          {...form.getInputProps('isActive', { type: 'checkbox' })}
+        />
+      ) : null}
 
       {error ? <Alert color="red">{error}</Alert> : null}
     </FormModal>
