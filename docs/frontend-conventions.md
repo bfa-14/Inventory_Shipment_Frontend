@@ -29,8 +29,18 @@ The app is **light-only** (`defaultColorScheme="light"`, `forceColorScheme="ligh
 ### The sign-in screen is the exception
 
 `src/pages/LoginPage.tsx`, its CSS in `src/index.css` and the images in `src/assets` are a
-customer-approved design. It is **not** built with Mantine and must not be restyled. It keeps its own
-`Alert` (`src/components/Alert.tsx`); every other screen uses Mantine's `<Alert>` or `notify()`.
+customer-approved design that must not be restyled.
+
+Its **controls are Mantine** like everywhere else (`TextInput`, `PasswordInput`, `Button`, `Alert`) — what is
+exceptional is the **paint**. Every rule that decides how the screen looks lives in `src/index.css` under
+`.login-field` / `.login-input` / `.login-submit` / `.login-alert`, and `src/main.tsx` loads that file **after**
+`@mantine/core/styles.css`, so those rules win the specificity ties against Mantine's own. Change the look
+there, never with inline styles on the page. Two details worth knowing before editing it:
+
+- `PasswordInput` renders the visible box as its `input` slot and the real `<input>` as `innerInput`; the
+  box is what carries the border, height and radius.
+- its reveal toggle fires on `mousedown`, not `click` — a test that calls `element.click()` will see nothing
+  happen and wrongly report a regression.
 
 ## Theme (`src/theme.ts`)
 
@@ -38,7 +48,11 @@ customer-approved design. It is **not** built with Mantine and must not be resty
 - `defaultRadius: 'md'`, `fontFamily: '"Segoe UI", Inter, system-ui, sans-serif'`, headings `fontWeight: 700`.
 - Component defaults: Button/TextInput/Textarea/Select/NumberInput/PasswordInput radius `md`, Paper radius
   `lg`, Modal radius `lg` + centered + overlay blur 2, Badge radius `xl`, Table `highlightOnHover`.
-- `CONTENT_BG` (`#F5F7FB`) is the shell's content background.
+- `CONTENT_BG` (`#EDF1F9`) is the shell's content background — a tint of the sign-in navy, so cards and grids
+  read as white panels **on** something rather than as slightly different whites.
+- `KATANGA` carries the sign-in screen's palette (`navy` #013596, `navyDeep` #01235a, `navyGlow` #0a2e6e,
+  `ink` #101f43), mirroring the `--katanga-*` custom properties in `index.css`. It is a TS constant because
+  the shell sets some of these as inline styles, which cannot see a CSS variable declared later.
 
 Use theme tokens (`var(--mantine-color-brand-6)`, `c="dimmed"`, `radius="lg"`) rather than hard-coded
 colours. `src/styles/app.css` holds the few brand overrides (active nav item on `--mantine-color-brand-0`).
@@ -46,13 +60,25 @@ colours. `src/styles/app.css` holds the few brand overrides (active nav item on 
 ## Shell
 
 `src/components/layout/` — `AppShell` (Mantine `AppShell`: navbar 240 / 72 collapsed, header 64, footer 44,
-padding `md`) with `AppNavbar`, `AppHeader`, `AppFooter`, `NavIcon`.
+padding `md`) with `AppNavbar`, `AppHeader`, `AppFooter`, `NavIcon`, `useComingSoon`.
+
+The **sidebar is navy** — a `KATANGA.navyGlow → navyDeep` gradient set in `AppShell.tsx` — under a white logo
+plate that lines up with the white header beside it. Everything that has to sit legibly on that navy lives in
+`src/styles/app.css`, scoped under `.app-navbar`: Mantine's `NavLink` is also used on white grounds (the Roles
+page's master list), and those must keep the default light styling.
 
 - The menu is generated from `src/navigation.ts`; never hard-code menu items in the shell.
 - Collapsed state is remembered in `localStorage` inside `try/catch`; below `sm` the navbar becomes a drawer
   driven by the header `Burger`.
-- Items the user lacks the permission for are hidden (`visibleNavigation`), `comingSoon` items render
-  disabled with a "Soon" `Badge`, and the group holding the active route is opened on load.
+- Items the user lacks the permission for are hidden (`visibleNavigation`), and the group holding the active
+  route is opened on load.
+- `comingSoon` items — the modules not built yet — are **hidden by default**: a menu is a list of places you
+  can go, and nine dead entries above the live ones make a working application look like a demo. The switch
+  on the dashboard brings them back, rendered disabled with a "Soon" `Badge`. The preference lives in
+  `useShowComingSoon()` (`localStorage`, key `inventory_shipment.showComingSoon`); Mantine's `useLocalStorage`
+  keeps the dashboard switch and the sidebar in step within the tab, so neither needs a provider. Pass the
+  flag as `visibleNavigation(hasPermission, showComingSoon)` — it defaults to `true`, so callers that only
+  care about permissions are unaffected.
 
 ## Shared components (`src/components/ui/`)
 
@@ -105,8 +131,8 @@ values are ticked and leave a filtered-out value impossible to un-tick - and pas
 
 **Grids that page on the server** (Branches, Warehouses) do not use `useGridFilters`. Each funnel reads and
 writes that page's `query` directly, so a header funnel and the filter bar's dropdown are two ways into one
-parameter and cannot disagree: the funnel's `onApply` sets both the `draft*` state and `query`, and applies
-at once rather than waiting for the Filter button - the popover has its own OK. `triStateFilter` /
+parameter and cannot disagree: both go through the same `apply*` helper, which sets the `draft*` state and
+`query` together and applies at once. `triStateFilter` /
 `triStateQuery` in `gridFilters.ts` are the bridge for a `'true' | 'false' | null` parameter. These pages
 pass no `filters` prop: the filter bar already shows and clears the same filters, and two Clears would be
 one too many.
@@ -157,9 +183,13 @@ back through `form.setErrors({ field: message })`.
 {dialog ? <XxxFormModal … /> : null}
 ```
 
-List-page behaviour: filters are held in `draft*` state and copied into `query` only on **Filter** or
-**Enter**; **Clear Filters** resets everything; sorting and paging hit the server and reset `page` to 1;
-`fetching` drives the grid's loading state.
+List-page behaviour: a filter **dropdown applies the moment it changes** — picking a value is a finished
+choice, and asking the reader to confirm it again with the Filter button is one click too many. The
+`draft*` state remains for the **search box** only, which is copied into `query` on **Filter** or **Enter**
+(typing has no natural end, and a request per keystroke is a different feature). Each dropdown therefore
+goes through a small `apply*` helper that sets both the `draft*` value and `query`, so the bar and the
+column funnel above it can never disagree. **Clear Filters** resets everything; sorting and paging hit the
+server and reset `page` to 1; `fetching` drives the grid's loading state.
 
 ## Error handling
 

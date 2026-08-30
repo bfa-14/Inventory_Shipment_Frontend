@@ -106,8 +106,10 @@ export function BranchesPage() {
    * so a funnel moves the bar's control with it - a header reading "Active" above a bar reading
    * "All" would be two controls disagreeing about one filter.
    *
-   * A funnel applies straight away, where the bar still waits for its Filter button: the popover has
-   * its own OK, and asking for a second confirmation of a confirmed choice is one click too many.
+   * Both apply STRAIGHT AWAY. A dropdown pick and a funnel's OK are each a finished choice, and
+   * making the reader confirm a finished choice a second time is one click too many. Only the search
+   * box still waits for Enter or the Filter button - typing has no natural end, and firing a request
+   * per keystroke is a different feature from the one anyone asked for.
    */
   function applyStatus(value: string | null) {
     setDraftActive(value)
@@ -304,7 +306,7 @@ export function BranchesPage() {
             placeholder="All"
             data={STATUS_OPTIONS}
             value={draftActive}
-            onChange={setDraftActive}
+            onChange={applyStatus}
             clearable
           />
         </FilterBar.Col>
@@ -315,7 +317,7 @@ export function BranchesPage() {
             placeholder="All"
             data={YES_NO_OPTIONS}
             value={draftMain}
-            onChange={setDraftMain}
+            onChange={applyMain}
             clearable
           />
         </FilterBar.Col>

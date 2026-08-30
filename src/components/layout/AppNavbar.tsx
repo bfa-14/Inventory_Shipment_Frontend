@@ -6,6 +6,7 @@ import { katangaLogo } from '../../assets'
 import { useAuth } from '../../auth/useAuth'
 import { findLeaf, isGroup, visibleNavigation, type NavItem } from '../../navigation'
 import { NavIcon } from './NavIcon'
+import { useShowComingSoon } from './useComingSoon'
 
 /** Menu labels stay on one line; the sidebar is only 240px wide. */
 const NO_WRAP = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
@@ -20,7 +21,8 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
   const { hasPermission } = useAuth()
   const location = useLocation()
 
-  const sections = visibleNavigation(hasPermission)
+  const [showComingSoon] = useShowComingSoon()
+  const sections = visibleNavigation(hasPermission, showComingSoon)
 
   // The group holding the current route starts open; the rest stay closed until clicked.
   const activeGroup = findLeaf(location.pathname, sections)?.group?.label
@@ -126,7 +128,7 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
   return (
     <>
       <AppShell.Section>
-        <Group justify="center" h={64} px="sm" style={{ borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
+        <Group className="app-navbar__brand" justify="center" h={64} px="sm">
           <Image src={katangaLogo} alt="Katanga TVS Motor Company" fit="contain" mah={40} />
         </Group>
       </AppShell.Section>
@@ -135,7 +137,16 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         {sections.map((section, index) => (
           <Box key={section.title ?? `top-${index}`} mb="xs">
             {section.title && !collapsed ? (
-              <Text tt="uppercase" fw={700} fz={10} c="dimmed" px="sm" pt="sm" pb={4} style={{ letterSpacing: '0.09em' }}>
+              <Text
+                className="app-navbar__section-title"
+                tt="uppercase"
+                fw={700}
+                fz={10}
+                px="sm"
+                pt="sm"
+                pb={4}
+                style={{ letterSpacing: '0.09em' }}
+              >
                 {section.title}
               </Text>
             ) : null}
@@ -144,7 +155,7 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         ))}
       </AppShell.Section>
 
-      <AppShell.Section p="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}>
+      <AppShell.Section className="app-navbar__footer" p="xs">
         <Tooltip label={collapsed ? 'Expand menu' : 'Collapse menu'} disabled={!collapsed} position="right">
           <NavLink
             label={collapsed ? undefined : 'Collapse Menu'}

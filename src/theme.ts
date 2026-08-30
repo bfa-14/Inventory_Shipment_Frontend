@@ -14,8 +14,28 @@ const brand: MantineColorsTuple = [
   '#12358C',
 ]
 
-/** Content background from the customer figures. */
-export const CONTENT_BG = '#F5F7FB'
+/**
+ * The sign-in screen's palette, lifted from the `--katanga-*` custom properties in index.css so the
+ * shell is painted in the colours the user just came through the door on. Kept here rather than read
+ * from CSS because the shell sets some of them as inline styles, which cannot see a CSS variable
+ * declared later in the cascade.
+ */
+export const KATANGA = {
+  /** --katanga-navy: the sign-in button, and this app's strongest brand blue. */
+  navy: '#013596',
+  /** --katanga-page-bg: the deep field the sign-in card floats on. The sidebar's ground. */
+  navyDeep: '#01235a',
+  /** --katanga-page-glow: the lighter bloom behind that card, reused for the sidebar's gradient. */
+  navyGlow: '#0a2e6e',
+  /** --katanga-title: the near-black used for headings on white. */
+  ink: '#101f43',
+} as const
+
+/**
+ * The content background. A tint of the sign-in navy rather than the near-white it was, so cards and
+ * grids read as white panels ON something instead of as slightly different whites.
+ */
+export const CONTENT_BG = '#EDF1F9'
 
 export const theme = createTheme({
   colors: { brand },

@@ -80,6 +80,10 @@ export const NAVIGATION: NavSection[] = [
         children: [
           { label: 'Users', to: '/security/users', permission: PERMISSIONS.usersView },
           { label: 'Roles', to: '/security/roles', permission: PERMISSIONS.rolesView },
+          // Assigning permissions to a role is a change to the ROLE, so it answers to the role codes:
+          // rolesView to open it, rolesManage to save. It needs permissionsView as well to list the
+          // catalog, but that is the catalog's own guard, not a second gate on this screen.
+          { label: 'Role Permissions', to: '/security/role-permissions', permission: PERMISSIONS.rolesView },
           { label: 'Permissions', to: '/security/permissions', permission: PERMISSIONS.permissionsView },
           { label: 'Login audit', to: '/security/login-audit', permission: PERMISSIONS.auditView },
         ],
@@ -99,20 +103,30 @@ export function isGroup(item: NavItem): boolean {
 /**
  * The menu with everything the user cannot reach removed. Groups keep only the children the user
  * may open, and both groups and sections vanish once nothing is left inside them.
+ *
+ * `showComingSoon` decides whether the modules that are not built yet are listed at all. It defaults
+ * to true so a caller that only cares about permissions - the dashboard's own section cards, say -
+ * keeps its existing behaviour; the sidebar passes the reader's choice from useShowComingSoon().
+ * With it false a group whose children are ALL unbuilt empties out and disappears with them, which
+ * is what stops "Master Data" surviving as a heading over nothing.
  */
-export function visibleNavigation(hasPermission: (code: string) => boolean): NavSection[] {
+export function visibleNavigation(
+  hasPermission: (code: string) => boolean,
+  showComingSoon = true,
+): NavSection[] {
   const allowed = (item: NavItem) => !item.permission || hasPermission(item.permission)
+  const built = (item: NavItem) => showComingSoon || !item.comingSoon
 
   return NAVIGATION.map((section) => ({
     ...section,
     items: section.items
-      .filter(allowed)
-      .map((item) => (item.children ? { ...item, children: item.children.filter(allowed) } : item))
+      .filter((item) => allowed(item) && built(item))
+      .map((item) => (item.children ? { ...item, children: item.children.filter((c) => allowed(c) && built(c)) } : item))
       .filter((item) => !isGroupShell(item)),
   })).filter((section) => section.items.length > 0)
 }
 
-/** A group whose children were all filtered away has nothing left to show. */
+/** A group whose children were all filtered away - by permission or by not existing yet. */
 function isGroupShell(item: NavItem): boolean {
   return !item.comingSoon && item.children !== undefined && item.children.length === 0
 }

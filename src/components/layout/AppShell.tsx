@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { AppShell as MantineAppShell, Burger, Group } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { Outlet, useLocation } from 'react-router'
-import { CONTENT_BG } from '../../theme'
+import { CONTENT_BG, KATANGA } from '../../theme'
 import { AppFooter } from './AppFooter'
 import { AppHeader } from './AppHeader'
 import { AppNavbar } from './AppNavbar'
@@ -52,7 +52,15 @@ export function AppShell() {
       }}
       footer={{ height: 44 }}
       padding="md"
-      styles={{ main: { background: CONTENT_BG } }}
+      styles={{
+        main: { background: CONTENT_BG },
+        // The sign-in page's ground, with its own bloom - the sidebar is the one piece of chrome
+        // that carries the brand colour, so it gets the gradient rather than a flat fill.
+        navbar: {
+          background: `linear-gradient(180deg, ${KATANGA.navyGlow} 0%, ${KATANGA.navyDeep} 55%)`,
+          border: 'none',
+        },
+      }}
     >
       <MantineAppShell.Header>
         <Group h="100%" px="md" wrap="nowrap" gap="sm">
@@ -61,7 +69,7 @@ export function AppShell() {
         </Group>
       </MantineAppShell.Header>
 
-      <MantineAppShell.Navbar>
+      <MantineAppShell.Navbar className="app-navbar">
         <AppNavbar collapsed={collapsed} onToggleCollapsed={() => setCollapsed((v) => !v)} onNavigate={closeMobile} />
       </MantineAppShell.Navbar>
 

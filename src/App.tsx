@@ -11,6 +11,7 @@ import { BranchesPage } from './pages/masterdata/BranchesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
+import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
 import { RolesPage } from './pages/security/RolesPage'
 import { UsersPage } from './pages/security/UsersPage'
 
@@ -40,6 +41,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.rolesView} />}>
                 <Route path="/security/roles" element={<RolesPage />} />
+                {/* Reading a role's permissions is reading the role, so it shares the role's view
+                    guard; saving them is checked against rolesManage inside the page. */}
+                <Route path="/security/role-permissions" element={<RolePermissionsPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.permissionsView} />}>
                 <Route path="/security/permissions" element={<PermissionsPage />} />

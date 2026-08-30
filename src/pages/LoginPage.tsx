@@ -1,10 +1,18 @@
 import { useState, type FormEvent } from 'react'
+import { Alert, Button, PasswordInput, TextInput } from '@mantine/core'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { ApiError } from '../api/http'
 import { bikeWatermark, katangaLogo, loginHero } from '../assets'
 import { useAuth } from '../auth/useAuth'
-import { Alert } from '../components/Alert'
 import { landingRoute } from '../navigation'
+
+/*
+ * The controls are Mantine; the LOOK is still the customer-approved design in index.css.
+ * Every rule that decides how this screen appears - the 52px fields, the 46px icon gutter, the navy
+ * focus ring, the uppercase submit - lives under .login-field / .login-input / .login-submit /
+ * .login-alert there, and main.tsx loads index.css AFTER @mantine/core/styles.css, so those rules
+ * win the specificity ties against Mantine's own. Restyle the screen there, not here.
+ */
 
 export function LoginPage() {
   const { status, user, login } = useAuth()
@@ -61,58 +69,71 @@ export function LoginPage() {
             <p className="login-panel__subtitle">Sign in to continue to Katanga TVS System</p>
 
             <form className="login-form" onSubmit={handleSubmit} noValidate>
+              {/* The labels stay hand-written rather than Mantine's `label` prop: the design places
+                  them above the field at its own size and weight, and Mantine's would also add the
+                  required asterisk this screen does not show. */}
               <label className="login-form__label" htmlFor="username">
                 Username
               </label>
-              <div className="login-field">
-                <UserIcon />
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  autoComplete="username"
-                  autoFocus
-                  required
-                  placeholder="Enter your username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  disabled={submitting}
-                />
-              </div>
+              <TextInput
+                id="username"
+                name="username"
+                autoComplete="username"
+                autoFocus
+                required
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.currentTarget.value)}
+                disabled={submitting}
+                leftSection={<UserIcon />}
+                leftSectionWidth={46}
+                leftSectionPointerEvents="none"
+                classNames={{ root: 'login-field', input: 'login-input' }}
+              />
 
               <label className="login-form__label" htmlFor="password">
                 Password
               </label>
-              <div className="login-field login-field--password">
-                <LockIcon />
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  required
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={submitting}
-                />
-                <button
-                  type="button"
-                  className="login-field__toggle"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  aria-pressed={showPassword}
-                  disabled={submitting}
-                >
-                  <EyeIcon off={showPassword} />
-                </button>
-              </div>
+              <PasswordInput
+                id="password"
+                name="password"
+                autoComplete="current-password"
+                required
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.currentTarget.value)}
+                disabled={submitting}
+                leftSection={<LockIcon />}
+                leftSectionWidth={46}
+                leftSectionPointerEvents="none"
+                /* Mantine owns the reveal toggle now, but it keeps THIS screen's eye glyph and its
+                   state stays lifted, so nothing about the behaviour changed. */
+                visible={showPassword}
+                onVisibilityChange={setShowPassword}
+                visibilityToggleIcon={({ reveal }) => <EyeIcon off={reveal} />}
+                /* Mantine already disables the toggle from the input's own `disabled`; only the
+                   label needs saying, because its default is a generic "Toggle password visibility". */
+                visibilityToggleButtonProps={{ 'aria-label': showPassword ? 'Hide password' : 'Show password' }}
+                classNames={{ root: 'login-field login-field--password', input: 'login-input' }}
+              />
 
-              <Alert kind="error" messages={errors} />
+              {errors.length > 0 ? (
+                <Alert color="red" variant="light" role="alert" classNames={{ root: 'login-alert' }}>
+                  {errors.length === 1 ? (
+                    errors[0]
+                  ) : (
+                    <ul>
+                      {errors.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </Alert>
+              ) : null}
 
-              <button type="submit" className="login-submit" disabled={submitting}>
+              <Button type="submit" fullWidth className="login-submit" disabled={submitting}>
                 {submitting ? 'Signing in...' : 'Sign in'}
-              </button>
+              </Button>
             </form>
           </div>
 

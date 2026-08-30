@@ -41,37 +41,31 @@ body,
 
 /* The shell paints its own background; only the sign-in screen sets a full-page one. */
 
-/* ---------- alerts (sign-in screen only; the rest of the app uses Mantine) ---------- */
+/* ---------- the sign-in screen's refusal notice ----------
+   Mantine's <Alert>, dressed as the design's box. Only this screen uses it: everywhere else takes
+   Mantine's own look, unaltered. */
 
-.alert {
-  margin-top: 14px;
+.login-alert {
+  margin: 12px 0;
   padding: 10px 12px;
   border-radius: 10px;
   font-size: 0.9rem;
   line-height: 1.4;
-}
-
-.alert ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.alert-error {
   background: var(--danger-bg);
   border: 1px solid var(--danger-border);
   color: #991b1b;
 }
 
-.alert-info {
-  background: var(--info-bg);
-  border: 1px solid var(--info-border);
-  color: #1e3a8a;
+.login-alert .mantine-Alert-body,
+.login-alert .mantine-Alert-message {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #991b1b;
 }
 
-.alert-success {
-  background: var(--success-bg);
-  border: 1px solid var(--success-border);
-  color: #166534;
+.login-alert ul {
+  margin: 0;
+  padding-left: 18px;
 }
 
 
@@ -173,24 +167,34 @@ body,
   margin-top: 24px;
 }
 
-.login-field {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
+/* The field is Mantine's TextInput / PasswordInput wearing the design's measurements. Every rule
+   below is a plain class two deep, so it outranks Mantine's single-class defaults - and index.css
+   is loaded after @mantine/core/styles.css (see main.tsx), which settles the ties it does not. */
 
+/* The glyph sits in Mantine's left section rather than absolutely over the input, so the 46px
+   gutter is the section's width and the 16px inset is its padding. Same pixels, no overlap. */
 .login-field__icon {
-  position: absolute;
-  left: 16px;
   width: 20px;
   height: 20px;
   color: #8a8f9c;
-  pointer-events: none;
 }
 
-.login-field input {
+/* 15px, not 16: the section is laid out inside the input's 1px border, so 15 puts the glyph on
+   the design's 16px inset from the field's outer edge. */
+.login-field .mantine-Input-section[data-position='left'] {
+  justify-content: flex-start;
+  padding-inline-start: 15px;
+}
+
+.login-field .mantine-Input-section[data-position='right'] {
+  justify-content: flex-end;
+  padding-inline-end: 16px;
+}
+
+.login-field .login-input {
   width: 100%;
   height: 52px;
+  min-height: 52px;
   padding: 0 16px 0 46px;
   font-family: inherit;
   font-size: 15px;
@@ -200,43 +204,40 @@ body,
   border-radius: 10px;
 }
 
-.login-field input::placeholder {
+.login-field .login-input::placeholder {
   color: #9aa0ac;
 }
 
-.login-field input:focus {
+.login-field .login-input:focus {
   outline: none;
   background: #fafafa;
   border-color: var(--katanga-navy);
   box-shadow: 0 0 0 4px rgba(1, 53, 150, 0.12);
 }
 
-.login-field--password input {
+.login-field--password .login-input {
   padding-right: 46px;
 }
 
-.login-field__toggle {
-  position: absolute;
-  right: 16px;
-  display: inline-flex;
-  padding: 0;
-  border: none;
-  background: transparent;
+/* Mantine's reveal button, sized and coloured like the hand-rolled one it replaced. */
+.login-field .mantine-PasswordInput-visibilityToggle {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
   color: #8a8f9c;
-  cursor: pointer;
+  background: transparent;
+  border: none;
 }
 
-.login-field__toggle svg {
+.login-field .mantine-PasswordInput-visibilityToggle svg {
   width: 20px;
   height: 20px;
 }
 
-.login-field__toggle:hover:not(:disabled) {
+.login-field .mantine-PasswordInput-visibilityToggle:hover:not(:disabled) {
   color: var(--katanga-navy);
-}
-
-.login-form .alert {
-  margin: 12px 0;
+  background: transparent;
 }
 
 .login-submit {
@@ -260,7 +261,12 @@ body,
   background: var(--katanga-navy-hover);
 }
 
-.login-submit:disabled {
+/* Mantine marks a disabled Button with [data-disabled] and paints it grey from a two-class rule,
+   so the attribute selector - not :disabled alone - is what keeps the button navy while it saves. */
+.login-submit:disabled,
+.login-submit[data-disabled] {
+  background: var(--katanga-navy);
+  color: #fff;
   opacity: 0.65;
   cursor: not-allowed;
 }

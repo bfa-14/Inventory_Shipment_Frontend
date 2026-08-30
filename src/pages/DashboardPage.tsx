@@ -1,18 +1,21 @@
-import { Avatar, Badge, Card, Group, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { Avatar, Badge, Card, Group, Paper, SimpleGrid, Stack, Switch, Text, Title } from '@mantine/core'
 import { IconArrowRight } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { useAuth } from '../auth/useAuth'
+import { useShowComingSoon } from '../components/layout/useComingSoon'
 import { formatDateTime, initials } from '../components/format'
 import { PageHeader } from '../components/ui/PageHeader'
 import { navLeaves, visibleNavigation } from '../navigation'
 
 export function DashboardPage() {
   const { user, hasPermission } = useAuth()
+  // Before the early return: hooks may not be called conditionally.
+  const [showComingSoon, setShowComingSoon] = useShowComingSoon()
   if (!user) return null
 
   // One card per screen this user may actually open, grouped the way the sidebar groups them.
   const groups = new Map<string, { label: string; to: string }[]>()
-  for (const leaf of navLeaves(visibleNavigation(hasPermission))) {
+  for (const leaf of navLeaves(visibleNavigation(hasPermission, false))) {
     if (leaf.item.to === '/') continue
     const heading = leaf.group?.label ?? leaf.section.breadcrumb ?? leaf.section.title ?? 'Sections'
     groups.set(heading, [...(groups.get(heading) ?? []), { label: leaf.item.label, to: leaf.item.to as string }])
@@ -49,6 +52,28 @@ export function DashboardPage() {
               Last sign-in: {formatDateTime(user.lastLoginAtUtc)}
             </Text>
           </Stack>
+        </Group>
+      </Paper>
+
+      <Paper radius="lg" p="md" withBorder mb="lg">
+        <Group justify="space-between" align="center" wrap="nowrap" gap="md">
+          <Stack gap={2}>
+            <Text fw={600} fz="sm">
+              Show modules that are not built yet
+            </Text>
+            <Text c="dimmed" fz="xs">
+              Lists the upcoming sections in the menu, greyed out and marked &ldquo;Soon&rdquo;. Off by default so the
+              menu only offers what you can actually open.
+            </Text>
+          </Stack>
+          <Switch
+            checked={showComingSoon}
+            onChange={(event) => setShowComingSoon(event.currentTarget.checked)}
+            aria-label="Show modules that are not built yet"
+            size="md"
+            onLabel="ON"
+            offLabel="OFF"
+          />
         </Group>
       </Paper>
 

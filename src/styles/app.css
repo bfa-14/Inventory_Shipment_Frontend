@@ -1,22 +1,94 @@
 /* ============================================================================
-   Brand touches on top of Mantine: the customer figures ask for a light-blue
-   active menu item and a specific footer. Everything else comes from the theme.
+   Brand touches on top of Mantine.
+
+   The shell is painted in the sign-in screen's colours: a navy sidebar under a
+   white logo band, white header, and a tinted content ground so the cards and
+   grids read as white panels ON something rather than as slightly different
+   whites. The navy itself is set in AppShell.tsx (it needs the theme tokens);
+   everything that has to sit legibly on top of it lives here.
    ========================================================================= */
 
-.mantine-NavLink-root[data-active] {
-  background-color: var(--mantine-color-brand-0);
-  color: var(--mantine-color-brand-6);
+/* ---------- the navy sidebar ----------
+   Every rule is scoped to .app-navbar. Mantine's NavLink is used elsewhere on a
+   white ground - the Roles page's master list is one - and those must keep the
+   default light styling. */
+
+/* The logo keeps a white plate: the lockup is dark blue and black on an opaque
+   white background, so on navy it would show as a white rectangle anyway. Made
+   deliberate, it lines up with the white header beside it as one top band. */
+.app-navbar .app-navbar__brand {
+  background: #ffffff;
+  border-bottom: none;
 }
 
-.mantine-NavLink-root[data-active] .mantine-NavLink-label {
+.app-navbar .mantine-NavLink-root {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.app-navbar .mantine-NavLink-root .mantine-NavLink-section svg {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.app-navbar .mantine-NavLink-root:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.app-navbar .mantine-NavLink-root:hover .mantine-NavLink-section svg {
+  color: #ffffff;
+}
+
+/* The current page. A filled bar rather than a tint: on a dark ground a tint of
+   the brand blue is nearly the ground itself. */
+.app-navbar .mantine-NavLink-root[data-active],
+.app-navbar .mantine-NavLink-root[data-active]:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.app-navbar .mantine-NavLink-root[data-active] .mantine-NavLink-label {
   font-weight: 600;
 }
 
-.mantine-NavLink-root[data-active] .mantine-NavLink-section svg {
-  color: var(--mantine-color-brand-6);
+.app-navbar .mantine-NavLink-root[data-active] .mantine-NavLink-section svg {
+  color: #ffffff;
 }
+
+/* Not built yet. Dim enough to read as unavailable, bright enough to still be
+   read - Mantine's own disabled colour is tuned for a white background. */
+.app-navbar .mantine-NavLink-root[data-disabled],
+.app-navbar .mantine-NavLink-root[data-disabled]:hover {
+  color: rgba(255, 255, 255, 0.38);
+  background-color: transparent;
+}
+
+.app-navbar .mantine-NavLink-root[data-disabled] .mantine-NavLink-section svg {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.app-navbar .mantine-Badge-root {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* The section heading ("BACKOFFICE") and the collapse control's divider. */
+.app-navbar .app-navbar__section-title {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.app-navbar .app-navbar__footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* The nav can outgrow the sidebar; its scrollbar has to be visible on navy. */
+.app-navbar .mantine-ScrollArea-thumb {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+
+/* ---------- content ---------- */
 
 /* The grid keeps its own rounded border; the surrounding card must not clip it. */
 .mantine-datatable {
   --mantine-datatable-color-border: var(--mantine-color-gray-3);
 }
+
