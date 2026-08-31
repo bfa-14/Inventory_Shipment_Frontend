@@ -39,6 +39,15 @@ export interface UseGridQueryOptions<TFilters extends object, TRecord, TResult> 
   debounced?: (keyof TFilters)[]
   initialSort: DataTableSortStatus<TRecord>
   pageSize?: number
+  /**
+   * Who pages and sorts the result.
+   *
+   * 'server' (the default) puts page, size and sort into the request, so changing any of them
+   * re-queries. 'client' is for an endpoint that answers with one flat list the page then slices
+   * itself - the login audit's, capped by its own row limit. There the fetch must NOT re-run when
+   * the reader turns a page, because nothing about the request would change.
+   */
+  paging?: 'server' | 'client'
   fetcher(args: GridQueryArgs<TFilters, TRecord>): Promise<TResult>
   /** Shown when the request fails and the API sent nothing readable. */
   errorMessage: string
@@ -79,6 +88,7 @@ export function useGridQuery<TFilters extends object, TRecord, TResult>({
   debounced = [],
   initialSort,
   pageSize: initialPageSize = PAGE_SIZE_DEFAULT,
+  paging = 'server',
   fetcher,
   errorMessage,
 }: UseGridQueryOptions<TFilters, TRecord, TResult>): GridQuery<TFilters, TRecord, TResult> {
@@ -96,14 +106,34 @@ export function useGridQuery<TFilters extends object, TRecord, TResult>({
   const [error, setError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
 
+  /**
+   * The defaults, captured once. Held in state rather than a ref because `isDefault` is computed
+   * during render, and a ref read there is exactly what React tells you not to do.
+   */
+  const [initial] = useState(initialFilters)
+
   // Read inside timers and callbacks, where the state closed over would be a render out of date.
   const filtersRef = useRef(filters)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const fetcherRef = useRef(fetcher)
-  fetcherRef.current = fetcher
-  const initialRef = useRef(initialFilters)
   const debouncedRef = useRef(debounced)
-  debouncedRef.current = debounced
+  // Read inside the fetch effect, which does not list them as dependencies under client paging.
+  const pageRef = useRef(page)
+  const pageSizeRef = useRef(pageSize)
+  const sortRef = useRef(sortStatus)
+
+  /**
+   * Kept current in an effect rather than assigned mid-render: a render React discards must not
+   * leave its values behind in a ref. Declared BEFORE the fetch effect, so by the time that one
+   * runs on the same commit these already hold this render's values.
+   */
+  useEffect(() => {
+    fetcherRef.current = fetcher
+    debouncedRef.current = debounced
+    pageRef.current = page
+    pageSizeRef.current = pageSize
+    sortRef.current = sortStatus
+  })
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -141,10 +171,10 @@ export function useGridQuery<TFilters extends object, TRecord, TResult>({
   const commitFilters = useCallback(() => flush(filtersRef.current), [flush])
 
   const clearFilters = useCallback(() => {
-    filtersRef.current = initialRef.current
-    setFiltersState(initialRef.current)
-    flush(initialRef.current)
-  }, [flush])
+    filtersRef.current = initial
+    setFiltersState(initial)
+    flush(initial)
+  }, [flush, initial])
 
   const setPage = useCallback((next: number) => setPageState(next), [])
 
@@ -161,17 +191,27 @@ export function useGridQuery<TFilters extends object, TRecord, TResult>({
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), [])
 
+  /**
+   * What, besides the filters, makes this a different request. Under client paging: nothing - so
+   * turning a page or re-sorting reuses the list already in hand instead of asking again.
+   */
+  const pagingKey =
+    paging === 'client' ? 'client' : `${page}|${pageSize}|${String(sortStatus.columnAccessor)}|${sortStatus.direction}`
+
   useEffect(() => {
     const controller = new AbortController()
+    // Fetching is the "synchronize with an external system" case the rule exempts; the spinner has
+    // to be on screen before the await, not a render later.
+    // eslint-disable-next-line react/set-state-in-effect
     setLoading(true)
 
     void (async () => {
       try {
         const result = await fetcherRef.current({
           filters: applied,
-          page,
-          pageSize,
-          sortStatus,
+          page: pageRef.current,
+          pageSize: pageSizeRef.current,
+          sortStatus: sortRef.current,
           signal: controller.signal,
         })
         // Overtaken by a newer query: the reader is waiting on that one's result, not this one's.
@@ -188,9 +228,9 @@ export function useGridQuery<TFilters extends object, TRecord, TResult>({
     })()
 
     return () => controller.abort()
-  }, [applied, page, pageSize, sortStatus, reloadToken, errorMessage])
+  }, [applied, pagingKey, reloadToken, errorMessage])
 
-  const isDefault = useMemo(() => sameFilters(filters, initialRef.current), [filters])
+  const isDefault = useMemo(() => sameFilters(filters, initial), [filters, initial])
 
   return {
     filters,

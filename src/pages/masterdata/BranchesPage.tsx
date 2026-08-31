@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Group, Paper, Select, TextInput } from '@mantine/core'
-import { IconFilter, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { useCallback, useState } from 'react'
+import { Alert, Button, Paper, Select, TextInput } from '@mantine/core'
+import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
-import type { BranchDto, BranchSortBy, PagedResult } from '../../api/types'
+import type { BranchDto, BranchSortBy } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
-import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
@@ -17,109 +17,62 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { MainFlag, StatusBadge } from '../../components/ui/StatusBadge'
-import { PAGE_SIZE_DEFAULT } from '../../config'
+import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
 import { BranchFormModal } from './BranchFormModal'
 
-/** Everything that decides which rows the API returns. */
-interface Query {
+/** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
+interface Filters {
   search: string
   isActive: string | null
   isMainBranch: string | null
-  sortBy: BranchSortBy
-  sortDir: 'asc' | 'desc'
-  page: number
-  pageSize: number
 }
 
-const DEFAULT_QUERY: Query = {
-  search: '',
-  isActive: null,
-  isMainBranch: null,
-  sortBy: 'BranchCode',
-  sortDir: 'asc',
-  page: 1,
-  pageSize: PAGE_SIZE_DEFAULT,
-}
+const NO_FILTERS: Filters = { search: '', isActive: null, isMainBranch: null }
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; branch: BranchDto } | null
 
 export function BranchesPage() {
   const { hasPermission } = useAuth()
-
-  const [query, setQuery] = useState<Query>(DEFAULT_QUERY)
-  // The filter inputs are only copied into `query` when the user applies them.
-  const [draftSearch, setDraftSearch] = useState('')
-  const [draftActive, setDraftActive] = useState<string | null>(null)
-  const [draftMain, setDraftMain] = useState<string | null>(null)
-
-  const [data, setData] = useState<PagedResult<BranchDto> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
 
   const canCreate = hasPermission(PERMISSIONS.branchesCreate)
   const canEdit = hasPermission(PERMISSIONS.branchesEdit)
   const canDelete = hasPermission(PERMISSIONS.branchesDelete)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const page = await branchesApi.search({
-        search: query.search || undefined,
-        isActive: query.isActive === null ? undefined : query.isActive === 'true',
-        isMainBranch: query.isMainBranch === null ? undefined : query.isMainBranch === 'true',
-        sortBy: query.sortBy,
-        sortDir: query.sortDir,
-        page: query.page,
-        pageSize: query.pageSize,
-      })
-      setData(page)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.messages.join(' ') : 'The branches could not be loaded.')
-    } finally {
-      setLoading(false)
-    }
-  }, [query])
-
-  useEffect(() => {
-    // Fetching the page is exactly the "synchronize with an external system" case; load() flips the
-    // loading flag before it awaits so the grid shows its spinner straight away.
-    // eslint-disable-next-line react/set-state-in-effect
-    void load()
-  }, [load])
-
-  function applyFilters() {
-    setQuery((q) => ({ ...q, search: draftSearch.trim(), isActive: draftActive, isMainBranch: draftMain, page: 1 }))
-  }
-
-  function clearFilters() {
-    setDraftSearch('')
-    setDraftActive(null)
-    setDraftMain(null)
-    setQuery(DEFAULT_QUERY)
-  }
-
   /**
-   * The column funnels and the filter bar's dropdowns are two ways into the SAME query parameter,
-   * so a funnel moves the bar's control with it - a header reading "Active" above a bar reading
-   * "All" would be two controls disagreeing about one filter.
+   * The grid's whole query. No Apply button: the search box settles 350ms after the last keystroke,
+   * every other control lands at once, and the hook guarantees one request per settled state with
+   * the newest one winning.
    *
-   * Both apply STRAIGHT AWAY. A dropdown pick and a funnel's OK are each a finished choice, and
-   * making the reader confirm a finished choice a second time is one click too many. Only the search
-   * box still waits for Enter or the Filter button - typing has no natural end, and firing a request
-   * per keystroke is a different feature from the one anyone asked for.
+   * The filter bar and the column funnels are two ways into the SAME filter, and both go through
+   * `setFilter`, so a header reading "Active" over a bar reading "All" is not a state that exists.
    */
-  function applyStatus(value: string | null) {
-    setDraftActive(value)
-    setQuery((q) => ({ ...q, isActive: value, page: 1 }))
-  }
+  const grid = useGridQuery<Filters, BranchDto, Awaited<ReturnType<typeof branchesApi.search>>>({
+    initialFilters: NO_FILTERS,
+    debounced: ['search'],
+    initialSort: { columnAccessor: 'branchCode', direction: 'asc' },
+    errorMessage: 'The branches could not be loaded.',
+    fetcher: useCallback(
+      ({ filters, page, pageSize, sortStatus, signal }) =>
+        branchesApi.search(
+          {
+            search: filters.search.trim() || undefined,
+            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+            isMainBranch: filters.isMainBranch === null ? undefined : filters.isMainBranch === 'true',
+            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'BranchCode',
+            sortDir: sortStatus.direction,
+            page,
+            pageSize,
+          },
+          signal,
+        ),
+      [],
+    ),
+  })
 
-  function applyMain(value: string | null) {
-    setDraftMain(value)
-    setQuery((q) => ({ ...q, isMainBranch: value, page: 1 }))
-  }
+  const { filters, setFilter, data, loading, error } = grid
+  const load = grid.reload
 
   function exportCsv() {
     downloadCsv(
@@ -189,7 +142,7 @@ export function BranchesPage() {
   }
 
   const columns: DataTableColumn<BranchDto>[] = [
-    rowNumberColumn<BranchDto>(query.page, query.pageSize),
+    rowNumberColumn<BranchDto>(grid.page, grid.pageSize),
     /* Branch Code, Branch Name and Address carry no header filter: this grid pages on the server and
        the search endpoint takes one free-text parameter that matches code OR name, so a per-column
        box here could only narrow by something other than the column it sits on. The search box in
@@ -209,8 +162,8 @@ export function BranchesPage() {
       width: 190,
       ...columnFilter({
         label: 'Is Main Branch',
-        value: triStateFilter(query.isMainBranch, 'Yes', 'No'),
-        onApply: (next) => applyMain(triStateQuery(next, 'Yes')),
+        value: triStateFilter(filters.isMainBranch, 'Yes', 'No'),
+        onApply: (next) => setFilter('isMainBranch', triStateQuery(next, 'Yes')),
         options: YES_NO_VALUES,
         withText: false,
       }),
@@ -223,8 +176,8 @@ export function BranchesPage() {
       width: 150,
       ...columnFilter({
         label: 'Status',
-        value: triStateFilter(query.isActive, 'Active', 'Inactive'),
-        onApply: (next) => applyStatus(triStateQuery(next, 'Active')),
+        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
+        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
         options: STATUS_VALUES,
         withText: false,
       }),
@@ -257,12 +210,9 @@ export function BranchesPage() {
     },
   ]
 
-  const sortStatus: DataTableSortStatus<BranchDto> = {
-    columnAccessor: SORT_TO_ACCESSOR[query.sortBy] ?? 'branchCode',
-    direction: query.sortDir,
-  }
-
-  const filtered = query.search !== '' || query.isActive !== null || query.isMainBranch !== null
+  // "Filtered" for the empty-state wording: it should say "try clearing the filters" only when
+  // there are filters to clear.
+  const filtered = !grid.isDefault
 
   return (
     <>
@@ -287,15 +237,16 @@ export function BranchesPage() {
       />
 
       <FilterBar>
-        <FilterBar.Col span={4}>
+        <FilterBar.Col span={5}>
           <TextInput
             placeholder="Search by branch code or name..."
             leftSection={<IconSearch size={16} />}
             aria-label="Search branches"
-            value={draftSearch}
-            onChange={(e) => setDraftSearch(e.currentTarget.value)}
+            value={filters.search}
+            onChange={(e) => setFilter('search', e.currentTarget.value)}
+            // Enter sends what is typed now instead of waiting out the debounce.
             onKeyDown={(e) => {
-              if (e.key === 'Enter') applyFilters()
+              if (e.key === 'Enter') grid.commitFilters()
             }}
           />
         </FilterBar.Col>
@@ -305,8 +256,8 @@ export function BranchesPage() {
             aria-label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
-            value={draftActive}
-            onChange={applyStatus}
+            value={filters.isActive}
+            onChange={(value) => setFilter('isActive', value)}
             clearable
           />
         </FilterBar.Col>
@@ -316,21 +267,21 @@ export function BranchesPage() {
             aria-label="Is Main Branch"
             placeholder="All"
             data={YES_NO_OPTIONS}
-            value={draftMain}
-            onChange={applyMain}
+            value={filters.isMainBranch}
+            onChange={(value) => setFilter('isMainBranch', value)}
             clearable
           />
         </FilterBar.Col>
 
-        <FilterBar.Col span={4}>
-          <Group gap="sm">
-            <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={clearFilters}>
-              Clear Filters
-            </Button>
-            <Button variant="default" leftSection={<IconFilter size={16} />} onClick={applyFilters}>
-              Filter
-            </Button>
-          </Group>
+        <FilterBar.Col span={3}>
+          <Button
+            variant="default"
+            leftSection={<IconFilterOff size={16} />}
+            onClick={grid.clearFilters}
+            disabled={grid.isDefault}
+          >
+            Clear Filters
+          </Button>
         </FilterBar.Col>
       </FilterBar>
 
@@ -345,19 +296,12 @@ export function BranchesPage() {
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}
-          page={query.page}
-          recordsPerPage={query.pageSize}
-          onPageChange={(page) => setQuery((q) => ({ ...q, page }))}
-          onRecordsPerPageChange={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
-          sortStatus={sortStatus}
-          onSortStatusChange={(status) =>
-            setQuery((q) => ({
-              ...q,
-              sortBy: ACCESSOR_TO_SORT[status.columnAccessor as string] ?? q.sortBy,
-              sortDir: status.direction,
-              page: 1,
-            }))
-          }
+          page={grid.page}
+          recordsPerPage={grid.pageSize}
+          onPageChange={grid.setPage}
+          onRecordsPerPageChange={grid.setPageSize}
+          sortStatus={grid.sortStatus}
+          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={
             filtered ? 'No branches found. Try clearing the filters to see every branch.' : 'No branches found.'
@@ -393,15 +337,6 @@ const YES_NO_OPTIONS = [
 const STATUS_VALUES = ['Active', 'Inactive']
 const YES_NO_VALUES = ['Yes', 'No']
 
-/** The grid sorts by DTO field; the API sorts by its own column names. */
-const SORT_TO_ACCESSOR: Record<BranchSortBy, string> = {
-  BranchCode: 'branchCode',
-  BranchName: 'branchName',
-  Address: 'address',
-  IsMainBranch: 'isMainBranch',
-  IsActive: 'isActive',
-  CreatedAtUtc: 'createdAtUtc',
-}
 
 const ACCESSOR_TO_SORT: Record<string, BranchSortBy> = {
   branchCode: 'BranchCode',

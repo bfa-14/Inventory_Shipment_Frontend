@@ -93,8 +93,8 @@ page's master list), and those must keep the default light styling.
 | `StatusBadge({ active })` | Active (green) / Inactive (grey) pill. |
 | `MainFlag({ isMain })` | Amber star + "Yes", otherwise "No". |
 | `PageHeader({ title, subtitle, breadcrumbs, actions })` | Title (order 2), dimmed subtitle, optional breadcrumbs, right-hand actions. |
-| `FilterBar` + `FilterBar.Col` | Bordered `Paper` with a responsive `Grid` for filter controls. |
-| `RowActions({ label, edit, toggleStatus, remove })` | Subtle `ActionIcon`s with tooltips. Each action takes `visible`, `disabled`, `disabledReason`, `onClick`. |
+| `FilterBar` + `FilterBar.Col` | Bordered `Paper` with a responsive `Grid` for filter controls. **No Apply/Filter button** — see **Filtering**. |
+| `RowActions({ label, edit, toggleStatus, custom, remove })` | Subtle `ActionIcon`s with tooltips. Each action takes `visible`, `disabled`, `disabledReason`, `onClick`. `custom` adds page-specific icons (`{ icon, tooltip, color }`) between the standard ones and Delete, through the same tooltip/disabled wrapper. |
 | `MoreActionsMenu({ actions })` | The "More Actions" dropdown. |
 | `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. |
 
@@ -131,8 +131,7 @@ values are ticked and leave a filtered-out value impossible to un-tick - and pas
 
 **Grids that page on the server** (Branches, Warehouses) do not use `useGridFilters`. Each funnel reads and
 writes that page's `query` directly, so a header funnel and the filter bar's dropdown are two ways into one
-parameter and cannot disagree: both go through the same `apply*` helper, which sets the `draft*` state and
-`query` together and applies at once. `triStateFilter` /
+parameter and cannot disagree: both call the same `setFilter` on the page's `useGridQuery`. `triStateFilter` /
 `triStateQuery` in `gridFilters.ts` are the bridge for a `'true' | 'false' | null` parameter. These pages
 pass no `filters` prop: the filter bar already shows and clears the same filters, and two Clears would be
 one too many.
@@ -183,13 +182,50 @@ back through `form.setErrors({ field: message })`.
 {dialog ? <XxxFormModal … /> : null}
 ```
 
-List-page behaviour: a filter **dropdown applies the moment it changes** — picking a value is a finished
-choice, and asking the reader to confirm it again with the Filter button is one click too many. The
-`draft*` state remains for the **search box** only, which is copied into `query` on **Filter** or **Enter**
-(typing has no natural end, and a request per keystroke is a different feature). Each dropdown therefore
-goes through a small `apply*` helper that sets both the `draft*` value and `query`, so the bar and the
-column funnel above it can never disagree. **Clear Filters** resets everything; sorting and paging hit the
-server and reset `page` to 1; `fetching` drives the grid's loading state.
+## Filtering
+
+**There is no Apply or Filter button anywhere.** A filter takes effect as it is edited:
+
+| Control | When it applies |
+|---|---|
+| text / search box | **350 ms** after the last keystroke, or at once on **Enter** and on clearing it (the X, or select-all-delete — an empty box is a finished thought) |
+| select, switch, checkbox, segmented control, date picker | **immediately** |
+| a column header funnel | on its **OK** |
+
+Any filter change resets to **page 1** (the page size and the sort are kept). Sorting resets the page too but
+never touches the filters. **Clear Filters** stays: it restores every filter to its default and applies at
+once, and it is **disabled while nothing is filtered**.
+
+Grids that filter on the **server** get all of this from one hook, [`src/hooks/useGridQuery.ts`](../src/hooks/useGridQuery.ts):
+
+```tsx
+const grid = useGridQuery<Filters, BranchDto, PagedResult<BranchDto>>({
+  initialFilters: NO_FILTERS,        // also exactly what Clear Filters restores
+  debounced: ['search'],             // only the fields that are TYPED into
+  initialSort: { columnAccessor: 'branchCode', direction: 'asc' },
+  paging: 'server',                  // 'client' when the endpoint returns one flat list
+  errorMessage: 'The branches could not be loaded.',
+  fetcher: useCallback(({ filters, page, pageSize, sortStatus, signal }) => branchesApi.search({ … }, signal), []),
+})
+```
+
+It returns `{ filters, setFilter, commitFilters, clearFilters, isDefault, page, setPage, pageSize, setPageSize,
+sortStatus, setSortStatus, data, loading, error, reload }`. Two guarantees are the reason it exists rather
+than each page repeating the pattern:
+
+- **One request per settled state.** The inputs write to `filters`; the fetch reads `applied`, which is only
+  ever a whole snapshot of `filters`. A pending keystroke and a dropdown pick a moment later therefore
+  collapse into a single request carrying both, instead of firing twice.
+- **The last request wins.** Every fetch runs under an `AbortController` that the next one aborts, so typing
+  `wh` then `wh-0` can never flicker back to the `wh` rows. Pass the `signal` straight into the API call —
+  the search functions in `src/api` all accept one.
+
+`paging: 'client'` is for an endpoint that answers with one flat list the page slices itself (the login
+audit). It keeps page/size/sort out of the fetch key, so turning a page does not re-ask the server for rows
+it already sent.
+
+Lists that hold **all** their rows and filter in the browser (Users, Roles) do not need the hook — they are
+already instant. They must simply have no Apply button either.
 
 ## Error handling
 
@@ -212,6 +248,7 @@ The API returns RFC 9457 problem details. `ApiError` exposes `.status`, `.messag
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.
 - [ ] Menu entry in `src/navigation.ts` with its permission code (breadcrumb comes from the model).
 - [ ] `PageHeader` + `FilterBar` + `Paper > DataTable` + `FormModal`, no bespoke layout CSS.
+- [ ] Filters auto-apply per **Filtering** — no Apply/Filter button, server grids on `useGridQuery`.
 - [ ] Header funnels per **Column filters** - and none on a server-paged column the API cannot filter by.
 - [ ] Every button and row action gated with `hasPermission(...)`.
 - [ ] `@mantine/form` validation; API field errors via `form.setErrors`.

@@ -1,18 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, Badge, Button, Checkbox, Paper, Select, Text, TextInput } from '@mantine/core'
-import { IconRefresh } from '@tabler/icons-react'
-import { ApiError } from '../../api/http'
+import { useCallback } from 'react'
+import { Alert, Badge, Button, Checkbox, Group, Paper, Select, Text, TextInput } from '@mantine/core'
+import { IconFilterOff, IconRefresh } from '@tabler/icons-react'
 import { securityApi } from '../../api/security'
 import type { LoginAuditDto } from '../../api/types'
 import { formatDateTime } from '../../components/format'
 import { columnFilter } from '../../components/ui/columnFilter'
-import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { PAGE_SIZE_DEFAULT } from '../../config'
+import { useGridQuery } from '../../hooks/useGridQuery'
 
 const TAKE_OPTIONS = ['50', '200', '500']
+
+/** The filters the reader edits. The endpoint answers with one flat list, so paging happens here. */
+interface Filters {
+  username: string
+  onlyFailed: boolean
+  take: string
+}
+
+const NO_FILTERS: Filters = { username: '', onlyFailed: false, take: '200' }
 
 /**
  * What each column SHOWS for an attempt - the text its header filter matches and, where the column
@@ -32,42 +40,38 @@ const COLUMN_TEXT: Record<string, ColumnText<LoginAuditDto>> = {
 const RESULT_VALUES = ['Success', 'Failed']
 
 export function LoginAuditPage() {
-  const [entries, setEntries] = useState<LoginAuditDto[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const [username, setUsername] = useState('')
-  const [onlyFailed, setOnlyFailed] = useState(false)
-  const [take, setTake] = useState('200')
-
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<LoginAuditDto>>({
-    columnAccessor: 'attemptedAtUtc',
-    direction: 'desc',
+  /**
+   * The username, the row cap and the failed-only switch all narrow the request, so they run through
+   * the shared grid query: typing settles after 350ms, the other two land at once, and the newest
+   * request always wins. Paging is 'client' because the endpoint returns one flat list - turning a
+   * page must not ask the server again for rows it already sent.
+   */
+  const query = useGridQuery<Filters, LoginAuditDto, LoginAuditDto[]>({
+    initialFilters: NO_FILTERS,
+    debounced: ['username'],
+    initialSort: { columnAccessor: 'attemptedAtUtc', direction: 'desc' },
+    paging: 'client',
+    errorMessage: 'The login audit could not be loaded.',
+    fetcher: useCallback(
+      ({ filters, signal }) =>
+        securityApi.loginAudit(
+          {
+            username: filters.username.trim() || undefined,
+            onlyFailed: filters.onlyFailed,
+            take: Number(filters.take),
+          },
+          signal,
+        ),
+      [],
+    ),
   })
-  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const grid = useGridFilters(COLUMN_TEXT, () => setPage(1))
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      setEntries(await securityApi.loginAudit({ username, onlyFailed, take: Number(take) }))
-      setPage(1)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.messages.join(' ') : 'The login audit could not be loaded.')
-    } finally {
-      setLoading(false)
-    }
-  }, [username, onlyFailed, take])
+  const { filters, setFilter, loading, error } = query
+  const entries = query.data ?? []
+  const { page, pageSize, sortStatus } = query
 
-  // Refetch when a filter the user toggles changes; the username needs an explicit Refresh.
-  useEffect(() => {
-    // eslint-disable-next-line react/set-state-in-effect
-    void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onlyFailed, take])
+  // The header funnels narrow what the request already returned - a second, purely local layer.
+  const grid = useGridFilters(COLUMN_TEXT, () => query.setPage(1))
 
   /** The endpoint returns one flat list, so column filtering, sorting and paging all happen here. */
   const narrowed = grid.apply(entries)
@@ -152,30 +156,49 @@ export function LoginAuditPage() {
           <TextInput
             label="Username"
             placeholder="Exact username"
-            value={username}
-            onChange={(e) => setUsername(e.currentTarget.value)}
+            value={filters.username}
+            onChange={(e) => setFilter('username', e.currentTarget.value)}
+            // Enter sends what is typed now instead of waiting out the debounce.
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void load()
+              if (e.key === 'Enter') query.commitFilters()
             }}
           />
         </FilterBar.Col>
 
         <FilterBar.Col span={2}>
-          <Select label="Rows" data={TAKE_OPTIONS} value={take} onChange={(v) => setTake(v ?? '200')} allowDeselect={false} />
+          <Select
+            label="Rows"
+            data={TAKE_OPTIONS}
+            value={filters.take}
+            onChange={(value) => setFilter('take', value ?? '200')}
+            allowDeselect={false}
+          />
         </FilterBar.Col>
 
         <FilterBar.Col span={2}>
           <Checkbox
             label="Only failed"
-            checked={onlyFailed}
-            onChange={(e) => setOnlyFailed(e.currentTarget.checked)}
+            checked={filters.onlyFailed}
+            onChange={(e) => setFilter('onlyFailed', e.currentTarget.checked)}
           />
         </FilterBar.Col>
 
-        <FilterBar.Col span={2}>
-          <Button leftSection={<IconRefresh size={16} />} loading={loading} onClick={() => void load()}>
-            Refresh
-          </Button>
+        <FilterBar.Col span={4}>
+          <Group gap="sm">
+            <Button
+              variant="default"
+              leftSection={<IconFilterOff size={16} />}
+              onClick={query.clearFilters}
+              disabled={query.isDefault}
+            >
+              Clear Filters
+            </Button>
+            {/* Not an Apply button: the filters are already live. This re-asks for the same query,
+                which is the only way to see attempts made since the page loaded. */}
+            <Button variant="default" leftSection={<IconRefresh size={16} />} loading={loading} onClick={query.reload}>
+              Refresh
+            </Button>
+          </Group>
         </FilterBar.Col>
       </FilterBar>
 
@@ -192,16 +215,10 @@ export function LoginAuditPage() {
           totalRecords={narrowed.length}
           page={page}
           recordsPerPage={pageSize}
-          onPageChange={setPage}
-          onRecordsPerPageChange={(size) => {
-            setPageSize(size)
-            setPage(1)
-          }}
+          onPageChange={query.setPage}
+          onRecordsPerPageChange={query.setPageSize}
           sortStatus={sortStatus}
-          onSortStatusChange={(status) => {
-            setSortStatus(status)
-            setPage(1)
-          }}
+          onSortStatusChange={query.setSortStatus}
           fetching={loading}
           filters={grid}
           noRecordsText="No sign-in attempts match these filters."
