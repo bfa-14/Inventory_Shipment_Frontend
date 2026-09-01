@@ -15,6 +15,18 @@ export const PERMISSIONS = {
   warehousesCreate: 'masterdata.warehouses.create',
   warehousesEdit: 'masterdata.warehouses.edit',
   warehousesDelete: 'masterdata.warehouses.delete',
+  currenciesView: 'masterdata.currencies.view',
+  currenciesCreate: 'masterdata.currencies.create',
+  currenciesEdit: 'masterdata.currencies.edit',
+  currenciesDelete: 'masterdata.currencies.delete',
+  exchangeRatesView: 'masterdata.exchangerates.view',
+  exchangeRatesCreate: 'masterdata.exchangerates.create',
+  exchangeRatesEdit: 'masterdata.exchangerates.edit',
+  exchangeRatesDelete: 'masterdata.exchangerates.delete',
+  itemFamiliesView: 'masterdata.itemfamilies.view',
+  itemFamiliesCreate: 'masterdata.itemfamilies.create',
+  itemFamiliesEdit: 'masterdata.itemfamilies.edit',
+  itemFamiliesDelete: 'masterdata.itemfamilies.delete',
 } as const
 
 export interface NavItem {
@@ -67,9 +79,8 @@ export const NAVIGATION: NavSection[] = [
         children: [
           { label: 'Branches / Sites', to: '/setup/master-data/branches', permission: PERMISSIONS.branchesView },
           { label: 'Warehouses', to: '/setup/master-data/warehouses', permission: PERMISSIONS.warehousesView },
-          { label: 'Item Families', comingSoon: true },
-          { label: 'Item Sub Groups', comingSoon: true },
-          { label: 'Item Categories', comingSoon: true },
+          { label: 'Currencies', to: '/setup/master-data/currencies', permission: PERMISSIONS.currenciesView },
+          { label: 'Item Families', to: '/setup/master-data/item-families', permission: PERMISSIONS.itemFamiliesView },
           { label: 'Units of Measure', comingSoon: true },
           { label: 'Brands', comingSoon: true },
         ],

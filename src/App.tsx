@@ -8,6 +8,8 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { LoginPage } from './pages/LoginPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
+import { CurrenciesPage } from './pages/masterdata/CurrenciesPage'
+import { ItemFamiliesPage } from './pages/masterdata/ItemFamiliesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
@@ -34,6 +36,12 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.warehousesView} />}>
                 <Route path="/setup/master-data/warehouses" element={<WarehousesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.currenciesView} />}>
+                <Route path="/setup/master-data/currencies" element={<CurrenciesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.itemFamiliesView} />}>
+                <Route path="/setup/master-data/item-families" element={<ItemFamiliesPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

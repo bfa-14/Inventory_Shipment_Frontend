@@ -1,6 +1,12 @@
 import { Button, Group, Text } from '@mantine/core'
 import { IconFilterOff } from '@tabler/icons-react'
-import { DataTable as MantineDataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable'
+import {
+  DataTable as MantineDataTable,
+  type DataTableColumn,
+  type DataTablePaginationProps,
+  type DataTableSortProps,
+  type DataTableSortStatus,
+} from 'mantine-datatable'
 import { PAGE_SIZE_OPTIONS } from '../../config'
 
 export type { DataTableColumn, DataTableSortStatus }
@@ -9,13 +15,19 @@ interface DataTableProps<T> {
   records: T[]
   columns: DataTableColumn<T>[]
   /** Total rows matching the filters, across every page (server-side paging). */
-  totalRecords: number
-  page: number
-  recordsPerPage: number
-  onPageChange(page: number): void
-  onRecordsPerPageChange(size: number): void
-  sortStatus: DataTableSortStatus<T>
-  onSortStatusChange(status: DataTableSortStatus<T>): void
+  totalRecords?: number
+  /**
+   * Current page. Leaving it out drops the paging footer entirely - for a grid that shows every
+   * row it has, such as the Item Families tree, where a page break would cut a parent from its
+   * children and page 2 would be a list of orphans.
+   */
+  page?: number
+  recordsPerPage?: number
+  onPageChange?(page: number): void
+  onRecordsPerPageChange?(size: number): void
+  /** Omit on a grid whose row order is fixed (a hierarchy), so no column offers to sort. */
+  sortStatus?: DataTableSortStatus<T>
+  onSortStatusChange?(status: DataTableSortStatus<T>): void
   fetching?: boolean
   noRecordsText?: string
   idAccessor?: keyof T & string
@@ -56,6 +68,24 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
 
+  // Paging and sorting are each all-or-nothing unions in mantine-datatable's own props, so they
+  // are built as those union types and spread in: an optional `sortStatus` would satisfy neither
+  // half of the union and the grid would stop type-checking.
+  const sortProps: DataTableSortProps<T> = sortStatus ? { sortStatus, onSortStatusChange } : {}
+
+  const pagingProps: DataTablePaginationProps =
+    page === undefined
+      ? {}
+      : {
+          page,
+          onPageChange: onPageChange ?? noop,
+          totalRecords: totalRecords ?? records.length,
+          recordsPerPage: recordsPerPage ?? PAGE_SIZE_OPTIONS[0],
+          recordsPerPageOptions: [...PAGE_SIZE_OPTIONS],
+          onRecordsPerPageChange: onRecordsPerPageChange ?? noop,
+          paginationText: ({ from, to, totalRecords: total }) => `Showing ${from} to ${to} of ${total} entries`,
+        }
+
   return (
     <>
       {activeFilters > 0 ? (
@@ -77,14 +107,6 @@ export function DataTable<T>({
       <MantineDataTable<T>
         records={records}
         columns={columns}
-        totalRecords={totalRecords}
-        page={page}
-        onPageChange={onPageChange}
-        recordsPerPage={recordsPerPage}
-        recordsPerPageOptions={[...PAGE_SIZE_OPTIONS]}
-        onRecordsPerPageChange={onRecordsPerPageChange}
-        sortStatus={sortStatus}
-        onSortStatusChange={onSortStatusChange}
         fetching={fetching}
         noRecordsText={noRecordsText}
         minHeight={minHeight}
@@ -95,8 +117,11 @@ export function DataTable<T>({
         borderRadius="md"
         verticalAlign="center"
         {...(idAccessor ? { idAccessor } : {})}
-        paginationText={({ from, to, totalRecords: total }) => `Showing ${from} to ${to} of ${total} entries`}
+        {...sortProps}
+        {...pagingProps}
       />
     </>
   )
 }
+
+function noop() {}

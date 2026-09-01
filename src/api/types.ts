@@ -269,3 +269,188 @@ export interface WarehouseLookupDto {
   isMainWarehouse: boolean
   isActive: boolean
 }
+
+// ----- master data: currencies -----
+
+export interface CurrencyDto {
+  id: number
+  /** ISO 4217, always three upper-case letters. */
+  currencyCode: string
+  currencyName: string
+  symbol: string | null
+  /** Digits after the decimal separator (0-6); 0 for currencies without cents. */
+  decimalPlaces: number
+  /** Exactly one active currency carries this: amounts are stored and reported in it. */
+  isBaseCurrency: boolean
+  isActive: boolean
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). */
+export interface SaveCurrencyRequest {
+  currencyCode: string
+  currencyName: string
+  symbol?: string | null
+  decimalPlaces: number
+  isBaseCurrency: boolean
+  isActive: boolean
+  /** Confirms taking the base currency flag away from the currency that currently holds it. */
+  replaceBaseCurrency: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export interface SetCurrencyStatusRequest {
+  isActive: boolean
+}
+
+export type CurrencySortBy =
+  | 'CurrencyCode'
+  | 'CurrencyName'
+  | 'DecimalPlaces'
+  | 'IsBaseCurrency'
+  | 'IsActive'
+  | 'CreatedAtUtc'
+
+export interface CurrencyQuery {
+  search?: string
+  isActive?: boolean
+  isBaseCurrency?: boolean
+  sortBy?: CurrencySortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+/** A currency as it appears in a dropdown (the base currency comes first). */
+export interface CurrencyLookupDto {
+  id: number
+  currencyCode: string
+  currencyName: string
+  symbol: string | null
+  decimalPlaces: number
+  isBaseCurrency: boolean
+  isActive: boolean
+}
+
+/** The payload behind the BASE_CURRENCY_EXISTS error code. */
+export interface CurrentBaseCurrency {
+  id: number
+  currencyCode: string
+  currencyName: string
+}
+
+// ----- master data: exchange rates -----
+
+/** 1 = Official (central bank), 2 = NonOfficial (parallel), 3 = Market. The API exchanges the names. */
+export type RateType = 'Official' | 'NonOfficial' | 'Market'
+
+/**
+ * One exchange rate: 1 unit of the BASE currency equals `rate` units of `currencyCode` on `rateDate`.
+ * The base currency never has rates - its rate is 1 by definition.
+ */
+export interface ExchangeRateDto {
+  id: number
+  currencyId: number
+  currencyCode: string
+  currencyName: string
+  symbol: string | null
+  /** Decimal places of the quoted currency - what the rate is formatted with. */
+  decimalPlaces: number
+  rateType: RateType
+  /** The effective date as "yyyy-MM-dd". */
+  rateDate: string
+  rate: number
+  notes: string | null
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). */
+export interface SaveExchangeRateRequest {
+  currencyId: number
+  rateType: RateType
+  /** "yyyy-MM-dd"; the API refuses a future date. */
+  rateDate: string
+  rate: number
+  notes?: string | null
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export type ExchangeRateSortBy = 'RateDate' | 'CurrencyCode' | 'RateType' | 'Rate' | 'CreatedAtUtc'
+
+export interface ExchangeRateQuery {
+  currencyId?: number
+  rateType?: RateType
+  /** "yyyy-MM-dd". */
+  dateFrom?: string
+  /** "yyyy-MM-dd". */
+  dateTo?: string
+  sortBy?: ExchangeRateSortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+// ----- master data: item families -----
+
+/**
+ * One node of the item family tree. The tree endpoint returns EVERY family as a flat list in this
+ * shape, ordered by level then code; the page nests them itself through `parentId`. There is no
+ * server paging on purpose - paging cannot work on a tree.
+ */
+export interface ItemFamilyDto {
+  id: number
+  /** Null for a root family. */
+  parentId: number | null
+  /** Globally unique and stable - moving a family never renames it. */
+  familyCode: string
+  familyName: string
+  description: string | null
+  /** Depth in the tree, 1 for a root. */
+  level: number
+  isActive: boolean
+  /** Direct children only; 0 means the row is a leaf. */
+  childCount: number
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). */
+export interface SaveItemFamilyRequest {
+  familyCode: string
+  familyName: string
+  /** Null creates (or moves the family to) a root. */
+  parentId?: number | null
+  description?: string | null
+  isActive: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export interface SetItemFamilyStatusRequest {
+  isActive: boolean
+}
+
+/** An item family as it appears in a dropdown; indent the label by `level`. */
+export interface ItemFamilyLookupDto {
+  id: number
+  parentId: number | null
+  familyCode: string
+  familyName: string
+  level: number
+  isActive: boolean
+}
+
+/** A code the API suggests for a record about to be created. Only a suggestion - it stays editable. */
+export interface NextCodeDto {
+  suggestedCode: string
+}
