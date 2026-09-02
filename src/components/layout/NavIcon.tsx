@@ -1,4 +1,6 @@
 import {
+  IconAlertTriangle,
+  IconArrowsExchange,
   IconBuildingWarehouse,
   IconClipboardList,
   IconCreditCard,
@@ -9,6 +11,7 @@ import {
   IconLayoutGrid,
   IconPlug,
   IconReportAnalytics,
+  IconScale,
   IconSettings,
   IconShoppingCart,
   IconTruck,
@@ -18,6 +21,9 @@ import {
 const ICONS = {
   grid: IconLayoutGrid,
   box: IconBuildingWarehouse,
+  balance: IconScale,
+  movement: IconArrowsExchange,
+  shortage: IconAlertTriangle,
   clipboard: IconClipboardList,
   cart: IconShoppingCart,
   invoice: IconFileInvoice,

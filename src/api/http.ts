@@ -71,6 +71,108 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return send<T>(path, options, true)
 }
 
+/**
+ * POSTs a multipart/form-data body - the file upload endpoints. It carries the bearer token and
+ * replays once after a refresh exactly like {@link request}; the difference is that the body is
+ * sent as-is and the Content-Type is left to the browser, which alone knows the multipart boundary.
+ */
+export async function uploadFile<T>(
+  path: string,
+  file: File,
+  options: { field?: string; signal?: AbortSignal } = {},
+): Promise<T> {
+  const form = new FormData()
+  form.append(options.field ?? 'file', file, file.name)
+  return sendForm<T>(path, form, options.signal, true)
+}
+
+async function sendForm<T>(
+  path: string,
+  form: FormData,
+  signal: AbortSignal | undefined,
+  allowRefresh: boolean,
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const token = tokenProvider?.getAccessToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', headers, body: form, signal })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError(0, null, 'Could not reach the API. Is Inventory_Shipment.API running?')
+  }
+
+  if (response.status === 401 && allowRefresh && tokenProvider) {
+    const fresh = await tokenProvider.refreshAccessToken()
+    // FormData is single-use once consumed by fetch, but the same object can be re-sent: the
+    // browser rebuilds the body from the entries, which are still there.
+    if (fresh) return sendForm<T>(path, form, signal, false)
+    tokenProvider.onSessionExpired()
+  }
+
+  if (response.status === 204) return undefined as T
+
+  const text = await response.text()
+  let data: unknown = null
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = text
+    }
+  }
+
+  if (!response.ok) {
+    const problem = data && typeof data === 'object' ? (data as ProblemDetails) : null
+    throw new ApiError(response.status, problem, defaultMessage(response.status, problem))
+  }
+
+  return data as T
+}
+
+/**
+ * Reads a binary endpoint (an item's image or attachment) as a Blob.
+ *
+ * An `<img src>` or a plain link cannot carry the Authorization header, so the bytes are fetched
+ * here and the caller turns the Blob into an object URL - which it must revoke when it is done.
+ */
+export async function fetchBlob(path: string, signal?: AbortSignal, allowRefresh = true): Promise<Blob> {
+  const headers: Record<string, string> = {}
+  const token = tokenProvider?.getAccessToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { headers, signal })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError(0, null, 'Could not reach the API. Is Inventory_Shipment.API running?')
+  }
+
+  if (response.status === 401 && allowRefresh && tokenProvider) {
+    const fresh = await tokenProvider.refreshAccessToken()
+    if (fresh) return fetchBlob(path, signal, false)
+    tokenProvider.onSessionExpired()
+  }
+
+  if (!response.ok) {
+    // An error body is JSON even here, so the caller still gets the API's own message.
+    const text = await response.text()
+    let problem: ProblemDetails | null = null
+    try {
+      const parsed: unknown = text ? JSON.parse(text) : null
+      problem = parsed && typeof parsed === 'object' ? (parsed as ProblemDetails) : null
+    } catch {
+      problem = null
+    }
+    throw new ApiError(response.status, problem, defaultMessage(response.status, problem))
+  }
+
+  return response.blob()
+}
+
 async function send<T>(path: string, options: RequestOptions, allowRefresh: boolean): Promise<T> {
   const { method = 'GET', body, auth = true, signal } = options
 
@@ -147,6 +249,8 @@ function defaultMessage(status: number, problem: ProblemDetails | null): string 
     case 504:
       return 'The API is not reachable. Make sure Inventory_Shipment.API is running (https://localhost:7089).'
     default:
-      return status >= 500 ? 'The server ran into a problem. Please try again.' : (problem?.title ?? `Request failed (${status}).`)
+      return status >= 500
+        ? 'The server ran into a problem. Please try again.'
+        : (problem?.title ?? `Request failed (${status}).`)
   }
 }

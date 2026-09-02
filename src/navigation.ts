@@ -27,6 +27,18 @@ export const PERMISSIONS = {
   itemFamiliesCreate: 'masterdata.itemfamilies.create',
   itemFamiliesEdit: 'masterdata.itemfamilies.edit',
   itemFamiliesDelete: 'masterdata.itemfamilies.delete',
+  brandsView: 'masterdata.brands.view',
+  brandsCreate: 'masterdata.brands.create',
+  brandsEdit: 'masterdata.brands.edit',
+  brandsDelete: 'masterdata.brands.delete',
+  unitTypesView: 'masterdata.unittypes.view',
+  unitTypesCreate: 'masterdata.unittypes.create',
+  unitTypesEdit: 'masterdata.unittypes.edit',
+  unitTypesDelete: 'masterdata.unittypes.delete',
+  itemsView: 'inventory.items.view',
+  itemsCreate: 'inventory.items.create',
+  itemsEdit: 'inventory.items.edit',
+  itemsDelete: 'inventory.items.delete',
 } as const
 
 export interface NavItem {
@@ -59,7 +71,6 @@ export const NAVIGATION: NavSection[] = [
   {
     items: [
       { label: 'Dashboard', to: '/', icon: 'grid' },
-      { label: 'Inventory', icon: 'box', comingSoon: true, children: [] },
       { label: 'Purchase Planning', icon: 'clipboard', comingSoon: true, children: [] },
       { label: 'Purchase Orders', icon: 'cart', comingSoon: true },
       { label: 'Invoices', icon: 'invoice', comingSoon: true },
@@ -67,6 +78,18 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Costs & Payments', icon: 'wallet', comingSoon: true, children: [] },
       { label: 'Documents', icon: 'documents', comingSoon: true },
       { label: 'Reports', icon: 'reports', comingSoon: true },
+    ],
+  },
+  {
+    // The stock screens are not built yet, but Item Definition is the heart of the application and
+    // belongs in its own section rather than buried under Master Data.
+    title: 'INVENTORY',
+    breadcrumb: 'Inventory',
+    items: [
+      { label: 'Item Definition', to: '/inventory/items', permission: PERMISSIONS.itemsView, icon: 'box' },
+      { label: 'Stock Balance', icon: 'balance', comingSoon: true },
+      { label: 'Stock Movement', icon: 'movement', comingSoon: true },
+      { label: 'Stock Shortage', icon: 'shortage', comingSoon: true },
     ],
   },
   {
@@ -81,8 +104,8 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Warehouses', to: '/setup/master-data/warehouses', permission: PERMISSIONS.warehousesView },
           { label: 'Currencies', to: '/setup/master-data/currencies', permission: PERMISSIONS.currenciesView },
           { label: 'Item Families', to: '/setup/master-data/item-families', permission: PERMISSIONS.itemFamiliesView },
-          { label: 'Units of Measure', comingSoon: true },
-          { label: 'Brands', comingSoon: true },
+          { label: 'Brands', to: '/setup/master-data/brands', permission: PERMISSIONS.brandsView },
+          { label: 'Unit Types', to: '/setup/master-data/unit-types', permission: PERMISSIONS.unitTypesView },
         ],
       },
       {
@@ -121,10 +144,7 @@ export function isGroup(item: NavItem): boolean {
  * With it false a group whose children are ALL unbuilt empties out and disappears with them, which
  * is what stops "Master Data" surviving as a heading over nothing.
  */
-export function visibleNavigation(
-  hasPermission: (code: string) => boolean,
-  showComingSoon = true,
-): NavSection[] {
+export function visibleNavigation(hasPermission: (code: string) => boolean, showComingSoon = true): NavSection[] {
   const allowed = (item: NavItem) => !item.permission || hasPermission(item.permission)
   const built = (item: NavItem) => showComingSoon || !item.comingSoon
 
@@ -132,7 +152,9 @@ export function visibleNavigation(
     ...section,
     items: section.items
       .filter((item) => allowed(item) && built(item))
-      .map((item) => (item.children ? { ...item, children: item.children.filter((c) => allowed(c) && built(c)) } : item))
+      .map((item) =>
+        item.children ? { ...item, children: item.children.filter((c) => allowed(c) && built(c)) } : item,
+      )
       .filter((item) => !isGroupShell(item)),
   })).filter((section) => section.items.length > 0)
 }

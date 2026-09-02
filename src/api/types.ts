@@ -230,13 +230,7 @@ export interface SetWarehouseStatusRequest {
 }
 
 export type WarehouseSortBy =
-  | 'WarehouseCode'
-  | 'WarehouseName'
-  | 'BranchName'
-  | 'Address'
-  | 'IsMainWarehouse'
-  | 'IsActive'
-  | 'CreatedAtUtc'
+  'WarehouseCode' | 'WarehouseName' | 'BranchName' | 'Address' | 'IsMainWarehouse' | 'IsActive' | 'CreatedAtUtc'
 
 export interface WarehouseQuery {
   search?: string
@@ -308,12 +302,7 @@ export interface SetCurrencyStatusRequest {
 }
 
 export type CurrencySortBy =
-  | 'CurrencyCode'
-  | 'CurrencyName'
-  | 'DecimalPlaces'
-  | 'IsBaseCurrency'
-  | 'IsActive'
-  | 'CreatedAtUtc'
+  'CurrencyCode' | 'CurrencyName' | 'DecimalPlaces' | 'IsBaseCurrency' | 'IsActive' | 'CreatedAtUtc'
 
 export interface CurrencyQuery {
   search?: string
@@ -453,4 +442,251 @@ export interface ItemFamilyLookupDto {
 /** A code the API suggests for a record about to be created. Only a suggestion - it stays editable. */
 export interface NextCodeDto {
   suggestedCode: string
+}
+
+// ----- master data: brands -----
+
+export interface BrandDto {
+  id: number
+  brandCode: string
+  brandName: string
+  description: string | null
+  isActive: boolean
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). */
+export interface SaveBrandRequest {
+  brandCode: string
+  brandName: string
+  description?: string | null
+  isActive: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export interface SetBrandStatusRequest {
+  isActive: boolean
+}
+
+export type BrandSortBy = 'BrandCode' | 'BrandName' | 'IsActive' | 'CreatedAtUtc'
+
+export interface BrandQuery {
+  search?: string
+  isActive?: boolean
+  sortBy?: BrandSortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+/** A brand as it appears in a dropdown (the Items page's Brand picker). */
+export interface BrandLookupDto {
+  id: number
+  brandCode: string
+  brandName: string
+  isActive: boolean
+}
+
+// ----- master data: unit types -----
+
+export interface UnitTypeDto {
+  id: number
+  unitTypeName: string
+  isActive: boolean
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). */
+export interface SaveUnitTypeRequest {
+  unitTypeName: string
+  isActive: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export type UnitTypeSortBy = 'UnitTypeName' | 'IsActive' | 'CreatedAtUtc'
+
+export interface UnitTypeQuery {
+  search?: string
+  isActive?: boolean
+  sortBy?: UnitTypeSortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+/** A unit type as it appears in a dropdown (the item's Units & Packaging picker). */
+export interface UnitTypeLookupDto {
+  id: number
+  unitTypeName: string
+  isActive: boolean
+}
+
+// ----- inventory: item definition -----
+
+/** One row of the Item Definition list. */
+export interface ItemListDto {
+  id: number
+  itemCode: string
+  itemName: string
+  brandId: number
+  brandName: string
+  model: string | null
+  itemFamilyId: number
+  familyCode: string
+  familyName: string
+  /** ISO 3166-1 alpha-2, e.g. "IN". */
+  countryOfOrigin: string
+  defaultWarehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  /** Unit type of the base unit; null while the item has no unit yet. */
+  baseUnitName: string | null
+  baseUnitSku: string | null
+  /** Placeholder until the stock module lands; always 0 today. */
+  onHand: number
+  isBivac: boolean
+  isActive: boolean
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** An item with its units and the metadata of its files - what the details page reads. */
+export interface ItemDetailsDto {
+  id: number
+  itemCode: string
+  itemName: string
+  brandId: number
+  brandName: string
+  model: string | null
+  itemFamilyId: number
+  familyCode: string
+  familyName: string
+  countryOfOrigin: string
+  defaultWarehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  description: string | null
+  warrantyMonths: number | null
+  minQuantity: number
+  maxQuantity: number | null
+  isBivac: boolean
+  isActive: boolean
+  /** Placeholders until the stock and purchasing modules land. */
+  onHand: number
+  lastCost: number | null
+  averageCost: number | null
+  lastPurchaseCost: number | null
+  createdAtUtc: string
+  createdByName: string | null
+  updatedAtUtc: string | null
+  updatedByName: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+  /** Base unit first, then the packing units ordered by formula. */
+  units: ItemUnitDto[]
+  /** The item image (when present) first, then the attachments, newest first. */
+  files: ItemFileDto[]
+}
+
+/** One packing unit of an item. Exactly one unit is the base and its formula is 1. */
+export interface ItemUnitDto {
+  id: number
+  itemId: number
+  unitTypeId: number
+  unitTypeName: string
+  /** How many base units this unit holds; 1 for the base unit itself. */
+  packingFormula: number
+  skuCode: string
+  barcode: string | null
+  isSalesUnit: boolean
+  isPurchaseUnit: boolean
+  isBaseUnit: boolean
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Metadata of one item file; the bytes come from the download endpoint. */
+export interface ItemFileDto {
+  id: number
+  itemId: number
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  /** True for the single item image; false for an ordinary attachment. */
+  isItemImage: boolean
+  createdAtUtc: string
+}
+
+/** Body of both POST (create) and PUT (update) on an item. */
+export interface SaveItemRequest {
+  itemCode: string
+  itemName: string
+  brandId: number
+  model?: string | null
+  itemFamilyId: number
+  /** ISO 3166-1 alpha-2; the API stores it upper-case. */
+  countryOfOrigin: string
+  defaultWarehouseId: number
+  description?: string | null
+  warrantyMonths?: number | null
+  minQuantity: number
+  maxQuantity?: number | null
+  isBivac: boolean
+  isActive: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+/** Body of both POST (add) and PUT (edit) on an item unit. */
+export interface SaveItemUnitRequest {
+  unitTypeId: number
+  packingFormula: number
+  skuCode: string
+  barcode?: string | null
+  isSalesUnit: boolean
+  isPurchaseUnit: boolean
+  isBaseUnit: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export interface SetItemStatusRequest {
+  isActive: boolean
+}
+
+export type ItemSortBy =
+  'ItemCode' | 'ItemName' | 'BrandName' | 'FamilyName' | 'WarehouseName' | 'IsActive' | 'CreatedAtUtc'
+
+export interface ItemQuery {
+  /** Matches item code, item name, or the SKU / barcode of any of the item's units. */
+  search?: string
+  /** Matches the family AND its whole subtree. */
+  itemFamilyId?: number
+  brandId?: number
+  defaultWarehouseId?: number
+  isActive?: boolean
+  isBivac?: boolean
+  sortBy?: ItemSortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+/** An item as it appears in a dropdown. */
+export interface ItemLookupDto {
+  id: number
+  itemCode: string
+  itemName: string
+  baseUnitSku: string | null
+  isActive: boolean
 }

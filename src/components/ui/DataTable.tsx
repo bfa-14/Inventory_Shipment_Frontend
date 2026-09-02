@@ -41,6 +41,12 @@ interface DataTableProps<T> {
    * offering the reader two Clears.
    */
   filters?: { activeCount: number; clearAll(): void }
+  /**
+   * Makes the whole row a way into the record - the Items list opens the item. Give it only when
+   * the row leads somewhere obvious the reader can also reach by a visible control (a link in the
+   * first cell, a View action), so nothing is reachable ONLY by guessing that rows are clickable.
+   */
+  onRowClick?(args: { record: T; index: number }): void
 }
 
 /**
@@ -65,6 +71,7 @@ export function DataTable<T>({
   idAccessor,
   minHeight = 240,
   filters,
+  onRowClick,
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
 
@@ -117,6 +124,9 @@ export function DataTable<T>({
         borderRadius="md"
         verticalAlign="center"
         {...(idAccessor ? { idAccessor } : {})}
+        {...(onRowClick
+          ? { onRowClick: ({ record, index }: { record: T; index: number }) => onRowClick({ record, index }) }
+          : {})}
         {...sortProps}
         {...pagingProps}
       />

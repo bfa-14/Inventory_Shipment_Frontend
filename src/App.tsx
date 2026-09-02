@@ -6,10 +6,14 @@ import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
+import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
+import { ItemsPage } from './pages/inventory/ItemsPage'
 import { LoginPage } from './pages/LoginPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
+import { BrandsPage } from './pages/masterdata/BrandsPage'
 import { CurrenciesPage } from './pages/masterdata/CurrenciesPage'
 import { ItemFamiliesPage } from './pages/masterdata/ItemFamiliesPage'
+import { UnitTypesPage } from './pages/masterdata/UnitTypesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
@@ -42,6 +46,22 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.itemFamiliesView} />}>
                 <Route path="/setup/master-data/item-families" element={<ItemFamiliesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.brandsView} />}>
+                <Route path="/setup/master-data/brands" element={<BrandsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.unitTypesView} />}>
+                <Route path="/setup/master-data/unit-types" element={<UnitTypesPage />} />
+              </Route>
+
+              {/* Creating an item needs its own guard: a reader who may only view items must not
+                  reach the blank form, even though it is the same component as the details page. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.itemsCreate} />}>
+                <Route path="/inventory/items/new" element={<ItemDetailsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.itemsView} />}>
+                <Route path="/inventory/items" element={<ItemsPage />} />
+                <Route path="/inventory/items/:id" element={<ItemDetailsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>
