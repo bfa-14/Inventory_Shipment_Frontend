@@ -13,6 +13,7 @@ instead of repeating the rules.
 | Toasts | `@mantine/notifications` |
 | Confirmations | `@mantine/modals` |
 | Dates | `@mantine/dates` + `dayjs` |
+| Command palette | `@mantine/spotlight` (same 9.5.x as the rest) |
 | Icons | `@tabler/icons-react` |
 
 `postcss.config.cjs` runs `postcss-preset-mantine` and `postcss-simple-vars` (breakpoints xs 36em, sm 48em,
@@ -21,7 +22,7 @@ md 62em, lg 75em, xl 88em). `src/main.tsx` imports the stylesheets in this order
 
 ```
 @mantine/core/styles.css → @mantine/notifications/styles.css → @mantine/dates/styles.css
-→ mantine-datatable/styles.layer.css → src/index.css → src/styles/app.css
+→ @mantine/spotlight/styles.css → mantine-datatable/styles.layer.css → src/index.css → src/styles/app.css
 ```
 
 The app is **light-only** (`defaultColorScheme="light"`, `forceColorScheme="light"`).
@@ -80,13 +81,48 @@ page's master list), and those must keep the default light styling.
   flag as `visibleNavigation(hasPermission, showComingSoon)` — it defaults to `true`, so callers that only
   care about permissions are unaffected.
 
+## Finding a page: the menu search and the Spotlight
+
+There are two ways to reach a screen by typing, and **both read `src/navigation.ts` through
+`visibleNavigation(hasPermission, …)`**. That is the rule, not an implementation detail: a search must never
+be a way to see — or open — a page the menu is hiding, so neither surface may keep a list of its own. Adding a
+page to `navigation.ts` adds it to both; nothing else is needed.
+
+**The sidebar box** (`AppNavbar`) sits below the logo, `TextInput` + `IconSearch`, placeholder
+"Search menu...". It narrows the menu as it is typed, through `searchNavigation(sections, query)` in
+`navigation.ts` — the one function that decides what "matching" means:
+
+| The query names… | What stays |
+|---|---|
+| a section (`title` **or** `breadcrumb` — "backoffice", "setup") | that section, whole |
+| a group ("master data") | the group and **every** child, because the group is what was asked for |
+| anything else | only the items whose label matches, inside the groups that hold them |
+
+A group holding a match is **expanded while the box has text**, whatever the reader last collapsed by hand —
+and that hand-made state is waiting again the moment the box is emptied. The matched text is **bold**
+(`Highlight` with `highlightStyles` that only set `fontWeight`, no marker background — this is a sidebar, not
+a highlighter). **Enter** opens the first item still on screen and empties the box; **Esc** empties it. When
+nothing matches, the sidebar says so rather than going blank. In the collapsed (72 px) rail the box is
+replaced by a search `ActionIcon`: it expands the sidebar and puts the cursor in the box that appears.
+
+**The Spotlight** (`AppSpotlight`, rendered once by `AppShell`) is the header's "Search anything..." box and
+**Ctrl+K / Cmd+K**. It lists every page the user may open — `navLeaves(visibleNavigation(hasPermission,
+false))`, so items with no route and the modules that are not built yet are absent by construction. Each
+action carries the page's label, its place in the menu as the description ("Setup › Master Data" — Spotlight's
+own filter matches it, so "setup" finds every back-office page), and its `NavIcon`; sub-items borrow their
+group's icon. The header box is `readOnly` and opens the palette on click, Enter or Space — it looks like a
+field, so it has to answer like one. `tagsToIgnore={[]}` overrides Mantine's default of standing the
+shortcut down while a text field has focus: a palette is exactly what a reader reaches for while typing in
+a filter box, and `Ctrl+K` cannot be mistaken for typing. Below `md` the box is an icon instead. The
+modifier in the hint is read from the reader's own platform.
+
 ## Shared components (`src/components/ui/`)
 
 | Component | Purpose |
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
 | `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
-| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`. Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. |
+| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`. Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
 | `rowNumberColumn(page, recordsPerPage)` | The leading "#" column, numbered across pages. |
@@ -96,7 +132,57 @@ page's master list), and those must keep the default light styling.
 | `FilterBar` + `FilterBar.Col` | Bordered `Paper` with a responsive `Grid` for filter controls. **No Apply/Filter button** — see **Filtering**. |
 | `RowActions({ label, edit, toggleStatus, custom, remove })` | Subtle `ActionIcon`s with tooltips. Each action takes `visible`, `disabled`, `disabledReason`, `onClick`. `custom` adds page-specific icons (`{ icon, tooltip, color }`) between the standard ones and Delete, through the same tooltip/disabled wrapper. |
 | `MoreActionsMenu({ actions })` | The "More Actions" dropdown. |
-| `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. |
+| `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. Opens with the cursor in the first field and gives the focus back on close — see **Modals and the keyboard**. |
+
+## Modals and the keyboard
+
+`FormModal` does this for **every** dialog in the application, create and edit alike. No page asks for it, and
+no page may re-implement it:
+
+- **The cursor starts in the first field.** A dialog that opens with nothing focused makes the reader reach
+  for the mouse to begin typing — New user opens on Username, New role on Name. The wrapper finds the first
+  focusable control that is actually painted, skipping its own Cancel / Save footer so a form with no fields
+  cannot open on "Cancel". It does this twice over, because the two halves cannot race: a layout effect tags
+  that control `data-autofocus`, which is what Mantine's focus trap looks for first, and the effect after it
+  focuses the same node directly in case the trap has already run.
+- **Closing returns the focus to whatever opened it** — the New button, or the row's Edit icon. The opener is
+  read in a layout effect, before any focus has moved; the return happens on unmount, because the pages mount
+  these modals conditionally (`{dialog ? <XxxFormModal … /> : null}`) and Mantine's own `returnFocus` is torn
+  down before it can see the modal close. It is off (`returnFocus={false}`) so there is one owner of that
+  behaviour, not two.
+- **Enter submits.** The body is a real `<form>` with a real `type="submit"` button, so Enter in any
+  single-line field — including the last — submits it. Nothing else is needed; a `Textarea` keeps Enter for
+  its own newline, which is right.
+
+A form modal that does not use `FormModal` gets none of this, which is the reason not to write one.
+
+## The selected row
+
+**Every grid marks the row the reader last touched**, from the wrapper, without a page opting in. A screen of
+near-identical lines loses your place the moment a toast fires or a dialog closes over it; the mark is how the
+record you were working on is still findable afterwards.
+
+- Clicking a row selects it — and so does clicking any of its **action icons**, which is the same click on its
+  way up. The row takes the brand light background (`--mantine-color-brand-0`, #EEF3FF) with a 3 px
+  brand-blue bar down its left edge.
+- A click that landed on a **control** (a button, link, checkbox…) selects the row and then stops: the control
+  has already answered it. Pressing Edit on the Items list asks to edit the item, not to edit it *and* open
+  it — the wrapper is where that is decided, so no page needs its own `stopPropagation`.
+- The colour is painted on the **cells**, not the row, and the bar is an `inset` shadow rather than a border.
+  A cell sits on top of mantine-datatable's own hover fill, so the mark survives the cursor passing over it;
+  an inset shadow costs no width, so no column shifts by 3 px when a row is marked. Both rules live in
+  `src/styles/app.css` under `.app-grid__row--selected`.
+- **The selection is the record's id, not the object**, so it survives the reload behind a toast: edit a user,
+  save, and the same row is still marked when the list comes back. It clears when the row is no longer in the
+  list — filtered away, deleted — judged only on a settled result (`fetching` false), and when the reader
+  turns the page. Both are corrected during the render that changes the rows, never in an effect, so no mark
+  is ever painted on the wrong row for a frame.
+- With the grid focused, **Up / Down** move the mark and **Enter** runs `onRowActivate` — give it what the
+  row's primary icon does (Edit on the master-data lists, View on Items) and gate it on the same permission:
+  `onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', … }) : undefined}`. It falls back to
+  `onRowClick` when only that is given.
+- `onRowClick` still means what it did — *the row leads somewhere* — and only such a grid shows the pointer
+  cursor. Selecting is not navigating, and the cursor must not promise that it is.
 
 ## Column filters
 
@@ -246,11 +332,13 @@ The API returns RFC 9457 problem details. `ApiError` exposes `.status`, `.messag
 ## Checklist for a new page
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.
-- [ ] Menu entry in `src/navigation.ts` with its permission code (breadcrumb comes from the model).
+- [ ] Menu entry in `src/navigation.ts` with its permission code (breadcrumb comes from the model). That entry
+      is also what puts the page into the sidebar search and the Ctrl+K Spotlight — nothing else to register.
 - [ ] `PageHeader` + `FilterBar` + `Paper > DataTable` + `FormModal`, no bespoke layout CSS.
 - [ ] Filters auto-apply per **Filtering** — no Apply/Filter button, server grids on `useGridQuery`.
 - [ ] Header funnels per **Column filters** - and none on a server-paged column the API cannot filter by.
 - [ ] Every button and row action gated with `hasPermission(...)`.
+- [ ] `onRowActivate` given the row's primary action, behind the same permission (see **The selected row**).
 - [ ] `@mantine/form` validation; API field errors via `form.setErrors`.
 - [ ] `notify` for success, `confirm` for destructive or irreversible actions.
 - [ ] Error codes handled per the table above.

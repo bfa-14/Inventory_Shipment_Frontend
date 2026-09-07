@@ -292,6 +292,8 @@ export function BrandsPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', brand: record }) : undefined}
           noRecordsText={
             filtered ? 'No brands found. Try clearing the filters to see every brand.' : 'No brands found.'
           }

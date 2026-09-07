@@ -16,6 +16,17 @@ export interface UserDto {
   createdAtUtc: string
 }
 
+/**
+ * A user as it appears in a dropdown - id, username, full name and status, nothing else. Readable
+ * by any signed-in user, because forms that link a record to the user it belongs to need it.
+ */
+export interface UserLookupDto {
+  id: number
+  username: string
+  fullName: string
+  isActive: boolean
+}
+
 export interface LoginRequest {
   username: string
   password: string
@@ -491,6 +502,66 @@ export interface BrandLookupDto {
   isActive: boolean
 }
 
+// ----- master data: price lists -----
+
+export interface PriceListDto {
+  id: number
+  priceListCode: string
+  priceListName: string
+  currencyId: number
+  currencyCode: string
+  currencyName: string
+  decimalPlaces: number
+  description: string | null
+  isActive: boolean
+  /** Prices held by the list. Non-zero locks the currency and blocks deletion. */
+  priceCount: number
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). */
+export interface SavePriceListRequest {
+  priceListCode: string
+  priceListName: string
+  currencyId: number
+  description?: string | null
+  isActive: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export interface SetPriceListStatusRequest {
+  isActive: boolean
+}
+
+export type PriceListSortBy =
+  'PriceListCode' | 'PriceListName' | 'CurrencyCode' | 'IsActive' | 'CreatedAtUtc'
+
+export interface PriceListQuery {
+  search?: string
+  currencyId?: number
+  isActive?: boolean
+  sortBy?: PriceListSortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+/** A price list as it appears in a dropdown, with the currency its prices are expressed in. */
+export interface PriceListLookupDto {
+  id: number
+  priceListCode: string
+  priceListName: string
+  currencyId: number
+  currencyCode: string
+  symbol: string | null
+  decimalPlaces: number
+  isActive: boolean
+}
+
 // ----- master data: unit types -----
 
 export interface UnitTypeDto {
@@ -688,5 +759,122 @@ export interface ItemLookupDto {
   itemCode: string
   itemName: string
   baseUnitSku: string | null
+  isActive: boolean
+}
+
+// ----- master data: parties -----
+
+/**
+ * The role a party plays, when exactly one has to be named - the list filter, a typed dropdown, the
+ * code the server suggests. A party itself carries the four flags below and may hold several.
+ */
+export type PartyTypeName = 'Supplier' | 'Client' | 'Salesman' | 'Employee'
+
+/**
+ * A party: the one master behind suppliers, clients, salesmen and employees. The type flags are
+ * independent, so the same company can be a supplier and a client without being entered twice.
+ * The `*Name` / `*Code` fields are joined in by the API and are read-only.
+ */
+export interface PartyDto {
+  id: number
+  partyCode: string
+  partyName: string
+  isSupplier: boolean
+  isClient: boolean
+  isSalesman: boolean
+  isEmployee: boolean
+  branchId: number | null
+  branchCode: string | null
+  branchName: string | null
+  contactPerson: string | null
+  phone: string | null
+  mobile: string | null
+  email: string | null
+  address: string | null
+  /** ISO 3166-1 alpha-2 country code, e.g. "IN". */
+  country: string | null
+  taxRegistrationNo: string | null
+  notes: string | null
+  /** The application user this party signs in as (salesman / employee). */
+  userId: number | null
+  userName: string | null
+  userFullName: string | null
+  /** Clients: the price list applied when this party buys. */
+  clientPriceListId: number | null
+  clientPriceListName: string | null
+  /** Salesmen: the price list this person sells with; a client's own list takes precedence. */
+  salesmanPriceListId: number | null
+  salesmanPriceListName: string | null
+  defaultCurrencyId: number | null
+  defaultCurrencyCode: string | null
+  isActive: boolean
+  createdAtUtc: string
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** Body of both POST (create) and PUT (update). At least one type flag must be set. */
+export interface SavePartyRequest {
+  partyCode: string
+  partyName: string
+  isSupplier: boolean
+  isClient: boolean
+  isSalesman: boolean
+  isEmployee: boolean
+  branchId: number | null
+  contactPerson: string | null
+  phone: string | null
+  mobile: string | null
+  email: string | null
+  address: string | null
+  country: string | null
+  taxRegistrationNo: string | null
+  notes: string | null
+  userId: number | null
+  /** Only accepted when isClient is set. */
+  clientPriceListId: number | null
+  /** Only accepted when isSalesman is set. */
+  salesmanPriceListId: number | null
+  defaultCurrencyId: number | null
+  isActive: boolean
+  /** Required on update to detect concurrent edits. */
+  rowVersion?: string | null
+}
+
+export interface SetPartyStatusRequest {
+  isActive: boolean
+}
+
+export type PartySortBy =
+  'PartyCode' | 'PartyName' | 'BranchName' | 'Email' | 'Phone' | 'IsActive' | 'CreatedAtUtc'
+
+export interface PartyQuery {
+  /** Matches party code, name, phone, mobile or e-mail. */
+  search?: string
+  /** Keeps only the parties carrying that type; omitted means every party. */
+  partyType?: PartyTypeName
+  branchId?: number
+  isActive?: boolean
+  sortBy?: PartySortBy
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+/** A party as it appears in a typed dropdown, with what choosing it should default to. */
+export interface PartyLookupDto {
+  id: number
+  partyCode: string
+  partyName: string
+  isSupplier: boolean
+  isClient: boolean
+  isSalesman: boolean
+  isEmployee: boolean
+  branchId: number | null
+  clientPriceListId: number | null
+  salesmanPriceListId: number | null
+  defaultCurrencyId: number | null
+  userId: number | null
   isActive: boolean
 }

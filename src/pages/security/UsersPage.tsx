@@ -333,6 +333,8 @@ export function UsersPage() {
             setPage(1)
           }}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', user: record }) : undefined}
           filters={grid}
           noRecordsText={users.length === 0 ? 'No users yet.' : 'No user matches your search.'}
         />

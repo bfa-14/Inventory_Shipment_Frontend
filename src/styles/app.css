@@ -92,3 +92,72 @@
   --mantine-datatable-color-border: var(--mantine-color-gray-3);
 }
 
+
+/* ---------- the sidebar's menu search ----------
+   A Mantine TextInput has to be re-painted for navy: its default white box would
+   be a slab of light in the middle of the dark rail. */
+
+.app-navbar .app-navbar__search input {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.app-navbar .app-navbar__search input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.app-navbar .app-navbar__search input:focus {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.app-navbar .app-navbar__search .mantine-TextInput-section {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* The collapsed rail's stand-in for the box: clicking it expands the sidebar. */
+.app-navbar .app-navbar__search-toggle {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.app-navbar .app-navbar__search-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* ---------- the grid's selected row ----------
+   Every grid marks the row the reader last clicked, so the record a toast or a
+   modal just changed can still be found in a screen of near-identical lines.
+
+   The colour is painted on the CELLS, not the row: mantine-datatable's own hover
+   rule fills the row, and a cell sits on top of it - which is how the mark stays
+   visible under the cursor instead of being repainted by it. The bar on the left
+   is an inset shadow rather than a border, so no column shifts by 3px when a row
+   is marked. */
+
+.mantine-datatable .app-grid__row--selected > td {
+  background-color: var(--mantine-color-brand-0);
+}
+
+.mantine-datatable .app-grid__row--selected > td:first-of-type {
+  box-shadow: inset 3px 0 0 var(--mantine-color-brand-6);
+}
+
+/* The grid takes the focus when a row is clicked, so the arrow keys have somewhere
+   to land. It is a container, not a control: it shows a ring only when the reader
+   arrived by keyboard. */
+.app-grid:focus {
+  outline: none;
+}
+
+.app-grid:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-4);
+  outline-offset: 2px;
+  border-radius: var(--mantine-radius-md);
+}
+
+/* Selecting is not navigating. Rows that only mark themselves keep the default
+   cursor; the pointer stays with the grids whose rows open something (Items). */
+.app-grid--select-only tbody tr {
+  cursor: default;
+}

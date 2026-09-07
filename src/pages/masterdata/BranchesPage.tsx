@@ -303,6 +303,8 @@ export function BranchesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', branch: record }) : undefined}
           noRecordsText={
             filtered ? 'No branches found. Try clearing the filters to see every branch.' : 'No branches found.'
           }

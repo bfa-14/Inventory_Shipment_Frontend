@@ -6,6 +6,7 @@ import { CONTENT_BG, KATANGA } from '../../theme'
 import { AppFooter } from './AppFooter'
 import { AppHeader } from './AppHeader'
 import { AppNavbar } from './AppNavbar'
+import { AppSpotlight } from './AppSpotlight'
 
 const COLLAPSE_KEY = 'inventory_shipment.sidebarCollapsed'
 
@@ -80,6 +81,9 @@ export function AppShell() {
       <MantineAppShell.Footer>
         <AppFooter />
       </MantineAppShell.Footer>
+
+      {/* Rendered once for the whole shell: it listens for Ctrl+K / Cmd+K wherever the reader is. */}
+      <AppSpotlight />
     </MantineAppShell>
   )
 }

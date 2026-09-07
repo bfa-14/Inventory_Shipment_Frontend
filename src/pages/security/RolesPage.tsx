@@ -254,6 +254,8 @@ export function RolesPage() {
             setPage(1)
           }}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', role: record }) : undefined}
           filters={grid}
           noRecordsText={roles.length === 0 ? 'No roles yet.' : 'No role matches your filters.'}
         />

@@ -318,6 +318,8 @@ export function CurrenciesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', currency: record }) : undefined}
           noRecordsText={
             filtered ? 'No currencies found. Try clearing the filters to see every currency.' : 'No currencies found.'
           }

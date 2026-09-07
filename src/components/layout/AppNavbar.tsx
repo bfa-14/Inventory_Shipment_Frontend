@@ -1,15 +1,32 @@
-import { useState } from 'react'
-import { AppShell, Badge, Box, Group, Image, NavLink, ScrollArea, Text, Tooltip } from '@mantine/core'
-import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react'
-import { NavLink as RouterNavLink, useLocation } from 'react-router'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  ActionIcon,
+  AppShell,
+  Badge,
+  Box,
+  CloseButton,
+  Group,
+  Highlight,
+  Image,
+  NavLink,
+  ScrollArea,
+  Text,
+  TextInput,
+  Tooltip,
+} from '@mantine/core'
+import { IconChevronLeft, IconChevronRight, IconSearch } from '@tabler/icons-react'
+import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router'
 import { katangaLogo } from '../../assets'
 import { useAuth } from '../../auth/useAuth'
-import { findLeaf, isGroup, visibleNavigation, type NavItem } from '../../navigation'
+import { findLeaf, isGroup, navLeaves, searchNavigation, visibleNavigation, type NavItem } from '../../navigation'
 import { NavIcon } from './NavIcon'
 import { useShowComingSoon } from './useComingSoon'
 
 /** Menu labels stay on one line; the sidebar is only 240px wide. */
 const NO_WRAP = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
+
+/** What the search box does to the text it found: bold it, and nothing else. */
+const MATCH_STYLES = { backgroundColor: 'transparent', color: 'inherit', fontWeight: 700 } as const
 
 interface AppNavbarProps {
   collapsed: boolean
@@ -20,12 +37,23 @@ interface AppNavbarProps {
 export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavbarProps) {
   const { hasPermission } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
 
   const [showComingSoon] = useShowComingSoon()
-  const sections = visibleNavigation(hasPermission, showComingSoon)
+  const allSections = visibleNavigation(hasPermission, showComingSoon)
 
-  // The group holding the current route starts open; the rest stay closed until clicked.
-  const activeGroup = findLeaf(location.pathname, sections)?.group?.label
+  const [query, setQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Raised when the search icon of the COLLAPSED sidebar is clicked: the box it should focus does
+  // not exist yet at that moment, so the focus waits for the expansion to render it.
+  const focusOnExpand = useRef(false)
+
+  const searching = query.trim().length > 0
+  const sections = searchNavigation(allSections, query)
+
+  // The group holding the current route starts open; the rest stay closed until clicked. Read from
+  // the UNFILTERED menu - while searching, the active route may not be among the matches at all.
+  const activeGroup = findLeaf(location.pathname, allSections)?.group?.label
   const [openGroups, setOpenGroups] = useState<string[]>(() => (activeGroup ? [activeGroup] : []))
   const [lastPath, setLastPath] = useState(location.pathname)
 
@@ -35,8 +63,43 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
     if (activeGroup && !openGroups.includes(activeGroup)) setOpenGroups([...openGroups, activeGroup])
   }
 
+  useEffect(() => {
+    if (collapsed || !focusOnExpand.current) return
+    focusOnExpand.current = false
+    searchRef.current?.focus()
+  }, [collapsed])
+
   function toggleGroup(label: string) {
     setOpenGroups((open) => (open.includes(label) ? open.filter((l) => l !== label) : [...open, label]))
+  }
+
+  /** Enter opens the first item still on screen; Esc empties the box. */
+  function handleSearchKeys(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setQuery('')
+      return
+    }
+
+    if (event.key !== 'Enter') return
+    const first = navLeaves(sections)[0]
+    if (!first?.item.to) return
+    event.preventDefault()
+    setQuery('')
+    onNavigate()
+    void navigate(first.item.to)
+  }
+
+  /** The label a menu entry shows: while searching, with the matched text in bold. */
+  function label(item: NavItem) {
+    if (collapsed) return undefined
+    if (!searching) return item.label
+
+    return (
+      <Highlight component="span" inherit highlight={query.trim()} highlightStyles={MATCH_STYLES}>
+        {item.label}
+      </Highlight>
+    )
   }
 
   const soonBadge = collapsed ? null : (
@@ -50,7 +113,7 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
       return (
         <NavLink
           key={child.label}
-          label={child.label}
+          label={label(child)}
           rightSection={soonBadge}
           disabled
           styles={{ label: { fontSize: 'var(--mantine-font-size-sm)', ...NO_WRAP } }}
@@ -63,7 +126,7 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         key={child.label}
         component={RouterNavLink}
         to={child.to}
-        label={child.label}
+        label={label(child)}
         onClick={onNavigate}
         active={location.pathname.startsWith(child.to)}
         styles={{
@@ -81,7 +144,7 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
       return (
         <NavLink
           key={item.label}
-          label={collapsed ? undefined : item.label}
+          label={label(item)}
           leftSection={icon}
           rightSection={soonBadge}
           disabled
@@ -92,11 +155,13 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
     }
 
     if (isGroup(item)) {
-      const opened = openGroups.includes(item.label)
+      // A search shows what it found: a group holding a match is open, whatever the reader last
+      // collapsed by hand - and that hand-made state is waiting again once the box is empty.
+      const opened = searching || openGroups.includes(item.label)
       return (
         <NavLink
           key={item.label}
-          label={collapsed ? undefined : item.label}
+          label={label(item)}
           leftSection={icon}
           opened={opened && !collapsed}
           onClick={() => toggleGroup(item.label)}
@@ -115,7 +180,7 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         component={RouterNavLink}
         to={item.to as string}
         end={item.to === '/'}
-        label={collapsed ? undefined : item.label}
+        label={label(item)}
         leftSection={icon}
         onClick={onNavigate}
         active={item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to as string)}
@@ -131,6 +196,43 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         <Group className="app-navbar__brand" justify="center" h={64} px="sm">
           <Image src={katangaLogo} alt="Katanga TVS Motor Company" fit="contain" mah={40} />
         </Group>
+      </AppShell.Section>
+
+      <AppShell.Section px="xs" pt="sm">
+        {collapsed ? (
+          <Tooltip label="Search menu" position="right" withArrow>
+            <ActionIcon
+              className="app-navbar__search-toggle"
+              variant="subtle"
+              size="lg"
+              mx="auto"
+              display="block"
+              aria-label="Search menu"
+              onClick={() => {
+                focusOnExpand.current = true
+                onToggleCollapsed()
+              }}
+            >
+              <IconSearch size={18} />
+            </ActionIcon>
+          </Tooltip>
+        ) : (
+          <TextInput
+            ref={searchRef}
+            className="app-navbar__search"
+            placeholder="Search menu..."
+            aria-label="Search menu"
+            leftSection={<IconSearch size={16} />}
+            rightSection={
+              searching ? (
+                <CloseButton size="sm" aria-label="Clear menu search" onClick={() => setQuery('')} />
+              ) : null
+            }
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            onKeyDown={handleSearchKeys}
+          />
+        )}
       </AppShell.Section>
 
       <AppShell.Section grow component={ScrollArea} px="xs" py="sm">
@@ -153,6 +255,12 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
             {section.items.map(renderItem)}
           </Box>
         ))}
+
+        {searching && sections.length === 0 ? (
+          <Text className="app-navbar__section-title" fz="sm" px="sm" py="xs">
+            No menu item matches &ldquo;{query.trim()}&rdquo;.
+          </Text>
+        ) : null}
       </AppShell.Section>
 
       <AppShell.Section className="app-navbar__footer" p="xs">

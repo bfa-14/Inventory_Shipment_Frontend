@@ -394,6 +394,8 @@ export function ExchangeRatesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', rate: record }) : undefined}
           noRecordsText={
             filtered
               ? 'No exchange rates found. Try clearing the filters to see every rate.'

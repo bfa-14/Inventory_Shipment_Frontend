@@ -444,6 +444,8 @@ export function ItemFamiliesPage() {
           columns={columns}
           idAccessor="id"
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', family: record }) : undefined}
           noRecordsText={
             filtering
               ? 'No item family matches the filters. Try clearing them to see the whole tree.'

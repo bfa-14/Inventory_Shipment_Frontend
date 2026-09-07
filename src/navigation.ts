@@ -35,6 +35,14 @@ export const PERMISSIONS = {
   unitTypesCreate: 'masterdata.unittypes.create',
   unitTypesEdit: 'masterdata.unittypes.edit',
   unitTypesDelete: 'masterdata.unittypes.delete',
+  priceListsView: 'masterdata.pricelists.view',
+  priceListsCreate: 'masterdata.pricelists.create',
+  priceListsEdit: 'masterdata.pricelists.edit',
+  priceListsDelete: 'masterdata.pricelists.delete',
+  partiesView: 'masterdata.parties.view',
+  partiesCreate: 'masterdata.parties.create',
+  partiesEdit: 'masterdata.parties.edit',
+  partiesDelete: 'masterdata.parties.delete',
   itemsView: 'inventory.items.view',
   itemsCreate: 'inventory.items.create',
   itemsEdit: 'inventory.items.edit',
@@ -51,6 +59,12 @@ export interface NavItem {
   comingSoon?: boolean
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
+  /**
+   * The whole breadcrumb for this item, when the trail the menu implies is not the one the screen
+   * should show. Price Lists sits beside Item Definition because that is where a reader looks for
+   * it, but it is setup data and the approved design reads "Setup › Inventory › Price Lists".
+   */
+  breadcrumb?: string[]
   /** Present on a group: the items it expands to. */
   children?: NavItem[]
 }
@@ -87,6 +101,13 @@ export const NAVIGATION: NavSection[] = [
     breadcrumb: 'Inventory',
     items: [
       { label: 'Item Definition', to: '/inventory/items', permission: PERMISSIONS.itemsView, icon: 'box' },
+      {
+        label: 'Price Lists',
+        to: '/inventory/price-lists',
+        permission: PERMISSIONS.priceListsView,
+        icon: 'price',
+        breadcrumb: ['Setup', 'Inventory', 'Price Lists'],
+      },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
       { label: 'Stock Shortage', icon: 'shortage', comingSoon: true },
@@ -105,6 +126,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Currencies', to: '/setup/master-data/currencies', permission: PERMISSIONS.currenciesView },
           { label: 'Item Families', to: '/setup/master-data/item-families', permission: PERMISSIONS.itemFamiliesView },
           { label: 'Brands', to: '/setup/master-data/brands', permission: PERMISSIONS.brandsView },
+          { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
           { label: 'Unit Types', to: '/setup/master-data/unit-types', permission: PERMISSIONS.unitTypesView },
         ],
       },
@@ -205,10 +227,49 @@ export function breadcrumbFor(pathname: string): string[] {
     return []
   }
 
+  // An item may carry the whole trail itself when the menu's own one is not what the screen shows.
+  if (leaf.item.breadcrumb) return leaf.item.breadcrumb
+
   return [leaf.section.breadcrumb, leaf.group?.label, leaf.item.label].filter((part): part is string => !!part)
 }
 
 /** Landing route after sign-in: the Users screen when allowed, otherwise the dashboard. */
 export function landingRoute(permissions: string[] | undefined): string {
   return permissions?.includes(PERMISSIONS.usersView) ? '/security/users' : '/'
+}
+
+/**
+ * The menu narrowed to what matches a typed query - the sidebar's search box and nothing else
+ * decides what "matching" means, so the box and the Spotlight cannot drift apart.
+ *
+ * Three rules, in the order a reader would expect them:
+ *  - a SECTION named by the query answers it whole ("setup" is a place, not a page), so it is kept
+ *    intact - its heading is matched on both the title it shows and the breadcrumb word it stands for;
+ *  - a GROUP whose own label matches keeps every child, because "master data" asks for the group;
+ *  - otherwise a group survives on its matching children alone, and everything else disappears.
+ *
+ * Feed it an already-permission-filtered list ({@link visibleNavigation}): a search must never be a
+ * way to see a page the menu is hiding.
+ */
+export function searchNavigation(sections: NavSection[], query: string): NavSection[] {
+  const term = query.trim().toLowerCase()
+  if (!term) return sections
+
+  const hits = (text?: string) => !!text && text.toLowerCase().includes(term)
+
+  return sections
+    .map((section) => {
+      if (hits(section.title) || hits(section.breadcrumb)) return section
+
+      const items = section.items
+        .map((item) => {
+          if (hits(item.label)) return item
+          const children = (item.children ?? []).filter((child) => hits(child.label))
+          return children.length > 0 ? { ...item, children } : null
+        })
+        .filter((item): item is NavItem => item !== null)
+
+      return { ...section, items }
+    })
+    .filter((section) => section.items.length > 0)
 }

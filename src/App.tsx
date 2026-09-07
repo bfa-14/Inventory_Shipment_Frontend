@@ -13,6 +13,8 @@ import { BranchesPage } from './pages/masterdata/BranchesPage'
 import { BrandsPage } from './pages/masterdata/BrandsPage'
 import { CurrenciesPage } from './pages/masterdata/CurrenciesPage'
 import { ItemFamiliesPage } from './pages/masterdata/ItemFamiliesPage'
+import { PartiesPage } from './pages/masterdata/PartiesPage'
+import { PriceListsPage } from './pages/masterdata/PriceListsPage'
 import { UnitTypesPage } from './pages/masterdata/UnitTypesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
@@ -53,6 +55,9 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.unitTypesView} />}>
                 <Route path="/setup/master-data/unit-types" element={<UnitTypesPage />} />
               </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.partiesView} />}>
+                <Route path="/setup/master-data/parties" element={<PartiesPage />} />
+              </Route>
 
               {/* Creating an item needs its own guard: a reader who may only view items must not
                   reach the blank form, even though it is the same component as the details page. */}
@@ -62,6 +67,9 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.itemsView} />}>
                 <Route path="/inventory/items" element={<ItemsPage />} />
                 <Route path="/inventory/items/:id" element={<ItemDetailsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>
+                <Route path="/inventory/price-lists" element={<PriceListsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

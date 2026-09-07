@@ -260,6 +260,8 @@ export function UnitTypesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', unitType: record }) : undefined}
           noRecordsText={
             filtered ? 'No unit types found. Try clearing the filters to see every unit type.' : 'No unit types found.'
           }

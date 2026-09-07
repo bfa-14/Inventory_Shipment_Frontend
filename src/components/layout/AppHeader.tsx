@@ -1,4 +1,5 @@
-import { ActionIcon, Avatar, Breadcrumbs, Group, Indicator, Menu, Stack, Text, TextInput, UnstyledButton } from '@mantine/core'
+import { ActionIcon, Avatar, Breadcrumbs, Group, Indicator, Kbd, Menu, Stack, Text, TextInput, UnstyledButton } from '@mantine/core'
+import { spotlight } from '@mantine/spotlight'
 import { IconBell, IconChevronDown, IconKey, IconLogout, IconLogout2, IconSearch } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../auth/useAuth'
@@ -7,6 +8,9 @@ import { initials } from '../format'
 
 /** Notifications are not wired up yet; the bell shows an empty count. */
 const NOTIFICATION_COUNT = 0
+
+/** The modifier the reader's own keyboard uses, so the hint on the box is the key they will press. */
+const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl'
 
 export function AppHeader() {
   const { user, logout, logoutEverywhere } = useAuth()
@@ -45,13 +49,46 @@ export function AppHeader() {
       </Stack>
 
       <Group gap="sm" wrap="nowrap">
+        {/*
+          A door to the Spotlight rather than a box that filters something: it is read-only, so a
+          keystroke cannot land in a field that would never act on it, and a click, Enter, Space and
+          Ctrl+K all open the same palette.
+        */}
         <TextInput
           placeholder="Search anything..."
           leftSection={<IconSearch size={16} />}
+          rightSection={
+            <Kbd size="xs" style={{ pointerEvents: 'none' }}>
+              {MOD_KEY} K
+            </Kbd>
+          }
+          rightSectionWidth={MOD_KEY === 'Ctrl' ? 56 : 44}
           w={240}
           visibleFrom="md"
-          aria-label="Search anything"
+          readOnly
+          value=""
+          aria-label={`Search anything (${MOD_KEY} K)`}
+          styles={{ input: { cursor: 'pointer' } }}
+          onClick={spotlight.open}
+          // It looks like a field, so it has to answer like one: a reader who tabs here and types
+          // Enter expects something to happen, and nothing else on the box would make it happen.
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            spotlight.open()
+          }}
         />
+
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="lg"
+          hiddenFrom="md"
+          aria-label="Search anything"
+          onClick={spotlight.open}
+        >
+          <IconSearch size={20} />
+        </ActionIcon>
 
         <Indicator label={NOTIFICATION_COUNT} size={16} color="red" offset={4}>
           <ActionIcon variant="subtle" color="gray" size="lg" aria-label={`Notifications (${NOTIFICATION_COUNT})`}>

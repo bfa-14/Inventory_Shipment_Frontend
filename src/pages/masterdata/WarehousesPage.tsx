@@ -354,6 +354,8 @@ export function WarehousesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', warehouse: record }) : undefined}
           noRecordsText={
             filtered ? 'No warehouses found. Try clearing the filters to see every warehouse.' : 'No warehouses found.'
           }
