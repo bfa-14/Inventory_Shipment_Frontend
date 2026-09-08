@@ -19,6 +19,12 @@ interface FormModalProps {
    * instead of a second component free to drift from the first.
    */
   readOnly?: boolean
+  /**
+   * Greys out Save while the form holds something the server is certain to reject - a code a
+   * pre-flight check has already found taken, say. Enter still does nothing, because the button it
+   * would press is disabled.
+   */
+  saveDisabled?: boolean
 }
 
 /** Everything a reader can type into or press, in the order the browser would tab through it. */
@@ -71,6 +77,7 @@ export function FormModal({
   cancelLabel = 'Cancel',
   size = 'lg',
   readOnly = false,
+  saveDisabled = false,
 }: FormModalProps) {
   const openerRef = useRef<HTMLElement | null>(null)
   const timerRef = useRef<number | undefined>(undefined)
@@ -138,7 +145,7 @@ export function FormModal({
               {cancelLabel}
             </Button>
             {readOnly ? null : (
-              <Button type="submit" loading={saving}>
+              <Button type="submit" loading={saving} disabled={saveDisabled}>
                 {saveLabel}
               </Button>
             )}

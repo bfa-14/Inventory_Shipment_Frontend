@@ -799,12 +799,9 @@ export interface PartyDto {
   userId: number | null
   userName: string | null
   userFullName: string | null
-  /** Clients: the price list applied when this party buys. */
-  clientPriceListId: number | null
-  clientPriceListName: string | null
-  /** Salesmen: the price list this person sells with; a client's own list takes precedence. */
-  salesmanPriceListId: number | null
-  salesmanPriceListName: string | null
+  /** The price list pre-filled on this party's invoices; editable there. Any party type may have one. */
+  defaultPriceListId: number | null
+  defaultPriceListName: string | null
   defaultCurrencyId: number | null
   defaultCurrencyCode: string | null
   isActive: boolean
@@ -832,10 +829,7 @@ export interface SavePartyRequest {
   taxRegistrationNo: string | null
   notes: string | null
   userId: number | null
-  /** Only accepted when isClient is set. */
-  clientPriceListId: number | null
-  /** Only accepted when isSalesman is set. */
-  salesmanPriceListId: number | null
+  defaultPriceListId: number | null
   defaultCurrencyId: number | null
   isActive: boolean
   /** Required on update to detect concurrent edits. */
@@ -872,8 +866,7 @@ export interface PartyLookupDto {
   isSalesman: boolean
   isEmployee: boolean
   branchId: number | null
-  clientPriceListId: number | null
-  salesmanPriceListId: number | null
+  defaultPriceListId: number | null
   defaultCurrencyId: number | null
   userId: number | null
   isActive: boolean

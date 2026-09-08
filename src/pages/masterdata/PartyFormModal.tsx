@@ -54,8 +54,7 @@ interface FormValues {
   taxRegistrationNo: string
   notes: string
   userId: string | null
-  clientPriceListId: string | null
-  salesmanPriceListId: string | null
+  defaultPriceListId: string | null
   defaultCurrencyId: string | null
   isActive: boolean
 }
@@ -71,6 +70,12 @@ const MAX_NOTES = 1000
 
 /** Matches the API's [EmailAddress]: something, an @, something with a dot, and no spaces. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * Said the same way whether the clash is found by the pre-flight check on blur or by the API's own
+ * 409 on save, because to the reader it is one fact about the code they typed.
+ */
+const CODE_TAKEN_MESSAGE = 'This Party Code already exists. Party codes must be unique.'
 
 export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModalProps) {
   const readOnly = mode === 'view'
@@ -88,6 +93,12 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
   /** True once the reader has typed in the code box: the suggestion must not overwrite their work. */
   const codeTouched = useRef(mode !== 'create')
 
+  /**
+   * Set when the pre-flight check on blur finds the code already taken. Saving is blocked until the
+   * code changes - the API would refuse it anyway, and saying so before the round trip is kinder.
+   */
+  const [codeTaken, setCodeTaken] = useState(false)
+
   const form = useForm<FormValues>({
     initialValues: {
       partyCode: party?.partyCode ?? '',
@@ -103,8 +114,7 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
       taxRegistrationNo: party?.taxRegistrationNo ?? '',
       notes: party?.notes ?? '',
       userId: party?.userId != null ? String(party.userId) : null,
-      clientPriceListId: party?.clientPriceListId != null ? String(party.clientPriceListId) : null,
-      salesmanPriceListId: party?.salesmanPriceListId != null ? String(party.salesmanPriceListId) : null,
+      defaultPriceListId: party?.defaultPriceListId != null ? String(party.defaultPriceListId) : null,
       defaultCurrencyId: party?.defaultCurrencyId != null ? String(party.defaultCurrencyId) : null,
       isActive: party?.isActive ?? true,
     },
@@ -133,10 +143,8 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
   })
 
   const types = form.values.types
-  const isClient = types.includes('Client')
   const isSupplier = types.includes('Supplier')
-  const isSalesman = types.includes('Salesman')
-  const isPerson = isSalesman || types.includes('Employee')
+  const isPerson = types.includes('Salesman') || types.includes('Employee')
 
   // The first checked type, in the canonical order - what the suggested code is built from.
   const firstType = PARTY_TYPES.find((t) => types.includes(t.value))?.value ?? null
@@ -166,13 +174,9 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
     const branch = set(setBranches)
     void branchesApi.lookup(true, party?.branchId ?? undefined).then(branch.ok).catch(branch.fail)
 
-    // One list feeds both price list pickers; whichever of the two the party already points at is
-    // kept visible even if it has since been deactivated.
+    // `includeId` keeps the party's current list visible even if it has since been deactivated.
     const list = set(setPriceLists)
-    void priceListsApi
-      .lookup(true, party?.clientPriceListId ?? party?.salesmanPriceListId ?? undefined)
-      .then(list.ok)
-      .catch(list.fail)
+    void priceListsApi.lookup(true, party?.defaultPriceListId ?? undefined).then(list.ok).catch(list.fail)
 
     const currency = set(setCurrencies)
     void currenciesApi.lookup(true, party?.defaultCurrencyId ?? undefined).then(currency.ok).catch(currency.fail)
@@ -186,7 +190,7 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
     return () => {
       cancelled = true
     }
-  }, [party?.branchId, party?.clientPriceListId, party?.salesmanPriceListId, party?.defaultCurrencyId, party?.userId])
+  }, [party?.branchId, party?.defaultPriceListId, party?.defaultCurrencyId, party?.userId])
 
   /**
    * The suggested code follows the first checked type while the reader has not written one of their
@@ -213,26 +217,50 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
   }, [mode, firstType])
 
   /**
-   * A field that belongs to a type is cleared by the tick that removed it - leaving a default price
-   * list on a party that is no longer a client would save a value nothing on the form still shows.
-   * It happens here rather than in an effect watching the values, so there is one obvious moment
-   * when it occurs and no chance of a render loop.
+   * A field that belongs to a type is cleared by the tick that removed it - leaving a default
+   * currency on a party that is no longer a supplier would save a value nothing on the form still
+   * shows. It happens here rather than in an effect watching the values, so there is one obvious
+   * moment when it occurs and no chance of a render loop. The default price list is NOT among them:
+   * it belongs to the party whatever its types.
    */
   function handleTypesChange(next: string[]) {
     form.setFieldValue('types', next)
-    if (!next.includes('Client')) form.setFieldValue('clientPriceListId', null)
-    if (!next.includes('Salesman')) form.setFieldValue('salesmanPriceListId', null)
     if (!next.includes('Supplier')) form.setFieldValue('defaultCurrencyId', null)
     if (!next.includes('Salesman') && !next.includes('Employee')) form.setFieldValue('userId', null)
   }
 
   const countryOptions = useMemo(() => COUNTRIES.map((c) => ({ value: c.code, label: countryLabel(c) })), [])
 
-  // Both price list pickers offer the same lists, named with the currency their prices are in.
+  // Price lists are named with the currency their prices are in.
   const priceListOptions = useMemo(
     () => priceLists.map((p) => ({ value: String(p.id), label: `${p.priceListName} (${p.currencyCode})` })),
     [priceLists],
   )
+
+  /**
+   * Party codes are unique system-wide and saving never merges into an existing party, so a clash
+   * is worth catching the moment the reader leaves the box. The lookup matches code OR name, hence
+   * the exact comparison; `activeOnly: false` because an inactive party still owns its code.
+   */
+  async function checkCodeAvailable() {
+    const code = form.values.partyCode.trim()
+    if (readOnly || !code) {
+      setCodeTaken(false)
+      return
+    }
+
+    try {
+      const matches = await partiesApi.lookup({ search: code, activeOnly: false, top: 50 })
+      const clash = matches.some(
+        (candidate) => candidate.partyCode.toLowerCase() === code.toLowerCase() && candidate.id !== party?.id,
+      )
+      setCodeTaken(clash)
+      if (clash) form.setFieldError('partyCode', CODE_TAKEN_MESSAGE)
+    } catch {
+      // A pre-flight check that cannot run must not block a save: the API still answers 409.
+      setCodeTaken(false)
+    }
+  }
 
   function buildPayload(values: FormValues): SavePartyRequest {
     const trimmed = (value: string) => (value.trim() ? value.trim() : null)
@@ -254,8 +282,7 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
       taxRegistrationNo: trimmed(values.taxRegistrationNo),
       notes: trimmed(values.notes),
       userId: toNumber(values.userId),
-      clientPriceListId: toNumber(values.clientPriceListId),
-      salesmanPriceListId: toNumber(values.salesmanPriceListId),
+      defaultPriceListId: toNumber(values.defaultPriceListId),
       defaultCurrencyId: toNumber(values.defaultCurrencyId),
       isActive: values.isActive,
       ...(mode === 'edit' ? { rowVersion } : {}),
@@ -287,7 +314,8 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
     }
 
     if (error.code === 'DUPLICATE_CODE') {
-      form.setErrors({ partyCode: 'A party with this Party Code already exists.' })
+      setCodeTaken(true)
+      form.setErrors({ partyCode: CODE_TAKEN_MESSAGE })
       return
     }
 
@@ -361,8 +389,7 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
         taxRegistrationNo: fresh.taxRegistrationNo ?? '',
         notes: fresh.notes ?? '',
         userId: fresh.userId != null ? String(fresh.userId) : null,
-        clientPriceListId: fresh.clientPriceListId != null ? String(fresh.clientPriceListId) : null,
-        salesmanPriceListId: fresh.salesmanPriceListId != null ? String(fresh.salesmanPriceListId) : null,
+        defaultPriceListId: fresh.defaultPriceListId != null ? String(fresh.defaultPriceListId) : null,
         defaultCurrencyId: fresh.defaultCurrencyId != null ? String(fresh.defaultCurrencyId) : null,
         isActive: fresh.isActive,
       })
@@ -388,6 +415,7 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
       saveLabel="Save Party"
       cancelLabel={readOnly ? 'Close' : 'Cancel'}
       readOnly={readOnly}
+      saveDisabled={codeTaken}
       saving={saving}
       onClose={onClose}
       onSubmit={() => form.onSubmit((values) => void save(values))()}
@@ -404,7 +432,14 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
             {...form.getInputProps('partyCode')}
             onChange={(event) => {
               codeTouched.current = true
+              // A different code is a different question, so the old verdict goes with it.
+              setCodeTaken(false)
+              form.clearFieldError('partyCode')
               form.getInputProps('partyCode').onChange(event)
+            }}
+            onBlur={(event) => {
+              form.getInputProps('partyCode').onBlur?.(event)
+              void checkCodeAvailable()
             }}
           />
         </Grid.Col>
@@ -534,37 +569,21 @@ export function PartyFormModal({ mode, party, onClose, onSaved }: PartyFormModal
 
         {/* Each of these belongs to a type: it appears when that type is ticked and its value is
             cleared when it is unticked, so the form never carries a setting it is not showing. */}
-        {isClient ? (
-          <Grid.Col span={{ base: 12, sm: 6 }}>
-            <Select
-              label="Client price list"
-              placeholder="No client price list"
-              description="Applied when this party buys"
-              data={priceListOptions}
-              searchable
-              clearable
-              nothingFoundMessage="No price list found"
-              {...lockSelect}
-              {...form.getInputProps('clientPriceListId')}
-            />
-          </Grid.Col>
-        ) : null}
-
-        {isSalesman ? (
-          <Grid.Col span={{ base: 12, sm: 6 }}>
-            <Select
-              label="Salesman price list"
-              placeholder="No salesman price list"
-              description="Used when this person sells; a client's own list takes precedence"
-              data={priceListOptions}
-              searchable
-              clearable
-              nothingFoundMessage="No price list found"
-              {...lockSelect}
-              {...form.getInputProps('salesmanPriceListId')}
-            />
-          </Grid.Col>
-        ) : null}
+        {/* The default price list belongs to the party itself, not to one of its roles, so it is
+            always offered - a supplier, a client and a salesman may each carry one. */}
+        <Grid.Col span={{ base: 12, sm: 6 }}>
+          <Select
+            label="Default Price List"
+            placeholder="No default price list"
+            description="Pre-filled on invoices for this party; can be changed on the invoice"
+            data={priceListOptions}
+            searchable
+            clearable
+            nothingFoundMessage="No price list found"
+            {...lockSelect}
+            {...form.getInputProps('defaultPriceListId')}
+          />
+        </Grid.Col>
 
         {isSupplier ? (
           <Grid.Col span={{ base: 12, sm: 6 }}>
