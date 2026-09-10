@@ -266,14 +266,16 @@ export function ItemsPage() {
     {
       accessor: 'onHand',
       title: 'On Hand',
+      sortable: true,
       width: 85,
       textAlign: 'right',
+      /* A REAL FIGURE NOW, read from the stock ledger. It used to carry a "coming soon" tooltip over
+         a zero, which was honest then and would be a lie now that Inventory In / Out write movements.
+         Zero is dimmed so "none in stock" reads differently from a number worth acting on. */
       render: (item) => (
-        <Tooltip label="Stock module coming soon" withArrow position="top-end">
-          <Text fz="sm" c="dimmed">
-            {item.onHand}
-          </Text>
-        </Tooltip>
+        <Text fz="sm" fw={item.onHand > 0 ? 500 : 400} c={item.onHand > 0 ? undefined : 'dimmed'}>
+          {item.onHand}
+        </Text>
       ),
     },
     {
@@ -488,6 +490,7 @@ const STATUS_VALUES = ['Active', 'Inactive']
 const BIVAC_VALUES = ['BIVAC', '—']
 
 const ACCESSOR_TO_SORT: Record<string, ItemSortBy> = {
+  onHand: 'OnHand',
   itemCode: 'ItemCode',
   itemName: 'ItemName',
   brandName: 'BrandName',

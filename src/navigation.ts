@@ -47,6 +47,18 @@ export const PERMISSIONS = {
   itemsCreate: 'inventory.items.create',
   itemsEdit: 'inventory.items.edit',
   itemsDelete: 'inventory.items.delete',
+  stockInView: 'inventory.stockin.view',
+  stockInCreate: 'inventory.stockin.create',
+  stockInPost: 'inventory.stockin.post',
+  stockInCancel: 'inventory.stockin.cancel',
+  stockInDelete: 'inventory.stockin.delete',
+  stockOutView: 'inventory.stockout.view',
+  stockOutCreate: 'inventory.stockout.create',
+  stockOutPost: 'inventory.stockout.post',
+  stockOutCancel: 'inventory.stockout.cancel',
+  stockOutDelete: 'inventory.stockout.delete',
+  invoicesImport: 'sales.invoices.import',
+  invoicesPriceOverride: 'sales.invoices.priceoverride',
 } as const
 
 export interface NavItem {
@@ -57,6 +69,8 @@ export interface NavItem {
   permission?: string
   /** Rendered greyed with a "Soon" tag and no route. */
   comingSoon?: boolean
+  /** A short tag beside the label — "Preview" on a screen that exists only to try something out. */
+  badge?: string
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
   /**
@@ -108,9 +122,29 @@ export const NAVIGATION: NavSection[] = [
         icon: 'price',
         breadcrumb: ['Setup', 'Inventory', 'Price Lists'],
       },
+      // The two document screens sit directly under Item Definition: they are what people open all
+      // day, and the read-only stock views below them are answers to questions these documents ask.
+      { label: 'Inventory In', to: '/inventory/stock-in', permission: PERMISSIONS.stockInView, icon: 'box' },
+      { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
       { label: 'Stock Shortage', icon: 'shortage', comingSoon: true },
+    ],
+  },
+  {
+    // ONE PAGE, AND IT IS SCAFFOLDING. The import wizard was built before the Sales Invoice screen
+    // that will host it, so this section exists to try it against a real API. It goes when
+    // US-SAL-001 lands and the invoice renders the wizard itself.
+    title: 'SALES',
+    breadcrumb: 'Sales',
+    items: [
+      {
+        label: 'Import Items (preview)',
+        to: '/sales/import-preview',
+        permission: PERMISSIONS.invoicesImport,
+        icon: 'invoice',
+        badge: 'Preview',
+      },
     ],
   },
   {

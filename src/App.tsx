@@ -2,12 +2,15 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/layout/AppShell'
+import { INVENTORY_IN, INVENTORY_OUT } from './components/documents/documentKind'
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
 import { ItemsPage } from './pages/inventory/ItemsPage'
+import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
+import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
 import { LoginPage } from './pages/LoginPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
 import { BrandsPage } from './pages/masterdata/BrandsPage'
@@ -17,6 +20,7 @@ import { PartiesPage } from './pages/masterdata/PartiesPage'
 import { PriceListsPage } from './pages/masterdata/PriceListsPage'
 import { UnitTypesPage } from './pages/masterdata/UnitTypesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
+import { ImportPreviewPage } from './pages/sales/ImportPreviewPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -68,8 +72,28 @@ export default function App() {
                 <Route path="/inventory/items" element={<ItemsPage />} />
                 <Route path="/inventory/items/:id" element={<ItemDetailsPage />} />
               </Route>
+              {/* The two document families. Create and edit sit behind the view permission as well:
+                  the page itself refuses to save without the create one, and a user who may not read
+                  the list has no business on a document from it. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.stockInView} />}>
+                <Route path="/inventory/stock-in" element={<StockDocumentsPage kind={INVENTORY_IN} />} />
+                <Route path="/inventory/stock-in/new" element={<StockDocumentPage kind={INVENTORY_IN} />} />
+                <Route path="/inventory/stock-in/:id" element={<StockDocumentPage kind={INVENTORY_IN} />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.stockOutView} />}>
+                <Route path="/inventory/stock-out" element={<StockDocumentsPage kind={INVENTORY_OUT} />} />
+                <Route path="/inventory/stock-out/new" element={<StockDocumentPage kind={INVENTORY_OUT} />} />
+                <Route path="/inventory/stock-out/:id" element={<StockDocumentPage kind={INVENTORY_OUT} />} />
+              </Route>
+
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>
                 <Route path="/inventory/price-lists" element={<PriceListsPage />} />
+              </Route>
+
+              {/* The import wizard's sandbox host. It goes when the Sales Invoice screen exists to
+                  render the wizard itself — see the page's own remark. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.invoicesImport} />}>
+                <Route path="/sales/import-preview" element={<ImportPreviewPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

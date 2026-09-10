@@ -736,7 +736,7 @@ export interface SetItemStatusRequest {
 }
 
 export type ItemSortBy =
-  'ItemCode' | 'ItemName' | 'BrandName' | 'FamilyName' | 'WarehouseName' | 'IsActive' | 'CreatedAtUtc'
+  'ItemCode' | 'ItemName' | 'BrandName' | 'FamilyName' | 'WarehouseName' | 'OnHand' | 'IsActive' | 'CreatedAtUtc'
 
 export interface ItemQuery {
   /** Matches item code, item name, or the SKU / barcode of any of the item's units. */

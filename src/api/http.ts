@@ -86,6 +86,70 @@ export async function uploadFile<T>(
   return sendForm<T>(path, form, options.signal, true)
 }
 
+/**
+ * POSTs a multipart body that is MORE than a file — the file plus the fields that say what to do
+ * with it.
+ *
+ * {@link uploadFile} covers the common case of one file and nothing else; this is for the import,
+ * which sends the branch, the warehouse and the price list beside the workbook. It goes through the
+ * same sender, so it carries the bearer token and replays once after a refresh like everything else.
+ */
+export async function postForm<T>(path: string, form: FormData, signal?: AbortSignal): Promise<T> {
+  return sendForm<T>(path, form, signal, true)
+}
+
+/**
+ * POSTs a JSON body and reads the answer as a Blob — a report generated FROM what the caller is
+ * holding.
+ *
+ * {@link fetchBlob} covers a GET, which is every binary the API can identify from a URL. The import
+ * error report cannot: nothing on the server remembers the upload, so the rows travel in the request
+ * and the workbook comes back in the response.
+ */
+export async function postForBlob(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  allowRefresh = true,
+): Promise<Blob> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = tokenProvider?.getAccessToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError(0, null, 'Could not reach the API. Is Inventory_Shipment.API running?')
+  }
+
+  if (response.status === 401 && allowRefresh && tokenProvider) {
+    const fresh = await tokenProvider.refreshAccessToken()
+    if (fresh) return postForBlob(path, body, signal, false)
+    tokenProvider.onSessionExpired()
+  }
+
+  if (!response.ok) {
+    const text = await response.text()
+    let problem: ProblemDetails | null = null
+    try {
+      const parsed: unknown = text ? JSON.parse(text) : null
+      problem = parsed && typeof parsed === 'object' ? (parsed as ProblemDetails) : null
+    } catch {
+      problem = null
+    }
+    throw new ApiError(response.status, problem, defaultMessage(response.status, problem))
+  }
+
+  return response.blob()
+}
+
 async function sendForm<T>(
   path: string,
   form: FormData,

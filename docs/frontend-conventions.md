@@ -329,6 +329,111 @@ The API returns RFC 9457 problem details. `ApiError` exposes `.status`, `.messag
 | ASP.NET `errors` object | Map `fieldErrors` onto form fields |
 | anything else | Inline `Alert` in the form, or `notify.error` for row actions |
 
+## Sales import wizard
+
+`ImportInvoiceItemsWizard` (`src/components/sales/ImportInvoiceItemsWizard.tsx`) imports lines from an
+Excel file. It is a **component, not a page**: it validates the file against the API, shows what will
+happen, and hands the usable rows back. It never saves anything except the audit row — the host screen
+owns the lines and saves them with the rest of its document. That is what lets one wizard serve the
+Sales Invoice, Inventory In and Inventory Out screens.
+
+```tsx
+<ImportInvoiceItemsWizard
+  opened={importOpen}
+  onClose={() => setImportOpen(false)}
+  header={{ branchId, warehouseId, priceListId, currencyCode, decimalPlaces }}
+  mode="invoice"              // or "stock" for Inventory In / Out
+  draftReference={draftRef}   // your draft id, so the audit row can be attached on save
+  onImported={(lines) => setLines((current) => [...current, ...lines])}
+/>
+```
+
+### Props
+
+| Prop | Meaning |
+|------|---------|
+| `header.priceListId` | The price list to price against, or `null` in stock mode. |
+| `mode` | `invoice` prices rows and shows the Discount column; `stock` sends no price list, labels the price column **Unit Cost** and hides Discount. |
+| `draftReference` | Your draft id. It goes on the audit row; `usp_InvoiceImport_AttachInvoice` stamps those rows with the real document id once it is saved. |
+| `onImported` | Called once, with the Valid **and** Warning rows. Append them; do not replace. |
+
+### ImportedLine
+
+```ts
+interface ImportedLine {
+  itemId: number; itemCode: string; itemName: string
+  itemUnitId: number; unitTypeName: string; packingFormula: number
+  warehouseId: number; warehouseCode: string
+  quantity: number
+  unitPrice: number | null      // the selling price, or the unit cost in stock mode
+  discountPercent: number
+  expiryDate: string | null
+  notes: string | null
+  importRowNumber: number       // the Excel row, so a later error can point back at the file
+}
+```
+
+### Rules the host must keep
+
+- **Append, never replace.** Somebody may import twice, or import on top of lines typed by hand.
+- **Give each appended line a fresh key.** `importRowNumber` repeats when the same file is imported
+  twice, and React will reuse one row's state for another.
+- **Warning rows ARE imported.** Only Error rows are skipped; Merged rows are already counted inside
+  the row that absorbed them.
+- **Keep the `draftReference` stable** for the life of the draft, and pass it to your save so the audit
+  row can be attached.
+- The wizard opens on `opened` and resets itself by remounting on that prop, so nothing leaks between
+  runs; the host only has to toggle it.
+
+## Document pages
+
+Inventory In and Inventory Out are the first **document family**. Purchase and Sales will be the same
+shape — a header, editable lines, attachments, an audit trail and a Draft → Posted → Cancelled
+lifecycle — so the pieces live in `src/components/documents/` and are meant to be reused rather than
+copied.
+
+### The pieces
+
+| Component | What it owns |
+|---|---|
+| `documentKind.ts` | Everything that differs between two documents of the same shape: title, route, accent colour, stock direction, whether the cost is typed, and the five permissions. Not a component — a table the pages read. |
+| `DocumentHeaderCard` | Document no. / branch / warehouse / date / reason / reference / currency / notes, in a grid that collapses at 390 px. |
+| `QuickItemSearch` | The scanner's way in: type or scan, press Enter, the line appears. |
+| `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
+| `DocumentSummary` | Total items, total quantity in base units, total cost. |
+| `AuditTrail` | What has happened to the document, five entries then the rest on asking. |
+| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. |
+| `AttachmentsDrawer` | The paperwork behind the document. |
+| `CancelReasonModal` | Asks why a posted document is being cancelled. |
+
+### The rules that are easy to get wrong
+
+- **One component for both directions.** `StockDocumentsPage` and `StockDocumentPage` take a
+  `kind: DocumentKind` prop; nothing in them branches on `'INV_IN'`. Adding Purchase means adding a
+  row to `documentKind.ts`, not a page.
+- **The mode is the status, not a prop.** A draft is a form; posted and cancelled are records, and
+  every input becomes **text** rather than a disabled input — a greyed form reads as broken, and
+  disabled inputs are skipped by keyboard and screen readers.
+- **Quantities on screen are in the chosen unit; totals and the ledger are in base units.** Two boxes
+  of twelve is 2 in the Qty cell and 24 everywhere else. Say "base units" in any label that shows the
+  second one.
+- **A repeated scan increments, it does not duplicate.** Same item + unit + warehouse is the same
+  line. Somebody counting twelve boxes scans twelve times.
+- **`Line N:` messages go on line N.** The API numbers them because it knows which row it judged;
+  show the row highlighted with a tooltip *and* as a notify, because the row may be scrolled away.
+- **The server owns every rule that matters.** Check what saves a round trip (missing branch, empty
+  grid, quantity below 1) and nothing else. Stock levels, draft status and the real cost are decided
+  in SQL and their sentences are shown unchanged.
+- **Unsaved-changes guard on both exits.** A `dirty` ref for in-app navigation (via `confirm`) and a
+  `beforeunload` listener for the tab close, which React Router never sees.
+
+### Adding the next family
+
+1. Add a `DocumentKind` for it (title, route, colour, direction, cost rule, five permission codes).
+2. Add the permission codes to `src/navigation.ts` and the menu entries.
+3. Add three routes in `src/App.tsx` pointing at `StockDocumentsPage` / `StockDocumentPage` — or at a
+   family-specific page that reuses the same components when its header needs more fields.
+
 ## Checklist for a new page
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.
