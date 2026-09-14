@@ -15,6 +15,7 @@ import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, ItemListDto, ItemLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { AttachmentsDrawer } from '../../components/documents/AttachmentsDrawer'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
@@ -35,6 +36,39 @@ import { PageHeader } from '../../components/ui/PageHeader'
 
 let keySeed = 0
 const nextKey = () => `line-${++keySeed}`
+
+/**
+ * Puts the cursor in a line's quantity box once React has drawn it.
+ *
+ * THE NEXT THING TO TYPE AFTER AN ITEM IS HOW MANY. A scanned item, or one chosen on a row, lands
+ * the reader in Qty rather than leaving them to find it; the frame delay is what lets the row exist
+ * first.
+ */
+function focusQuantity(key: string) {
+  focusWhenDrawn(`[data-line-qty="${key}"] input`)
+}
+
+/** "+ Add Item" starts with the item picker of the new row: there is nothing to count yet. */
+function focusItem(index: number) {
+  focusWhenDrawn(`[data-line-item="${index}"] input`)
+}
+
+/**
+ * Focuses an input that a state change is about to draw.
+ *
+ * A FEW SHORT RETRIES rather than one animation frame: the row is committed by React on its own
+ * schedule, and the scanner box re-focuses itself synchronously after each scan — so the focus has
+ * to land after both, which a single frame does not guarantee.
+ */
+function focusWhenDrawn(selector: string, attempt = 0) {
+  const input = document.querySelector<HTMLInputElement>(selector)
+  if (input) {
+    input.focus()
+    input.select()
+    return
+  }
+  if (attempt < 10) window.setTimeout(() => focusWhenDrawn(selector, attempt + 1), 40)
+}
 
 function emptyLine(warehouseId: number | null): EditableLine {
   return {
@@ -91,8 +125,14 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
   const [reasons, setReasons] = useState<StockReasonDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
-  const [numberOnPost, setNumberOnPost] = useState(false)
-  const [reasonRequired, setReasonRequired] = useState(true)
+  /* THE TYPE CONFIGURATION DECIDES the numbering, the reason and — since the configuration page —
+     whether the cost may be typed. Read from the shared cache; the fallbacks cover the first render
+     before it answers, and read the way the two inventory kinds have always behaved. */
+  const { byCode } = useDocumentTypes()
+  const documentType = byCode(kind.code)
+  const numberOnPost = documentType?.numberOnPost ?? false
+  const reasonRequired = documentType?.requiresReason ?? true
+  const costIsEditable = pricingOf(documentType, { mode: 'cost', editable: kind.direction === 1 }).editable
 
   const [header, setHeader] = useState<DocumentHeaderValue>({
     branchId: null,
@@ -146,17 +186,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       .then(setReasons)
       .catch(() => notify.error('Reasons could not be loaded.'))
 
-    inventoryLookupsApi
-      .documentTypes()
-      .then((types) => {
-        const type = types.find((t) => t.code === kind.code)
-        if (!type) return
-        setNumberOnPost(type.numberOnPost)
-        setReasonRequired(type.requiresReason)
-      })
-      .catch(() => {
-        /* the defaults above are the safe reading: a required reason and a number on save */
-      })
     // isNew is derived from the route and cannot change without remounting the page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind.code, kind.direction])
@@ -279,7 +308,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
                   itemUnitId: base?.id ?? null,
                   unitTypeName: base?.unitTypeName ?? '',
                   packingFormula: base?.packingFormula ?? 1,
-                  unitCost: kind.costIsEditable ? (details.lastCost ?? 0) : (details.averageCost ?? 0),
+                  unitCost: costIsEditable ? (details.lastCost ?? 0) : (details.averageCost ?? 0),
                   onHandBase: null,
                 }
               : line,
@@ -289,11 +318,12 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         const line = lines.find((l) => l.key === key)
         const warehouseId = line?.warehouseId ?? (header.warehouseId ? Number(header.warehouseId) : null)
         if (warehouseId !== null) void refreshOnHand(key, itemId, warehouseId)
+        focusQuantity(key)
       } catch (error) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
       }
     },
-    [kind.costIsEditable, lines, header.warehouseId, refreshOnHand],
+    [costIsEditable, lines, header.warehouseId, refreshOnHand],
   )
 
   /**
@@ -328,6 +358,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
 
       if (existing) {
         patchLine(existing.key, { quantity: existing.quantity + 1 })
+        focusQuantity(existing.key)
         return
       }
 
@@ -344,18 +375,20 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           itemUnitId: base.id,
           unitTypeName: base.unitTypeName,
           packingFormula: base.packingFormula,
-          unitCost: kind.costIsEditable ? (details.lastCost ?? 0) : (details.averageCost ?? 0),
+          unitCost: costIsEditable ? (details.lastCost ?? 0) : (details.averageCost ?? 0),
         },
       ])
 
       if (warehouseId !== null) void refreshOnHand(key, details.id, warehouseId)
+      focusQuantity(key)
     },
-    [header.warehouseId, lines, patchLine, kind.costIsEditable, refreshOnHand],
+    [header.warehouseId, lines, patchLine, costIsEditable, refreshOnHand],
   )
 
   function addEmptyLine() {
     markDirty()
     setLines((current) => [...current, emptyLine(header.warehouseId ? Number(header.warehouseId) : null)])
+    focusItem(lines.length)
   }
 
   function removeLine(key: string) {
@@ -464,10 +497,11 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         lineNo: index + 1,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
-        warehouseId: line.warehouseId!,
+        // ONE DOCUMENT = ONE WAREHOUSE: every line carries the header's, whatever the row once held.
+        warehouseId: Number(header.warehouseId),
         expiryDate: line.expiryDate,
         quantity: line.quantity,
-        unitCost: kind.costIsEditable ? line.unitCost : null,
+        unitCost: costIsEditable ? line.unitCost : null,
         notes: line.notes.trim() || null,
       })),
     }
@@ -780,10 +814,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           currencyCode={document?.currencyCode ?? 'USD'}
-          costIsEditable={kind.costIsEditable}
+          costIsEditable={costIsEditable}
           warnOnOverdraw={kind.direction === -1}
           readOnly={!editable}
         />
@@ -827,14 +860,49 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           header={{
             branchId: Number(header.branchId),
             warehouseId: Number(header.warehouseId),
+            warehouseCode: warehouses.find((w) => String(w.id) === header.warehouseId)?.warehouseCode,
             // STOCK MODE: no price list at all, so nothing is priced and the price column is the cost.
             priceListId: null,
             currencyCode: document?.currencyCode ?? 'USD',
             decimalPlaces: 2,
           }}
+          documentTypeCode={kind.code}
           mode="stock"
           draftReference={document ? `${kind.code}-${document.id}` : null}
           onImported={appendImported}
+          // A file naming several warehouses becomes one document per warehouse, on the server.
+          importCreate={(imported, postImmediately) =>
+            stockDocumentsApi.importCreate({
+              documentTypeCode: kind.code,
+              documentDate: header.documentDate,
+              branchId: Number(header.branchId),
+              reasonId: header.reasonId === null ? null : Number(header.reasonId),
+              referenceNo: header.referenceNo.trim() || null,
+              notes: header.notes.trim() || null,
+              postImmediately,
+              lines: imported.map((line) => ({
+                warehouseId: line.warehouseId,
+                itemId: line.itemId,
+                itemUnitId: line.itemUnitId,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                expiryDate: line.expiryDate,
+                notes: line.notes,
+                importRowNumber: line.importRowNumber,
+              })),
+            })
+          }
+          documentRoute={(id) => `${kind.route}/${id}`}
+          onDocumentsCreated={(created) => {
+            // The lines live in the new documents now; nothing on this page is unsaved any more.
+            dirty.current = false
+            void navigate(kind.route, { state: { highlight: created.documents.map((d) => d.id) } })
+          }}
+          onSwitchWarehouse={(warehouseId) => {
+            markDirty()
+            setHeader((current) => ({ ...current, warehouseId: String(warehouseId) }))
+            setLines((current) => current.map((line) => ({ ...line, warehouseId })))
+          }}
         />
       )}
     </Stack>

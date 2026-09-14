@@ -1,5 +1,6 @@
 import type { StockDocumentTypeCode } from '../../api/inventory/stockDocuments'
 import { PERMISSIONS } from '../../navigation'
+import { formatMoney } from '../format'
 
 /**
  * Everything that differs between Inventory In and Inventory Out, in one table.
@@ -31,15 +32,10 @@ export interface DocumentKind {
   /** 1 adds stock, -1 removes it. Also what the reasons endpoint filters on. */
   direction: 1 | -1
 
-  /**
-   * Whether the unit cost is the operator's to type.
-   *
-   * ONLY ON THE WAY IN. Stock arriving has a cost somebody knows — an invoice, a count sheet.
-   * Stock leaving is valued at the average of what is already there, which the database works out;
-   * letting the operator type it would let the same stock leave at a different value than it
-   * entered, which is how an inventory stops reconciling.
-   */
-  costIsEditable: boolean
+  /* THE COST RULE IS NOT HERE ANY MORE. Whether the cost column may be typed comes from the document
+     type configuration (defaultPricing / priceEditable, read through useDocumentTypes), so a business
+     owner can change it without a release. The direction is kept: it is what the shortage warning and
+     the fallback-while-loading read. */
 
   permissions: {
     view: string
@@ -56,7 +52,6 @@ export const INVENTORY_IN: DocumentKind = {
   route: '/inventory/stock-in',
   colour: 'green',
   direction: 1,
-  costIsEditable: true,
   permissions: {
     view: PERMISSIONS.stockInView,
     create: PERMISSIONS.stockInCreate,
@@ -72,7 +67,6 @@ export const INVENTORY_OUT: DocumentKind = {
   route: '/inventory/stock-out',
   colour: 'orange',
   direction: -1,
-  costIsEditable: false,
   permissions: {
     view: PERMISSIONS.stockOutView,
     create: PERMISSIONS.stockOutCreate,
@@ -89,9 +83,9 @@ export const STATUS_COLOURS: Record<string, string> = {
   Cancelled: 'red',
 }
 
-/** Money as the documents show it. The base currency is USD and there is no second one yet. */
+/** Money as the documents show it: "14,020,800.00 USD". The stock ledger is in the base currency. */
 export function money(value: number | null | undefined, currencyCode = 'USD'): string {
-  return `${(value ?? 0).toFixed(2)} ${currencyCode}`
+  return formatMoney(value, currencyCode)
 }
 
 /** 'yyyy-MM-dd' for a Date, built from its own parts so no timezone can shift the day. */

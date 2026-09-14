@@ -13,7 +13,7 @@ import {
 } from '@mantine/core'
 import { IconDownload, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { stockDocumentsApi, type StockDocumentFileDto } from '../../api/inventory/stockDocuments'
+import { stockDocumentsApi } from '../../api/inventory/stockDocuments'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { stamp } from './documentKind'
@@ -23,15 +23,33 @@ const MAX_BYTES = 10 * 1024 * 1024
 /** What may be attached. Anything else is a file somebody meant to send elsewhere. */
 const ALLOWED = ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.png', '.jpg', '.jpeg', '.gif', '.webp']
 
+/** What every family's file row carries; the sales and purchase DTOs satisfy it as they are. */
+export interface DocumentFile {
+  id: number
+  fileName: string
+  sizeBytes: number
+  createdAtUtc: string
+  createdByName: string | null
+}
+
+/** The three calls the drawer makes — each family's API module has them under these names. */
+export interface DocumentFilesApi {
+  addFile(id: number, file: File): Promise<unknown>
+  downloadFile(id: number, fileId: number, fileName: string): Promise<void>
+  removeFile(id: number, fileId: number): Promise<void>
+}
+
 interface AttachmentsDrawerProps {
   opened: boolean
   onClose: () => void
   /** Null on a document that has never been saved: there is nothing to attach a file to yet. */
   documentId: number | null
-  files: StockDocumentFileDto[]
+  files: DocumentFile[]
   /** Re-reads the document so the list and the audit trail both catch up. */
   onChanged: () => void
   canEdit: boolean
+  /** The family's file endpoints. The stock documents' when left out. */
+  api?: DocumentFilesApi
 }
 
 /**
@@ -51,6 +69,7 @@ export function AttachmentsDrawer({
   files,
   onChanged,
   canEdit,
+  api = stockDocumentsApi,
 }: AttachmentsDrawerProps) {
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -71,7 +90,7 @@ export function AttachmentsDrawer({
 
     setBusy(true)
     try {
-      await stockDocumentsApi.addFile(documentId, file)
+      await api.addFile(documentId, file)
       notify.success(`${file.name} attached.`)
       onChanged()
     } catch (error) {
@@ -81,16 +100,16 @@ export function AttachmentsDrawer({
     }
   }
 
-  async function download(file: StockDocumentFileDto) {
+  async function download(file: DocumentFile) {
     if (documentId === null) return
     try {
-      await stockDocumentsApi.downloadFile(documentId, file.id, file.fileName)
+      await api.downloadFile(documentId, file.id, file.fileName)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The file could not be downloaded.')
     }
   }
 
-  async function remove(file: StockDocumentFileDto) {
+  async function remove(file: DocumentFile) {
     if (documentId === null) return
     const go = await confirm({
       title: 'Delete attachment',
@@ -101,7 +120,7 @@ export function AttachmentsDrawer({
     if (!go) return
 
     try {
-      await stockDocumentsApi.removeFile(documentId, file.id)
+      await api.removeFile(documentId, file.id)
       notify.success('Attachment deleted.')
       onChanged()
     } catch (error) {

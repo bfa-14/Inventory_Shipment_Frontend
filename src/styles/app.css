@@ -161,3 +161,28 @@
 .app-grid--select-only tbody tr {
   cursor: default;
 }
+
+/* Document line grids: the "open item" icon beside an item code shows on hover only, so the grid
+   reads as codes rather than as a column of icons. */
+.line-item-link .line-item-link-icon {
+  opacity: 0.25;
+  transition: opacity 120ms ease;
+}
+.line-item-link:hover .line-item-link-icon,
+.line-item-link a:focus-visible .line-item-link-icon {
+  opacity: 1;
+}
+
+/* Rows an import just created: tinted until the reader leaves the list. */
+/* The shortage report: a row with nothing on the shelf is red, one below its minimum is orange. */
+.mantine-datatable .app-grid__row--danger > td {
+  background-color: var(--mantine-color-red-0);
+}
+
+.mantine-datatable .app-grid__row--warning > td {
+  background-color: var(--mantine-color-orange-0);
+}
+
+.mantine-datatable .app-grid__row--highlight > td {
+  background: var(--mantine-color-green-0);
+}

@@ -1,4 +1,5 @@
 import { Divider, Group, Paper, Stack, Text, Title } from '@mantine/core'
+import { formatNumber } from '../format'
 import { money } from './documentKind'
 
 interface DocumentSummaryProps {
@@ -30,12 +31,12 @@ export function DocumentSummary({ totalItems, totalQuantity, totalCost, currency
       <Stack gap="xs">
         <Group justify="space-between">
           <Text size="sm" c="dimmed">Total Items</Text>
-          <Text fw={500}>{totalItems}</Text>
+          <Text fw={500}>{formatNumber(totalItems)}</Text>
         </Group>
 
         <Group justify="space-between">
           <Text size="sm" c="dimmed">Total Quantity (base units)</Text>
-          <Text fw={500}>{totalQuantity}</Text>
+          <Text fw={500}>{formatNumber(totalQuantity)}</Text>
         </Group>
 
         <Divider />

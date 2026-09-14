@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Alert,
+  Anchor,
   Badge,
   Box,
   Button,
   Card,
+  Checkbox,
   Chip,
   Group,
   Loader,
@@ -18,13 +20,17 @@ import {
   Text,
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
+import { Link } from 'react-router'
+import type { ImportCreateResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
 import {
   invoiceImportApi,
+  type ImportPriceSource,
   type ImportRowStatus,
   type ImportValidatedRow,
   type ImportValidationResult,
 } from '../../api/sales/invoiceImport'
+import { formatMoney, formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 
@@ -41,6 +47,8 @@ export interface ImportedLine {
   quantity: number
   /** The selling price in invoice mode, the unit cost in stock mode. Null when the file gave none. */
   unitPrice: number | null
+  /** Where that price came from. A host sends only a Manual price back; a list price is the server's to re-find. */
+  priceSource: ImportPriceSource | null
   discountPercent: number
   expiryDate: string | null
   notes: string | null
@@ -51,6 +59,8 @@ export interface ImportedLine {
 export interface ImportWizardHeader {
   branchId: number
   warehouseId: number
+  /** The header warehouse's code, for the question a single-warehouse file for another warehouse raises. */
+  warehouseCode?: string
   /** Null in stock mode: an Inventory In / Out document has no price list. */
   priceListId: number | null
   currencyCode: string
@@ -61,6 +71,8 @@ export interface ImportInvoiceItemsWizardProps {
   opened: boolean
   onClose: () => void
   header: ImportWizardHeader
+  /** The hosting page's document type: always sent, it picks the unit preference and rejects rows typed for another kind. */
+  documentTypeCode: string
   /**
    * invoice: rows are priced against the header's price list and discounts apply.
    * stock: nothing is priced — the price column is the UNIT COST and discounts do not exist.
@@ -68,7 +80,27 @@ export interface ImportInvoiceItemsWizardProps {
   mode?: 'invoice' | 'stock'
   /** The host's draft id, recorded on the audit row so it can be attached to the document later. */
   draftReference?: string | null
+  /**
+   * Invoice mode only: rows that would take more than the stock on hand — cumulatively with the
+   * rows above them for the same item and warehouse — come back as Errors.
+   */
+  checkStock?: boolean
   onImported: (lines: ImportedLine[]) => void
+  /**
+   * The family's import-create: one document per warehouse found in the file. When it is given and
+   * the validated rows span several warehouses, the wizard offers to create them instead of
+   * appending; without it a multi-warehouse file is appended to the open document as before.
+   */
+  importCreate?: (lines: ImportedLine[], postImmediately: boolean) => Promise<ImportCreateResult>
+  /** Where a created document lives, for the links in the result panel. */
+  documentRoute?: (id: number) => string
+  /** After the result panel's "Go to the list": the host navigates and highlights the new rows. */
+  onDocumentsCreated?: (result: ImportCreateResult) => void
+  /**
+   * A single-warehouse file for another warehouse than the header's: after the reader agrees, the
+   * host switches the document to that warehouse and the lines are appended.
+   */
+  onSwitchWarehouse?: (warehouseId: number, warehouseCode: string) => void
 }
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -80,6 +112,9 @@ const STATUS_COLOURS: Record<ImportRowStatus, string> = {
   Merged: 'gray',
 }
 
+/** Where step 3 is: appending to the open document, or making one document per warehouse. */
+type Phase = 'appending' | 'groups' | 'creating' | 'created'
+
 /**
  * Importing invoice or stock lines from an Excel file, in three steps: choose the file, look at what
  * the server made of it, then take the rows that are usable.
@@ -90,13 +125,13 @@ const STATUS_COLOURS: Record<ImportRowStatus, string> = {
  * left behind. A wizard that quietly dropped four rows out of forty would be worse than one that
  * refused the file outright, because nobody would find out until the stock count disagreed.
  *
+ * ONE DOCUMENT = ONE WAREHOUSE. A file naming several warehouses cannot become the open document,
+ * so step 3 shows the warehouse groups and offers to create one document per warehouse through the
+ * family's import-create endpoint. A file for one other warehouse asks to switch the document to it.
+ *
  * THE HOST OWNS THE LINES. This component returns them through onImported and writes only the audit
  * row; whichever screen opened it adds them to its own draft and saves them with everything else.
  * That is what lets one wizard serve the Sales Invoice, Inventory In and Inventory Out screens.
- *
- * TWO MODES, ONE FILE FORMAT. In stock mode there is no price list, so the API prices nothing and
- * the Unit Price column is read as the unit cost; the discount column is hidden here because an
- * inventory document has no discounts to give.
  */
 export function ImportInvoiceItemsWizard(props: ImportInvoiceItemsWizardProps) {
   /*
@@ -115,9 +150,15 @@ function ImportWizardBody({
   opened,
   onClose,
   header,
+  documentTypeCode,
   mode = 'invoice',
   draftReference,
+  checkStock = false,
   onImported,
+  importCreate,
+  documentRoute,
+  onDocumentsCreated,
+  onSwitchWarehouse,
 }: ImportInvoiceItemsWizardProps) {
   const fullScreen = useMediaQuery('(max-width: 768px)')
   const isStock = mode === 'stock'
@@ -134,6 +175,10 @@ function ImportWizardBody({
   const [importing, setImporting] = useState(false)
   const [imported, setImported] = useState(false)
 
+  const [phase, setPhase] = useState<Phase>('appending')
+  const [postImmediately, setPostImmediately] = useState(false)
+  const [created, setCreated] = useState<ImportCreateResult | null>(null)
+
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
 
@@ -143,6 +188,18 @@ function ImportWizardBody({
     [result],
   )
 
+  /** The warehouses the importable rows name, first-seen order, with how many rows each has. */
+  const warehouseGroups = useMemo(() => {
+    const groups: { warehouseId: number; warehouseCode: string; rows: number }[] = []
+    for (const row of importable) {
+      if (row.warehouseId === null) continue
+      const group = groups.find((g) => g.warehouseId === row.warehouseId)
+      if (group) group.rows++
+      else groups.push({ warehouseId: row.warehouseId, warehouseCode: row.warehouseCode ?? String(row.warehouseId), rows: 1 })
+    }
+    return groups
+  }, [importable])
+
   const visibleRows = useMemo(
     () => (filter === 'all' ? (result?.rows ?? []) : (result?.rows ?? []).filter((r) => r.status === filter)),
     [result, filter],
@@ -150,7 +207,7 @@ function ImportWizardBody({
 
   const money = useCallback(
     (value: number | null) =>
-      value == null ? '—' : `${value.toFixed(header.decimalPlaces)} ${header.currencyCode}`,
+      value == null ? '—' : formatMoney(value, header.currencyCode, header.decimalPlaces),
     [header.currencyCode, header.decimalPlaces],
   )
 
@@ -186,7 +243,7 @@ function ImportWizardBody({
 
   async function downloadTemplate() {
     try {
-      await invoiceImportApi.downloadTemplate()
+      await invoiceImportApi.downloadTemplate(documentTypeCode)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The template could not be downloaded.')
     }
@@ -202,6 +259,8 @@ function ImportWizardBody({
         warehouseId: header.warehouseId,
         // Stock mode sends no price list at all — see the class remark.
         priceListId: isStock ? null : header.priceListId,
+        checkStock: !isStock && checkStock,
+        documentTypeCode,
       })
       setResult(answer)
       setFilter('all')
@@ -226,26 +285,9 @@ function ImportWizardBody({
     }
   }
 
-  /**
-   * Walks the importable rows on screen and then hands them over.
-   *
-   * THE PROGRESS IS HONEST ABOUT BEING COSMETIC: the rows are already validated and already in the
-   * browser, so there is nothing to wait for. It exists because handing sixty lines to a grid in one
-   * frame looks like nothing happened, and a person who pressed Import needs to see that it did.
-   */
-  async function runImport() {
-    if (!result || importable.length === 0) return
-
-    setStep(2)
-    setImporting(true)
-    setProgress(0)
-
-    const step = Math.max(1, Math.round(importable.length / 20))
-    for (let done = 0; done < importable.length; done += step) {
-      setProgress(Math.min(done + step, importable.length))
-      await new Promise((resolve) => setTimeout(resolve, 30))
-    }
-
+  /** The audit row. A record of the import, not a condition of it: a failed log never stops the lines. */
+  async function logImport(invoiceId?: number) {
+    if (!result) return
     try {
       await invoiceImportApi.log({
         branchId: header.branchId,
@@ -257,16 +299,87 @@ function ImportWizardBody({
         warningRows: result.warningRows,
         rejectedRows: result.errorRows,
         draftReference: draftReference ?? null,
+        invoiceId: invoiceId ?? null,
       })
     } catch {
-      // THE LINES STILL GO IN. The audit row is a record of the import, not a condition of it, and
-      // losing the record is a smaller harm than making somebody redo the whole file because a log
-      // write failed.
+      // THE LINES STILL GO IN. Losing the record is a smaller harm than making somebody redo the
+      // whole file because a log write failed.
     }
+  }
+
+  /**
+   * Decides what step 3 is, then does it.
+   *
+   * SEVERAL WAREHOUSES AND A HOST THAT CAN CREATE DOCUMENTS: the groups panel, not an append — the
+   * open document holds one warehouse. ONE OTHER WAREHOUSE: ask, switch the document, append. The
+   * header's own warehouse, or a host without import-create: append as before.
+   */
+  async function runImport() {
+    if (!result || importable.length === 0) return
+
+    if (warehouseGroups.length > 1 && importCreate) {
+      setStep(2)
+      setPhase('groups')
+      return
+    }
+
+    const only = warehouseGroups[0]
+    if (warehouseGroups.length === 1 && only && only.warehouseId !== header.warehouseId && onSwitchWarehouse) {
+      const go = await confirm({
+        title: 'Switch the document warehouse?',
+        message: `The file is for ${only.warehouseCode}${header.warehouseCode ? `, not ${header.warehouseCode}` : ''} — switch the document to ${only.warehouseCode}? The lines already on the document move with it.`,
+        confirmLabel: `Switch to ${only.warehouseCode}`,
+      })
+      if (!go) return
+      onSwitchWarehouse(only.warehouseId, only.warehouseCode)
+    }
+
+    await appendRows()
+  }
+
+  /**
+   * Walks the importable rows on screen and then hands them over.
+   *
+   * THE PROGRESS IS HONEST ABOUT BEING COSMETIC: the rows are already validated and already in the
+   * browser, so there is nothing to wait for. It exists because handing sixty lines to a grid in one
+   * frame looks like nothing happened, and a person who pressed Import needs to see that it did.
+   */
+  async function appendRows() {
+    setStep(2)
+    setPhase('appending')
+    setImporting(true)
+    setProgress(0)
+
+    const stride = Math.max(1, Math.round(importable.length / 20))
+    for (let done = 0; done < importable.length; done += stride) {
+      setProgress(Math.min(done + stride, importable.length))
+      await new Promise((resolve) => setTimeout(resolve, 30))
+    }
+
+    await logImport()
 
     onImported(importable.map(toLine))
     setImporting(false)
     setImported(true)
+  }
+
+  /** One document per warehouse, through the host's import-create. */
+  async function createPerWarehouse() {
+    if (!importCreate) return
+    setPhase('creating')
+    try {
+      const answer = await importCreate(importable.map(toLine), postImmediately)
+      setCreated(answer)
+      setPhase('created')
+      // The audit row goes against the first invoice when the family has one; stock documents keep
+      // the draft reference only.
+      await logImport(isStock ? undefined : answer.documents[0]?.id)
+      if (answer.failed.length === 0) notify.success(`${answer.created} document(s) created${answer.posted > 0 ? `, ${answer.posted} posted` : ''}.`)
+      else notify.error(`${answer.failed.length} warehouse(s) could not be ${postImmediately ? 'posted' : 'created'} — see the list.`)
+    } catch (error) {
+      notify.error(error instanceof ApiError ? error.message : 'The documents could not be created.')
+      setPhase('groups')
+    }
   }
 
   /* ── closing ────────────────────────────────────────────────────────────────────────────────── */
@@ -276,7 +389,7 @@ function ImportWizardBody({
    * after a successful import the work is already in the host's grid.
    */
   async function requestClose() {
-    const hasUnimportedWork = result !== null && !imported && importable.length > 0
+    const hasUnimportedWork = result !== null && !imported && created === null && importable.length > 0 && phase !== 'creating'
     if (hasUnimportedWork) {
       const go = await confirm({
         title: 'Discard this import?',
@@ -290,12 +403,14 @@ function ImportWizardBody({
     onClose()
   }
 
-  const skipped = (result?.errorRows ?? 0)
+  const skipped = result?.errorRows ?? 0
   const importLabel = importable.length === 0
     ? 'Import Valid Rows'
     : skipped > 0
       ? `Import ${importable.length} Row(s), Skip ${skipped}`
       : `Import Valid Rows (${importable.length})`
+
+  const columnCount = isStock ? 11 : 12
 
   return (
     <Modal
@@ -309,14 +424,17 @@ function ImportWizardBody({
       <Stepper active={step} size="sm" mb="lg" allowNextStepsSelect={false}>
         <Stepper.Step label="Upload File" description="Choose an .xlsx" />
         <Stepper.Step label="Validate & Preview" description="Check what will be imported" />
-        <Stepper.Step label="Import" description="Add the rows" />
+        <Stepper.Step label="Import" description={phase === 'appending' ? 'Add the rows' : 'Create the documents'} />
       </Stepper>
 
       {step === 0 && (
         <Stack>
           <Alert color="blue" title="Use the standard template">
             <Group justify="space-between" align="center" wrap="wrap" gap="sm">
-              <Text size="sm">Use the standard template to ensure your file is imported correctly.</Text>
+              <Text size="sm">
+                One template for every document type. Rows may name a warehouse; a file naming several
+                warehouses becomes one document per warehouse.
+              </Text>
               <Button variant="light" size="xs" onClick={() => void downloadTemplate()}>
                 Download Template
               </Button>
@@ -409,6 +527,15 @@ function ImportWizardBody({
             <SummaryCard label="Error Rows" value={result.errorRows} colour="red" />
           </SimpleGrid>
 
+          {warehouseGroups.length > 1 && (
+            <Alert color="blue" title={`${warehouseGroups.length} warehouses in this file`}>
+              {warehouseGroups.map((g) => `${g.warehouseCode} - ${g.rows} line(s)`).join(', ')}.{' '}
+              {importCreate
+                ? 'One document is created per warehouse on the next step.'
+                : 'The lines are appended to this document; each keeps the warehouse the file named.'}
+            </Alert>
+          )}
+
           <Chip.Group multiple={false} value={filter} onChange={(v) => setFilter(v as typeof filter)}>
             <Group gap="xs">
               <Chip value="all">All ({result.rows.length})</Chip>
@@ -419,14 +546,17 @@ function ImportWizardBody({
           </Chip.Group>
 
           <ScrollArea.Autosize mah={360} type="auto">
-            <Table striped highlightOnHover stickyHeader miw={900}>
+            <Table striped highlightOnHover stickyHeader miw={1000}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th w={50}>#</Table.Th>
+                  <Table.Th>Type</Table.Th>
                   <Table.Th>Item Code</Table.Th>
                   <Table.Th>Item Name</Table.Th>
                   <Table.Th>Unit</Table.Th>
                   <Table.Th>Warehouse</Table.Th>
+                  {/* What the shelf holds, beside what the row asks of it. Base units, like the check. */}
+                  <Table.Th ta="right">On Hand</Table.Th>
                   <Table.Th ta="right">Qty</Table.Th>
                   <Table.Th ta="right">{isStock ? 'Unit Cost' : 'Price'}</Table.Th>
                   {/* An inventory document has no discounts, so the column is not there to explain. */}
@@ -436,31 +566,48 @@ function ImportWizardBody({
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {visibleRows.map((row) => (
-                  <Table.Tr key={row.rowNumber}>
-                    <Table.Td>{row.rowNumber}</Table.Td>
-                    <Table.Td>{row.itemCode ?? row.itemRef ?? '—'}</Table.Td>
-                    <Table.Td>{row.itemName ?? '—'}</Table.Td>
-                    <Table.Td>{row.unitTypeName ?? '—'}</Table.Td>
-                    <Table.Td>{row.warehouseCode ?? '—'}</Table.Td>
-                    <Table.Td ta="right">{row.quantity ?? '—'}</Table.Td>
-                    <Table.Td ta="right">{money(row.unitPrice)}</Table.Td>
-                    {!isStock && <Table.Td ta="right">{row.discountPercent}</Table.Td>}
-                    <Table.Td>
-                      <Badge color={STATUS_COLOURS[row.status]} variant="light">
-                        {row.status}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs" c="dimmed">
-                        {row.message ?? ''}
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
+                {visibleRows.map((row) => {
+                  const short = row.onHandBase != null && row.requiredBase != null && row.requiredBase > row.onHandBase
+                  return (
+                    <Table.Tr key={row.rowNumber}>
+                      <Table.Td>{row.rowNumber}</Table.Td>
+                      <Table.Td>
+                        <Text fz="xs" c={row.rowDocumentTypeCode === documentTypeCode ? 'dimmed' : 'red'} span>
+                          {row.rowDocumentTypeCode ?? '—'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>{row.itemCode ?? row.itemRef ?? '—'}</Table.Td>
+                      <Table.Td>{row.itemName ?? '—'}</Table.Td>
+                      <Table.Td>{row.unitTypeName ?? '—'}</Table.Td>
+                      <Table.Td>{row.warehouseCode ?? '—'}</Table.Td>
+                      <Table.Td ta="right">
+                        {row.onHandBase == null ? (
+                          '—'
+                        ) : (
+                          <Text fz="sm" span c={short ? 'red' : undefined} fw={short ? 700 : 400}>
+                            {formatNumber(row.onHandBase)}
+                          </Text>
+                        )}
+                      </Table.Td>
+                      <Table.Td ta="right">{row.quantity == null ? '—' : formatNumber(row.quantity)}</Table.Td>
+                      <Table.Td ta="right">{money(row.unitPrice)}</Table.Td>
+                      {!isStock && <Table.Td ta="right">{row.discountPercent}</Table.Td>}
+                      <Table.Td>
+                        <Badge color={STATUS_COLOURS[row.status]} variant="light">
+                          {row.status}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {row.message ?? ''}
+                        </Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                })}
                 {visibleRows.length === 0 && (
                   <Table.Tr>
-                    <Table.Td colSpan={isStock ? 9 : 10}>
+                    <Table.Td colSpan={columnCount}>
                       <Text ta="center" c="dimmed" py="md">
                         No rows with that status.
                       </Text>
@@ -481,13 +628,13 @@ function ImportWizardBody({
               </Button>
             )}
             <Button disabled={importable.length === 0} onClick={() => void runImport()}>
-              {importLabel}
+              {warehouseGroups.length > 1 && importCreate ? `Continue with ${importable.length} Row(s)` : importLabel}
             </Button>
           </Group>
         </Stack>
       )}
 
-      {step === 2 && result && (
+      {step === 2 && result && phase === 'appending' && (
         <Stack>
           {importing && (
             <Stack align="center" py="xl" gap="sm">
@@ -532,6 +679,110 @@ function ImportWizardBody({
           )}
         </Stack>
       )}
+
+      {step === 2 && result && (phase === 'groups' || phase === 'creating') && (
+        <Stack>
+          <Alert color="blue" title="One document per warehouse">
+            The file names {warehouseGroups.length} warehouses, and a document holds one. The lines are
+            created as {warehouseGroups.length} separate documents; the open document is left as it is.
+          </Alert>
+
+          <Table withTableBorder withColumnBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Warehouse</Table.Th>
+                <Table.Th ta="right">Lines</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {warehouseGroups.map((g) => (
+                <Table.Tr key={g.warehouseId}>
+                  <Table.Td>{g.warehouseCode}</Table.Td>
+                  <Table.Td ta="right">{formatNumber(g.rows)}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+
+          <Checkbox
+            label="Post immediately"
+            description="Each document is posted right after it is created; a refused posting leaves that one as a draft."
+            checked={postImmediately}
+            onChange={(event) => setPostImmediately(event.currentTarget.checked)}
+            disabled={phase === 'creating'}
+          />
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => void requestClose()} disabled={phase === 'creating'}>
+              Cancel
+            </Button>
+            <Button loading={phase === 'creating'} onClick={() => void createPerWarehouse()}>
+              Create one document per warehouse
+            </Button>
+          </Group>
+        </Stack>
+      )}
+
+      {step === 2 && phase === 'created' && created && (
+        <Stack>
+          <Alert color={created.failed.length === 0 ? 'green' : 'orange'} title={`${created.created} document(s) created${created.posted > 0 ? `, ${created.posted} posted` : ''}`}>
+            {created.failed.length === 0
+              ? 'Every warehouse in the file has its document.'
+              : `${created.failed.length} warehouse(s) were refused — their reason is listed below.`}
+          </Alert>
+
+          <Table withTableBorder withColumnBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Document</Table.Th>
+                <Table.Th>Warehouse</Table.Th>
+                <Table.Th ta="right">Lines</Table.Th>
+                <Table.Th>Status</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {created.documents.map((d) => (
+                <Table.Tr key={d.id}>
+                  <Table.Td>
+                    {documentRoute ? (
+                      <Anchor component={Link} to={documentRoute(d.id)} fz="sm" fw={500}>
+                        {d.documentNumber ?? `draft #${d.id}`}
+                      </Anchor>
+                    ) : (
+                      <Text fz="sm" fw={500}>{d.documentNumber ?? `draft #${d.id}`}</Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>{d.warehouseName}</Table.Td>
+                  <Table.Td ta="right">{formatNumber(d.lineCount)}</Table.Td>
+                  <Table.Td>
+                    <Badge color={d.status === 'Posted' ? 'green' : 'gray'} variant="light">
+                      {d.status}
+                    </Badge>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+              {created.failed.map((f) => (
+                <Table.Tr key={`failed-${f.warehouseId}`}>
+                  <Table.Td colSpan={4}>
+                    <Text fz="sm" c="red">
+                      {f.warehouseName ?? `warehouse #${f.warehouseId}`}: {f.message} ({f.code})
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={onClose}>
+              Close
+            </Button>
+            {onDocumentsCreated && (
+              <Button onClick={() => onDocumentsCreated(created)}>Go to the list</Button>
+            )}
+          </Group>
+        </Stack>
+      )}
     </Modal>
   )
 }
@@ -543,7 +794,7 @@ function SummaryCard({ label, value, colour }: { label: string; value: number; c
         {label}
       </Text>
       <Text fz={26} fw={700} c={colour}>
-        {value}
+        {formatNumber(value)}
       </Text>
     </Card>
   )
@@ -567,8 +818,10 @@ function toLine(row: ImportValidatedRow): ImportedLine {
     warehouseCode: row.warehouseCode ?? '',
     quantity: row.quantity ?? 0,
     unitPrice: row.unitPrice,
+    priceSource: row.priceSource,
     discountPercent: row.discountPercent,
-    expiryDate: row.expiryDate,
+    // Date only: the API answers "2028-06-30T00:00:00" and takes a DateOnly back, which "T00:00:00" would fail.
+    expiryDate: row.expiryDate ? row.expiryDate.slice(0, 10) : null,
     notes: row.notes,
     importRowNumber: row.rowNumber,
   }

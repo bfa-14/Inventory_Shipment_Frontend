@@ -35,10 +35,40 @@ export function currencyLabel(currency: {
  * quoted to 2 - printing "2,800.000000" everywhere would be noise.
  */
 export function formatRate(rate: number, decimalPlaces: number): string {
-  return rate.toLocaleString(undefined, {
-    minimumFractionDigits: decimalPlaces,
-    maximumFractionDigits: decimalPlaces,
-  })
+  return formatNumber(rate, decimalPlaces)
+}
+
+/**
+ * A number with thousands separators and a fixed number of decimals, always in the en-US shape:
+ * 14020800 at 2 decimals reads "14,020,800.00" whatever the browser's locale is set to.
+ *
+ * LOCKED TO en-US ON PURPOSE. The same figure is read on several screens, in exports and on paper,
+ * and a browser set to French would print "14 020 800,00" on one of them. One shape everywhere is
+ * what makes an amount recognisable from screen to screen. EVERY quantity and amount the app shows
+ * goes through here or through formatMoney; a NumberInput that holds one carries thousandSeparator.
+ */
+export function formatNumber(value: number | null | undefined, decimals = 0): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
+/**
+ * What a NumberInput's onChange handed over, as a number — or null when there is no number in it.
+ *
+ * MANTINE REPORTS A STRING FOR A VALUE IT THINKS IS STILL BEING TYPED: "12." or "0.5" while the
+ * zero is the last thing typed — and, with fixedDecimalScale, EVERY value, because "2150.00" ends in
+ * zeros too. A handler that keeps only numbers therefore drops exactly the figures a fixed decimal
+ * scale produces (the Inventory In cost read as 0 was this). Parse the string; separators included.
+ */
+export function numberInputValue(next: number | string): number | null {
+  if (typeof next === 'number') return Number.isFinite(next) ? next : null
+  const parsed = Number.parseFloat(String(next).replace(/,/g, ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/** "14,020,800.00 USD" — an amount with its currency code, to the currency's decimals. Null reads as zero. */
+export function formatMoney(value: number | null | undefined, currencyCode: string, decimals = 2): string {
+  return `${formatNumber(value ?? 0, decimals)} ${currencyCode}`
 }
 
 /**

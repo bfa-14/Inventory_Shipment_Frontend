@@ -25,6 +25,9 @@ import { IconArrowLeft, IconCopy, IconDeviceFloppy, IconInfoCircle, IconPencil }
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
+import { partiesApi } from '../../api/masterdata/parties'
+import type { PartyLookupDto } from '../../api/types'
+import { formatNumber, numberInputValue } from '../../components/format'
 import type { ItemDetailsDto, ItemUnitDto, SaveItemRequest, SaveItemUnitRequest } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { confirm } from '../../components/ui/confirm'
@@ -60,6 +63,8 @@ interface FormValues {
   maxQuantity: number | ''
   isBivac: boolean
   isActive: boolean
+  defaultSupplierId: string | null
+  leadTimeDays: number | ''
 }
 
 const BLANK: FormValues = {
@@ -76,6 +81,8 @@ const BLANK: FormValues = {
   maxQuantity: '',
   isBivac: false,
   isActive: true,
+  defaultSupplierId: null,
+  leadTimeDays: '',
 }
 
 /** What Copy Item hands the new page: the source's values, its units, and the code it came from. */
@@ -100,6 +107,8 @@ function toFormValues(item: ItemDetailsDto): FormValues {
     maxQuantity: item.maxQuantity ?? '',
     isBivac: item.isBivac,
     isActive: item.isActive,
+    defaultSupplierId: item.defaultSupplierId === null ? null : String(item.defaultSupplierId),
+    leadTimeDays: item.leadTimeDays ?? '',
   }
 }
 
@@ -152,6 +161,17 @@ function ItemDetails() {
   const [busyUnitId, setBusyUnitId] = useState<number | null>(null)
   const [removingImage, setRemovingImage] = useState(false)
   const [tab, setTab] = useState<string | null>('general')
+
+  /** Active suppliers for the Default Supplier picker, plus the item's own even when inactive. */
+  const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
+  useEffect(() => {
+    partiesApi
+      .lookup({ partyType: 'Supplier', includeId: item?.defaultSupplierId ?? undefined })
+      .then(setSuppliers)
+      .catch(() => {
+        /* the picker is then empty; the item keeps the supplier it has */
+      })
+  }, [item?.defaultSupplierId])
 
   const editing = isNew || searchParams.get('edit') === '1'
   const editable = editing && (isNew ? canCreate : canEdit)
@@ -329,6 +349,8 @@ function ItemDetails() {
       maxQuantity: values.maxQuantity === '' ? null : values.maxQuantity,
       isBivac: values.isBivac,
       isActive: values.isActive,
+      defaultSupplierId: values.defaultSupplierId === null ? null : Number(values.defaultSupplierId),
+      leadTimeDays: values.leadTimeDays === '' ? null : values.leadTimeDays,
       ...(isNew ? {} : { rowVersion: item?.rowVersion ?? null }),
     }
   }
@@ -1037,6 +1059,7 @@ function ItemDetails() {
                           >
                             <NumberInput
                               label="Minimum Quantity"
+                              thousandSeparator=","
                               min={0}
                               step={1}
                               allowDecimal={false}
@@ -1054,6 +1077,7 @@ function ItemDetails() {
                           >
                             <NumberInput
                               label="Maximum Quantity"
+                              thousandSeparator=","
                               placeholder="No maximum"
                               min={0}
                               step={1}
@@ -1104,6 +1128,57 @@ function ItemDetails() {
                               </Group>
                             </Group>
                           ) : null}
+                        </Grid.Col>
+                      </Grid>
+                    )}
+                  </Card>
+
+                  <Card radius="lg" p="lg" withBorder>
+                    <Text fw={600} fz="md" mb="md">
+                      Purchasing
+                    </Text>
+
+                    {loading ? (
+                      <FieldSkeletons rows={1} />
+                    ) : (
+                      <Grid gap="md">
+                        <Grid.Col span={{ base: 12, sm: 8 }}>
+                          <Field
+                            label="Default Supplier"
+                            value={item?.defaultSupplierName ? `${item.defaultSupplierCode} - ${item.defaultSupplierName}` : '—'}
+                            editing={editable}
+                          >
+                            <Select
+                              label="Default Supplier"
+                              placeholder="The supplier a purchase order is raised on"
+                              data={suppliers.map((s) => ({ value: String(s.id), label: `${s.partyCode} - ${s.partyName}` }))}
+                              searchable
+                              clearable
+                              nothingFoundMessage="No supplier matches"
+                              {...form.getInputProps('defaultSupplierId')}
+                            />
+                          </Field>
+                        </Grid.Col>
+
+                        <Grid.Col span={{ base: 12, sm: 4 }}>
+                          <Field
+                            label="Lead time (days)"
+                            value={item?.leadTimeDays === null || item === null ? '—' : formatNumber(item.leadTimeDays)}
+                            editing={editable}
+                          >
+                            <NumberInput
+                              label="Lead time (days)"
+                              placeholder="Days from order to receipt"
+                              min={0}
+                              max={3650}
+                              step={1}
+                              allowDecimal={false}
+                              allowNegative={false}
+                              value={form.values.leadTimeDays}
+                              onChange={(next) => form.setFieldValue('leadTimeDays', numberInputValue(next) ?? '')}
+                              error={form.errors.leadTimeDays}
+                            />
+                          </Field>
                         </Grid.Col>
                       </Grid>
                     )}

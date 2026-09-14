@@ -106,10 +106,12 @@ export function DocumentHeaderCard({
 
         <Grid.Col span={{ base: 12, sm: 6, lg: 'auto' }}>
           {readOnly ? (
-            field('Default Warehouse', warehouses.find((w) => w.value === value.warehouseId)?.label ?? '')
+            field('Warehouse', warehouses.find((w) => w.value === value.warehouseId)?.label ?? '')
           ) : (
             <Select
-              label="Default Warehouse"
+              // THE document's warehouse, not a default: one document holds one warehouse and every
+              // line takes this one. A file naming several becomes several documents.
+              label="Warehouse"
               withAsterisk
               placeholder={value.branchId ? 'Choose a warehouse' : 'Choose a branch first'}
               data={warehouses}

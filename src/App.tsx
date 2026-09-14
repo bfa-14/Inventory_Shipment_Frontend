@@ -3,12 +3,15 @@ import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/layout/AppShell'
 import { INVENTORY_IN, INVENTORY_OUT } from './components/documents/documentKind'
+import { PURCHASE_INVOICE, PURCHASE_ORDER, PURCHASE_RETURN } from './components/purchase/purchaseKind'
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
+import { DocumentTypesPage } from './pages/configuration/DocumentTypesPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
 import { ItemsPage } from './pages/inventory/ItemsPage'
+import { ShortagesPage } from './pages/inventory/ShortagesPage'
 import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
 import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
 import { LoginPage } from './pages/LoginPage'
@@ -20,7 +23,11 @@ import { PartiesPage } from './pages/masterdata/PartiesPage'
 import { PriceListsPage } from './pages/masterdata/PriceListsPage'
 import { UnitTypesPage } from './pages/masterdata/UnitTypesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
-import { ImportPreviewPage } from './pages/sales/ImportPreviewPage'
+import { PurchaseDocumentPage } from './pages/purchase/PurchaseDocumentPage'
+import { PurchaseDocumentsPage } from './pages/purchase/PurchaseDocumentsPage'
+import { ImportSalesPage } from './pages/sales/ImportSalesPage'
+import { SalesInvoicePage } from './pages/sales/SalesInvoicePage'
+import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -89,11 +96,44 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>
                 <Route path="/inventory/price-lists" element={<PriceListsPage />} />
               </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.shortagesView} />}>
+                <Route path="/inventory/shortages" element={<ShortagesPage />} />
+              </Route>
 
-              {/* The import wizard's sandbox host. It goes when the Sales Invoice screen exists to
-                  render the wizard itself — see the page's own remark. */}
+              {/* The purchase family: one list and one document page, three kinds. Each kind sits behind
+                  its own view permission; creating, posting, closing and cancelling are checked on the
+                  page (and by the API, which answers 403 naming the permission). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseOrdersView} />}>
+                <Route path="/purchase/orders" element={<PurchaseDocumentsPage kind={PURCHASE_ORDER} />} />
+                <Route path="/purchase/orders/new" element={<PurchaseDocumentPage kind={PURCHASE_ORDER} />} />
+                <Route path="/purchase/orders/:id" element={<PurchaseDocumentPage kind={PURCHASE_ORDER} />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseInvoicesView} />}>
+                <Route path="/purchase/invoices" element={<PurchaseDocumentsPage kind={PURCHASE_INVOICE} />} />
+                <Route path="/purchase/invoices/new" element={<PurchaseDocumentPage kind={PURCHASE_INVOICE} />} />
+                <Route path="/purchase/invoices/:id" element={<PurchaseDocumentPage kind={PURCHASE_INVOICE} />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseReturnsView} />}>
+                <Route path="/purchase/returns" element={<PurchaseDocumentsPage kind={PURCHASE_RETURN} />} />
+                <Route path="/purchase/returns/new" element={<PurchaseDocumentPage kind={PURCHASE_RETURN} />} />
+                <Route path="/purchase/returns/:id" element={<PurchaseDocumentPage kind={PURCHASE_RETURN} />} />
+              </Route>
+
+              {/* Import Sales from Excel: validate a file against the stock and post it as an invoice.
+                  Guarded by the import permission; posting is checked on the page (and the API). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.invoicesImport} />}>
-                <Route path="/sales/import-preview" element={<ImportPreviewPage />} />
+                <Route path="/sales/import-preview" element={<ImportSalesPage />} />
+              </Route>
+              {/* Sales invoices: the list and the document sit behind the view permission; creating,
+                  posting and cancelling are checked on the page (and by the API). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.invoicesView} />}>
+                <Route path="/sales/invoices" element={<SalesInvoicesPage />} />
+                <Route path="/sales/invoices/new" element={<SalesInvoicePage />} />
+                <Route path="/sales/invoices/:id" element={<SalesInvoicePage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.documentTypesManage} />}>
+                <Route path="/configuration/document-types" element={<DocumentTypesPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

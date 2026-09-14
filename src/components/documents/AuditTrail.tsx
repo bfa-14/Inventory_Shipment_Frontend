@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import { Anchor, Badge, Group, Paper, Stack, Text, Timeline, Title } from '@mantine/core'
-import type { StockDocumentAuditDto } from '../../api/inventory/stockDocuments'
 import { stamp } from './documentKind'
+
+/** What every family's audit row carries; the stock, sales and purchase DTOs satisfy it as they are. */
+export interface AuditEntry {
+  action: string
+  details: string | null
+  userName: string | null
+  atUtc: string
+}
 
 /** How many entries are worth showing before somebody asks for the rest. */
 const PREVIEW = 5
@@ -25,7 +32,7 @@ const ACTION_COLOURS: Record<string, string> = {
  * FIVE ENTRIES, THEN THE REST ON ASKING. A document that has been edited eleven times would
  * otherwise push its own lines off the screen with its history.
  */
-export function AuditTrail({ entries }: { entries: StockDocumentAuditDto[] }) {
+export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? entries : entries.slice(0, PREVIEW)
 

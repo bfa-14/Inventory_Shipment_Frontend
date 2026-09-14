@@ -329,13 +329,69 @@ The API returns RFC 9457 problem details. `ApiError` exposes `.status`, `.messag
 | ASP.NET `errors` object | Map `fieldErrors` onto form fields |
 | anything else | Inline `Alert` in the form, or `notify.error` for row actions |
 
-## Sales import wizard
+## Import Sales from Excel page
+
+`/sales/import-preview` (`src/pages/sales/ImportSalesPage.tsx`, menu **Sales → Import Sales from Excel**,
+permission `sales.invoices.import`) turns a spreadsheet into a **posted sales invoice and its stock
+movements in one step**. There is no draft on this page: the lines live in the browser until "Post to
+Stock", and the server saves and posts them in one call (`POST api/sales/invoices/import-post`), deleting
+its own draft if the posting is refused — so a failure leaves nothing behind and the reader fixes the
+lines and posts again.
+
+### The flow
+
+1. **Header** (`SalesImportHeaderCard`): branch → default warehouse (filtered by branch) → price list →
+   client → salesman → date → rate type + exchange rate → reference / notes. Defaults: the main branch
+   and its main warehouse, the only client when there is exactly one (and its default price list, until
+   the reader picks another), the salesman whose `userId` is the signed-in user, today. The rate is
+   looked up (`GET api/sales/invoices/rate`) whenever the price list, the type or the date changes: a
+   base-currency list shows "1 (base currency)", a foreign one shows the rate found and lets the reader
+   change it, a date with no rate says so and asks for one — Post waits until there is one.
+2. **Import from Excel** (disabled with a tooltip until branch, warehouse and price list are chosen)
+   opens `ImportInvoiceItemsWizard` in `invoice` mode with `checkStock`, so the preview shows an
+   **On Hand** column and marks the rows that would overdraw the shelf as Errors. Imported lines are
+   **merged** into an identical existing line (same item, unit, warehouse, price, discount, expiry and
+   notes) by adding the quantities — `mergeImported` in `salesLines.ts`.
+3. **Lines** (`SalesLinesGrid`): On Hand per item + warehouse (read once from `stock/on-hand` and cached;
+   refreshed after posting and after an INSUFFICIENT_STOCK refusal), editable quantity, discount and
+   notes; the price is editable only with `sales.invoices.priceoverride` and read-only with a tooltip
+   otherwise. Only a price the reader typed (or a Manual price the file carried and the server honoured)
+   is sent back; a list price is left for the server to re-find.
+4. **Post to Stock** (visible with `sales.invoices.post`; the API also wants `sales.invoices.create`): a
+   confirm naming the warehouses, then one call. Success replaces the grid with a panel — the invoice
+   number, the totals, "Start a new import" (keeps the header) and "Export to Excel".
+
+### Stock check rules
+
+- The check is **cumulative per item + warehouse, in row order, in base units** (qty × packing
+  formula). The row that crosses the on-hand figure is the one marked; the rows above it are fine.
+- It runs **three times**: in the wizard preview (server, `checkStock=true`), in the grid as quantities
+  are edited (client, the same rule), and on posting (server — the only one that is a rule). The first
+  two save a round trip. A red row shows "Insufficient stock: available a, required r", the Lines card
+  says how many rows exceed the stock, and Post is disabled while any does.
+- The server's refusals are shown unchanged. `Line N:` messages (VALIDATION, NO_PRICE) go on line N with
+  a tooltip and a notify; INSUFFICIENT_STOCK ("Insufficient stock for <code> in <warehouse>: …")
+  highlights every line of that item + warehouse and refreshes their On Hand; MASTER_INACTIVE, NO_LINES
+  and CONCURRENCY are a notify. The header stays editable so the reader can fix and post again.
+- Changing the branch, warehouse or price list while lines exist asks, then clears them: they were
+  validated against the old header.
+- A `beforeunload` guard warns while imported lines are not posted (React Router never sees a tab close).
+
+### What the invoice page reuses
+
+`src/api/sales/invoices.ts` already types the whole invoice (`SalesInvoiceDto`, `SaveSalesInvoiceRequest`,
+`RateResolutionDto`, `ImportPostResult`) and the rate lookup. `SalesImportHeaderCard`, `SalesLinesGrid`,
+`SalesTotals` and the helpers in `salesLines.ts` (`mergeImported`, `sameLine`, `lineTotal`, `stockKey`,
+`partyLabel`, `priceListLabel`) are written for a draft that can be saved as well as posted; the invoice
+page adds a document number, search, edit, cancel and attachments on the same skeleton as the stock
+documents (see *Document pages*).
+
+### The wizard
 
 `ImportInvoiceItemsWizard` (`src/components/sales/ImportInvoiceItemsWizard.tsx`) imports lines from an
 Excel file. It is a **component, not a page**: it validates the file against the API, shows what will
 happen, and hands the usable rows back. It never saves anything except the audit row — the host screen
-owns the lines and saves them with the rest of its document. That is what lets one wizard serve the
-Sales Invoice, Inventory In and Inventory Out screens.
+owns the lines. That is what lets one wizard serve Import Sales, Inventory In and Inventory Out.
 
 ```tsx
 <ImportInvoiceItemsWizard
@@ -343,48 +399,173 @@ Sales Invoice, Inventory In and Inventory Out screens.
   onClose={() => setImportOpen(false)}
   header={{ branchId, warehouseId, priceListId, currencyCode, decimalPlaces }}
   mode="invoice"              // or "stock" for Inventory In / Out
+  checkStock                  // invoice mode: rows are checked against the stock on hand
   draftReference={draftRef}   // your draft id, so the audit row can be attached on save
   onImported={(lines) => setLines((current) => [...current, ...lines])}
 />
 ```
 
-### Props
-
 | Prop | Meaning |
 |------|---------|
 | `header.priceListId` | The price list to price against, or `null` in stock mode. |
 | `mode` | `invoice` prices rows and shows the Discount column; `stock` sends no price list, labels the price column **Unit Cost** and hides Discount. |
+| `checkStock` | Invoice mode only. Rows that would overdraw the shelf, cumulatively per item + warehouse, come back as Errors and the preview shows On Hand. |
 | `draftReference` | Your draft id. It goes on the audit row; `usp_InvoiceImport_AttachInvoice` stamps those rows with the real document id once it is saved. |
 | `onImported` | Called once, with the Valid **and** Warning rows. Append them; do not replace. |
 
-### ImportedLine
+`ImportedLine` carries `itemId / itemCode / itemName / itemUnitId / unitTypeName / packingFormula /
+warehouseId / warehouseCode / quantity / unitPrice / priceSource / discountPercent / expiryDate / notes /
+importRowNumber`. Rules for a host: **append, never replace**; give each appended line a **fresh key**
+(`importRowNumber` repeats when a file is imported twice); **Warning rows are imported**, only Error rows
+are skipped and Merged rows are already inside the row that absorbed them; keep `draftReference` stable
+for the life of the draft. The wizard resets itself by remounting on `opened`.
 
-```ts
-interface ImportedLine {
-  itemId: number; itemCode: string; itemName: string
-  itemUnitId: number; unitTypeName: string; packingFormula: number
-  warehouseId: number; warehouseCode: string
-  quantity: number
-  unitPrice: number | null      // the selling price, or the unit cost in stock mode
-  discountPercent: number
-  expiryDate: string | null
-  notes: string | null
-  importRowNumber: number       // the Excel row, so a later error can point back at the file
-}
-```
+## Document type configuration
 
-### Rules the host must keep
+`Configuration › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
+`inventory.documenttypes.manage`) edits the eight document kinds: name, prefix, number length, number on
+post, number per branch, requires reason, default pricing (Cost / PriceList / None), price editable, active.
+Code, family and stock direction are read-only — the procedures branch on them.
 
-- **Append, never replace.** Somebody may import twice, or import on top of lines typed by hand.
-- **Give each appended line a fresh key.** `importRowNumber` repeats when the same file is imported
-  twice, and React will reuse one row's state for another.
-- **Warning rows ARE imported.** Only Error rows are skipped; Merged rows are already counted inside
-  the row that absorbed them.
-- **Keep the `draftReference` stable** for the life of the draft, and pass it to your save so the audit
-  row can be attached.
-- The wizard opens on `opened` and resets itself by remounting on that prop, so nothing leaks between
-  runs; the host only has to toggle it.
+Every document page reads the configuration through **`useDocumentTypes()`** (`src/hooks/useDocumentTypes.ts`,
+one cached fetch shared by every reader; the configuration page calls `refresh()` after a save) and
+**`pricingOf(type, fallback)`**: `Cost` + editable = a typed cost (Inventory In, purchase documents), `Cost` +
+not editable = the read-only average (Inventory Out), `PriceList` = the list price, editable only with the
+override permission (sales). The pages no longer hard-code `INV_IN` / `INV_OUT` cost rules; `documentKind.ts`
+keeps the direction only (the fallback while the configuration loads). Document numbers run per branch
+(`IN-KLW-000012`): the number column is 190 px and never truncates.
 
+## One document = one warehouse
+
+The header warehouse is *the* warehouse of the document (the header card labels it "Warehouse"); the
+lines grid has no Warehouse column, and every line is sent with `warehouseId` = the header warehouse
+to keep the API contract. A file naming several warehouses does not become one document — see below.
+
+## Bulk actions
+
+Every document list carries a checkbox column (`DataTable` props `selectedRecords`,
+`onSelectedRecordsChange`, `isRecordSelectable` — only drafts the reader may post or delete are
+selectable) held by **`useBulkSelection()`** so the selection survives paging. `BulkActionsBar` shows
+"3 selected: Post selected / Delete selected / Clear" above the grid; each action confirms, calls
+`bulk-post` / `bulk-delete` (one call per document on the server, one refusal never stops the others),
+shows **`BulkResultsModal`** (number, result badge, message per document), drops the succeeded rows from
+the selection and reloads the grid. Sales and purchase lists reuse the same three pieces.
+
+## Import: one document per warehouse
+
+`ImportInvoiceItemsWizard` always sends the hosting page's `documentTypeCode` (the template download uses
+it too, and the preview shows a **Type** column; rows typed for another kind are Errors). When the
+validated rows span several warehouses and the host passed **`importCreate`**, step 3 lists the groups
+("WH-001 - 12 lines, WH-002 - 3 lines") with a "Post immediately" checkbox and creates one document per
+warehouse through the family's `import-create` endpoint; the result panel links the new documents and
+"Go to the list" calls `onDocumentsCreated`, where the host navigates with `state.highlight` (the list
+tints those rows). With one warehouse the lines are appended as before; if it is not the header warehouse
+the wizard asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`.
+## Sales invoice page
+
+`/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are
+the priced document on the same skeleton as Inventory In: a header card, an editable lines grid, the
+summary and audit cards, the sticky action bar, attachments in a drawer, a Draft → Posted → Cancelled
+lifecycle where posted and cancelled are read-only text. What is the invoice's own:
+
+- **Header** (`SalesInvoiceHeaderCard`): invoice no. ("Assigned on posting"), invoice date, due date,
+  branch, warehouse, client (searchable; its default price list pre-fills Price List until the reader
+  picks one), salesman (defaults to the salesman linked to the signed-in user), price list (shows the
+  currency), rate type + exchange rate (auto from `GET api/sales/invoices/rate`; "1 (base currency)" for
+  USD; a warning and a manual box when none is defined), reference, notes. A loaded invoice keeps its own
+  rate until the price list, the type or the date is changed.
+- **Lines** (`SalesInvoiceLinesGrid`): Quick Item Search and "+ Add Item" give a line its **sales unit**
+  (else the base unit), quantity 1 and the price from `GET api/masterdata/unit-prices/resolve` (branch
+  price first, then All Branches). Changing the unit re-resolves the price. **No price = a red line
+  "No price in <list>"** and the save is blocked with the NO_PRICE wording. The price column follows the
+  type configuration (`pricingOf`): PriceList pricing is editable only with `sales.invoices.priceoverride`,
+  and a typed price that differs from the list price carries a **manual** badge; only a Manual price is
+  sent to the API (`unitPrice`), a list price is left for the server to re-find. On Hand turns red when
+  qty × formula exceeds it; the page repeats the count above the grid.
+- **Import from Excel**: the wizard in invoice mode with `checkStock`; a multi-warehouse file becomes one
+  invoice per warehouse through `importCreate` (Manual prices only are sent).
+- **Errors**: `Line N:` messages land on line N; INSUFFICIENT_STOCK highlights every line of the named
+  item and refreshes its On Hand; CONCURRENCY reloads. Same unsaved-changes guard as Inventory In.
+- **List**: filters (search, branch, client, salesman, status, dates), bulk Post / Delete on ticked
+  drafts, a total in the invoice currency ("$ 5,000.00 USD"), row actions gated by permission and status.
+
+`AttachmentsDrawer` and `AuditTrail` are shared by every family: the drawer takes the family's file
+endpoints through `api` (the stock documents' when left out) and both read structural DTOs.
+## Purchase documents
+
+`/purchase/orders`, `/purchase/invoices` and `/purchase/returns` (lists, `PurchaseDocumentsPage`) and their
+`/new` / `/:id` document pages (`PurchaseDocumentPage`) are **one component each, parameterised by
+`kind: PurchaseKind`** (`src/components/purchase/purchaseKind.ts`: PO blue, PINV green, PRET orange —
+title, plural, noun, route, colour, the posting wording and the five `purchase.<kind>.*` permissions).
+Nothing in the pages branches on `'PO'` except through that table. They sit on the sales invoice skeleton
+in **cost mode**:
+
+- **Header** (`PurchaseHeaderCard`): document no. (orders are numbered on save, invoices and returns on
+  posting), document date, expected / due date, supplier (searchable; **picking a supplier sets Currency to
+  the supplier's default currency**, else the base one, until the reader picks another), branch, warehouse,
+  currency, rate type + exchange rate (auto from `GET api/purchase/rate?currencyId=&rateType=&date=`;
+  "1 (base currency)" for USD; a warning and a manual box when none is defined), supplier reference, notes.
+  A document made from another shows a **source chip** ("From Purchase Order PO-…") that links to it; its
+  supplier and branch are fixed, and Add Item / Import are hidden because the lines are the source's.
+- **Lines** (`PurchaseLinesGrid`, helpers in `purchaseLines.ts`): Quick Item Search and "+ Add Item" give a
+  line its **purchase unit** (else the base unit), quantity 1 and a **Unit Cost = last cost × packing formula
+  × exchange rate** (blank when the item was never bought — the server then writes 0). The cost column
+  follows the type configuration (`pricingOf`, Cost mode: editable unless the owner turned it off). On a
+  line with a source, the Qty box is capped at what remains on the source line and says **"Remaining: n"**
+  under it; a larger quantity turns the row red before the server's SOURCE_INVALID does, and that message
+  ("Line 1: … only 6 remain on the order line.") lands on line N like every other `Line N:` error.
+- **Import from Excel**: the wizard in stock (cost) mode with the kind's `documentTypeCode`; the Unit Price
+  / Cost column is the unit cost; a multi-warehouse file becomes one document per warehouse through
+  `purchaseDocumentsApi.importCreate`.
+- **Summary** (`SalesTotals` reused): subtotal, discount, grand total in the document currency and the
+  "≈ … USD" line at the document rate. **Linked Documents** (`LinkedDocumentsCard`): the source and every
+  document created from this one, each with its status — a cancelled invoice under an order means the
+  order is open again.
+- **Lifecycle**: Draft → Posted → Cancelled, plus **Closed (teal)** for orders: automatically when every line
+  is received, or by hand with "Close Order" (`CloseOrderModal`, reason optional, needs
+  `purchase.orders.post`). Confirmations say what posting does per kind — an order is *confirmed* and its
+  quantities count as incoming; an invoice adds stock and sets costs; a return removes stock at the
+  invoice cost. View mode offers Export, **Create Purchase Invoice** (open order, needs
+  `purchase.invoices.create`), **Create Purchase Return** (posted invoice, needs `purchase.returns.create`),
+  Close Order, Cancel Document, Back. Posted, closed and cancelled documents are read-only text.
+- **List**: filters (search, branch, supplier, status Draft / Posted / Cancelled / Closed, dates), a Source
+  column that links to the order / invoice, a **Received** progress bar on orders (0–100 % of the ordered
+  quantity invoiced), bulk Post / Delete on ticked drafts, row actions gated by permission and status
+  including Create invoice / Create return.
+- **API**: `src/api/purchase/documents.ts` — one module for the three kinds; every 403 from it names the
+  permission that was missing (`code: FORBIDDEN`).
+
+## Shortages → PO
+
+`/inventory/shortages` (`ShortagesPage`, behind `inventory.shortages.view`) is the shortage report:
+one row per item and warehouse from `GET api/inventory/shortages` (not paged — the page holds the whole
+list, sorts and pages it itself with `useGridQuery({ paging: 'client' })`, and sums it for the cards).
+
+- **Filters**: branch, warehouse (of the branch), family (tree order, includes sub-families), brand,
+  supplier, search, **Only shortages** (default on; off shows every evaluated item and warehouse) and
+  **Average over** 30 / 60 / 90 days for the average daily sales.
+- **Cards**: Items short, Total suggested cost (suggested base quantity × last cost, else average cost),
+  Warehouses affected.
+- **Grid**: item (link), warehouse, On Hand, Incoming (open purchase orders), Available (= on hand +
+  incoming, what is compared with Min), Min, Max, Shortage, **Suggested in the purchase unit** ("3 Box
+  (x12)"), average daily sales, **Days of cover** (red when shorter than the lead time), supplier with a
+  *default* / *last* badge or a warning when the item has none, last cost, lead time. A row is **red when
+  nothing is on hand** and **orange when short** (`app-grid__row--danger` / `--warning`). Export writes
+  the same rows to Excel.
+- **Create Purchase Order (n)** (needs `purchase.orders.create`): the ticked rows in a modal
+  (`CreatePurchaseOrdersModal`) with an editable quantity (the suggestion) and supplier, an order date
+  and an expected date, and a **grouping preview** — one order per supplier AND warehouse, updated as
+  suppliers change. Create calls `POST api/inventory/shortages/create-orders`; the result lists each
+  draft with a link, and Done reloads the report with an info line naming the orders. The branch of each
+  order is the warehouse's own; the currency is the supplier's; the line price is the last cost converted.
+
+## Numbers
+
+Every quantity and amount the app shows goes through `formatNumber` / `formatMoney`
+(`src/components/format.ts`): thousands separators and fixed decimals in the en-US shape — 14020800 reads
+**14,020,800.00**, whatever the browser locale. `money()` in `documentKind.ts` is the same thing with the
+currency code. A `NumberInput` that holds a quantity or an amount carries `thousandSeparator=","`.
+Counts (items, rows) go through `formatNumber` too; a bare `{value}` of a number in JSX is a bug.
 ## Document pages
 
 Inventory In and Inventory Out are the first **document family**. Purchase and Sales will be the same

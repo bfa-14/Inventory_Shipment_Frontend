@@ -8,6 +8,7 @@ import { itemsApi } from '../../api/inventory/items'
 import type { ItemListDto, ItemSortBy } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { downloadCsv } from '../../components/masterdata/csv'
+import { formatNumber } from '../../components/format'
 import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
@@ -50,6 +51,8 @@ export function ItemsPage() {
   const navigate = useNavigate()
   const lookups = useItemLookups()
   const narrow = useMediaQuery(NARROW)
+  /* The cost column is for the desk, not the phone: below 1024 px the row has no room for it. */
+  const wide = useMediaQuery('(min-width: 1024px)')
   const [busyId, setBusyId] = useState<number | null>(null)
 
   const canCreate = hasPermission(PERMISSIONS.itemsCreate)
@@ -274,10 +277,25 @@ export function ItemsPage() {
          Zero is dimmed so "none in stock" reads differently from a number worth acting on. */
       render: (item) => (
         <Text fz="sm" fw={item.onHand > 0 ? 500 : 400} c={item.onHand > 0 ? undefined : 'dimmed'}>
-          {item.onHand}
+          {formatNumber(item.onHand)}
         </Text>
       ),
     },
+    ...(wide
+      ? [
+          {
+            accessor: 'averageCost',
+            title: 'Avg. Cost',
+            width: 110,
+            textAlign: 'right',
+            render: (item: ItemListDto) => (
+              <Text fz="sm" c={item.averageCost ? undefined : 'dimmed'}>
+                {item.averageCost === null ? '—' : formatNumber(item.averageCost, 2)}
+              </Text>
+            ),
+          } satisfies DataTableColumn<ItemListDto>,
+        ]
+      : []),
     {
       accessor: 'isActive',
       title: 'Status',

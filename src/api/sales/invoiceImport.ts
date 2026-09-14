@@ -20,6 +20,8 @@ export interface ImportValidatedRow {
   rowNumber: number
   status: ImportRowStatus
   message: string | null
+  /** The type the row belongs to: its "Document Type" cell resolved to a code, or the page's when blank. */
+  rowDocumentTypeCode: string | null
 
   /** What the file said. On a row whose code is unknown it is the only identification there is. */
   itemRef: string | null
@@ -46,6 +48,15 @@ export interface ImportValidatedRow {
   discountPercent: number
   expiryDate: string | null
   notes: string | null
+
+  /** Stock on hand for the row's item and warehouse, in base units. Null when either is unresolved. */
+  onHandBase: number | null
+  /**
+   * Base units this row takes together with the rows above it for the same item and warehouse —
+   * what the stock check (checkStock) compares with onHandBase. Cumulative, because a file with
+   * three rows of one item is one demand on the shelf.
+   */
+  requiredBase: number | null
 }
 
 export interface ImportValidationResult {
@@ -68,6 +79,8 @@ export interface ImportLogRequest {
   rejectedRows: number
   /** The host screen's draft id, so the audit row can be attached to the document once it is saved. */
   draftReference?: string | null
+  /** The invoice the lines went into, once it has an id; the audit row then also lands on the invoice. */
+  invoiceId?: number | null
 }
 
 export const invoiceImportApi = {
@@ -79,7 +92,7 @@ export const invoiceImportApi = {
    */
   validate: (
     file: File,
-    header: { branchId: number; warehouseId: number; priceListId: number | null },
+    header: { branchId: number; warehouseId: number; priceListId: number | null; checkStock?: boolean; documentTypeCode: string },
     signal?: AbortSignal,
   ) => {
     const form = new FormData()
@@ -87,6 +100,10 @@ export const invoiceImportApi = {
     form.append('branchId', String(header.branchId))
     form.append('warehouseId', String(header.warehouseId))
     if (header.priceListId != null) form.append('priceListId', String(header.priceListId))
+    // Off by default on the server too; sent only when asked, so a stock-in import never trips it.
+    if (header.checkStock) form.append('checkStock', 'true')
+    // Always: the page's type decides the unit a blank Unit cell means and rejects rows typed for another kind.
+    form.append('documentTypeCode', header.documentTypeCode)
 
     return postForm<ImportValidationResult>('/api/sales/invoice-import/validate', form, signal)
   },
@@ -94,9 +111,12 @@ export const invoiceImportApi = {
   log: (payload: ImportLogRequest) =>
     request<{ id: number }>('/api/sales/invoice-import/log', { method: 'POST', body: payload }),
 
-  /** The blank template, saved by the browser. */
-  downloadTemplate: async () =>
-    save(await fetchBlob('/api/sales/invoice-import/template'), 'Invoice_Items_Template.xlsx'),
+  /** The blank template for one document type — the same workbook for every type, the type pre-filled. */
+  downloadTemplate: async (documentTypeCode: string) =>
+    save(
+      await fetchBlob(`/api/sales/invoice-import/template?documentTypeCode=${encodeURIComponent(documentTypeCode)}`),
+      `Import_${documentTypeCode}_Template.xlsx`,
+    ),
 
   /** The non-valid rows as a workbook to correct and re-upload. */
   downloadErrorReport: async (rows: ImportValidatedRow[]) =>

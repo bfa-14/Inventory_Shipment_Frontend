@@ -1,7 +1,7 @@
 import { Badge, Card, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import { IconArrowsExchange, IconFiles, IconScale, IconShoppingCart, IconTruck } from '@tabler/icons-react'
 import type { ItemDetailsDto } from '../../api/types'
-import { formatDateTime } from '../../components/format'
+import { formatDateOnly, formatDateTime, formatNumber } from '../../components/format'
 
 /** Label above, value below - the read-only shape the side cards repeat. */
 function Row({ label, value, dimmed = false }: { label: string; value: string; dimmed?: boolean }) {
@@ -35,13 +35,14 @@ export function ItemAuditCard({ item }: { item: ItemDetailsDto }) {
 }
 
 /**
- * On hand and the cost figures. Every value here is a placeholder the API sends as 0 or null: the
- * numbers become real when the stock and purchasing modules land, and the note says so rather than
- * letting a reader take a dash for "this item costs nothing".
+ * On hand and the cost figures, as the ledger and the postings keep them.
+ *
+ * READ-ONLY BY DESIGN. The average is a moving average written by every posting that adds stock,
+ * the last cost and supplier by the last receipt; a box that let somebody type over them would let
+ * the same stock leave at a value it never entered at.
  */
 export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
-  const money = (value: number | null | undefined) =>
-    value === null || value === undefined ? '—' : value.toLocaleString(undefined, { minimumFractionDigits: 2 })
+  const money = (value: number | null | undefined) => (value === null || value === undefined ? '—' : `${formatNumber(value, 2)} USD`)
 
   return (
     <Card radius="lg" p="lg" withBorder>
@@ -49,13 +50,14 @@ export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
         Stock &amp; Costs
       </Text>
       <Stack gap="xs">
-        <Row label="On Hand" value={item ? String(item.onHand) : '0'} dimmed />
-        <Row label="Last Cost" value={money(item?.lastCost)} dimmed />
-        <Row label="Average Cost" value={money(item?.averageCost)} dimmed />
-        <Row label="Last Purchase Cost" value={money(item?.lastPurchaseCost)} dimmed />
+        <Row label="On Hand" value={item ? formatNumber(item.onHand) : '0'} />
+        <Row label="Average Cost" value={money(item?.averageCost)} />
+        <Row label="Last Cost" value={money(item?.lastCost)} />
+        <Row label="Last Supplier" value={item?.lastSupplierName ?? '—'} dimmed={!item?.lastSupplierName} />
+        <Row label="Last Purchase" value={item?.lastPurchaseAtUtc ? formatDateOnly(item.lastPurchaseAtUtc.slice(0, 10)) : '—'} dimmed={!item?.lastPurchaseAtUtc} />
       </Stack>
       <Text c="dimmed" fz="xs" mt="sm">
-        Available once the Stock module is live.
+        Per base unit, in USD. The average moves with every receipt; the last cost and supplier are the last receipt's.
       </Text>
     </Card>
   )

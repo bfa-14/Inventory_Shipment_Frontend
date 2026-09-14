@@ -1,3 +1,4 @@
+import type { BulkActionResult, ImportCreateLine, ImportCreateResult } from '../documents'
 import { fetchBlob, postForm, request } from '../http'
 import type { PagedResult } from '../types'
 
@@ -32,7 +33,42 @@ export interface DocumentTypeDto {
    */
   numberOnPost: boolean
   requiresReason: boolean
+  /** Cost: a typed or average cost; PriceList: the price list price; None: no money on the lines. */
+  defaultPricing: 'Cost' | 'PriceList' | 'None'
+  /** Whether the price / cost column may be typed. False on an Out: the average is applied. */
+  priceEditable: boolean
+  /** True: one sequence per branch ("IN-KLW-000012"); false: one for the company. */
+  numberPerBranch: boolean
   isActive: boolean
+  updatedAtUtc: string | null
+  /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */
+  rowVersion: string
+}
+
+/** The configuration page's save. Code, family and direction are not editable. */
+export interface UpdateDocumentTypeRequest {
+  name: string
+  numberPrefix: string
+  numberLength: number
+  numberOnPost: boolean
+  requiresReason: boolean
+  defaultPricing: string
+  priceEditable: boolean
+  numberPerBranch: boolean
+  isActive: boolean
+  rowVersion: string | null
+}
+
+/** An imported file becoming stock documents: the shared header and the lines, grouped by warehouse on the server. */
+export interface ImportCreateStockDocumentsRequest {
+  documentTypeCode: StockDocumentTypeCode
+  documentDate: string
+  branchId: number
+  reasonId?: number | null
+  referenceNo?: string | null
+  notes?: string | null
+  lines: ImportCreateLine[]
+  postImmediately: boolean
 }
 
 export interface StockReasonDto {
@@ -253,6 +289,17 @@ export const stockDocumentsApi = {
   exportToExcel: async (id: number, fileName: string) =>
     save(await fetchBlob(`${BASE}/${id}/export`), fileName),
 
+  /** Posts each id in its own transaction; the result says what happened to each. */
+  bulkPost: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-post`, { method: 'POST', body: { ids } }),
+
+  /** Deletes each draft in its own call; a posted document among the ids fails alone with NOT_DRAFT. */
+  bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
+
+  /** One document per warehouse found in the lines, each posted at once when asked. */
+  importCreate: (payload: ImportCreateStockDocumentsRequest) =>
+    request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
+
+
   addFile: (id: number, file: File) => {
     const form = new FormData()
     form.append('file', file, file.name)
@@ -269,6 +316,11 @@ export const stockDocumentsApi = {
 export const inventoryLookupsApi = {
   /** All eight document kinds and their numbering rules. Readable by any signed-in user. */
   documentTypes: () => request<DocumentTypeDto[]>('/api/inventory/document-types'),
+
+  /** The configuration page's save; needs inventory.documenttypes.manage. */
+  updateDocumentType: (id: number, payload: UpdateDocumentTypeRequest) =>
+    request<DocumentTypeDto>(`/api/inventory/document-types/${id}`, { method: 'PUT', body: payload }),
+
 
   /** Reasons for one direction: 1 for In, -1 for Out. */
   stockReasons: (direction: number) =>

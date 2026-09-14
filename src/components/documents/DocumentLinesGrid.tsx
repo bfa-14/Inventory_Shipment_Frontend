@@ -1,7 +1,9 @@
-import { ActionIcon, Group, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
+import { ActionIcon, Anchor, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
-import { IconAlertTriangle, IconTrash } from '@tabler/icons-react'
+import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
+import { Link } from 'react-router'
 import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
+import { formatNumber, numberInputValue } from '../format'
 import { fromIsoDate, isoDate, money, unitLabel } from './documentKind'
 
 /**
@@ -36,11 +38,6 @@ export interface EditableLine {
   error?: string
 }
 
-interface Option {
-  value: string
-  label: string
-}
-
 interface DocumentLinesGridProps {
   lines: EditableLine[]
   onChange: (key: string, patch: Partial<EditableLine>) => void
@@ -48,8 +45,6 @@ interface DocumentLinesGridProps {
   onAdd: () => void
   /** Every active item, for the Item Code select. Searchable, so the whole list is fine. */
   items: ItemLookupDto[]
-  /** Warehouses of the header's branch. */
-  warehouses: Option[]
   /** When an item is picked, the page fetches its units and its last cost. */
   onItemChosen: (key: string, itemId: number) => void
   currencyCode: string
@@ -77,7 +72,6 @@ export function DocumentLinesGrid({
   onRemove,
   onAdd,
   items,
-  warehouses,
   onItemChosen,
   currencyCode,
   costIsEditable,
@@ -100,7 +94,7 @@ export function DocumentLinesGrid({
   const total = (line: EditableLine) => line.quantity * line.unitCost
 
   return (
-    <Table.ScrollContainer minWidth={1200}>
+    <Table.ScrollContainer minWidth={1050}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -108,14 +102,13 @@ export function DocumentLinesGrid({
             <Table.Th w={240}>Item Code</Table.Th>
             <Table.Th w={200}>Item Name</Table.Th>
             <Table.Th w={140}>Unit</Table.Th>
-            <Table.Th w={170}>Warehouse</Table.Th>
             <Table.Th w={150}>Expiry Date</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
             <Table.Th w={130} ta="right">Unit Cost</Table.Th>
             <Table.Th w={130} ta="right">Amount</Table.Th>
             <Table.Th w={160}>Notes</Table.Th>
-            {!readOnly && <Table.Th w={50} />}
+            <Table.Th w={84} />
           </Table.Tr>
         </Table.Thead>
 
@@ -143,22 +136,48 @@ export function DocumentLinesGrid({
                   </Group>
                 </Table.Td>
 
-                <Table.Td data-line-item={index}>
+                {/* THE CODE IS A LINK TO THE ITEM, in a new tab so the document stays where it is.
+                    tabIndex -1 everywhere: the link and its icon are for the mouse, and a reader
+                    tabbing item → unit → quantity must not land on them. */}
+                <Table.Td data-line-item={index} className="line-item-link">
                   {readOnly ? (
-                    <Text fz="sm" fw={500}>{line.itemCode}</Text>
+                    line.itemId === null ? (
+                      <Text fz="sm" fw={500}>{line.itemCode}</Text>
+                    ) : (
+                      <ItemLink itemId={line.itemId} code={line.itemCode} />
+                    )
                   ) : (
-                    <Select
-                      data={itemOptions}
-                      value={line.itemId === null ? null : String(line.itemId)}
-                      placeholder="Choose an item"
-                      searchable
-                      onChange={(next) => {
-                        if (!next) return
-                        onItemChosen(line.key, Number(next))
-                      }}
-                      error={Boolean(line.error) && line.itemId === null}
-                      comboboxProps={{ withinPortal: true }}
-                    />
+                    <Group gap={4} wrap="nowrap">
+                      <Select
+                        data={itemOptions}
+                        value={line.itemId === null ? null : String(line.itemId)}
+                        placeholder="Choose an item"
+                        searchable
+                        onChange={(next) => {
+                          if (!next) return
+                          onItemChosen(line.key, Number(next))
+                        }}
+                        error={Boolean(line.error) && line.itemId === null}
+                        comboboxProps={{ withinPortal: true }}
+                        style={{ flex: 1 }}
+                      />
+                      {line.itemId !== null && (
+                        <Tooltip label="View item details (new tab)" withArrow>
+                          <ActionIcon
+                            component="a"
+                            href={`/inventory/items/${line.itemId}`}
+                            target="_blank"
+                            rel="noopener"
+                            variant="subtle"
+                            size="sm"
+                            tabIndex={-1}
+                            aria-label={`View item ${line.itemCode}`}
+                          >
+                            <IconExternalLink size={15} className="line-item-link-icon" />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </Group>
                   )}
                 </Table.Td>
 
@@ -194,22 +213,6 @@ export function DocumentLinesGrid({
 
                 <Table.Td>
                   {readOnly ? (
-                    <Text fz="sm">
-                      {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
-                    </Text>
-                  ) : (
-                    <Select
-                      data={warehouses}
-                      value={line.warehouseId === null ? null : String(line.warehouseId)}
-                      placeholder="Warehouse"
-                      onChange={(next) => next && onChange(line.key, { warehouseId: Number(next) })}
-                      comboboxProps={{ withinPortal: true }}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td>
-                  {readOnly ? (
                     <Text fz="sm">{line.expiryDate?.slice(0, 10) ?? '—'}</Text>
                   ) : (
                     <DateInput
@@ -230,23 +233,25 @@ export function DocumentLinesGrid({
                     <Text fz="sm" c="dimmed">—</Text>
                   ) : (
                     <Text fz="sm" fw={short ? 700 : 400} c={short ? 'red' : undefined}>
-                      {line.onHandBase}
+                      {formatNumber(line.onHandBase)}
                     </Text>
                   )}
                 </Table.Td>
 
-                <Table.Td>
+                <Table.Td data-line-qty={line.key}>
                   {readOnly ? (
-                    <Text fz="sm" ta="right">{line.quantity}</Text>
+                    <Text fz="sm" ta="right">{formatNumber(line.quantity)}</Text>
                   ) : (
                     <NumberInput
-                      value={line.quantity}
+                      /* Empty while it is being retyped: a cleared box snapped back to 1 would make
+                         the next keystroke append ("7" → "71"). 0 is "nothing yet"; the page refuses to
+                         save a line at 0. */
+                      value={line.quantity > 0 ? line.quantity : ''}
                       min={1}
                       step={1}
                       allowDecimal={false}
-                      onChange={(next) =>
-                        onChange(line.key, { quantity: typeof next === 'number' ? next : 1 })
-                      }
+                      thousandSeparator=","
+                      onChange={(next) => onChange(line.key, { quantity: numberInputValue(next) ?? 0 })}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
                           event.preventDefault()
@@ -258,15 +263,16 @@ export function DocumentLinesGrid({
                   )}
                 </Table.Td>
 
-                <Table.Td>
+                <Table.Td data-line-cost={line.key}>
                   {readOnly || !costIsEditable ? (
                     <Tooltip
                       label="Average cost is applied automatically"
-                      disabled={readOnly || costIsEditable}
+                      // Said in every mode on an Out: a posted Out's cost is still the average, not a typed figure.
+                      disabled={costIsEditable}
                       withArrow
                     >
                       <Text fz="sm" ta="right" c={costIsEditable ? undefined : 'dimmed'}>
-                        {line.unitCost.toFixed(2)}
+                        {formatNumber(line.unitCost, 2)}
                       </Text>
                     </Tooltip>
                   ) : (
@@ -275,9 +281,9 @@ export function DocumentLinesGrid({
                       min={0}
                       decimalScale={2}
                       fixedDecimalScale
-                      onChange={(next) =>
-                        onChange(line.key, { unitCost: typeof next === 'number' ? next : 0 })
-                      }
+                      thousandSeparator=","
+                      // Parsed, not type-checked: with fixedDecimalScale the value arrives as "2,150.00".
+                      onChange={(next) => onChange(line.key, { unitCost: numberInputValue(next) ?? 0 })}
                     />
                   )}
                 </Table.Td>
@@ -299,22 +305,49 @@ export function DocumentLinesGrid({
                   )}
                 </Table.Td>
 
-                {!readOnly && (
-                  <Table.Td>
-                    <Tooltip label="Remove line" withArrow>
-                      <ActionIcon variant="subtle" color="red" onClick={() => onRemove(line.key)}>
-                        <IconTrash size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </Table.Td>
-                )}
+                <Table.Td>
+                  <Group gap={2} wrap="nowrap" justify="flex-end">
+                    {!readOnly && (
+                      <Tooltip label="Remove line" withArrow>
+                        <ActionIcon variant="subtle" color="red" onClick={() => onRemove(line.key)} aria-label={`Remove line ${index + 1}`}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    )}
+                    {/* The row menu: what can be done with the line beyond editing it. */}
+                    <Menu position="bottom-end" withinPortal shadow="md" width={200}>
+                      <Menu.Target>
+                        <ActionIcon variant="subtle" tabIndex={-1} aria-label={`Actions for line ${index + 1}`}>
+                          <IconDotsVertical size={16} />
+                        </ActionIcon>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        <Menu.Item
+                          component="a"
+                          href={line.itemId === null ? undefined : `/inventory/items/${line.itemId}`}
+                          target="_blank"
+                          rel="noopener"
+                          leftSection={<IconExternalLink size={14} />}
+                          disabled={line.itemId === null}
+                        >
+                          View item details
+                        </Menu.Item>
+                        {!readOnly && (
+                          <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onRemove(line.key)}>
+                            Remove line
+                          </Menu.Item>
+                        )}
+                      </Menu.Dropdown>
+                    </Menu>
+                  </Group>
+                </Table.Td>
               </Table.Tr>
             )
           })}
 
           {lines.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={readOnly ? 11 : 12}>
+              <Table.Td colSpan={11}>
                 <Text ta="center" c="dimmed" py="lg">
                   No lines yet. Scan an item above, or add one below.
                 </Text>
@@ -326,7 +359,7 @@ export function DocumentLinesGrid({
               it makes people hunt upwards after every line they finish. */}
           {!readOnly && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={12}>
+              <Table.Td colSpan={11}>
                 <Text c="dimmed" fz="sm">
                   + Click to add an item…
                 </Text>
@@ -336,5 +369,24 @@ export function DocumentLinesGrid({
         </Table.Tbody>
       </Table>
     </Table.ScrollContainer>
+  )
+}
+
+/** The item code as a link to Item Definition, in a new tab, with the icon appearing on hover. */
+function ItemLink({ itemId, code }: { itemId: number; code: string }) {
+  return (
+    <Anchor
+      component={Link}
+      to={`/inventory/items/${itemId}`}
+      target="_blank"
+      rel="noopener"
+      fz="sm"
+      fw={500}
+      tabIndex={-1}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+    >
+      {code}
+      <IconExternalLink size={14} className="line-item-link-icon" />
+    </Anchor>
   )
 }

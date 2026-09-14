@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
@@ -13,6 +13,7 @@ import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { formatNumber } from '../../components/format'
 import {
   dateLabel,
   isoDate,
@@ -20,6 +21,9 @@ import {
   STATUS_COLOURS,
   type DocumentKind,
 } from '../../components/documents/documentKind'
+import type { BulkActionResult } from '../../api/documents'
+import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
+import { BulkResultsModal } from '../../components/documents/BulkResultsModal'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
@@ -28,6 +32,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { useGridQuery } from '../../hooks/useGridQuery'
 
 interface Filters {
@@ -68,7 +73,11 @@ const ACCESSOR_TO_SORT: Record<string, string> = {
  */
 export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { hasPermission } = useAuth()
+
+  /** Ids the import wizard just created; their rows are tinted so the reader finds them. */
+  const highlight = ((location.state as { highlight?: number[] } | null)?.highlight) ?? []
 
   const canCreate = hasPermission(kind.permissions.create)
   const canPost = hasPermission(kind.permissions.post)
@@ -81,6 +90,11 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   /** The row whose cancellation is being asked about, or null when the dialog is closed. */
   const [cancelling, setCancelling] = useState<StockDocumentListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
+
+  /* BULK ACTIONS: the ticked drafts, kept across pages, acted on one by one on the server. */
+  const selection = useBulkSelection<StockDocumentListDto>()
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
 
   const grid = useGridQuery<Filters, StockDocumentListDto, Awaited<ReturnType<typeof stockDocumentsApi.search>>>({
     initialFilters: NO_FILTERS,
@@ -147,6 +161,54 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   const documentLabel = (row: StockDocumentListDto) =>
     row.documentNumber ?? `draft #${row.id}`
 
+  /** Only a draft can be posted or deleted, and only by a reader who may do one of the two. */
+  const selectable = (row: StockDocumentListDto) => row.status === 'Draft' && (canPost || canDelete)
+
+  async function bulkPost() {
+    const ids = selection.ids
+    const go = await confirm({
+      title: `Post ${ids.length} document(s)`,
+      message: `Post the ${ids.length} selected draft(s)? Each is posted on its own: one refusal does not stop the others. Stock will be updated and the posted documents become read-only.`,
+      confirmLabel: 'Post selected',
+    })
+    if (!go) return
+
+    setBulkBusy(true)
+    try {
+      const result = await stockDocumentsApi.bulkPost(ids)
+      setBulkResult({ title: 'Post selected', successLabel: 'Posted', result })
+      selection.removeIds(result.results.filter((r) => r.ok).map((r) => r.id))
+      await load()
+    } catch (err) {
+      notify.error(err instanceof ApiError ? err.message : 'The documents could not be posted.')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function bulkDelete() {
+    const ids = selection.ids
+    const go = await confirm({
+      title: `Delete ${ids.length} draft(s)`,
+      message: `Delete the ${ids.length} selected draft(s)? This cannot be undone.`,
+      confirmLabel: 'Delete selected',
+      danger: true,
+    })
+    if (!go) return
+
+    setBulkBusy(true)
+    try {
+      const result = await stockDocumentsApi.bulkDelete(ids)
+      setBulkResult({ title: 'Delete selected', successLabel: 'Deleted', result })
+      selection.removeIds(result.results.filter((r) => r.ok).map((r) => r.id))
+      await load()
+    } catch (err) {
+      notify.error(err instanceof ApiError ? err.message : 'The drafts could not be deleted.')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   async function post(row: StockDocumentListDto) {
     const go = await confirm({
       title: `Post ${documentLabel(row)}`,
@@ -207,12 +269,13 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
       accessor: 'documentNumber',
       title: 'Document No.',
       sortable: true,
-      width: 150,
+      // Per-branch numbers are longer ("IN-KLW-000012"); the column must never truncate one.
+      width: 190,
       /* A draft of a type that numbers on posting has no number yet, and an empty cell would read as
          missing data rather than as "not assigned". The badge says which it is. */
       render: (row) =>
         row.documentNumber ? (
-          <Text fz="sm" fw={500}>{row.documentNumber}</Text>
+          <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{row.documentNumber}</Text>
         ) : (
           <Badge color="gray" variant="light">DRAFT</Badge>
         ),
@@ -228,13 +291,13 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
     { accessor: 'warehouseName', title: 'Warehouse', sortable: true },
     { accessor: 'reasonName', title: 'Reason', render: (row) => row.reasonName ?? '—' },
     { accessor: 'referenceNo', title: 'Reference', render: (row) => row.referenceNo ?? '—' },
-    { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right' },
+    { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
     {
       accessor: 'totalQuantity',
       title: 'Quantity',
       width: 100,
       textAlign: 'right',
-      render: (row) => row.totalQuantity,
+      render: (row) => formatNumber(row.totalQuantity),
     },
     {
       accessor: 'totalCost',
@@ -393,10 +456,24 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
         </Alert>
       )}
 
+      <BulkActionsBar
+        count={selection.ids.length}
+        canPost={canPost}
+        canDelete={canDelete}
+        busy={bulkBusy}
+        onPost={() => void bulkPost()}
+        onDelete={() => void bulkDelete()}
+        onClear={selection.clear}
+      />
+
       <Paper radius="lg" withBorder>
         <DataTable
           records={data?.items ?? []}
           columns={columns}
+          selectedRecords={selection.selected}
+          onSelectedRecordsChange={selection.setSelected}
+          isRecordSelectable={selectable}
+          rowClassName={(row) => (highlight.includes(row.id) ? 'app-grid__row--highlight' : undefined)}
           totalRecords={data?.totalCount ?? 0}
           page={grid.page}
           recordsPerPage={grid.pageSize}
@@ -409,6 +486,15 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
           onRowClick={({ record }) => void navigate(`${kind.route}/${record.id}`)}
         />
       </Paper>
+
+      <BulkResultsModal
+        opened={bulkResult !== null}
+        title={bulkResult?.title ?? ''}
+        successLabel={bulkResult?.successLabel ?? ''}
+        result={bulkResult?.result ?? null}
+        labelOf={(item) => `draft #${item.id}`}
+        onClose={() => setBulkResult(null)}
+      />
 
       <CancelReasonModal
         opened={cancelling !== null}

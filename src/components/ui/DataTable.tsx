@@ -60,6 +60,16 @@ interface DataTableProps<T> {
    * permission for that action. Defaults to {@link onRowClick} when only that is given.
    */
   onRowActivate?(args: { record: T; index: number }): void
+  /**
+   * Bulk selection - a checkbox column, driven by the page. The page holds the selected RECORDS so
+   * a selection survives paging; `isRecordSelectable` says which rows may be ticked at all (drafts,
+   * for a post). Leaving these out keeps the grid without a checkbox column.
+   */
+  selectedRecords?: T[]
+  onSelectedRecordsChange?(records: T[]): void
+  isRecordSelectable?(record: T, index: number): boolean
+  /** A class for a row the page wants to point at - the documents an import just created. */
+  rowClassName?(record: T): string | undefined
 }
 
 /**
@@ -97,6 +107,10 @@ export function DataTable<T>({
   filters,
   onRowClick,
   onRowActivate,
+  selectedRecords,
+  onSelectedRecordsChange,
+  isRecordSelectable,
+  rowClassName,
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
   const idKey = idAccessor ?? 'id'
@@ -207,7 +221,14 @@ export function DataTable<T>({
           withColumnBorders
           borderRadius="md"
           verticalAlign="center"
-          rowClassName={(record) => (rowId(record, idKey) === selectedId ? 'app-grid__row--selected' : undefined)}
+          rowClassName={(record) =>
+            [rowId(record, idKey) === selectedId ? 'app-grid__row--selected' : undefined, rowClassName?.(record)]
+              .filter(Boolean)
+              .join(' ') || undefined
+          }
+          {...(selectedRecords && onSelectedRecordsChange
+            ? { selectedRecords, onSelectedRecordsChange, isRecordSelectable }
+            : {})}
           onRowClick={({ record, index, event }) => {
             setSelectedId(rowId(record, idKey))
 

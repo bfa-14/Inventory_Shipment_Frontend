@@ -59,6 +59,28 @@ export const PERMISSIONS = {
   stockOutDelete: 'inventory.stockout.delete',
   invoicesImport: 'sales.invoices.import',
   invoicesPriceOverride: 'sales.invoices.priceoverride',
+  invoicesView: 'sales.invoices.view',
+  invoicesCreate: 'sales.invoices.create',
+  invoicesPost: 'sales.invoices.post',
+  invoicesCancel: 'sales.invoices.cancel',
+  invoicesDelete: 'sales.invoices.delete',
+  documentTypesManage: 'inventory.documenttypes.manage',
+  shortagesView: 'inventory.shortages.view',
+  purchaseOrdersView: 'purchase.orders.view',
+  purchaseOrdersCreate: 'purchase.orders.create',
+  purchaseOrdersPost: 'purchase.orders.post',
+  purchaseOrdersCancel: 'purchase.orders.cancel',
+  purchaseOrdersDelete: 'purchase.orders.delete',
+  purchaseInvoicesView: 'purchase.invoices.view',
+  purchaseInvoicesCreate: 'purchase.invoices.create',
+  purchaseInvoicesPost: 'purchase.invoices.post',
+  purchaseInvoicesCancel: 'purchase.invoices.cancel',
+  purchaseInvoicesDelete: 'purchase.invoices.delete',
+  purchaseReturnsView: 'purchase.returns.view',
+  purchaseReturnsCreate: 'purchase.returns.create',
+  purchaseReturnsPost: 'purchase.returns.post',
+  purchaseReturnsCancel: 'purchase.returns.cancel',
+  purchaseReturnsDelete: 'purchase.returns.delete',
 } as const
 
 export interface NavItem {
@@ -71,6 +93,11 @@ export interface NavItem {
   comingSoon?: boolean
   /** A short tag beside the label — "Preview" on a screen that exists only to try something out. */
   badge?: string
+  /**
+   * False hides the item from the sidebar, the menu search AND the Spotlight while its route keeps
+   * working — for a screen that is kept but not offered, so a bookmark still opens it.
+   */
+  visible?: boolean
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
   /**
@@ -128,22 +155,35 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
-      { label: 'Stock Shortage', icon: 'shortage', comingSoon: true },
+      // The shortage report: what is below its minimum, and the purchase orders that fix it.
+      { label: 'Shortages', to: '/inventory/shortages', permission: PERMISSIONS.shortagesView, icon: 'shortage' },
     ],
   },
   {
-    // ONE PAGE, AND IT IS SCAFFOLDING. The import wizard was built before the Sales Invoice screen
-    // that will host it, so this section exists to try it against a real API. It goes when
-    // US-SAL-001 lands and the invoice renders the wizard itself.
+    // BUYING, IN THE ORDER IT HAPPENS: an order is confirmed, the supplier invoices it (stock in,
+    // costs set), and what is wrong goes back on a return. One page serves all three.
+    title: 'PURCHASE',
+    breadcrumb: 'Purchase',
+    items: [
+      { label: 'Purchase Orders', to: '/purchase/orders', permission: PERMISSIONS.purchaseOrdersView, icon: 'cart' },
+      { label: 'Purchase Invoices', to: '/purchase/invoices', permission: PERMISSIONS.purchaseInvoicesView, icon: 'invoice' },
+      { label: 'Purchase Returns', to: '/purchase/returns', permission: PERMISSIONS.purchaseReturnsView, icon: 'movement' },
+    ],
+  },
+  {
+    // HIDDEN, NOT REMOVED. The import page turned a spreadsheet into a posted invoice before the
+    // Sales Invoice screen existed; that screen hosts the same wizard now, so the page is kept for
+    // its route and its code but is not offered in the menu, the search or the Spotlight.
     title: 'SALES',
     breadcrumb: 'Sales',
     items: [
+      { label: 'Sales Invoices', to: '/sales/invoices', permission: PERMISSIONS.invoicesView, icon: 'invoice' },
       {
-        label: 'Import Items (preview)',
+        label: 'Import Sales from Excel',
         to: '/sales/import-preview',
         permission: PERMISSIONS.invoicesImport,
         icon: 'invoice',
-        badge: 'Preview',
+        visible: false,
       },
     ],
   },
@@ -178,9 +218,22 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Login audit', to: '/security/login-audit', permission: PERMISSIONS.auditView },
         ],
       },
-      { label: 'Configuration', icon: 'settings', comingSoon: true, children: [] },
       { label: 'Integration', icon: 'plug', comingSoon: true },
       { label: 'Audit & Logs', icon: 'history', comingSoon: true, children: [] },
+    ],
+  },
+  {
+    // WHAT A BUSINESS OWNER CHANGES ONCE AND LEAVES ALONE: how documents number, price and behave.
+    // Its own section rather than a group under Setup, so it is found by the people who own it.
+    title: 'CONFIGURATION',
+    breadcrumb: 'Configuration',
+    items: [
+      {
+        label: 'Document Types',
+        to: '/configuration/document-types',
+        permission: PERMISSIONS.documentTypesManage,
+        icon: 'settings',
+      },
     ],
   },
 ]
@@ -202,7 +255,7 @@ export function isGroup(item: NavItem): boolean {
  */
 export function visibleNavigation(hasPermission: (code: string) => boolean, showComingSoon = true): NavSection[] {
   const allowed = (item: NavItem) => !item.permission || hasPermission(item.permission)
-  const built = (item: NavItem) => showComingSoon || !item.comingSoon
+  const built = (item: NavItem) => (showComingSoon || !item.comingSoon) && item.visible !== false
 
   return NAVIGATION.map((section) => ({
     ...section,

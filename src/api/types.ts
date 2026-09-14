@@ -621,8 +621,14 @@ export interface ItemListDto {
   /** Unit type of the base unit; null while the item has no unit yet. */
   baseUnitName: string | null
   baseUnitSku: string | null
-  /** Placeholder until the stock module lands; always 0 today. */
+  /** Base units across every warehouse, from the stock ledger. */
   onHand: number
+  /** The moving average cost per base unit, kept on the item. */
+  averageCost: number | null
+  /** What the last receipt cost, per base unit. */
+  lastCost: number | null
+  defaultSupplierId: number | null
+  defaultSupplierName: string | null
   isBivac: boolean
   isActive: boolean
   createdAtUtc: string
@@ -652,11 +658,21 @@ export interface ItemDetailsDto {
   maxQuantity: number | null
   isBivac: boolean
   isActive: boolean
-  /** Placeholders until the stock and purchasing modules land. */
   onHand: number
+  /** What the last receipt cost, per base unit. */
   lastCost: number | null
+  /** The moving average cost per base unit, kept on the item by every posting that adds stock. */
   averageCost: number | null
   lastPurchaseCost: number | null
+  /** The supplier a purchase order is raised on by default. */
+  defaultSupplierId: number | null
+  defaultSupplierCode: string | null
+  defaultSupplierName: string | null
+  /** Days between ordering and receiving. */
+  leadTimeDays: number | null
+  lastSupplierId: number | null
+  lastSupplierName: string | null
+  lastPurchaseAtUtc: string | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -714,6 +730,10 @@ export interface SaveItemRequest {
   maxQuantity?: number | null
   isBivac: boolean
   isActive: boolean
+  /** The supplier a purchase order is raised on by default. */
+  defaultSupplierId?: number | null
+  /** Days between ordering and receiving. */
+  leadTimeDays?: number | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }
