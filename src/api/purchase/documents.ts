@@ -1,6 +1,7 @@
 import type { BulkActionResult, ImportCreateLine, ImportCreateResult } from '../documents'
 import { fetchBlob, postForm, request } from '../http'
 import type { SalesRateType } from '../sales/invoices'
+import type { PurchaseChargeDto, SetPurchaseChargesRequest } from './landedCostAdjustments'
 import type { PagedResult } from '../types'
 
 /**
@@ -143,18 +144,30 @@ export interface PurchaseDocumentLineDto {
   discountPercent: number
   lineDiscount: number
   lineTotal: number
-  /** The cost per base unit in the base currency, written by the posting. */
+  /** The LANDED cost per base unit in the base currency, written by the posting (FOB + charges). */
   unitCostBase: number | null
+  /** The same figure under the name the costing uses, so a column can say "Landed" without arithmetic. */
+  landedCostBase: number | null
+  /** What the supplier charged per base unit, before any of the charges around it. */
+  fobCostBase: number | null
+  /** The charges this line took, in the base currency. */
+  allocatedChargesBase: number
   receivedQuantityBase: number
   returnedQuantityBase: number
   /** Orders: still to receive; invoices: still returnable; returns: null. Base units. */
   remainingBase: number | null
+  /** Orders: what the supplier has shipped so far, recorded with "Mark as shipped". Base units. */
+  shippedQuantityBase: number
+  /** Shipped and not yet received — what the shortage plan counts as Transit. Base units. */
+  transitBase: number
   importRowNumber: number | null
   notes: string | null
   sourceLineId: number | null
   onHandBase: number
   itemLastCost: number | null
   itemAverageCost: number | null
+  /** The item's FOB cost as it stands now — what the next invoice would start from. */
+  itemFobCost: number | null
 }
 
 export interface PurchaseDocumentFileDto {
@@ -226,9 +239,16 @@ export interface PurchaseDocumentDto {
   totalDiscount: number
   totalAmount: number
   totalAmountBase: number
+  /** The landed charges on the goods: the invoice's own and its posted adjustments'. */
+  totalChargesBase: number
+  /** What the goods really cost: totalAmountBase + totalChargesBase. */
+  totalLandedCostBase: number
   sourceDocumentId: number | null
   sourceDocumentNumber: string | null
   sourceDocumentTypeCode: PurchaseDocumentTypeCode | null
+  /** The shortage plan this order was created from. */
+  sourceShortageId: number | null
+  sourceShortageNumber: string | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -247,9 +267,17 @@ export interface PurchaseDocumentDto {
   canDelete: boolean
   canCancel: boolean
   canClose: boolean
+  /** Charges are typed on a DRAFT invoice; after posting they arrive as a landed cost adjustment. */
+  canEditCharges: boolean
+  /** A posted invoice can receive charges that arrived late. */
+  canAdjustLandedCost: boolean
+  /** An open (posted) order: shipped quantities can be recorded. */
+  canMarkShipped: boolean
   canCreateInvoice: boolean
   canCreateReturn: boolean
   lines: PurchaseDocumentLineDto[]
+  /** The invoice's own charges AND those of its adjustments, each saying which it came from. */
+  charges: PurchaseChargeDto[]
   files: PurchaseDocumentFileDto[]
   audit: PurchaseDocumentAuditDto[]
   linked: LinkedPurchaseDocumentDto[]
@@ -303,6 +331,20 @@ export const purchaseDocumentsApi = {
   /** Orders only: ends an open order that will not be received any further. */
   close: (id: number, reason: string | null, rowVersion: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/close`, { method: 'POST', body: { reason, rowVersion } }),
+
+  /**
+   * What the supplier has shipped on an open order — the TOTAL shipped so far per line, in base
+   * units. No lines means everything was shipped. Needs purchase.orders.create.
+   */
+  markShipped: (id: number, lines: { lineId: number; shippedQuantityBase: number }[], rowVersion: string | null) =>
+    request<PurchaseDocumentDto>(`${BASE}/${id}/mark-shipped`, { method: 'POST', body: { lines, rowVersion } }),
+
+  /**
+   * The charges of a DRAFT purchase invoice, replacing whatever was there. Sent apart from the
+   * lines: the lines are the supplier's bill and the charges are everybody else's.
+   */
+  setCharges: (id: number, payload: SetPurchaseChargesRequest) =>
+    request<PurchaseDocumentDto>(`${BASE}/${id}/charges`, { method: 'PUT', body: payload }),
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 

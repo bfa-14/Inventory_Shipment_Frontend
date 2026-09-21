@@ -294,6 +294,17 @@ export function ItemsPage() {
               </Text>
             ),
           } satisfies DataTableColumn<ItemListDto>,
+          {
+            accessor: 'inventoryValue',
+            title: 'Inventory Value',
+            width: 130,
+            textAlign: 'right',
+            render: (item: ItemListDto) => (
+              <Text fz="sm" c={item.inventoryValue ? undefined : 'dimmed'}>
+                {formatNumber(item.inventoryValue, 2)}
+              </Text>
+            ),
+          } satisfies DataTableColumn<ItemListDto>,
         ]
       : []),
     {

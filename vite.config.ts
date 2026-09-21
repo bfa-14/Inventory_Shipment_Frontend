@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => {
   // Where the dev server forwards API calls. Using a proxy keeps the browser on a single origin
   // (no CORS) and accepts the API's self-signed development certificate (secure: false).
   const apiTarget = env.VITE_API_PROXY_TARGET || 'https://localhost:7089'
+  // The dev server's port. 5173 (Vite's default) is taken by another application on some machines,
+  // so this project uses 5174. WEB_PORT (env or .env file) overrides it; scripts/dev.mjs passes it too.
+  const webPort = Number(env.WEB_PORT) || 5174
 
   /**
    * What the browser gets when the API is not listening.
@@ -46,7 +49,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
-      port: 5173,
+      port: webPort,
       strictPort: true,
       proxy: {
         '/api': proxyEntry,

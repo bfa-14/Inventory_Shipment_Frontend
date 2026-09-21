@@ -48,6 +48,8 @@ interface PurchaseHeaderCardProps {
   /** True when the type assigns its number on posting rather than on the draft. */
   numberOnPost: boolean
   source: PurchaseSourceChip | null
+  /** The shortage plan the order was created from, shown as a chip that links to it. */
+  sourceShortage?: { id: number; documentNumber: string | null } | null
   isNew: boolean
   /** Posted, closed and cancelled documents are read: every input becomes text. */
   readOnly: boolean
@@ -78,6 +80,7 @@ export function PurchaseHeaderCard({
   documentNumber,
   numberOnPost,
   source,
+  sourceShortage = null,
   isNew,
   readOnly,
   errors,
@@ -111,6 +114,20 @@ export function PurchaseHeaderCard({
     <Paper radius="lg" p="md" withBorder>
       <Group justify="space-between" align="center" mb="sm" wrap="wrap">
         <Title order={5}>{kind.title} Information</Title>
+        {sourceShortage && (
+          <Badge
+            size="lg"
+            variant="light"
+            color="grape"
+            leftSection={<IconLink size={14} />}
+            component={Link}
+            to={`/inventory/shortages/${sourceShortage.id}`}
+            style={{ cursor: 'pointer', textTransform: 'none' }}
+            data-source-shortage-chip
+          >
+            Source: Shortage {sourceShortage.documentNumber ?? `#${sourceShortage.id}`}
+          </Badge>
+        )}
         {source && (
           <Badge
             size="lg"

@@ -12,11 +12,19 @@
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 import https from 'node:https'
+import net from 'node:net'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * The port the web dev server listens on - the one place to change it (vite.config.ts reads the same
+ * WEB_PORT). Not Vite's default 5173, which another application occupies on some machines.
+ */
+const WEB_PORT = Number(process.env.WEB_PORT) || 5174
+const WEB_URL = `http://localhost:${WEB_PORT}`
 
 /** How long the API is given to build, migrate and start listening. */
 const READY_TIMEOUT_MS = 90_000
@@ -88,6 +96,16 @@ function probeHealth() {
   })
 }
 
+/** Is WEB_PORT free? Checked before Vite starts so the failure names the fix (WEB_PORT=...). */
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.unref()
+    server.once('error', () => resolve(false))
+    server.listen({ port, host: '127.0.0.1' }, () => server.close(() => resolve(true)))
+  })
+}
+
 /** Write output line by line with `prefix`, so a matcher watching for "VITE v" still sees it. */
 function prefixTo(stream, prefix) {
   let rest = ''
@@ -133,7 +151,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 }
 
 /** Start Vite. `piped` prefixes its output; otherwise it keeps the terminal (colours, hot keys). */
-function startWeb(piped) {
+async function startWeb(piped) {
   const viteBin = path.join(WEB_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
   if (!existsSync(viteBin)) {
     console.error(`${RED}[dev] vite is not installed - run npm install${RESET}`)
@@ -141,10 +159,19 @@ function startWeb(piped) {
     return
   }
 
-  const web = spawn(process.execPath, [viteBin, ...process.argv.slice(2)], {
+  if (!(await isPortFree(WEB_PORT))) {
+    console.error(`${RED}[dev] port ${WEB_PORT} is already in use - stop what is on it, or run with WEB_PORT=<free port>${RESET}`)
+    shutdown(1)
+    return
+  }
+
+  console.log(`[dev] starting web on ${WEB_URL}`)
+
+  // --port first so an explicit `npm run dev -- --port N` still wins (Vite takes the last one).
+  const web = spawn(process.execPath, [viteBin, '--port', String(WEB_PORT), ...process.argv.slice(2)], {
     cwd: WEB_DIR,
     stdio: piped ? ['inherit', 'pipe', 'pipe'] : 'inherit',
-    env: process.env,
+    env: { ...process.env, WEB_PORT: String(WEB_PORT) },
   })
   children.push(web)
 
@@ -163,7 +190,7 @@ function startWeb(piped) {
 async function main() {
   if (await probeHealth()) {
     console.log(`[dev] API already running on ${TARGET} (e.g. from Visual Studio) - starting web only`)
-    startWeb(false)
+    await startWeb(false)
     return
   }
 
@@ -212,7 +239,7 @@ async function main() {
     if (await probeHealth()) {
       healthy = true
       console.log(`[dev] API is up on ${TARGET} (${waited}s) - starting web`)
-      startWeb(true)
+      await startWeb(true)
       return
     }
     if (waited % 5 === 0) console.log(`${DIM}[dev] waiting for ${TARGET}/health ... ${waited}s${RESET}`)

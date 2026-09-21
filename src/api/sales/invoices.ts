@@ -200,7 +200,23 @@ export interface SalesInvoiceLineDto {
   lineTotal: number
   priceSource: 'PriceList' | 'Manual'
   /** The average cost snapshotted on posting; null on a draft. */
+  /* THE COST SNAPSHOT, frozen when the invoice was posted. Null on a draft, and null for a reader
+     without sales.profit.view — a price is everybody's business, a margin is not. */
   unitCostBase: number | null
+  fobCostAtSale: number | null
+  lastCostAtSale: number | null
+  /** The line's sale after discount, in the base currency. */
+  netSalesBase: number | null
+  cogsBase: number | null
+  grossProfitBase: number | null
+  /** Gross profit as a percentage OF NET SALES. */
+  grossProfitPct: number | null
+  /** How much of this line has come back on a sales return, in base units. */
+  returnedQuantityBase: number
+  /** What can still be returned. */
+  remainingBase: number
+  /** The item's average cost as it stands NOW. Null without sales.profit.view. */
+  itemAverageCost: number | null
   importRowNumber: number | null
   notes: string | null
   onHandBase: number
@@ -268,7 +284,13 @@ export interface SalesInvoiceDto {
   totalDiscount: number
   totalAmount: number
   totalAmountBase: number
+  /** Cost of the goods that left. Null on a draft and for a reader without sales.profit.view. */
   totalCostBase: number | null
+  totalGrossProfitBase: number | null
+  totalGrossProfitPct: number | null
+  /** The invoice a return was created from. */
+  sourceDocumentId: number | null
+  sourceDocumentNumber: string | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -282,6 +304,8 @@ export interface SalesInvoiceDto {
   canEdit: boolean
   canPost: boolean
   canCancel: boolean
+  /** A posted invoice with something still not returned becomes a sales return draft. */
+  canCreateReturn: boolean
   canDelete: boolean
   lines: SalesInvoiceLineDto[]
   files: SalesInvoiceFileDto[]
@@ -331,6 +355,13 @@ export const salesInvoicesApi = {
 
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<SalesInvoiceDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
+
+  /**
+   * A sales return draft from a posted invoice: the remaining quantities, the invoice's prices and
+   * its ORIGINAL cost of sales. There is no returns page yet — the caller shows the number.
+   */
+  createReturn: (id: number, documentDate?: string | null) =>
+    request<SalesInvoiceDto>(`${BASE}/${id}/create-return`, { method: 'POST', body: { documentDate: documentDate ?? null } }),
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 

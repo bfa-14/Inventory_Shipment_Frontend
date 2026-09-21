@@ -186,3 +186,176 @@
 .mantine-datatable .app-grid__row--highlight > td {
   background: var(--mantine-color-green-0);
 }
+
+/* ── Shortage plan lines ─────────────────────────────────────────────────────────────────────────
+   Nineteen columns scroll inside the card; "#" and Item stay put so a figure at the far right is
+   still a figure OF something. Sticky cells need their own opaque background (the row's colour is
+   painted on the cells already), and sit above the scrolling ones. On a phone only Item sticks:
+   two frozen columns would leave no room for the ones being scrolled to. */
+.shortage-lines .mantine-datatable th:nth-child(2),
+.shortage-lines .mantine-datatable td:nth-child(2) {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background-color: var(--mantine-color-body);
+  box-shadow: inset -1px 0 0 var(--mantine-color-gray-3);
+}
+
+.shortage-lines .mantine-datatable th:nth-child(2) {
+  z-index: 3;
+}
+
+/* On a phone the frozen Item column is narrowed, so that what it leaves is still a usable cell.
+   !important because the grid writes the column's width inline. */
+@media (max-width: 47.99em) {
+  .shortage-lines .mantine-datatable th:nth-child(2),
+  .shortage-lines .mantine-datatable td:nth-child(2) {
+    width: 118px !important;
+    min-width: 118px !important;
+    max-width: 118px !important;
+  }
+}
+
+@media (min-width: 48em) {
+  .shortage-lines .mantine-datatable th:nth-child(1),
+  .shortage-lines .mantine-datatable td:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background-color: var(--mantine-color-body);
+  }
+
+  .shortage-lines .mantine-datatable th:nth-child(1) {
+    z-index: 3;
+  }
+
+  .shortage-lines .mantine-datatable th:nth-child(2),
+  .shortage-lines .mantine-datatable td:nth-child(2) {
+    left: 56px;
+  }
+}
+
+/* Room under the last row for the horizontal scrollbar, which otherwise lies over its inputs. */
+.shortage-lines .mantine-datatable table {
+  margin-bottom: 14px;
+}
+
+.shortage-lines .mantine-datatable tr.app-grid__row--selected > td:nth-child(-n + 2) {
+  background-color: var(--mantine-color-brand-0);
+}
+
+.shortage-lines .mantine-datatable tr.app-grid__row--danger > td:nth-child(-n + 2) {
+  background-color: var(--mantine-color-red-0);
+}
+
+/* ── Print view (the shortage plan on paper) ─────────────────────────────────────────────────────
+   Its own route outside the shell, so there is no navigation to hide: only the toolbar goes. */
+.print-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  background: #fff;
+  color: #000;
+  font-size: 13px;
+}
+
+.print-page h1 {
+  font-size: 20px;
+  margin: 0 0 12px;
+}
+
+.print-page dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 24px;
+  margin: 0 0 16px;
+}
+
+.print-page dl > div {
+  display: flex;
+  gap: 8px;
+}
+
+.print-page dt {
+  min-width: 130px;
+  color: #555;
+}
+
+.print-page dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.print-page__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+  font-size: 11px;
+}
+
+.print-page__table th,
+.print-page__table td {
+  border: 1px solid #999;
+  padding: 3px 5px;
+  text-align: right;
+  vertical-align: top;
+}
+
+.print-page__table th {
+  background: #e8eef7;
+  font-weight: 700;
+}
+
+.print-page__table .left {
+  text-align: left;
+}
+
+.print-page__totals {
+  border-top: 2px solid #000;
+  padding-top: 8px;
+}
+
+@media screen and (max-width: 48em) {
+  .print-page {
+    overflow-x: auto;
+  }
+
+  .print-page__table {
+    min-width: 1100px;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-page {
+    max-width: none;
+    padding: 0;
+    font-size: 10px;
+  }
+
+  .print-page__table {
+    font-size: 8.5px;
+  }
+
+  .print-page__table thead {
+    display: table-header-group;
+  }
+
+  .print-page__table tr {
+    break-inside: avoid;
+  }
+
+  .print-page__table th {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

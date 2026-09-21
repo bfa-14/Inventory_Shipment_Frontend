@@ -50,6 +50,7 @@ export function DocumentTypesPage() {
     { accessor: 'numberLength', title: 'Length', width: 80, textAlign: 'right' },
     { accessor: 'numberOnPost', title: 'Number on post', width: 120, render: (t) => <YesNo value={t.numberOnPost} /> },
     { accessor: 'numberPerBranch', title: 'Per branch', width: 100, render: (t) => <YesNo value={t.numberPerBranch} /> },
+    { accessor: 'yearInNumber', title: 'Year in number', width: 120, render: (t) => <YesNo value={t.yearInNumber} /> },
     { accessor: 'requiresReason', title: 'Requires reason', width: 120, render: (t) => <YesNo value={t.requiresReason} /> },
     {
       accessor: 'defaultPricing',

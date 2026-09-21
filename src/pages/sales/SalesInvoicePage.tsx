@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Alert, Button, Grid, Group, Loader, Paper, Stack, Title } from '@mantine/core'
-import { IconPlus, IconTrash } from '@tabler/icons-react'
+import { IconArrowBackUp, IconPlus, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
@@ -29,6 +29,7 @@ import { formatNumber } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
 import { SalesInvoiceHeaderCard, type SalesInvoiceHeader, type SalesInvoiceHeaderErrors } from '../../components/sales/SalesInvoiceHeaderCard'
 import { SalesInvoiceLinesGrid, type InvoiceLine } from '../../components/sales/SalesInvoiceLinesGrid'
+import { SalesInvoiceProfitCard } from '../../components/sales/SalesInvoiceProfitCard'
 import { SalesTotals } from '../../components/sales/SalesTotals'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
@@ -85,6 +86,9 @@ export function SalesInvoicePage() {
   const canCreate = hasPermission(PERMISSIONS.invoicesCreate)
   const canPost = hasPermission(PERMISSIONS.invoicesPost)
   const canCancelDoc = hasPermission(PERMISSIONS.invoicesCancel)
+  /* A margin is its own permission. Without it the API sends the cost fields as null, and the page
+     draws nothing rather than a card full of dashes. */
+  const canSeeProfit = hasPermission(PERMISSIONS.salesProfitView)
   const canImport = hasPermission(PERMISSIONS.invoicesImport)
   const canOverridePrice = hasPermission(PERMISSIONS.invoicesPriceOverride)
 
@@ -606,6 +610,33 @@ export function SalesInvoicePage() {
     }
   }
 
+  /**
+   * The return of a posted invoice: the remaining quantities at the invoice's own prices and its
+   * ORIGINAL cost of sales, so giving goods back reverses the margin that was booked.
+   *
+   * THERE IS NO RETURNS PAGE YET, so the draft is made and its number is said rather than opened.
+   */
+  async function createReturn() {
+    if (!invoice) return
+    const go = await confirm({
+      title: 'Create return',
+      message: `Create a sales return draft from ${invoice.documentNumber}, with everything that has not already come back?`,
+      confirmLabel: 'Create',
+    })
+    if (!go) return
+
+    setSaving(true)
+    try {
+      const created = await salesInvoicesApi.createReturn(invoice.id)
+      notify.success(`Return draft ${created.documentNumber ?? `#${created.id}`} created (SRET). It is numbered when it is posted.`)
+      await reload()
+    } catch (error) {
+      showApiError(error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function cancelInvoice(reason: string) {
     if (!invoice) return
     setCancelBusy(true)
@@ -676,6 +707,7 @@ export function SalesInvoicePage() {
     ? [
         { key: 'attachments', label: `Attachments (${invoice?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
+        { key: 'create-return', label: 'Create Return', icon: <IconArrowBackUp size={16} />, colour: 'orange', visible: canCreate && invoice?.canCreateReturn === true, loading: saving, onClick: () => void createReturn() },
         { key: 'cancel-doc', label: 'Cancel Invoice', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && invoice?.canCancel === true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(ROUTE) },
       ]
@@ -792,6 +824,11 @@ export function SalesInvoicePage() {
           />
         </Grid.Col>
       </Grid>
+
+      {/* Only a posted invoice has a frozen cost to show, and only a holder of sales.profit.view sees it. */}
+      {invoice && canSeeProfit && invoice.totalCostBase !== null && (
+        <SalesInvoiceProfitCard invoice={invoice} baseCurrencyCode={invoice.baseCurrencyCode ?? 'USD'} />
+      )}
 
       <AttachmentsDrawer
         opened={attachmentsOpen}

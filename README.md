@@ -10,7 +10,7 @@ The frontend for `Inventory_Shipment.API`. Open **this folder** in VS Code (`Fil
 ## Running in development
 
 Two processes have to be up: the **API** on `https://localhost:7089` and the **web dev server** on
-`http://localhost:5173`. The dev server proxies `/api` and `/health` to the API, so the browser stays on one
+`http://localhost:5174`. The dev server proxies `/api` and `/health` to the API, so the browser stays on one
 origin.
 
 ```bash
@@ -38,7 +38,7 @@ npm run dev        # starts the API if it is not already up, then the web dev se
 |------|------|
 | `7089` | API, HTTPS — what the proxy targets |
 | `5121` | API, HTTP |
-| `5173` | web dev server |
+| `5174` | web dev server |
 
 **Start the API on the `https` profile, not `IIS Express`.** The IIS Express profile binds `44395`/`49677`
 instead, so the proxy finds nothing on `7089` and every API call fails. In Visual Studio pick the **https**
@@ -73,7 +73,7 @@ In development the Vite dev server **proxies** `/api` and `/health` to the API (
 VITE_API_PROXY_TARGET=https://localhost:7089
 ```
 
-If the API runs on a different port, change it there. To call the API directly instead, set `VITE_API_BASE_URL` (the API's `Cors:AllowedOrigins` must then contain `http://localhost:5173`).
+If the API runs on a different port, change it there. To call the API directly instead, set `VITE_API_BASE_URL` (the API's `Cors:AllowedOrigins` must then contain `http://localhost:5174`).
 
 ## Scripts
 

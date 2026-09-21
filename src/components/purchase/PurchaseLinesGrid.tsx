@@ -37,6 +37,14 @@ export interface PurchaseLine {
   sourceLineId: number | null
   /** What that source line still allows, in base units. Null on a line without a source. */
   sourceRemainingBase: number | null
+  /** Orders: shipped by the supplier and not yet received, in base units. Null on a line not saved yet. */
+  transitBase?: number | null
+  /** Posted invoices: what the supplier charged per base unit, before the charges around it. */
+  fobCostBase?: number | null
+  /** Posted invoices: the charges this line took, in the base currency. */
+  allocatedChargesBase?: number | null
+  /** Posted invoices: FOB plus those charges, per base unit — what the ledger took. */
+  landedCostBase?: number | null
   /** A message about the row: the server's "Line N: …". */
   error?: string
 }
@@ -62,6 +70,12 @@ interface PurchaseLinesGridProps {
   warnOnOverdraw: boolean
   /** True on a document made from another: the item and unit are the source's and cannot change. */
   linesFromSource: boolean
+  /** True on a purchase order: the grid shows what is in transit (recorded with "Mark as shipped"). */
+  showTransit?: boolean
+  /** True on a POSTED purchase invoice: the three cost columns the charges produced. */
+  showCosts?: boolean
+  /** The base currency's code, for the cost column captions. */
+  baseCurrencyCode?: string
   readOnly: boolean
 }
 
@@ -88,12 +102,17 @@ export function PurchaseLinesGrid({
   priceEditable,
   warnOnOverdraw,
   linesFromSource,
+  showTransit = false,
+  showCosts = false,
+  baseCurrencyCode = 'USD',
   readOnly,
 }: PurchaseLinesGridProps) {
+  const columnCount = 11 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0)
+
   const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
 
   return (
-    <Table.ScrollContainer minWidth={1150}>
+    <Table.ScrollContainer minWidth={1150 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0)}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -103,9 +122,17 @@ export function PurchaseLinesGrid({
             <Table.Th w={150}>Unit</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={110} ta="right">Qty</Table.Th>
+            {showTransit && <Table.Th w={100} ta="right">In transit</Table.Th>}
             <Table.Th w={150} ta="right">Unit Cost</Table.Th>
             <Table.Th w={90} ta="right">Disc %</Table.Th>
             <Table.Th w={140} ta="right">Line Total</Table.Th>
+            {showCosts && (
+              <>
+                <Table.Th w={120} ta="right">FOB ({baseCurrencyCode})</Table.Th>
+                <Table.Th w={120} ta="right">Charges ({baseCurrencyCode})</Table.Th>
+                <Table.Th w={140} ta="right">Landed cost ({baseCurrencyCode})</Table.Th>
+              </>
+            )}
             <Table.Th w={160}>Notes</Table.Th>
             <Table.Th w={84} />
           </Table.Tr>
@@ -211,6 +238,18 @@ export function PurchaseLinesGrid({
                   )}
                 </Table.Td>
 
+                {showTransit && (
+                  <Table.Td ta="right" data-line-transit={line.key}>
+                    {line.transitBase == null || line.transitBase === 0 ? (
+                      <Text fz="sm" c="dimmed">{line.transitBase === 0 ? '0' : '—'}</Text>
+                    ) : (
+                      <Tooltip label="Shipped by the supplier, not yet received (base units)" withArrow>
+                        <Text fz="sm" fw={600} c="blue">{formatNumber(line.transitBase)}</Text>
+                      </Tooltip>
+                    )}
+                  </Table.Td>
+                )}
+
                 <Table.Td data-line-cost={line.key}>
                   {readOnly || !priceEditable ? (
                     <Tooltip label="The cost is set by the document type configuration" disabled={readOnly || priceEditable} withArrow>
@@ -252,6 +291,23 @@ export function PurchaseLinesGrid({
                 <Table.Td ta="right">
                   <Text fz="sm" fw={500}>{formatMoney(purchaseLineTotal(line), currencyCode, decimalPlaces)}</Text>
                 </Table.Td>
+
+                {showCosts && (
+                  <>
+                    {/* Per base unit, so FOB and Landed read against each other; the charges are the line's whole share. */}
+                    <Table.Td ta="right" data-line-fob={line.key}>
+                      <Text fz="sm">{formatNumber(line.fobCostBase, 2)}</Text>
+                    </Table.Td>
+                    <Table.Td ta="right" data-line-charges={line.key}>
+                      <Text fz="sm">{formatNumber(line.allocatedChargesBase, 2)}</Text>
+                    </Table.Td>
+                    <Table.Td ta="right" data-line-landed={line.key}>
+                      <Tooltip label="FOB plus the charges allocated to this line, per base unit — what the ledger took" withArrow>
+                        <Text fz="sm" fw={600}>{formatNumber(line.landedCostBase, 2)}</Text>
+                      </Tooltip>
+                    </Table.Td>
+                  </>
+                )}
 
                 <Table.Td>
                   {readOnly ? (
@@ -307,7 +363,7 @@ export function PurchaseLinesGrid({
 
           {lines.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={columnCount}>
                 <Text ta="center" c="dimmed" py="lg">
                   No lines yet. Scan an item above, add one below, or import a file.
                 </Text>
@@ -317,7 +373,7 @@ export function PurchaseLinesGrid({
 
           {!readOnly && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={columnCount}>
                 <Text c="dimmed" fz="sm">
                   + Click to add an item…
                 </Text>

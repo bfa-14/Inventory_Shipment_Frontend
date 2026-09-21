@@ -39,6 +39,8 @@ export interface DocumentTypeDto {
   priceEditable: boolean
   /** True: one sequence per branch ("IN-KLW-000012"); false: one for the company. */
   numberPerBranch: boolean
+  /** True: the year is part of the number and the sequence restarts every year ("SHR-2026-000001"). */
+  yearInNumber: boolean
   isActive: boolean
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */
@@ -55,6 +57,7 @@ export interface UpdateDocumentTypeRequest {
   defaultPricing: string
   priceEditable: boolean
   numberPerBranch: boolean
+  yearInNumber: boolean
   isActive: boolean
   rowVersion: string | null
 }

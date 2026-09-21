@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button, Group, Menu, Paper } from '@mantine/core'
+import { Button, Group, Menu, Paper, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconDotsVertical } from '@tabler/icons-react'
 
@@ -11,6 +11,12 @@ export interface DocumentAction {
   /** Hidden entirely when false — a control nobody can successfully press is an invitation to try. */
   visible?: boolean
   disabled?: boolean
+  /**
+   * Why a disabled action is disabled ("Post the plan first"). For the rare action whose absence
+   * would be more puzzling than its greyed presence — the next step of a lifecycle, shown before
+   * it is reachable. The button stays hoverable so the tooltip can answer.
+   */
+  disabledReason?: string
   loading?: boolean
   variant?: 'filled' | 'default' | 'light' | 'subtle'
   colour?: string
@@ -78,6 +84,7 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
                     color={action.colour}
                   >
                     {action.label}
+                    {action.disabled && action.disabledReason ? ` — ${action.disabledReason}` : ''}
                   </Menu.Item>
                 ))}
               </Menu.Dropdown>
@@ -91,19 +98,35 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
   return (
     <Paper radius="lg" p="xs" withBorder pos="sticky" top={0} style={{ zIndex: 3 }}>
       <Group justify="flex-end" gap="xs" wrap="wrap">
-        {shown.map((action) => (
-          <Button
-            key={action.key}
-            leftSection={action.icon}
-            variant={action.variant ?? 'default'}
-            color={action.colour}
-            onClick={action.onClick}
-            disabled={action.disabled}
-            loading={action.loading}
-          >
-            {action.label}
-          </Button>
-        ))}
+        {shown.map((action) =>
+          action.disabled && action.disabledReason ? (
+            // data-disabled rather than disabled: a disabled button swallows the hover the tooltip needs.
+            <Tooltip key={action.key} label={action.disabledReason} withArrow>
+              <Button
+                leftSection={action.icon}
+                variant={action.variant ?? 'default'}
+                color={action.colour}
+                data-disabled
+                aria-disabled
+                onClick={(event) => event.preventDefault()}
+              >
+                {action.label}
+              </Button>
+            </Tooltip>
+          ) : (
+            <Button
+              key={action.key}
+              leftSection={action.icon}
+              variant={action.variant ?? 'default'}
+              color={action.colour}
+              onClick={action.onClick}
+              disabled={action.disabled}
+              loading={action.loading}
+            >
+              {action.label}
+            </Button>
+          ),
+        )}
       </Group>
     </Paper>
   )

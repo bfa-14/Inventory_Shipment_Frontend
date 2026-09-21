@@ -625,8 +625,12 @@ export interface ItemListDto {
   onHand: number
   /** The moving average cost per base unit, kept on the item. */
   averageCost: number | null
-  /** What the last receipt cost, per base unit. */
+  /** What the last purchase LANDED at, per base unit. */
   lastCost: number | null
+  /** What the supplier charged on the last posted invoice, before the charges around it. */
+  fobCost: number | null
+  /** On hand × average cost, in the base currency. */
+  inventoryValue: number
   defaultSupplierId: number | null
   defaultSupplierName: string | null
   isBivac: boolean
@@ -659,10 +663,14 @@ export interface ItemDetailsDto {
   isBivac: boolean
   isActive: boolean
   onHand: number
-  /** What the last receipt cost, per base unit. */
+  /** What the last posted purchase LANDED at, per base unit. An Inventory In does not touch it. */
   lastCost: number | null
-  /** The moving average cost per base unit, kept on the item by every posting that adds stock. */
+  /** The moving average cost per base unit, kept on the item by every posting that adds stock. What a sale is costed at. */
   averageCost: number | null
+  /** What the supplier charged per base unit on the last posted invoice, before freight, customs and the rest. */
+  fobCost: number | null
+  /** On hand × average cost, in the base currency. */
+  inventoryValue: number
   lastPurchaseCost: number | null
   /** The supplier a purchase order is raised on by default. */
   defaultSupplierId: number | null
@@ -670,6 +678,12 @@ export interface ItemDetailsDto {
   defaultSupplierName: string | null
   /** Days between ordering and receiving. */
   leadTimeDays: number | null
+  /** Pieces (base units) that fit in one container — the default of a shortage plan line. Only the item's own GET returns it. */
+  pcPerContainer?: number | null
+  /** Per BASE unit. What a charge allocated by weight is shared out on. */
+  weightKg?: number | null
+  /** Per BASE unit, in cubic metres. The same, for a charge allocated by volume. */
+  volumeCbm?: number | null
   lastSupplierId: number | null
   lastSupplierName: string | null
   lastPurchaseAtUtc: string | null
@@ -734,6 +748,12 @@ export interface SaveItemRequest {
   defaultSupplierId?: number | null
   /** Days between ordering and receiving. */
   leadTimeDays?: number | null
+  /** Pieces (base units) per container; null clears it. */
+  pcPerContainer?: number | null
+  /** Per BASE unit; needed by charges allocated by weight. */
+  weightKg?: number | null
+  /** Per BASE unit, in cubic metres; needed by charges allocated by volume. */
+  volumeCbm?: number | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }

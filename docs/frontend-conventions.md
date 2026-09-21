@@ -423,8 +423,8 @@ for the life of the draft. The wizard resets itself by remounting on `opened`.
 ## Document type configuration
 
 `Configuration › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
-`inventory.documenttypes.manage`) edits the eight document kinds: name, prefix, number length, number on
-post, number per branch, requires reason, default pricing (Cost / PriceList / None), price editable, active.
+`inventory.documenttypes.manage`) edits the document kinds: name, prefix, number length, number on
+post, number per branch, **year in number** (a checkbox: `SHR-2026-000001`, one sequence per year), requires reason, default pricing (Cost / PriceList / None), price editable, active.
 Code, family and stock direction are read-only — the procedures branch on them.
 
 Every document page reads the configuration through **`useDocumentTypes()`** (`src/hooks/useDocumentTypes.ts`,
@@ -535,29 +535,168 @@ in **cost mode**:
 - **API**: `src/api/purchase/documents.ts` — one module for the three kinds; every 403 from it names the
   permission that was missing (`code: FORBIDDEN`).
 
-## Shortages → PO
+## Shortage plans
 
-`/inventory/shortages` (`ShortagesPage`, behind `inventory.shortages.view`) is the shortage report:
-one row per item and warehouse from `GET api/inventory/shortages` (not paged — the page holds the whole
-list, sorts and pages it itself with `useGridQuery({ paging: 'client' })`, and sums it for the cards).
+`/inventory/shortages` (list, `ShortagesPage`), `/inventory/shortages/new` and `/:id` (`ShortageDocumentPage`)
+and `/:id/print` (`ShortagePrintPage`) are the customer's shortage study as a **saved planning document**,
+numbered `SHR-2026-000001` (the year is part of the number and the sequence restarts every year — *Year in
+number* on the document type). Permissions: `inventory.shortages.view / create / post / delete`; creating the
+purchase order needs `purchase.orders.create`. The caption is always **"Lead Time (Month)"**, never "Planning
+Period". The pieces live in `src/components/shortages/`.
 
-- **Filters**: branch, warehouse (of the branch), family (tree order, includes sub-families), brand,
-  supplier, search, **Only shortages** (default on; off shows every evaluated item and warehouse) and
-  **Average over** 30 / 60 / 90 days for the average daily sales.
-- **Cards**: Items short, Total suggested cost (suggested base quantity × last cost, else average cost),
-  Warehouses affected.
-- **Grid**: item (link), warehouse, On Hand, Incoming (open purchase orders), Available (= on hand +
-  incoming, what is compared with Min), Min, Max, Shortage, **Suggested in the purchase unit** ("3 Box
-  (x12)"), average daily sales, **Days of cover** (red when shorter than the lead time), supplier with a
-  *default* / *last* badge or a warning when the item has none, last cost, lead time. A row is **red when
-  nothing is on hand** and **orange when short** (`app-grid__row--danger` / `--warning`). Export writes
-  the same rows to Excel.
-- **Create Purchase Order (n)** (needs `purchase.orders.create`): the ticked rows in a modal
-  (`CreatePurchaseOrdersModal`) with an editable quantity (the suggestion) and supplier, an order date
-  and an expected date, and a **grouping preview** — one order per supplier AND warehouse, updated as
-  suppliers change. Create calls `POST api/inventory/shortages/create-orders`; the result lists each
-  draft with a link, and Done reloads the report with an info line naming the orders. The branch of each
-  order is the warehouse's own; the currency is the supplier's; the line price is the last cost converted.
+### The formulas (`shortageMath.ts` — the same ones the database uses)
+
+Per line, in **base units** (only Required Qty is in the purchase unit, shown as the input's suffix):
+
+| Cell | Formula |
+|---|---|
+| Stock + Transit | Current Inventory + Transit |
+| Total Expected Stock | Current Inventory + Transit + Outstanding Order |
+| Expected Monthly Sales | sales of the last *Months of history* (default 3) in the warehouse ÷ months; **overridable per line** |
+| Expected Requirement | Expected Monthly Sales × Lead Time (Month) |
+| Shortage Qty | max(0, Requirement − Total Expected Stock), rounded up — red when > 0 |
+| Coverage (months) | Total Expected Stock ÷ Expected Monthly Sales — red when < Lead Time, "—" when nothing sells |
+| Required Qty | typed; defaults to the shortage rounded up to whole purchase units |
+| Container Requirement | Required Qty × packing ÷ PC per Container (the item's *PC per Container*, overridable per line) |
+
+Transit = quantities **marked as shipped** on open purchase orders and not yet received; Outstanding Order =
+what remains on those orders *minus* what is in transit. Summary card: items, total shortage, total required,
+containers (the sum, 7.35), containers rounded (8) and utilization (91.88 %, with a bar).
+
+### Draft vs posted
+
+- **A draft is a working sheet.** Current inventory, transit, outstanding order and the computed monthly sales
+  are the server's and are never edited; the planner types three things — a manual monthly sales figure (the
+  computed value stays greyed as the placeholder; a **manual** badge and a reset icon appear once overridden),
+  a required quantity (it *follows the suggestion* until typed; "Reset to suggested" hands it back) and a PC per
+  container. `derive()` recomputes every other cell as they are typed.
+- **The figures are never sent.** A save carries the items and the three typed values; the procedure takes the
+  live figures itself, so **the API's values win after every save**. **Recalculate** (saved drafts only; with
+  unsaved changes it asks to save first) refreshes the live figures and keeps the three typed values.
+- **Load items** opens `LoadItemsDrawer`: `GET calculate` with the header's warehouse, lead time and history,
+  filters that apply as they change (family tree, brand, search, *Only shortages* and *Only this supplier's
+  items*, both on by default), every short row pre-ticked, "Add selected (n)". Items already on the plan cannot
+  be ticked, and any that slip through are skipped with a notify.
+- Changing the warehouse or the months of history under existing lines shows a yellow alert: the lines were
+  counted with the old settings until the next save.
+- **Posted is a photograph.** "Save & Post" confirms with *"Post this shortage plan? The figures will be frozen
+  as a historical snapshot."* A posted plan is read-only text, shows the banner "Posted by X on Y - historical
+  snapshot, values are not recalculated", and its summary shows the **stored** totals. Stock can move as much
+  as it likes afterwards; the plan does not.
+- The lines grid is the shared `DataTable` with client-side sort. **The order is frozen while you type** — it is
+  taken when a header is clicked or lines are added/removed — so a row never moves out from under the cursor.
+  Nineteen columns scroll inside the card; "#" and Item are sticky (`.shortage-lines` in `app.css`; on a phone
+  only a narrowed Item column sticks).
+- Errors: `Line N:` lands on line N (red row + tooltip + notify); NO_LINES, NOTHING_TO_ORDER and the rest are a
+  notify; CONCURRENCY and NOT_DRAFT also reload. Unsaved-changes guard on both exits, as every document page.
+- View-only users get the same page as read-only text: no New, Load items, Recalculate, Save, Post or Delete.
+
+### Purchase order creation
+
+**Create Purchase Order** is disabled on a draft with the tooltip "Post the plan first" (`DocumentAction.disabledReason`)
+and live on a posted plan: confirm → `POST {id}/create-purchase-order` → a notify naming the PO → the PO draft
+opens. The order takes the plan's supplier, branch and warehouse and every line with a Required Qty above zero,
+in the purchase unit; NOTHING_TO_ORDER when there is none. The PO shows a **"Source: Shortage SHR-…" chip**
+linking back, and the plan's **Purchase orders** card lists every order made from it (number, date, status,
+amount); the audit trail shows Created / Updated / Recalculated / Posted / POCreated.
+
+On an open purchase order, **Mark as shipped** (`MarkShippedModal`, needs `purchase.orders.create`) records the
+*total* shipped so far per line in base units ("All shipped" fills the ordered quantities). It moves no stock:
+it is what the plans read as Transit, and the order's lines grid shows it as **In transit**.
+
+### Print and export
+
+Print goes to `/:id/print`, a route **outside the shell** — there is no navigation to hide, `@media print`
+only drops the two buttons (`.no-print`), the page is A4 landscape, and `window.print()` opens once the saved
+plan has loaded (a draft with unsaved changes is asked to save first). Export downloads `Shortage_<number>.xlsx`.
+Both are on the list's row actions and on the document.
+
+## Charge types & landed cost
+
+The money that turns a supplier's price into what the goods really cost.
+
+### Charge Types (US-MD-008)
+
+`/purchase/charge-types` (`ChargeTypesPage` + `ChargeTypeFormModal`, permission
+`purchase.chargetypes.manage`) defines the charge kinds: code, name, **allocation method**
+(By Item Value / By Quantity / By Weight / By Volume (CBM) / Manual — `allocationMethodLabel()` in
+`src/api/purchase/chargeTypes.ts` owns the wording), whether it is **included in the landed cost**,
+and whether it is a **recoverable tax**. The last two cannot both be true: switching Recoverable Tax
+on forces Include in Landed Cost off and disables it ("A recoverable tax is never part of the item
+cost"), and the table, the procedure and the request DTO all say so.
+
+**Delete is only ever offered for a type nothing has used** (`usageCount === 0`, surfaced as
+`canDelete`). A used one shows the disabled icon with "Used in N transactions - deactivate instead",
+because deleting it would take the history of every charge line with it.
+
+### The Charges tab
+
+`PurchaseChargesGrid` (`src/components/purchase/`) is the same grid on a **draft purchase invoice**
+and on a **landed cost adjustment**; `purchaseCharges.ts` holds the row shape and the arithmetic.
+
+- **Every charge is two numbers**: what was billed, in the currency it was billed in, and
+  `amount ÷ rate` in the base currency — the only one goods can be costed in. The second is derived
+  and read-only; a reader who disagrees changes the rate. Picking a currency looks its rate up for
+  the document date (`GET api/purchase/rate`).
+- Picking a **charge type fills in** the allocation method and the "in landed cost" flag; both stay
+  editable per charge, and the flag is copied at save time so a later change to the type cannot
+  restate a posted invoice.
+- A charge **not in the landed cost is greyed and badged "not in cost"** — it is still recorded and
+  paid, it simply does not make the goods worth more.
+- **Manual** opens an allocation panel under the row: one line per invoice line, a "Spread by
+  quantity" shortcut, and a running **Remaining** that must reach zero. The page blocks the save
+  while it does not; the server refuses it too ("Charge N: manual allocations (250.00) must equal
+  the charge amount in base currency (300.00)"), and that sentence is what the row shows.
+- A manual split points at **line ids**, so only lines the server has already saved can carry one.
+- Footer: **Total charges** and **of which landed**.
+
+**The charges are saved apart from the lines.** "Save Draft" saves the lines first
+(`POST/PUT api/purchase/documents`), then the charges against the version that came back
+(`PUT api/purchase/documents/{id}/charges`) — a new invoice has no line ids until its lines exist.
+`Charge N:` errors land on charge N, exactly as `Line N:` errors land on line N.
+
+**Allocation happens at posting**, not at typing: `allocatedBase` is null on a draft. A posted
+invoice's lines then carry **FOB**, **Charges** and **Landed cost** per base unit, and the page adds
+a **Landed cost** card (goods + charges = total landed cost).
+
+### Landed Cost Adjustments
+
+`/purchase/landed-cost-adjustments` (list + document, permissions `purchase.landedcosts.*`) is the
+freight bill that arrives three weeks after the goods. **It moves value, not stock**, which is why it
+is a document with its own Draft → Posted → Cancelled life rather than an edit to the invoice.
+
+- The **invoice is chosen once** (posted purchase invoices only) and is read-only afterwards: every
+  figure hangs off it. A posted invoice offers **"New landed cost adjustment"**, which pre-selects
+  itself through `?invoiceId=`.
+- Posting spreads the charges over the invoice lines and **splits each one**: the quantity still in
+  stock raises the inventory value (and the item's average cost), the quantity already sold becomes
+  a **COGS adjustment** in the period. The Split table shows allocated, extra per unit, remaining,
+  both portions and the landed cost before and after, under a banner naming who posted it.
+- Cancelling writes the reversal and rebuilds the item costs.
+
+## Sales profit
+
+`sales.profit.view` is its own permission: **a price is everybody's business, a margin is not.**
+Without it the API returns every cost and margin field as `null` — so the pages draw nothing at all
+rather than a row of dashes, which would leak the permission as a shrug.
+
+- **On a posted sales invoice**, `SalesInvoiceProfitCard` shows Net Sales / COGS / Gross Profit /
+  GP % and the same four per line. Every figure was **frozen at posting**: cost of sales is what the
+  goods were worth the moment they left, so the same invoice read next year says the same thing.
+- **"Create Return"** on a posted invoice (needs `sales.invoices.create`) makes an SRET draft with
+  the remaining quantities, the invoice's prices and its **original** COGS. There is no returns page
+  yet, so the page names the draft and stays where it is.
+- `/sales/profit` (`SalesProfitPage`) groups by Invoice / Item / Family / Brand / Client / Salesman /
+  Branch / Month / All, with summary cards, a totals row and Export to Excel. The **COGS adjustments**
+  column appears only for the groupings a landed cost adjustment can be attributed to
+  (`showsCogsAdjustments()`): an adjustment knows its item and its date, never its invoice.
+- `/inventory/valuation` (`StockValuationPage`, `inventory.items.view`) is on hand × the item's
+  moving average cost, per warehouse or company-wide. The totals come from the API, not from summing
+  the page.
+- **Item Definition** shows FOB Purchase Cost, Last Cost (landed), Average Cost and Inventory Value
+  with a tooltip each (they differ by one word), and the Purchasing section carries **Weight (kg)**
+  and **Volume (CBM)** per base unit — a charge allocated by weight or volume is refused for an item
+  that has none.
 
 ## Numbers
 

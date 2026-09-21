@@ -1,146 +1,295 @@
 import { fetchBlob, request } from '../http'
-import type { SalesRateType } from '../sales/invoices'
+import type { PurchaseDocumentDto, PurchaseDocumentStatus } from '../purchase/documents'
+import type { PagedResult } from '../types'
 
 /**
- * The shortage report: one row per item and warehouse, and the purchase orders it turns into.
+ * Shortage plans — saved planning documents.
  *
- * NOT PAGED. The report is read whole and the page filters, sorts and sums it itself — the cards
- * above the grid ("Items short", "Total suggested cost") need every row, not the current page.
+ * DRAFT → POSTED, AND NOTHING ELSE. A draft is a working sheet: edited, recalculated, deleted. A
+ * posted plan is a HISTORICAL SNAPSHOT — the API never computes its figures again — and purchase
+ * orders are created from it, carrying the Shortage No.
+ *
+ * THE FIGURES ARE NEVER SENT. A save carries the items and what the planner typed (required
+ * quantity, a manual monthly sales figure, a PC per container); the server takes the live figures
+ * itself, so what comes back is the truth and replaces whatever the page had computed meanwhile.
  */
 const BASE = '/api/inventory/shortages'
 
-export interface ShortageRowDto {
+export type ShortageDocumentStatus = 'Draft' | 'Posted'
+
+/** The figures every shortage row carries, live or saved. Base units, except where a name says otherwise. */
+export interface ShortageFigures {
   itemId: number
   itemCode: string
   itemName: string
-  brandId: number
   brandName: string
-  itemFamilyId: number
   familyName: string
   isBivac: boolean
-  warehouseId: number
-  warehouseCode: string
-  warehouseName: string
-  branchId: number
-  branchName: string
-  onHandBase: number
-  /** On posted, still open purchase orders. */
-  incomingBase: number
-  /** On hand + incoming: what is compared with the minimum. */
-  availableBase: number
-  minQuantity: number
-  maxQuantity: number | null
+  currentInventoryBase: number
+  /** Marked as shipped on open purchase orders for the warehouse, not yet received. */
+  transitBase: number
+  /** Still to receive on open purchase orders, EXCLUDING what is already in transit. */
+  outstandingOrderBase: number
+  stockPlusTransitBase: number
+  totalExpectedStockBase: number
+  /** Sales of the last "months of history" ÷ months. The computed value, never the override. */
+  expectedMonthlySalesBase: number
+  leadTimeMonths: number
+  expectedRequirementBase: number
   shortageBase: number
-  suggestedBase: number
-  purchaseItemUnitId: number | null
-  purchaseUnitName: string | null
-  purchasePackingFormula: number | null
-  /** Whole purchase units that bring Available up to the maximum (0 when nothing is short). */
-  suggestedQty: number
-  avgDailySalesBase: number
-  /** Days the stock on hand lasts at the average sales rate; null when nothing was sold. */
-  daysOfCover: number | null
+  /** Null when nothing sells: a coverage in months has no meaning then. */
+  coverageMonths: number | null
+  purchaseItemUnitId: number
+  purchaseUnitName: string
+  purchasePackingFormula: number
+  pcPerContainer: number | null
+  containerRequirement: number | null
+  minQuantity: number | null
+  maxQuantity: number | null
+  lastCost: number | null
+}
+
+/** One LIVE row of `calculate` — what "Load items" offers to a draft. */
+export interface ShortageLiveRowDto extends ShortageFigures {
+  soldInPeriodBase: number
+  monthsOfHistory: number
+  /** The shortage rounded up to whole purchase units — the default Required Qty of a new line. */
+  suggestedRequiredQty: number
+  averageCost: number | null
+  leadTimeDays: number | null
   /** The default supplier, else the last one the item was bought from. */
   supplierId: number | null
   supplierName: string | null
   supplierIsDefault: boolean
-  lastCost: number | null
-  averageCost: number | null
-  leadTimeDays: number | null
-  lastPurchaseAtUtc: string | null
 }
 
-export interface ShortageQuery {
-  branchId?: number
-  warehouseId?: number
-  itemFamilyId?: number
-  brandId?: number
-  supplierId?: number
-  search?: string
-  /** True = rows where Available is below the minimum; false = every evaluated item and warehouse. */
-  onlyShortages: boolean
-  /** The window the average daily sales is taken over: 30, 60 or 90 days. */
-  daysForAverage: number
+export interface ShortageDocumentLineDto extends ShortageFigures {
+  id: number
+  lineNo: number
+  expectedMonthlySalesManual: number | null
+  effectiveMonthlySales: number
+  /** Purchase units. */
+  requiredQty: number
+  requiredBase: number
+  notes: string | null
 }
 
-export interface ShortageOrderLine {
-  itemId: number
-  warehouseId: number
-  supplierId: number
-  /** The unit ordered in — the item's purchase unit from the report unless the reader chose another. */
-  itemUnitId: number
-  quantity: number
-  /** Null = the item's last cost, converted to the order's currency. */
-  unitPrice?: number | null
-  notes?: string | null
-}
-
-export interface CreatePurchaseOrdersRequest {
-  /** Null = today. */
-  documentDate?: string | null
-  expectedDate?: string | null
-  rateType?: SalesRateType
-  notes?: string | null
-  lines: ShortageOrderLine[]
-}
-
-export interface CreatedPurchaseOrderDto {
+export interface ShortagePurchaseOrderDto {
   id: number
   documentNumber: string | null
-  supplierId: number
-  supplierName: string
-  warehouseId: number
-  warehouseName: string
+  documentDate: string
+  status: PurchaseDocumentStatus
+  totalAmount: number
+  currencyCode: string
+  createdAtUtc: string
+}
+
+export interface ShortageDocumentAuditDto {
+  id: number
+  /** Created | Updated | Recalculated | Posted | POCreated */
+  action: string
+  details: string | null
+  userId: number | null
+  userName: string | null
+  atUtc: string
+}
+
+export interface ShortageDocumentListDto {
+  id: number
+  documentNumber: string
+  description: string
+  documentDate: string
   branchId: number
   branchName: string
-  currencyCode: string
-  exchangeRate: number
-  lineCount: number
-  totalAmount: number
-  status: string
-}
-
-export interface ShortageOrderFailure {
-  supplierId: number
   warehouseId: number
-  code: string
-  message: string
+  warehouseName: string
+  supplierId: number
+  supplierCode: string
+  supplierName: string
+  leadTimeMonths: number
+  monthsOfHistory: number
+  status: ShortageDocumentStatus
+  totalLines: number
+  totalShortageBase: number
+  totalRequiredBase: number
+  totalContainers: number
+  containersRounded: number
+  /** Purchase orders created from the plan, cancelled ones not counted. */
+  purchaseOrders: number
+  postedAtUtc: string | null
+  postedByName: string | null
+  createdAtUtc: string
+  createdBy: number | null
+  createdByName: string | null
+  updatedAtUtc: string | null
+  rowVersion: string
+  canEdit: boolean
+  canDelete: boolean
 }
 
-export interface CreatePurchaseOrdersResult {
-  orders: CreatedPurchaseOrderDto[]
-  created: number
-  failed: ShortageOrderFailure[]
+export interface ShortageDocumentDto {
+  id: number
+  documentNumber: string
+  description: string
+  documentDate: string
+  branchId: number
+  branchCode: string
+  branchName: string
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  supplierId: number
+  supplierCode: string
+  supplierName: string
+  leadTimeMonths: number
+  monthsOfHistory: number
+  notes: string | null
+  status: ShortageDocumentStatus
+  totalLines: number
+  totalShortageBase: number
+  totalRequiredBase: number
+  /** The sum of the lines' container requirements, e.g. 7.35. */
+  totalContainers: number
+  /** That sum rounded up: 8. */
+  containersRounded: number
+  /** 7.35 ÷ 8 = 91.88. Null when no line has a container requirement. */
+  containerUtilizationPct: number | null
+  calculatedAtUtc: string | null
+  postedAtUtc: string | null
+  postedBy: number | null
+  postedByName: string | null
+  createdAtUtc: string
+  createdBy: number | null
+  createdByName: string | null
+  updatedAtUtc: string | null
+  updatedBy: number | null
+  updatedByName: string | null
+  rowVersion: string
+  canEdit: boolean
+  canRecalculate: boolean
+  canPost: boolean
+  canDelete: boolean
+  canCreatePurchaseOrder: boolean
+  lines: ShortageDocumentLineDto[]
+  purchaseOrders: ShortagePurchaseOrderDto[]
+  audit: ShortageDocumentAuditDto[]
 }
 
-function toParams(query: ShortageQuery): URLSearchParams {
-  const params = new URLSearchParams({ onlyShortages: String(query.onlyShortages), daysForAverage: String(query.daysForAverage) })
-  if (query.branchId !== undefined) params.set('branchId', String(query.branchId))
-  if (query.warehouseId !== undefined) params.set('warehouseId', String(query.warehouseId))
-  if (query.itemFamilyId !== undefined) params.set('itemFamilyId', String(query.itemFamilyId))
-  if (query.brandId !== undefined) params.set('brandId', String(query.brandId))
-  if (query.supplierId !== undefined) params.set('supplierId', String(query.supplierId))
-  if (query.search?.trim()) params.set('search', query.search.trim())
-  return params
+export interface SaveShortageDocumentLine {
+  lineNo: number
+  itemId: number
+  /** Purchase units. Null = the suggested quantity (the shortage rounded up). */
+  requiredQty: number | null
+  /** Null = the computed monthly sales. */
+  expectedMonthlySalesManual: number | null
+  /** Null = the item's own PC per container. */
+  pcPerContainer: number | null
+  notes: string | null
+}
+
+export interface SaveShortageDocumentRequest {
+  description: string
+  documentDate: string
+  branchId: number
+  warehouseId: number
+  supplierId: number
+  leadTimeMonths: number
+  monthsOfHistory: number
+  notes: string | null
+  lines: SaveShortageDocumentLine[]
+  rowVersion?: string | null
+}
+
+export interface ShortageCalculateQuery {
+  warehouseId: number
+  supplierId?: number
+  leadTimeMonths: number
+  monthsOfHistory: number
+  itemFamilyId?: number
+  brandId?: number
+  search?: string
+  onlyShortages: boolean
+}
+
+export interface ShortageDocumentQuery {
+  search?: string
+  warehouseId?: number
+  branchId?: number
+  supplierId?: number
+  status?: ShortageDocumentStatus
+  createdBy?: number
+  dateFrom?: string
+  dateTo?: string
+  sortBy?: string
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
 }
 
 export const shortagesApi = {
-  report: (query: ShortageQuery, signal?: AbortSignal) =>
-    request<ShortageRowDto[]>(`${BASE}?${toParams(query).toString()}`, { signal }),
-
-  exportToExcel: async (query: ShortageQuery, fileName: string) => {
-    const blob = await fetchBlob(`${BASE}/export?${toParams(query).toString()}`)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 0)
+  /** The LIVE rows of one warehouse. Not paged: the drawer shows them all and the reader ticks. */
+  calculate: (query: ShortageCalculateQuery, signal?: AbortSignal) => {
+    const params = new URLSearchParams({
+      warehouseId: String(query.warehouseId),
+      leadTimeMonths: String(query.leadTimeMonths),
+      monthsOfHistory: String(query.monthsOfHistory),
+      onlyShortages: String(query.onlyShortages),
+    })
+    if (query.supplierId !== undefined) params.set('supplierId', String(query.supplierId))
+    if (query.itemFamilyId !== undefined) params.set('itemFamilyId', String(query.itemFamilyId))
+    if (query.brandId !== undefined) params.set('brandId', String(query.brandId))
+    if (query.search?.trim()) params.set('search', query.search.trim())
+    return request<ShortageLiveRowDto[]>(`${BASE}/calculate?${params.toString()}`, { signal })
   },
 
-  /** One draft purchase order per supplier and warehouse. Needs purchase.orders.create. */
-  createOrders: (payload: CreatePurchaseOrdersRequest) =>
-    request<CreatePurchaseOrdersResult>(`${BASE}/create-orders`, { method: 'POST', body: payload }),
+  list: (query: ShortageDocumentQuery, signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    if (query.search?.trim()) params.set('search', query.search.trim())
+    if (query.warehouseId !== undefined) params.set('warehouseId', String(query.warehouseId))
+    if (query.branchId !== undefined) params.set('branchId', String(query.branchId))
+    if (query.supplierId !== undefined) params.set('supplierId', String(query.supplierId))
+    if (query.status) params.set('status', query.status)
+    if (query.createdBy !== undefined) params.set('createdBy', String(query.createdBy))
+    if (query.dateFrom) params.set('dateFrom', query.dateFrom)
+    if (query.dateTo) params.set('dateTo', query.dateTo)
+    if (query.sortBy) params.set('sortBy', query.sortBy)
+    if (query.sortDir) params.set('sortDir', query.sortDir)
+    if (query.page !== undefined) params.set('page', String(query.page))
+    if (query.pageSize !== undefined) params.set('pageSize', String(query.pageSize))
+    return request<PagedResult<ShortageDocumentListDto>>(`${BASE}?${params.toString()}`, { signal })
+  },
+
+  get: (id: number) => request<ShortageDocumentDto>(`${BASE}/${id}`),
+
+  create: (payload: SaveShortageDocumentRequest) => request<ShortageDocumentDto>(BASE, { method: 'POST', body: payload }),
+
+  update: (id: number, payload: SaveShortageDocumentRequest) =>
+    request<ShortageDocumentDto>(`${BASE}/${id}`, { method: 'PUT', body: payload }),
+
+  /** Draft only: the live figures again; what was typed is kept. */
+  recalculate: (id: number, rowVersion: string | null) =>
+    request<ShortageDocumentDto>(`${BASE}/${id}/recalculate`, { method: 'POST', body: { rowVersion } }),
+
+  post: (id: number, rowVersion: string | null) =>
+    request<ShortageDocumentDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion } }),
+
+  remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
+
+  /** Posted only: one purchase order draft for the plan's supplier, branch and warehouse. Needs purchase.orders.create. */
+  createPurchaseOrder: (id: number, payload: { documentDate?: string | null; expectedDate?: string | null } = {}) =>
+    request<PurchaseDocumentDto>(`${BASE}/${id}/create-purchase-order`, { method: 'POST', body: payload }),
+
+  exportToExcel: async (id: number, documentNumber: string) =>
+    save(await fetchBlob(`${BASE}/${id}/export`), `Shortage_${documentNumber}.xlsx`),
+}
+
+function save(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }

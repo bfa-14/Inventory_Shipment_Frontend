@@ -4,12 +4,25 @@ import type { ItemDetailsDto } from '../../api/types'
 import { formatDateOnly, formatDateTime, formatNumber } from '../../components/format'
 
 /** Label above, value below - the read-only shape the side cards repeat. */
-function Row({ label, value, dimmed = false }: { label: string; value: string; dimmed?: boolean }) {
+function Row({
+  label,
+  value,
+  dimmed = false,
+  hint,
+}: {
+  label: string
+  value: string
+  dimmed?: boolean
+  /** What the figure means. The four cost figures differ by one word, so each says which it is. */
+  hint?: string
+}) {
   return (
     <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
-      <Text c="dimmed" fz="sm">
-        {label}
-      </Text>
+      <Tooltip label={hint} disabled={!hint} multiline w={280} withArrow position="left">
+        <Text c="dimmed" fz="sm" style={hint ? { cursor: 'help', textDecoration: 'underline dotted' } : undefined}>
+          {label}
+        </Text>
+      </Tooltip>
       <Text fz="sm" fw={dimmed ? 400 : 500} c={dimmed ? 'dimmed' : undefined} ta="right">
         {value}
       </Text>
@@ -51,13 +64,32 @@ export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
       </Text>
       <Stack gap="xs">
         <Row label="On Hand" value={item ? formatNumber(item.onHand) : '0'} />
-        <Row label="Average Cost" value={money(item?.averageCost)} />
-        <Row label="Last Cost" value={money(item?.lastCost)} />
+        <Row
+          label="FOB Purchase Cost"
+          value={money(item?.fobCost)}
+          hint="What the supplier charged per base unit on the last posted invoice, before freight, customs and the rest."
+        />
+        <Row
+          label="Last Cost (landed)"
+          value={money(item?.lastCost)}
+          hint="The last posted purchase, FOB plus every charge allocated to it. An Inventory In does not touch it."
+        />
+        <Row
+          label="Average Cost"
+          value={money(item?.averageCost)}
+          hint="The moving weighted average, moved only by the postings that add stock. What a sale is costed at."
+        />
+        <Row
+          label="Inventory Value"
+          value={money(item?.inventoryValue)}
+          hint="On hand × average cost."
+        />
         <Row label="Last Supplier" value={item?.lastSupplierName ?? '—'} dimmed={!item?.lastSupplierName} />
         <Row label="Last Purchase" value={item?.lastPurchaseAtUtc ? formatDateOnly(item.lastPurchaseAtUtc.slice(0, 10)) : '—'} dimmed={!item?.lastPurchaseAtUtc} />
       </Stack>
       <Text c="dimmed" fz="xs" mt="sm">
-        Per base unit, in USD. The average moves with every receipt; the last cost and supplier are the last receipt's.
+        Per base unit, in USD. FOB is what the supplier charged; the landed cost adds the freight, customs and clearing
+        allocated to the goods.
       </Text>
     </Card>
   )

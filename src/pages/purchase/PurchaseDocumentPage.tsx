@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Stack, Title } from '@mantine/core'
-import { IconArrowBackUp, IconFileInvoice, IconLock, IconPlus, IconTrash } from '@tabler/icons-react'
+import { Alert, Button, Grid, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core'
+import { IconArrowBackUp, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash, IconTruckDelivery } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
+import { chargeTypesApi, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
 import { branchesApi } from '../../api/masterdata/branches'
 import { currenciesApi } from '../../api/masterdata/currencies'
@@ -27,6 +28,18 @@ import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber } from '../../components/format'
 import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
+import { MarkShippedModal } from '../../components/purchase/MarkShippedModal'
+import { PurchaseChargesGrid } from '../../components/purchase/PurchaseChargesGrid'
+import {
+  chargeFromDto,
+  chargeTotals,
+  emptyCharge,
+  isUnallocated,
+  toChargeRequests,
+  toManualAllocations,
+  type AllocationTarget,
+  type ChargeLine,
+} from '../../components/purchase/purchaseCharges'
 import { PurchaseHeaderCard, type PurchaseHeader, type PurchaseHeaderErrors } from '../../components/purchase/PurchaseHeaderCard'
 import { PURCHASE_INVOICE, PURCHASE_RETURN, type PurchaseKind } from '../../components/purchase/purchaseKind'
 import { defaultPurchasePrice, lineMaximum, purchaseUnitOf } from '../../components/purchase/purchaseLines'
@@ -83,6 +96,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const canPost = hasPermission(kind.permissions.post)
   const canCancelDoc = hasPermission(kind.permissions.cancel)
   const canImport = hasPermission(PERMISSIONS.invoicesImport)
+  const canLandedCost = hasPermission(PERMISSIONS.landedCostsCreate)
   const canCreateInvoice = kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.create)
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
 
@@ -121,13 +135,24 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
   const [closeBusy, setCloseBusy] = useState(false)
+  const [shippedOpen, setShippedOpen] = useState(false)
+  const [shippedBusy, setShippedBusy] = useState(false)
+
+  /* THE CHARGES ARE THEIR OWN DOCUMENT HALF: the lines are the supplier's bill, the charges are
+     everybody else's, and the API saves them with two different calls. Only a purchase invoice has
+     them; an order commits nothing and a return gives goods back at the cost they came in at. */
+  const [charges, setCharges] = useState<ChargeLine[]>([])
+  const [chargeTypes, setChargeTypes] = useState<ChargeTypeLookupDto[]>([])
 
   const dirty = useRef(false)
   const markDirty = () => {
     dirty.current = true
   }
 
+  const baseCode = document?.baseCurrencyCode ?? rate?.baseCurrencyCode ?? 'USD'
   const status = document?.status ?? 'Draft'
+  /** Only a purchase invoice carries charges: an order commits nothing, a return gives goods back at cost. */
+  const hasCharges = kind.code === PURCHASE_INVOICE.code
   const readOnly = !isNew && status !== 'Draft'
   const editable = !readOnly && (isNew ? canCreate : canCreate && document?.canEdit === true)
   const fromSource = document?.sourceDocumentId != null
@@ -147,6 +172,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     currenciesApi.lookup().then(setCurrencies).catch(() => notify.error('Currencies could not be loaded.'))
     partiesApi.lookup({ partyType: 'Supplier' }).then(setSuppliers).catch(() => notify.error('Suppliers could not be loaded.'))
     itemsApi.lookup().then(setItems).catch(() => {})
+    if (kind.code === PURCHASE_INVOICE.code) {
+      chargeTypesApi.lookup().then(setChargeTypes).catch(() => notify.error('Charge types could not be loaded.'))
+    }
     // isNew comes from the route; it does not change without a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -172,7 +200,27 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }, [])
 
-  const applyDocument = useCallback((doc: PurchaseDocumentDto) => {
+  /**
+   * The manual splits, re-pointed at the ids a save produced.
+   *
+   * SAVING REPLACES THE LINES, so every line comes back with a NEW id and a split captured against
+   * the old ones would be refused ("a manual allocation refers to a line that does not belong to
+   * the invoice"). The lines keep their order, so position is what carries a split across a save.
+   */
+  const remapAllocations = useCallback(
+    (allocations: Record<number, number>, oldIds: number[], newIds: number[]): Record<number, number> => {
+      const byPosition = new Map(oldIds.map((id, index) => [id, newIds[index]]))
+      const out: Record<number, number> = {}
+      for (const [lineId, amount] of Object.entries(allocations)) {
+        const next = byPosition.get(Number(lineId))
+        if (next !== undefined) out[next] = amount
+      }
+      return out
+    },
+    [],
+  )
+
+  const applyDocument = useCallback((doc: PurchaseDocumentDto, keepAllocations?: Map<number, Record<number, number>>) => {
     setDocument(doc)
     setHeader({
       documentDate: doc.documentDate.slice(0, 10),
@@ -206,8 +254,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         importRowNumber: line.importRowNumber,
         sourceLineId: line.sourceLineId,
         sourceRemainingBase: null,
+        transitBase: line.transitBase,
+        fobCostBase: line.fobCostBase,
+        allocatedChargesBase: line.allocatedChargesBase,
+        landedCostBase: line.landedCostBase,
       })),
     )
+    /* The server stores a manual split but its read does not return it per line, so the page keeps
+       what the reader typed — re-pointed at the new ids — rather than blanking the panel. */
+    setCharges(doc.charges.filter((c) => c.documentKind === 'PINV').map((c) => chargeFromDto(c, keepAllocations?.get(c.lineNumber) ?? {})))
     currencyTouched.current = true
     rateDirty.current = false
     dirty.current = false
@@ -409,6 +464,42 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     priceLine(key, unit, lastCost)
   }
 
+  const patchCharge = useCallback((key: string, patch: Partial<ChargeLine>) => {
+    markDirty()
+    setCharges((current) => current.map((line) => (line.key === key ? { ...line, ...patch, error: undefined } : line)))
+  }, [])
+
+  function addCharge() {
+    markDirty()
+    // A new charge starts in the invoice's own currency at the invoice's rate: most of them are.
+    setCharges((current) => [
+      ...current,
+      { ...emptyCharge(header.currencyId === null ? null : Number(header.currencyId)), exchangeRate: header.exchangeRate },
+    ])
+  }
+
+  function removeCharge(key: string) {
+    markDirty()
+    setCharges((current) => current.filter((line) => line.key !== key))
+  }
+
+  /** A charge in another currency takes that currency's rate for the document date, looked up once. */
+  const chargeCurrencyChosen = useCallback(
+    async (key: string, currencyId: number) => {
+      try {
+        const answer = await purchaseDocumentsApi.rate(currencyId, 1, header.documentDate || null)
+        setCharges((current) =>
+          current.map((line) =>
+            line.key === key ? { ...line, exchangeRate: answer.isBaseCurrency ? 1 : answer.rate } : line,
+          ),
+        )
+      } catch {
+        /* No rate to be found: the reader types one, and the server refuses a charge without it. */
+      }
+    },
+    [header.documentDate],
+  )
+
   function addEmptyLine() {
     markDirty()
     setLines((current) => [...current, emptyLine()])
@@ -453,6 +544,22 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   /* ── totals ───────────────────────────────────────────────────────────────────────────────── */
 
+  /* A manual split points at LINE IDS, so only lines the server has already saved can carry one —
+     a line typed a moment ago has no id yet, and the page says so rather than sending a null. */
+  const allocationTargets: AllocationTarget[] = useMemo(
+    () =>
+      (document?.lines ?? []).map((line) => ({
+        id: line.id,
+        lineNo: line.lineNo,
+        itemCode: line.itemCode,
+        itemName: line.itemName,
+        quantityBase: line.quantityBase,
+      })),
+    [document],
+  )
+
+  const chargeSummary = useMemo(() => chargeTotals(charges), [charges])
+
   const totals = useMemo(() => {
     let quantity = 0, subtotal = 0, discount = 0
     for (const line of lines) {
@@ -488,6 +595,18 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       notify.error(`Line ${bad + 1} needs an item, a unit and a quantity of at least 1.`)
       return false
     }
+    const unallocated = charges.findIndex(isUnallocated)
+    if (unallocated >= 0) {
+      notify.error(`Charge ${unallocated + 1} is allocated manually and has not been fully allocated yet.`)
+      return false
+    }
+
+    const incompleteCharge = charges.findIndex((c) => c.chargeTypeId === null || c.amount === null || c.amount <= 0)
+    if (incompleteCharge >= 0) {
+      notify.error(`Charge ${incompleteCharge + 1} needs a charge type and an amount above zero.`)
+      return false
+    }
+
     const over = lines.findIndex((l) => {
       const max = lineMaximum(l)
       return max !== null && l.quantity > max
@@ -539,6 +658,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       return
     }
     setLines((current) => current.map((line) => ({ ...line, error: undefined })))
+    setCharges((current) => current.map((line) => ({ ...line, error: undefined })))
+
+    // The charges are numbered apart from the lines, and the server says which it judged.
+    const chargeMatch = /^Charge (\d+):/.exec(error.message)
+    if (chargeMatch) {
+      const index = Number(chargeMatch[1]) - 1
+      setCharges((current) => current.map((line, i) => (i === index ? { ...line, error: error.message } : line)))
+    }
+
     const match = /^Line (\d+):/.exec(error.message)
     if ((error.code === 'VALIDATION' || error.code === 'SOURCE_INVALID' || error.code === 'NO_PRICE') && match) {
       const index = Number(match[1]) - 1
@@ -558,11 +686,28 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     if (!validate()) return null
     setSaving(true)
     try {
+      const oldLineIds = allocationTargets.map((t) => t.id)
       const saved = documentId === null ? await purchaseDocumentsApi.create(toRequest()) : await purchaseDocumentsApi.update(documentId, toRequest())
-      applyDocument(saved)
+      const newLineIds = saved.lines.map((l) => l.id)
+
+      /* THE LINES FIRST, THEN THE CHARGES. A manual allocation points at line ids, and a new
+         invoice has none until its lines are saved — so the charges go in a second call, against
+         the version the first one just produced and the ids it just handed out. */
+      const remapped = charges.map((charge) => ({
+        ...charge,
+        allocations: remapAllocations(charge.allocations, oldLineIds, newLineIds),
+      }))
+
+      const withCharges = hasCharges ? await purchaseDocumentsApi.setCharges(saved.id, {
+        charges: toChargeRequests(remapped),
+        manualAllocations: toManualAllocations(remapped),
+        rowVersion: saved.rowVersion,
+      }) : saved
+
+      applyDocument(withCharges, new Map(remapped.map((c, index) => [index + 1, c.allocations])))
       notify.success(documentId === null ? 'Draft created.' : 'Draft saved.')
-      if (documentId === null) navigate(`${kind.route}/${saved.id}`, { replace: true })
-      return saved
+      if (documentId === null) navigate(`${kind.route}/${withCharges.id}`, { replace: true })
+      return withCharges
     } catch (error) {
       showApiError(error)
       return null
@@ -619,6 +764,23 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       showApiError(error)
     } finally {
       setCloseBusy(false)
+    }
+  }
+
+  /** What the supplier has shipped on the open order: no stock moves, the shortage plans read it as Transit. */
+  async function markShipped(shipped: { lineId: number; shippedQuantityBase: number }[]) {
+    if (!document) return
+    setShippedBusy(true)
+    try {
+      const updated = await purchaseDocumentsApi.markShipped(document.id, shipped, document.rowVersion)
+      applyDocument(updated)
+      const transit = updated.lines.reduce((sum, l) => sum + l.transitBase, 0)
+      notify.success(`Shipped quantities recorded: ${formatNumber(transit)} base unit(s) in transit.`)
+      setShippedOpen(false)
+    } catch (error) {
+      showApiError(error)
+    } finally {
+      setShippedBusy(false)
     }
   }
 
@@ -704,8 +866,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     ? [
         { key: 'attachments', label: `Attachments (${document?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
+        { key: 'landed-cost', label: 'New landed cost adjustment', icon: <IconReceipt2 size={16} />, colour: 'grape', visible: canLandedCost && document?.canAdjustLandedCost === true, onClick: () => void navigate(`/purchase/landed-cost-adjustments/new?invoiceId=${document?.id}`) },
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', visible: canCreateInvoice && document?.canCreateInvoice === true, loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
+        { key: 'mark-shipped', label: 'Mark as shipped', icon: <IconTruckDelivery size={16} />, colour: 'blue', visible: kind.code === 'PO' && canCreate && document?.canMarkShipped === true, onClick: () => setShippedOpen(true) },
         { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', visible: kind.code === 'PO' && canPost && document?.canClose === true, onClick: () => setCloseOpen(true) },
         { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
@@ -753,6 +917,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         documentNumber={document?.documentNumber ?? null}
         numberOnPost={documentType?.numberOnPost ?? kind.code !== 'PO'}
         source={source}
+        sourceShortage={document?.sourceShortageId != null ? { id: document.sourceShortageId, documentNumber: document.sourceShortageNumber } : null}
         isNew={isNew}
         readOnly={!editable}
         errors={errors}
@@ -804,9 +969,28 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           priceEditable={priceEditable}
           warnOnOverdraw={kind.code === 'PRET'}
           linesFromSource={fromSource}
+          showTransit={kind.code === 'PO'}
+          showCosts={hasCharges && readOnly}
+          baseCurrencyCode={baseCode}
           readOnly={!editable}
         />
       </Paper>
+
+      {hasCharges && (editable || charges.length > 0 || (document?.charges.length ?? 0) > 0) && (
+        <PurchaseChargesGrid
+          lines={editable ? charges : (document?.charges ?? []).map((c) => chargeFromDto(c))}
+          onChange={patchCharge}
+          onRemove={removeCharge}
+          onAdd={addCharge}
+          chargeTypes={chargeTypes}
+          providers={suppliers}
+          currencies={currencies}
+          targets={allocationTargets}
+          baseCurrencyCode={document?.baseCurrencyCode ?? rate?.baseCurrencyCode ?? 'USD'}
+          onCurrencyChosen={(key, currencyId) => void chargeCurrencyChosen(key, currencyId)}
+          readOnly={!editable}
+        />
+      )}
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
@@ -827,6 +1011,42 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               exchangeRate={header.exchangeRate}
               isBaseCurrency={isBaseCurrency}
             />
+
+            {/* WHAT THE GOODS REALLY COST, beside what the supplier charged. A draft shows what the
+                typed charges would add; a posted invoice shows what was actually allocated, which
+                includes the charges that arrived later on an adjustment. */}
+            {hasCharges && (chargeSummary.total > 0 || (document?.totalChargesBase ?? 0) > 0) && (
+              <Paper radius="lg" p="md" withBorder data-landed-summary>
+                <Title order={5} mb="sm">Landed cost</Title>
+                <Stack gap={6}>
+                  <Group justify="space-between">
+                    <Text fz="sm" c="dimmed">Goods ({baseCode})</Text>
+                    <Text fz="sm">{formatNumber(document?.totalAmountBase ?? totals.total / (header.exchangeRate || 1), 2)}</Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text fz="sm" c="dimmed">Total charges ({baseCode})</Text>
+                    <Text fz="sm">{formatNumber(readOnly ? (document?.totalChargesBase ?? 0) : chargeSummary.landed, 2)}</Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text fw={700}>Total landed cost ({baseCode})</Text>
+                    <Text fw={700} data-total-landed>
+                      {formatNumber(
+                        readOnly
+                          ? (document?.totalLandedCostBase ?? 0)
+                          : (document?.totalAmountBase ?? totals.total / (header.exchangeRate || 1)) + chargeSummary.landed,
+                        2,
+                      )}
+                    </Text>
+                  </Group>
+                  {chargeSummary.total !== chargeSummary.landed && !readOnly && (
+                    <Text fz="xs" c="dimmed">
+                      {formatNumber(chargeSummary.total - chargeSummary.landed, 2)} {baseCode} of charges are recorded but do not reach the item cost.
+                    </Text>
+                  )}
+                </Stack>
+              </Paper>
+            )}
+
             <LinkedDocumentsCard linked={document?.linked ?? []} />
           </Stack>
         </Grid.Col>
@@ -843,6 +1063,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       />
 
       <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={documentLabel} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
+
+      <MarkShippedModal opened={shippedOpen} onClose={() => setShippedOpen(false)} documentLabel={documentLabel} lines={document?.lines ?? []} busy={shippedBusy} onConfirm={(shipped) => void markShipped(shipped)} />
 
       <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />
 

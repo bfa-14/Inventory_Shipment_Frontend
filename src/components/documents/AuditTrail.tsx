@@ -18,6 +18,9 @@ const ACTION_COLOURS: Record<string, string> = {
   Updated: 'blue',
   Posted: 'green',
   Cancelled: 'red',
+  // Shortage plans: the live figures were refreshed; a purchase order was created from the plan.
+  Recalculated: 'violet',
+  POCreated: 'teal',
   FileAdded: 'gray',
   FileDeleted: 'gray',
 }

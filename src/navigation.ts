@@ -66,6 +66,9 @@ export const PERMISSIONS = {
   invoicesDelete: 'sales.invoices.delete',
   documentTypesManage: 'inventory.documenttypes.manage',
   shortagesView: 'inventory.shortages.view',
+  shortagesCreate: 'inventory.shortages.create',
+  shortagesPost: 'inventory.shortages.post',
+  shortagesDelete: 'inventory.shortages.delete',
   purchaseOrdersView: 'purchase.orders.view',
   purchaseOrdersCreate: 'purchase.orders.create',
   purchaseOrdersPost: 'purchase.orders.post',
@@ -81,6 +84,13 @@ export const PERMISSIONS = {
   purchaseReturnsPost: 'purchase.returns.post',
   purchaseReturnsCancel: 'purchase.returns.cancel',
   purchaseReturnsDelete: 'purchase.returns.delete',
+  chargeTypesManage: 'purchase.chargetypes.manage',
+  landedCostsView: 'purchase.landedcosts.view',
+  landedCostsCreate: 'purchase.landedcosts.create',
+  landedCostsPost: 'purchase.landedcosts.post',
+  landedCostsCancel: 'purchase.landedcosts.cancel',
+  landedCostsDelete: 'purchase.landedcosts.delete',
+  salesProfitView: 'sales.profit.view',
 } as const
 
 export interface NavItem {
@@ -153,9 +163,11 @@ export const NAVIGATION: NavSection[] = [
       // day, and the read-only stock views below them are answers to questions these documents ask.
       { label: 'Inventory In', to: '/inventory/stock-in', permission: PERMISSIONS.stockInView, icon: 'box' },
       { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
+      // What the shelves are worth: the item list with its money shown, behind the same permission.
+      { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.itemsView, icon: 'balance' },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
-      // The shortage report: what is below its minimum, and the purchase orders that fix it.
+      // Shortage plans: saved planning documents (draft, then a posted snapshot) that purchase orders are created from.
       { label: 'Shortages', to: '/inventory/shortages', permission: PERMISSIONS.shortagesView, icon: 'shortage' },
     ],
   },
@@ -168,6 +180,10 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Purchase Orders', to: '/purchase/orders', permission: PERMISSIONS.purchaseOrdersView, icon: 'cart' },
       { label: 'Purchase Invoices', to: '/purchase/invoices', permission: PERMISSIONS.purchaseInvoicesView, icon: 'invoice' },
       { label: 'Purchase Returns', to: '/purchase/returns', permission: PERMISSIONS.purchaseReturnsView, icon: 'movement' },
+      // Charges that arrive after the goods: they move value, not stock, so they are their own document.
+      { label: 'Landed Cost Adjustments', to: '/purchase/landed-cost-adjustments', permission: PERMISSIONS.landedCostsView, icon: 'price' },
+      // Defining the charge types is setup; entering a charge is not. Both live where they are used.
+      { label: 'Charge Types', to: '/purchase/charge-types', permission: PERMISSIONS.chargeTypesManage, icon: 'settings' },
     ],
   },
   {
@@ -178,6 +194,8 @@ export const NAVIGATION: NavSection[] = [
     breadcrumb: 'Sales',
     items: [
       { label: 'Sales Invoices', to: '/sales/invoices', permission: PERMISSIONS.invoicesView, icon: 'invoice' },
+      // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
+      { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       {
         label: 'Import Sales from Excel',
         to: '/sales/import-preview',

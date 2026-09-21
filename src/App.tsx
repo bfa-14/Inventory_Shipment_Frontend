@@ -11,7 +11,10 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
 import { ItemsPage } from './pages/inventory/ItemsPage'
+import { ShortageDocumentPage } from './pages/inventory/ShortageDocumentPage'
+import { ShortagePrintPage } from './pages/inventory/ShortagePrintPage'
 import { ShortagesPage } from './pages/inventory/ShortagesPage'
+import { StockValuationPage } from './pages/inventory/StockValuationPage'
 import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
 import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
 import { LoginPage } from './pages/LoginPage'
@@ -23,11 +26,15 @@ import { PartiesPage } from './pages/masterdata/PartiesPage'
 import { PriceListsPage } from './pages/masterdata/PriceListsPage'
 import { UnitTypesPage } from './pages/masterdata/UnitTypesPage'
 import { WarehousesPage } from './pages/masterdata/WarehousesPage'
+import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
+import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
+import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
 import { PurchaseDocumentPage } from './pages/purchase/PurchaseDocumentPage'
 import { PurchaseDocumentsPage } from './pages/purchase/PurchaseDocumentsPage'
 import { ImportSalesPage } from './pages/sales/ImportSalesPage'
 import { SalesInvoicePage } from './pages/sales/SalesInvoicePage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
+import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -43,6 +50,11 @@ export default function App() {
 
           {/* Everything below requires a signed-in user. */}
           <Route element={<ProtectedRoute />}>
+            {/* The plan on paper: outside the shell, so nothing but the document reaches the printer. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.shortagesView} />}>
+              <Route path="/inventory/shortages/:id/print" element={<ShortagePrintPage />} />
+            </Route>
+
             <Route element={<AppShell />}>
               <Route index element={<DashboardPage />} />
               <Route path="/account/password" element={<ChangePasswordPage />} />
@@ -96,8 +108,19 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>
                 <Route path="/inventory/price-lists" element={<PriceListsPage />} />
               </Route>
+              {/* What the shelves are worth: the item list with its money shown, so it is guarded
+                  by the item permission rather than one of its own. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.itemsView} />}>
+                <Route path="/inventory/valuation" element={<StockValuationPage />} />
+              </Route>
+              {/* Shortage plans: the list and the document sit behind the view permission; "new" needs
+                  the create one as well, so a reader who may only look never reaches a blank plan. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.shortagesCreate} />}>
+                <Route path="/inventory/shortages/new" element={<ShortageDocumentPage />} />
+              </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.shortagesView} />}>
                 <Route path="/inventory/shortages" element={<ShortagesPage />} />
+                <Route path="/inventory/shortages/:id" element={<ShortageDocumentPage />} />
               </Route>
 
               {/* The purchase family: one list and one document page, three kinds. Each kind sits behind
@@ -117,6 +140,25 @@ export default function App() {
                 <Route path="/purchase/returns" element={<PurchaseDocumentsPage kind={PURCHASE_RETURN} />} />
                 <Route path="/purchase/returns/new" element={<PurchaseDocumentPage kind={PURCHASE_RETURN} />} />
                 <Route path="/purchase/returns/:id" element={<PurchaseDocumentPage kind={PURCHASE_RETURN} />} />
+              </Route>
+
+              {/* Charge types are setup — one permission for the lot. Landed cost adjustments are
+                  documents: the list and the document sit behind the view permission, and creating,
+                  posting, cancelling and deleting are checked on the page (and by the API). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.chargeTypesManage} />}>
+                <Route path="/purchase/charge-types" element={<ChargeTypesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.landedCostsCreate} />}>
+                <Route path="/purchase/landed-cost-adjustments/new" element={<LandedCostAdjustmentPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.landedCostsView} />}>
+                <Route path="/purchase/landed-cost-adjustments" element={<LandedCostAdjustmentsPage />} />
+                <Route path="/purchase/landed-cost-adjustments/:id" element={<LandedCostAdjustmentPage />} />
+              </Route>
+
+              {/* Net sales less the cost frozen on each line, behind its own permission. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.salesProfitView} />}>
+                <Route path="/sales/profit" element={<SalesProfitPage />} />
               </Route>
 
               {/* Import Sales from Excel: validate a file against the stock and post it as an invoice.

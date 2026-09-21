@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Grid, NumberInput, Select, Stack, Switch, Text, TextInput } from '@mantine/core'
+import { Alert, Checkbox, Grid, NumberInput, Select, Stack, Switch, Text, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { IconAlertTriangle } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -19,6 +19,7 @@ interface FormValues {
   numberLength: number | ''
   numberOnPost: boolean
   numberPerBranch: boolean
+  yearInNumber: boolean
   requiresReason: boolean
   defaultPricing: string | null
   priceEditable: boolean
@@ -56,6 +57,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
       numberLength: type.numberLength,
       numberOnPost: type.numberOnPost,
       numberPerBranch: type.numberPerBranch,
+      yearInNumber: type.yearInNumber,
       requiresReason: type.requiresReason,
       defaultPricing: type.defaultPricing,
       priceEditable: type.priceEditable,
@@ -83,6 +85,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
         numberLength: Number(values.numberLength),
         numberOnPost: values.numberOnPost,
         numberPerBranch: values.numberPerBranch,
+        yearInNumber: values.yearInNumber,
         requiresReason: values.requiresReason,
         defaultPricing: values.defaultPricing as string,
         priceEditable: values.priceEditable,
@@ -158,6 +161,11 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
               label="Number per branch"
               description='On: each branch has its own sequence ("IN-KLW-000012"). Off: one sequence for the company.'
               {...form.getInputProps('numberPerBranch', { type: 'checkbox' })}
+            />
+            <Checkbox
+              label="Year in number"
+              description='Ticked: the year is part of the number and the sequence restarts every year ("SHR-2026-000001").'
+              {...form.getInputProps('yearInNumber', { type: 'checkbox' })}
             />
             <Switch label="Requires a reason" description="The Reason field is mandatory on this document." {...form.getInputProps('requiresReason', { type: 'checkbox' })} />
             <Switch
