@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Stack, Text, Title, Tooltip } from '@mantine/core'
+import { Alert, Badge, Button, Grid, Group, Loader, Paper, Stack, Text, Title, Tooltip } from '@mantine/core'
 import { IconCalculator, IconDownload, IconPrinter, IconShoppingCart, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { shortagesApi, type SaveShortageDocumentRequest, type ShortageDocumentDto, type ShortageLiveRowDto } from '../../api/inventory/shortages'
@@ -14,9 +14,9 @@ import { useAuth } from '../../auth/useAuth'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
-import { isoDate, stamp } from '../../components/documents/documentKind'
+import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { PURCHASE_ORDER, supplierLabel } from '../../components/purchase/purchaseKind'
+import { PURCHASE_ORDER, PURCHASE_STATUS_COLOURS, supplierLabel } from '../../components/purchase/purchaseKind'
 import { LoadItemsDrawer } from '../../components/shortages/LoadItemsDrawer'
 import { ShortageHeaderCard, type ShortageHeader, type ShortageHeaderErrors } from '../../components/shortages/ShortageHeaderCard'
 import { ShortageLinesGrid } from '../../components/shortages/ShortageLinesGrid'
@@ -190,6 +190,12 @@ export function ShortageDocumentPage() {
 
   const existingItemIds = useMemo(() => new Set(lines.map((line) => line.itemId)), [lines])
 
+  /** The orders this plan actually produced: a cancelled one ordered nothing. */
+  const livePurchaseOrders = useMemo(
+    () => (document?.purchaseOrders ?? []).filter((order) => order.status !== 'Cancelled'),
+    [document],
+  )
+
   function addLoaded(rows: ShortageLiveRowDto[]) {
     const fresh = rows.filter((row) => !existingItemIds.has(row.itemId))
     const skipped = rows.length - fresh.length
@@ -343,12 +349,45 @@ export function ShortageDocumentPage() {
     }
   }
 
+  /**
+   * The plan becomes a purchase order — and says so when it already has one.
+   *
+   * NOTHING STOPS A SECOND ORDER, and nothing should: a plan split across two suppliers, or a first
+   * order cancelled at the supplier's end, are ordinary. What is not ordinary is ordering the same
+   * quantities twice by accident, so the orders this plan already produced are listed IN the
+   * question rather than left for the reader to remember. A cancelled order is not listed: it
+   * ordered nothing, and naming it would argue against a second order for no reason.
+   */
   async function createPurchaseOrder() {
     if (!document) return
+
+    const existing = livePurchaseOrders
     const go = await confirm({
-      title: 'Create purchase order',
-      message: `Create a purchase order draft for ${document.supplierName} from ${document.documentNumber}, with every line that has a required quantity?`,
-      confirmLabel: 'Create',
+      title: existing.length > 0 ? 'Create another purchase order' : 'Create purchase order',
+      message:
+        existing.length > 0 ? (
+          <Stack gap="xs">
+            <Text size="sm">
+              This plan already has a purchase order. Create another one with the same quantities?
+            </Text>
+            <Stack gap={6}>
+              {existing.map((order) => (
+                <Group key={order.id} gap="xs" wrap="nowrap">
+                  <Text size="sm" fw={500}>
+                    {/* An order is numbered on saving, but a draft that has not been may still exist. */}
+                    {order.documentNumber ?? `Draft, created ${dateLabel(order.createdAtUtc)}`}
+                  </Text>
+                  <Badge size="sm" variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>
+                    {order.status}
+                  </Badge>
+                </Group>
+              ))}
+            </Stack>
+          </Stack>
+        ) : (
+          `Create a purchase order draft for ${document.supplierName} from ${document.documentNumber}, with every line that has a required quantity?`
+        ),
+      confirmLabel: existing.length > 0 ? 'Create another' : 'Create',
     })
     if (!go) return
     setSaving(true)
