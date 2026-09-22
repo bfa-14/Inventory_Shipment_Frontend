@@ -24,7 +24,7 @@ const SORT_VALUE: Record<string, (row: Row) => number | string> = {
   itemCode: (row) => row.itemCode.toLowerCase(),
   effectiveMonthlySales: (row) => row.effectiveMonthlySales,
   coverageMonths: (row) => row.coverageMonths ?? Number.POSITIVE_INFINITY,
-  pcPerContainer: (row) => row.pcPerContainer ?? -1,
+  pcPerContainer: (row) => row.effectivePcPerContainer ?? -1,
   containerRequirement: (row) => row.containerRequirement ?? -1,
   minQuantity: (row) => row.minQuantity ?? -1,
   maxQuantity: (row) => row.maxQuantity ?? -1,
@@ -224,26 +224,48 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
       accessor: 'pcPerContainer',
       title: 'PC per Container',
       sortable: true,
-      width: 165,
+      width: 175,
       textAlign: 'right',
       render: (row) =>
         readOnly ? (
-          number(row.pcPerContainer)
+          number(row.effectivePcPerContainer)
         ) : (
-          <NumberInput
-            value={row.pcPerContainer ?? ''}
-            placeholder="None"
-            min={1}
-            step={1}
-            allowDecimal={false}
-            allowNegative={false}
-            thousandSeparator=","
-            onChange={(next) => {
-              const parsed = numberInputValue(next)
-              onChange(row.key, { pcPerContainer: parsed !== null && parsed > 0 ? parsed : null })
-            }}
-            aria-label={`PC per container of line ${row.lineNo}`}
-          />
+          <div data-line-pcs={row.key}>
+            <NumberInput
+              value={row.pcPerContainer ?? ''}
+              // The item's Container unit, greyed, is what stands while nothing is typed over it.
+              placeholder={row.defaultPcPerContainer === null ? 'None' : formatNumber(row.defaultPcPerContainer)}
+              min={1}
+              step={1}
+              allowDecimal={false}
+              allowNegative={false}
+              thousandSeparator=","
+              onChange={(next) => {
+                const parsed = numberInputValue(next)
+                onChange(row.key, { pcPerContainer: parsed !== null && parsed > 0 ? parsed : null })
+              }}
+              aria-label={`PC per container of line ${row.lineNo}`}
+              rightSectionWidth={row.pcPerContainer === null ? undefined : 30}
+              rightSection={
+                row.pcPerContainer === null ? undefined : (
+                  <Tooltip label={row.defaultPcPerContainer === null ? 'Clear: the item has no Container unit' : `Back to the Container unit (${formatNumber(row.defaultPcPerContainer)})`} withArrow>
+                    <ActionIcon variant="subtle" size="sm" onClick={() => onChange(row.key, { pcPerContainer: null })} aria-label={`Reset the PC per container of line ${row.lineNo}`}>
+                      <IconRestore size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                )
+              }
+            />
+            {row.pcPerContainer !== null ? (
+              <Group gap={4} justify="flex-end" mt={2} wrap="nowrap">
+                <Badge size="xs" variant="light" color="violet">manual</Badge>
+                <Text fz={10} c="dimmed">{row.defaultPcPerContainer === null ? 'no unit' : `unit ${formatNumber(row.defaultPcPerContainer)}`}</Text>
+              </Group>
+            ) : row.defaultPcPerContainer === null ? (
+              // Where to fix it: the item's Units & Packaging.
+              <Text fz={10} c="dimmed" ta="right" mt={2}>no Container unit</Text>
+            ) : null}
+          </div>
         ),
     },
     { accessor: 'containerRequirement', title: 'Container Requirement', sortable: true, width: 200, textAlign: 'right', render: (row) => <Text fz="sm" data-line-containers={row.key}>{formatNumber(row.containerRequirement, 2)}</Text> },

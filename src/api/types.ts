@@ -678,8 +678,6 @@ export interface ItemDetailsDto {
   defaultSupplierName: string | null
   /** Days between ordering and receiving. */
   leadTimeDays: number | null
-  /** Pieces (base units) that fit in one container — the default of a shortage plan line. Only the item's own GET returns it. */
-  pcPerContainer?: number | null
   /** Per BASE unit. What a charge allocated by weight is shared out on. */
   weightKg?: number | null
   /** Per BASE unit, in cubic metres. The same, for a charge allocated by volume. */
@@ -748,8 +746,6 @@ export interface SaveItemRequest {
   defaultSupplierId?: number | null
   /** Days between ordering and receiving. */
   leadTimeDays?: number | null
-  /** Pieces (base units) per container; null clears it. */
-  pcPerContainer?: number | null
   /** Per BASE unit; needed by charges allocated by weight. */
   weightKg?: number | null
   /** Per BASE unit, in cubic metres; needed by charges allocated by volume. */

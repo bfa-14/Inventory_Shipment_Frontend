@@ -30,7 +30,10 @@ export interface ShortageLine {
   requiredQty: number
   /** True once the planner typed a quantity: it no longer follows the suggestion. */
   requiredManual: boolean
+  /** The planner's override, or null when the item's Container unit ({@link defaultPcPerContainer}) stands. */
   pcPerContainer: number | null
+  /** The Packing Formula of the item's "Container" unit; null when the item has none. */
+  defaultPcPerContainer: number | null
   minQuantity: number | null
   maxQuantity: number | null
   lastCost: number | null
@@ -51,6 +54,8 @@ export interface ShortageDerived {
   /** The shortage rounded up to whole purchase units. */
   suggestedRequiredQty: number
   requiredBase: number
+  /** The override, else the item's Container unit; null without either. */
+  effectivePcPerContainer: number | null
   /** Null without a PC per container. */
   containerRequirement: number | null
 }
@@ -68,7 +73,7 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
  *   Container Requirement = Required Qty × packing ÷ PC per Container
  */
 export function derive(
-  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'>,
+  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer' | 'defaultPcPerContainer'>,
   leadTimeMonths: number,
 ): ShortageDerived {
   const stockPlusTransitBase = line.currentInventoryBase + line.transitBase
@@ -80,6 +85,7 @@ export function derive(
   const shortageBase = gap > 0 ? Math.ceil(gap - 1e-9) : 0
   const packing = line.purchasePackingFormula > 0 ? line.purchasePackingFormula : 1
   const requiredBase = line.requiredQty * packing
+  const pcPerContainer = line.pcPerContainer ?? line.defaultPcPerContainer
 
   return {
     stockPlusTransitBase,
@@ -90,7 +96,8 @@ export function derive(
     coverageMonths: effectiveMonthlySales > 0 ? round2(totalExpectedStockBase / effectiveMonthlySales) : null,
     suggestedRequiredQty: shortageBase > 0 ? Math.ceil(shortageBase / packing) : 0,
     requiredBase,
-    containerRequirement: line.pcPerContainer !== null && line.pcPerContainer > 0 ? round2(requiredBase / line.pcPerContainer) : null,
+    effectivePcPerContainer: pcPerContainer,
+    containerRequirement: pcPerContainer !== null && pcPerContainer > 0 ? round2(requiredBase / pcPerContainer) : null,
   }
 }
 
@@ -132,8 +139,13 @@ export function totalsOf(lines: ShortageLine[], leadTimeMonths: number): Shortag
 let keySeed = 0
 const nextKey = () => `shr-${++keySeed}`
 
-/** A saved line. Its quantity counts as typed when it is not what the snapshot would suggest. */
-export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
+/**
+ * A saved line. Its quantity counts as typed when it is not what the snapshot would suggest, and its
+ * PC per container when it is not the item's Container unit (the database keeps only the value used).
+ * A POSTED plan is a snapshot: the value it used stays its value, whatever the item's unit says today.
+ */
+export function lineFromDto(dto: ShortageDocumentLineDto, draft: boolean): ShortageLine {
+  const defaultPcPerContainer = draft ? dto.defaultPcPerContainer : dto.pcPerContainer
   const line: ShortageLine = {
     key: nextKey(),
     id: dto.id,
@@ -149,7 +161,8 @@ export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
     purchasePackingFormula: dto.purchasePackingFormula,
     requiredQty: dto.requiredQty,
     requiredManual: false,
-    pcPerContainer: dto.pcPerContainer,
+    pcPerContainer: dto.pcPerContainer === defaultPcPerContainer ? null : dto.pcPerContainer,
+    defaultPcPerContainer,
     minQuantity: dto.minQuantity,
     maxQuantity: dto.maxQuantity,
     lastCost: dto.lastCost,
@@ -159,7 +172,7 @@ export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
   return line
 }
 
-/** A live row picked in "Load items": the suggestion as its quantity, the item's own PC per container. */
+/** A live row picked in "Load items": the suggestion as its quantity, the item's Container unit as its PC per container. */
 export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
   return {
     key: nextKey(),
@@ -176,7 +189,8 @@ export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
     purchasePackingFormula: row.purchasePackingFormula,
     requiredQty: row.suggestedRequiredQty,
     requiredManual: false,
-    pcPerContainer: row.pcPerContainer,
+    pcPerContainer: null,
+    defaultPcPerContainer: row.pcPerContainer,
     minQuantity: row.minQuantity,
     maxQuantity: row.maxQuantity,
     lastCost: row.lastCost,

@@ -65,7 +65,6 @@ interface FormValues {
   isActive: boolean
   defaultSupplierId: string | null
   leadTimeDays: number | ''
-  pcPerContainer: number | ''
   weightKg: number | ''
   volumeCbm: number | ''
 }
@@ -86,7 +85,6 @@ const BLANK: FormValues = {
   isActive: true,
   defaultSupplierId: null,
   leadTimeDays: '',
-  pcPerContainer: '',
   weightKg: '',
   volumeCbm: '',
 }
@@ -115,7 +113,6 @@ function toFormValues(item: ItemDetailsDto): FormValues {
     isActive: item.isActive,
     defaultSupplierId: item.defaultSupplierId === null ? null : String(item.defaultSupplierId),
     leadTimeDays: item.leadTimeDays ?? '',
-    pcPerContainer: item.pcPerContainer ?? '',
     weightKg: item.weightKg ?? '',
     volumeCbm: item.volumeCbm ?? '',
   }
@@ -360,7 +357,6 @@ function ItemDetails() {
       isActive: values.isActive,
       defaultSupplierId: values.defaultSupplierId === null ? null : Number(values.defaultSupplierId),
       leadTimeDays: values.leadTimeDays === '' ? null : values.leadTimeDays,
-      pcPerContainer: values.pcPerContainer === '' ? null : values.pcPerContainer,
       weightKg: values.weightKg === '' ? null : values.weightKg,
       volumeCbm: values.volumeCbm === '' ? null : values.volumeCbm,
       ...(isNew ? {} : { rowVersion: item?.rowVersion ?? null }),
@@ -1189,28 +1185,6 @@ function ItemDetails() {
                               value={form.values.leadTimeDays}
                               onChange={(next) => form.setFieldValue('leadTimeDays', numberInputValue(next) ?? '')}
                               error={form.errors.leadTimeDays}
-                            />
-                          </Field>
-                        </Grid.Col>
-
-                        <Grid.Col span={{ base: 12, sm: 4 }}>
-                          <Field
-                            label="PC per Container"
-                            value={item?.pcPerContainer == null ? '—' : formatNumber(item.pcPerContainer)}
-                            editing={editable}
-                          >
-                            <NumberInput
-                              label="PC per Container"
-                              description="Pieces (base units) that fill one container; shortage plans turn a required quantity into containers with it."
-                              placeholder="Optional"
-                              min={1}
-                              step={1}
-                              allowDecimal={false}
-                              allowNegative={false}
-                              thousandSeparator=","
-                              value={form.values.pcPerContainer}
-                              onChange={(next) => form.setFieldValue('pcPerContainer', numberInputValue(next) ?? '')}
-                              error={form.errors.pcPerContainer}
                             />
                           </Field>
                         </Grid.Col>

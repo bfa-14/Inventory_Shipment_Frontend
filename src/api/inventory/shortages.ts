@@ -42,6 +42,10 @@ export interface ShortageFigures {
   purchaseItemUnitId: number
   purchaseUnitName: string
   purchasePackingFormula: number
+  /**
+   * Pieces (base units) in one container. A live row carries the Packing Formula of the item's
+   * "Container" unit; a saved line carries what the plan used — that, or the planner's override.
+   */
   pcPerContainer: number | null
   containerRequirement: number | null
   minQuantity: number | null
@@ -71,6 +75,8 @@ export interface ShortageDocumentLineDto extends ShortageFigures {
   /** Purchase units. */
   requiredQty: number
   requiredBase: number
+  /** The item's Container unit TODAY — what a cleared PC per Container falls back to. Null without one. */
+  defaultPcPerContainer: number | null
   notes: string | null
 }
 
@@ -182,7 +188,7 @@ export interface SaveShortageDocumentLine {
   requiredQty: number | null
   /** Null = the computed monthly sales. */
   expectedMonthlySalesManual: number | null
-  /** Null = the item's own PC per container. */
+  /** Null = the Packing Formula of the item's "Container" unit. */
   pcPerContainer: number | null
   notes: string | null
 }

@@ -122,7 +122,7 @@ export function ShortageDocumentPage() {
       monthsOfHistory: doc.monthsOfHistory,
       notes: doc.notes ?? '',
     })
-    setLines(doc.lines.map(lineFromDto))
+    setLines(doc.lines.map((line) => lineFromDto(line, doc.status === 'Draft')))
     setErrors({})
     setFiguresStale(false)
     branchTouched.current = true

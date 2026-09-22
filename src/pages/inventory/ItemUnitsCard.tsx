@@ -43,7 +43,8 @@ export function ItemUnitsCard({
             Units &amp; Packaging
           </Text>
           <Text c="dimmed" fz="sm">
-            The base unit is the quantity everything else converts to.
+            The base unit is the quantity everything else converts to. A Container unit&apos;s packing formula
+            is the pieces per container that shortage plans start from.
           </Text>
         </Box>
         {editable ? (
