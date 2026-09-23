@@ -70,6 +70,11 @@ interface DataTableProps<T> {
   isRecordSelectable?(record: T, index: number): boolean
   /** A class for a row the page wants to point at - the documents an import just created. */
   rowClassName?(record: T): string | undefined
+  /**
+   * Keeps the last column (the row actions) in view while a grid too wide for the screen scrolls
+   * sideways - the actions are what a reader scrolled the row for.
+   */
+  pinLastColumn?: boolean
 }
 
 /**
@@ -111,6 +116,7 @@ export function DataTable<T>({
   onSelectedRecordsChange,
   isRecordSelectable,
   rowClassName,
+  pinLastColumn = false,
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
   const idKey = idAccessor ?? 'id'
@@ -221,6 +227,7 @@ export function DataTable<T>({
           withColumnBorders
           borderRadius="md"
           verticalAlign="center"
+          pinLastColumn={pinLastColumn}
           rowClassName={(record) =>
             [rowId(record, idKey) === selectedId ? 'app-grid__row--selected' : undefined, rowClassName?.(record)]
               .filter(Boolean)

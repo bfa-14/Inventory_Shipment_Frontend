@@ -262,6 +262,18 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
         </div>
       ),
     },
+    ...(kind.code === 'PINV'
+      ? [
+          {
+            accessor: 'exporterReference',
+            title: 'Exporter Ref.',
+            width: 150,
+            // Hidden on a phone: a reference nobody scans on a narrow screen costs the supplier its width.
+            visibleMediaQuery: (theme) => `(min-width: ${theme.breakpoints.sm})`,
+            render: (row) => row.exporterReference ?? <Text fz="sm" c="dimmed">—</Text>,
+          } as DataTableColumn<PurchaseDocumentListDto>,
+        ]
+      : []),
     { accessor: 'branchName', title: 'Branch' },
     { accessor: 'warehouseName', title: 'Warehouse' },
     ...(sourceKind
@@ -347,7 +359,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
 
       <FilterBar>
         <FilterBar.Col span={3}>
-          <TextInput label="Search" placeholder="Number, supplier reference or supplier" leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
+          <TextInput label="Search" placeholder={kind.code === 'PINV' ? 'Number, supplier, exporter ref., commercial invoice no.' : 'Number, supplier reference or supplier'} leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Branch" placeholder="All branches" data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))} value={filters.branchId} onChange={(next) => setFilter('branchId', next)} clearable searchable />

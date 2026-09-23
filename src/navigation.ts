@@ -91,6 +91,17 @@ export const PERMISSIONS = {
   landedCostsCancel: 'purchase.landedcosts.cancel',
   landedCostsDelete: 'purchase.landedcosts.delete',
   salesProfitView: 'sales.profit.view',
+  containersView: 'containers.view',
+  containersCreate: 'containers.create',
+  containersConfirm: 'containers.confirm',
+  containersOffload: 'containers.offload',
+  containersCancel: 'containers.cancel',
+  containersClose: 'containers.close',
+  containersDelete: 'containers.delete',
+  containersOverCapacity: 'containers.overcapacity',
+  containerTypesManage: 'masterdata.containertypes.manage',
+  portsManage: 'masterdata.ports.manage',
+  attachmentTypesManage: 'masterdata.attachmenttypes.manage',
 } as const
 
 export interface NavItem {
@@ -139,7 +150,6 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Purchase Planning', icon: 'clipboard', comingSoon: true, children: [] },
       { label: 'Purchase Orders', icon: 'cart', comingSoon: true },
       { label: 'Invoices', icon: 'invoice', comingSoon: true },
-      { label: 'Shipment & Containers', icon: 'truck', comingSoon: true, children: [] },
       { label: 'Costs & Payments', icon: 'wallet', comingSoon: true, children: [] },
       { label: 'Documents', icon: 'documents', comingSoon: true },
       { label: 'Reports', icon: 'reports', comingSoon: true },
@@ -187,6 +197,15 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
+    // THE SHIPMENT BETWEEN THE INVOICE AND THE WAREHOUSE: goods loaded from purchase invoices, the
+    // route they travel, and the offload that puts them into stock at landed cost.
+    title: 'LOGISTICS',
+    breadcrumb: 'Logistics',
+    items: [
+      { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
+    ],
+  },
+  {
     // HIDDEN, NOT REMOVED. The import page turned a spreadsheet into a posted invoice before the
     // Sales Invoice screen existed; that screen hosts the same wizard now, so the page is kept for
     // its route and its code but is not offered in the menu, the search or the Spotlight.
@@ -220,6 +239,10 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Brands', to: '/setup/master-data/brands', permission: PERMISSIONS.brandsView },
           { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
           { label: 'Unit Types', to: '/setup/master-data/unit-types', permission: PERMISSIONS.unitTypesView },
+          // The lists the container pages pick from.
+          { label: 'Container Types', to: '/setup/master-data/container-types', permission: PERMISSIONS.containerTypesManage },
+          { label: 'Ports', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
+          { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
         ],
       },
       {

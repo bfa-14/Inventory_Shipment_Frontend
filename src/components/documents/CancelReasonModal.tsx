@@ -8,7 +8,14 @@ interface CancelReasonModalProps {
   documentLabel: string
   busy?: boolean
   onConfirm: (reason: string) => void
+  /** What the red button says; "Cancel document" unless the caller names its own verb. */
+  confirmLabel?: string
+  /** What the cancellation does, when it is not the stock document's reversal. */
+  description?: string
 }
+
+const DEFAULT_DESCRIPTION =
+  'Cancelling writes the opposite stock movements and leaves the document in place as a record. It cannot be undone.'
 
 /**
  * Asks why a posted document is being cancelled.
@@ -27,6 +34,8 @@ export function CancelReasonModal({
   documentLabel,
   busy,
   onConfirm,
+  confirmLabel = 'Cancel document',
+  description = DEFAULT_DESCRIPTION,
 }: CancelReasonModalProps) {
   /*
    * THE FORM IS A CHILD SO THAT CLOSING FORGETS IT. Mantine unmounts a modal's children when it
@@ -35,7 +44,7 @@ export function CancelReasonModal({
    */
   return (
     <Modal opened={opened} onClose={onClose} title={`Cancel ${documentLabel}`} centered>
-      <ReasonForm onClose={onClose} busy={busy} onConfirm={onConfirm} />
+      <ReasonForm onClose={onClose} busy={busy} onConfirm={onConfirm} confirmLabel={confirmLabel} description={description} />
     </Modal>
   )
 }
@@ -44,17 +53,16 @@ function ReasonForm({
   onClose,
   busy,
   onConfirm,
-}: Pick<CancelReasonModalProps, 'onClose' | 'busy' | 'onConfirm'>) {
+  confirmLabel,
+  description,
+}: Pick<CancelReasonModalProps, 'onClose' | 'busy' | 'onConfirm'> & { confirmLabel: string; description: string }) {
   const [reason, setReason] = useState('')
   const ready = reason.trim().length > 0
 
   return (
     <>
       <Stack>
-        <Text size="sm">
-          Cancelling writes the opposite stock movements and leaves the document in place as a
-          record. It cannot be undone.
-        </Text>
+        <Text size="sm">{description}</Text>
 
         <Textarea
           label="Reason"
@@ -73,7 +81,7 @@ function ReasonForm({
             Keep it
           </Button>
           <Button color="red" disabled={!ready} loading={busy} onClick={() => onConfirm(reason.trim())}>
-            Cancel document
+            {confirmLabel}
           </Button>
         </Group>
       </Stack>

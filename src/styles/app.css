@@ -135,6 +135,13 @@
    is an inset shadow rather than a border, so no column shifts by 3px when a row
    is marked. */
 
+/* A pinned column (the row actions, pinLastColumn) sits over the cells that scroll under it, so it
+   needs a ground of its own; the selected row keeps its brand tint through the rule below. */
+.mantine-datatable th[data-pinned],
+.mantine-datatable td[data-pinned] {
+  background-color: var(--mantine-color-body);
+}
+
 .mantine-datatable .app-grid__row--selected > td {
   background-color: var(--mantine-color-brand-0);
 }

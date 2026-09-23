@@ -60,10 +60,40 @@ export interface SavePurchaseDocumentRequest {
   /** Null = resolved from the exchange rates for the document date. */
   exchangeRate: number | null
   supplierReference: string | null
+  /** Invoices only. Null = unchanged (1 on creation); forced to 2 once the invoice is in a container. */
+  receiptMode?: ReceiptMode | null
+  exporterReference?: string | null
+  commercialInvoiceNo?: string | null
   notes: string | null
   sourceDocumentId?: number | null
   lines: SavePurchaseDocumentLine[]
   rowVersion?: string | null
+}
+
+/** When a purchase invoice puts its goods into stock: 1 on posting (local), 2 on container offload (imports). */
+export type ReceiptMode = 1 | 2
+
+export const RECEIPT_MODE_LABELS: Record<ReceiptMode, string> = {
+  1: 'On posting',
+  2: 'On container offload',
+}
+
+/** A container carrying (part of) a purchase invoice. */
+export interface PurchaseInvoiceContainerDto {
+  id: number
+  containerRef: string
+  containerNo: string | null
+  status: number
+  statusName: string
+  dispatchDate: string | null
+  eta: string | null
+  offloadedDate: string | null
+  currentLocation: string | null
+  warehouseCode: string | null
+  warehouseName: string | null
+  /** Of this invoice, in base units. */
+  allocatedBase: number
+  receivedBase: number
 }
 
 export interface PurchaseDocumentListDto {
@@ -87,6 +117,10 @@ export interface PurchaseDocumentListDto {
   decimalPlaces: number
   exchangeRate: number
   supplierReference: string | null
+  /** Null until the list procedure returns it. */
+  exporterReference: string | null
+  commercialInvoiceNo: string | null
+  receiptMode: ReceiptMode
   status: PurchaseDocumentStatus
   totalItems: number
   totalQuantity: number
@@ -158,8 +192,12 @@ export interface PurchaseDocumentLineDto {
   remainingBase: number | null
   /** Orders: what the supplier has shipped so far, recorded with "Mark as shipped". Base units. */
   shippedQuantityBase: number
-  /** Shipped and not yet received — what the shortage plan counts as Transit. Base units. */
+  /** Invoices: loaded on containers in transit / at port / cleared and not yet received — what the shortage plan counts as Transit. Base units. */
   transitBase: number
+  /** Invoices: what containers that are not cancelled hold of this line. Base units. */
+  allocatedToContainersBase: number
+  /** Invoices: still free to load into a container; null on orders and returns. Base units. */
+  availableForContainerBase: number | null
   importRowNumber: number | null
   notes: string | null
   sourceLineId: number | null
@@ -231,6 +269,11 @@ export interface PurchaseDocumentDto {
   exchangeRate: number
   baseCurrencyCode: string | null
   supplierReference: string | null
+  /** Invoices: the exporter's reference and the supplier's commercial invoice number. */
+  exporterReference: string | null
+  commercialInvoiceNo: string | null
+  /** Invoices: 1 = stock on posting, 2 = stock on container offload (forced once in a container). */
+  receiptMode: ReceiptMode
   notes: string | null
   status: PurchaseDocumentStatus
   totalItems: number
@@ -281,6 +324,8 @@ export interface PurchaseDocumentDto {
   files: PurchaseDocumentFileDto[]
   audit: PurchaseDocumentAuditDto[]
   linked: LinkedPurchaseDocumentDto[]
+  /** Invoices: the containers carrying it, with what each holds and has received. */
+  containers: PurchaseInvoiceContainerDto[]
 }
 
 export interface ImportCreatePurchaseDocumentsRequest {

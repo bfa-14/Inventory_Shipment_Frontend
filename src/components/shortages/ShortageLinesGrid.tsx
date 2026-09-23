@@ -111,7 +111,14 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
       ),
     },
     { accessor: 'currentInventoryBase', title: 'Current Inventory', sortable: true, width: 160, textAlign: 'right', render: (row) => number(row.currentInventoryBase) },
-    { accessor: 'transitBase', title: 'Transit Qty', sortable: true, width: 125, textAlign: 'right', render: (row) => number(row.transitBase) },
+    {
+      accessor: 'transitBase',
+      title: (
+        <Tooltip label="Quantity on containers in transit, at port or cleared, not yet offloaded" multiline w={260} withArrow>
+          <span>Transit Qty</span>
+        </Tooltip>
+      ),
+      sortable: true, width: 125, textAlign: 'right', render: (row) => number(row.transitBase) },
     { accessor: 'outstandingOrderBase', title: 'Outstanding Order Qty', sortable: true, width: 200, textAlign: 'right', render: (row) => number(row.outstandingOrderBase) },
     { accessor: 'stockPlusTransitBase', title: 'Stock + Transit', sortable: true, width: 150, textAlign: 'right', render: (row) => number(row.stockPlusTransitBase) },
     { accessor: 'totalExpectedStockBase', title: 'Total Expected Stock', sortable: true, width: 185, textAlign: 'right', render: (row) => <Text fz="sm" fw={500}>{formatNumber(row.totalExpectedStockBase)}</Text> },

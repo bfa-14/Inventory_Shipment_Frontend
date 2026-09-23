@@ -2,7 +2,7 @@ import { Anchor, Badge, Grid, Group, NumberInput, Paper, Select, Text, Textarea,
 import { DateInput } from '@mantine/dates'
 import { IconLink } from '@tabler/icons-react'
 import { Link } from 'react-router'
-import type { PurchaseRateResolutionDto } from '../../api/purchase/documents'
+import { RECEIPT_MODE_LABELS, type PurchaseRateResolutionDto, type ReceiptMode } from '../../api/purchase/documents'
 import { SALES_RATE_TYPES, salesRateTypeLabel, type SalesRateType } from '../../api/sales/invoices'
 import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
@@ -21,6 +21,11 @@ export interface PurchaseHeader {
   /** The rate the document is valued at; null while none is known, and the page refuses to post then. */
   exchangeRate: number | null
   supplierReference: string
+  /** Invoices only: the exporter's reference and the supplier's commercial invoice number. */
+  exporterReference: string
+  commercialInvoiceNo: string
+  /** Invoices only: '1' stock on posting, '2' stock on container offload. */
+  receiptMode: '1' | '2'
   notes: string
 }
 
@@ -55,6 +60,8 @@ interface PurchaseHeaderCardProps {
   readOnly: boolean
   errors: PurchaseHeaderErrors
   disabled: boolean
+  /** Invoices: a container carries it, so it is received at offload whatever the reader picks. */
+  receiptModeLocked?: boolean
 }
 
 /**
@@ -85,7 +92,9 @@ export function PurchaseHeaderCard({
   readOnly,
   errors,
   disabled,
+  receiptModeLocked = false,
 }: PurchaseHeaderCardProps) {
+  const isInvoice = kind.code === 'PINV'
   const isBase = rate?.isBaseCurrency === true
   const currency = currencies.find((c) => String(c.id) === value.currencyId)
   const currencyCode = rate?.currencyCode ?? currency?.currencyCode
@@ -322,7 +331,58 @@ export function PurchaseHeaderCard({
           )}
         </Grid.Col>
 
-        <Grid.Col span={{ base: 12, lg: 9 }}>
+        {isInvoice ? (
+          <>
+            <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+              {readOnly ? (
+                field("Exporter's Ref.", value.exporterReference)
+              ) : (
+                <TextInput
+                  label="Exporter's Ref."
+                  placeholder="On the exporter's paperwork"
+                  value={value.exporterReference}
+                  onChange={(event) => onChange({ exporterReference: event.currentTarget.value })}
+                  maxLength={50}
+                  disabled={disabled}
+                />
+              )}
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+              {readOnly ? (
+                field('Commercial Invoice No.', value.commercialInvoiceNo)
+              ) : (
+                <TextInput
+                  label="Commercial Invoice No."
+                  placeholder="The supplier's invoice number"
+                  value={value.commercialInvoiceNo}
+                  onChange={(event) => onChange({ commercialInvoiceNo: event.currentTarget.value })}
+                  maxLength={50}
+                  disabled={disabled}
+                />
+              )}
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+              {readOnly || receiptModeLocked ? (
+                field('Receipt Mode', RECEIPT_MODE_LABELS[Number(value.receiptMode) as ReceiptMode])
+              ) : (
+                <Select
+                  label="Receipt Mode"
+                  description="When the goods enter stock"
+                  data={[
+                    { value: '1', label: RECEIPT_MODE_LABELS[1] },
+                    { value: '2', label: RECEIPT_MODE_LABELS[2] },
+                  ]}
+                  value={value.receiptMode}
+                  onChange={(next) => onChange({ receiptMode: next === '2' ? '2' : '1' })}
+                  allowDeselect={false}
+                  disabled={disabled}
+                />
+              )}
+            </Grid.Col>
+          </>
+        ) : null}
+
+        <Grid.Col span={{ base: 12, lg: isInvoice ? 12 : 9 }}>
           {readOnly ? (
             field('Notes', value.notes)
           ) : (

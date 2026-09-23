@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Alert, Button, Grid, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core'
-import { IconArrowBackUp, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash, IconTruckDelivery } from '@tabler/icons-react'
+import { IconArrowBackUp, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import { chargeTypesApi, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
@@ -14,6 +14,7 @@ import {
   purchaseDocumentsApi,
   type PurchaseDocumentDto,
   type PurchaseRateResolutionDto,
+  type ReceiptMode,
   type SavePurchaseDocumentRequest,
 } from '../../api/purchase/documents'
 import type { BranchLookupDto, CurrencyLookupDto, ItemListDto, ItemLookupDto, ItemUnitDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
@@ -28,7 +29,7 @@ import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber } from '../../components/format'
 import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
-import { MarkShippedModal } from '../../components/purchase/MarkShippedModal'
+import { InvoiceContainersCard } from '../../components/purchase/InvoiceContainersCard'
 import { PurchaseChargesGrid } from '../../components/purchase/PurchaseChargesGrid'
 import {
   chargeFromDto,
@@ -118,7 +119,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   const [header, setHeader] = useState<PurchaseHeader>({
     documentDate: isoDate(new Date()), expectedDate: null, branchId: null, warehouseId: null, supplierId: null,
-    currencyId: null, rateType: 1, exchangeRate: null, supplierReference: '', notes: '',
+    currencyId: null, rateType: 1, exchangeRate: null, supplierReference: '', exporterReference: '', commercialInvoiceNo: '',
+    receiptMode: '1', notes: '',
   })
   const [errors, setErrors] = useState<PurchaseHeaderErrors>({})
   const [lines, setLines] = useState<PurchaseLine[]>([])
@@ -135,8 +137,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
   const [closeBusy, setCloseBusy] = useState(false)
-  const [shippedOpen, setShippedOpen] = useState(false)
-  const [shippedBusy, setShippedBusy] = useState(false)
 
   /* THE CHARGES ARE THEIR OWN DOCUMENT HALF: the lines are the supplier's bill, the charges are
      everybody else's, and the API saves them with two different calls. Only a purchase invoice has
@@ -232,6 +232,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       rateType: doc.rateType,
       exchangeRate: doc.exchangeRate,
       supplierReference: doc.supplierReference ?? '',
+      exporterReference: doc.exporterReference ?? '',
+      commercialInvoiceNo: doc.commercialInvoiceNo ?? '',
+      receiptMode: doc.receiptMode === 2 ? '2' : '1',
       notes: doc.notes ?? '',
     })
     setLines(
@@ -633,6 +636,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       rateType: header.rateType,
       exchangeRate: isBaseCurrency ? null : header.exchangeRate,
       supplierReference: header.supplierReference.trim() || null,
+      ...(kind.code === 'PINV'
+        ? {
+            exporterReference: header.exporterReference.trim() || null,
+            commercialInvoiceNo: header.commercialInvoiceNo.trim() || null,
+            receiptMode: Number(header.receiptMode) as ReceiptMode,
+          }
+        : {}),
       notes: header.notes.trim() || null,
       sourceDocumentId: document?.sourceDocumentId ?? null,
       rowVersion: document?.rowVersion ?? null,
@@ -767,23 +777,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }
 
-  /** What the supplier has shipped on the open order: no stock moves, the shortage plans read it as Transit. */
-  async function markShipped(shipped: { lineId: number; shippedQuantityBase: number }[]) {
-    if (!document) return
-    setShippedBusy(true)
-    try {
-      const updated = await purchaseDocumentsApi.markShipped(document.id, shipped, document.rowVersion)
-      applyDocument(updated)
-      const transit = updated.lines.reduce((sum, l) => sum + l.transitBase, 0)
-      notify.success(`Shipped quantities recorded: ${formatNumber(transit)} base unit(s) in transit.`)
-      setShippedOpen(false)
-    } catch (error) {
-      showApiError(error)
-    } finally {
-      setShippedBusy(false)
-    }
-  }
-
   async function createFromThis() {
     if (!document) return
     const target = kind.code === 'PO' ? PURCHASE_INVOICE : PURCHASE_RETURN
@@ -869,7 +862,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         { key: 'landed-cost', label: 'New landed cost adjustment', icon: <IconReceipt2 size={16} />, colour: 'grape', visible: canLandedCost && document?.canAdjustLandedCost === true, onClick: () => void navigate(`/purchase/landed-cost-adjustments/new?invoiceId=${document?.id}`) },
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', visible: canCreateInvoice && document?.canCreateInvoice === true, loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
-        { key: 'mark-shipped', label: 'Mark as shipped', icon: <IconTruckDelivery size={16} />, colour: 'blue', visible: kind.code === 'PO' && canCreate && document?.canMarkShipped === true, onClick: () => setShippedOpen(true) },
         { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', visible: kind.code === 'PO' && canPost && document?.canClose === true, onClick: () => setCloseOpen(true) },
         { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
@@ -890,7 +882,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       {document && status === 'Posted' && (
         <Alert color={kind.colour} title={`${kind.code === 'PO' ? 'Confirmed' : 'Posted'} — ${document.documentNumber}`}>
-          {kind.code === 'PO' ? 'Confirmed' : 'Posted'} by {document.postedByName ?? 'unknown'} on {stamp(document.postedAtUtc)}. {kind.postedBanner}
+          {kind.code === 'PO' ? 'Confirmed' : 'Posted'} by {document.postedByName ?? 'unknown'} on {stamp(document.postedAtUtc)}.{' '}
+          {kind.code === 'PINV' && document.receiptMode === 2
+            ? 'The item costs are set; the stock enters when the containers carrying it are offloaded. This invoice can no longer be edited.'
+            : kind.postedBanner}
         </Alert>
       )}
       {document && status === 'Closed' && (
@@ -922,6 +917,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         readOnly={!editable}
         errors={errors}
         disabled={saving}
+        receiptModeLocked={document?.containers.some((c) => c.status !== 8) ?? false}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -1048,6 +1044,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             )}
 
             <LinkedDocumentsCard linked={document?.linked ?? []} />
+            {kind.code === 'PINV' && document ? <InvoiceContainersCard containers={document.containers} /> : null}
           </Stack>
         </Grid.Col>
       </Grid>
@@ -1064,7 +1061,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={documentLabel} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
 
-      <MarkShippedModal opened={shippedOpen} onClose={() => setShippedOpen(false)} documentLabel={documentLabel} lines={document?.lines ?? []} busy={shippedBusy} onConfirm={(shipped) => void markShipped(shipped)} />
 
       <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />
 
