@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Button, Checkbox, Group, Popover, Stack, Text } from '@mantine/core'
+import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { Button, Checkbox, Group, Menu, Modal, Stack, Text } from '@mantine/core'
 import { IconColumns3, IconFilterOff, IconRestore } from '@tabler/icons-react'
 import {
   DataTable as MantineDataTable,
@@ -109,9 +109,10 @@ interface DataTableProps<T> {
  * Per-column filtering is opt-in per column: give the column the props from `columnFilter()` and
  * hand the same {@link GridFilters} to `filters` here.
  *
- * A {@link DataTableProps.storeKey} adds the column chooser and draggable column widths, remembered
- * per reader under that key. Both are the grid's own business rather than each page's, which is why
- * a page asks for them with one prop and never repeats a flag down its column list.
+ * A {@link DataTableProps.storeKey} adds draggable column widths and the column chooser - reached by
+ * right-clicking the header, never shown otherwise - both remembered per reader under that key.
+ * They are the grid's own business rather than each page's, which is why a page asks for them with
+ * one prop and never repeats a flag down its column list.
  *
  * **Rows are selectable, on every grid, without a page asking for it.** Clicking a row - or any of
  * its action icons, which is the same click on the way up - marks it. A click that landed on a
@@ -152,8 +153,15 @@ export function DataTable<T>({
   const idKey = idAccessor ?? 'id'
 
   /**
-   * Every column a page did not fix or decide for itself becomes hideable and resizable, so a page
-   * opts into both features with one prop instead of repeating two flags down its column list.
+   * Every column a page did not fix or decide for itself becomes resizable, so a page opts in with
+   * one prop instead of repeating a flag down its column list.
+   *
+   * `toggleable` IS DELIBERATELY NOT SET, though these columns are exactly the ones the chooser
+   * offers. mantine-datatable reads that flag as permission to run its own column UI: a cross in
+   * every header that hides the column, and a checkbox list on right-click that opens straight
+   * away. The cross reads as "clear" next to the header funnels, and the list is meant to be
+   * reached through the menu below. Hiding does not depend on the flag - `effectiveColumns` takes
+   * it from the stored toggle state either way - so leaving it off costs nothing.
    */
   const adjustableColumns = useMemo(
     () =>
@@ -162,11 +170,7 @@ export function DataTable<T>({
         : columns.map((column) =>
             FIXED_ACCESSORS.has(String(column.accessor))
               ? column
-              : {
-                  ...column,
-                  toggleable: column.toggleable ?? true,
-                  resizable: column.resizable ?? true,
-                },
+              : { ...column, resizable: column.resizable ?? true },
           ),
     [columns, storeKey],
   )
@@ -194,11 +198,32 @@ export function DataTable<T>({
     [adjustableColumns],
   )
 
-  const toggleableColumns = storeKey === undefined ? [] : columnsToggle.filter((column) => column.toggleable)
+  /**
+   * What the chooser offers. Judged on this component's own list of fixed columns rather than on
+   * the `toggleable` flag, which is left unset on purpose (see above).
+   */
+  const choosableColumns =
+    storeKey === undefined ? [] : columnsToggle.filter((column) => !FIXED_ACCESSORS.has(String(column.accessor)))
+
+  /** Where the header was right-clicked, and so where the menu opens. Null while it is closed. */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const [chooserOpen, setChooserOpen] = useState(false)
 
   const [selectedId, setSelectedId] = useState<RowId | null>(null)
   const [lastPage, setLastPage] = useState(page)
   const gridRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * THE HEADER ONLY. A right-click on a row is the browser's, as it has always been - the menu
+   * belongs to the columns, and offering it over the data would put it in the way of copying a cell.
+   */
+  function handleContextMenu(event: MouseEvent<HTMLDivElement>) {
+    if (choosableColumns.length === 0) return
+    if (!(event.target as HTMLElement).closest('thead')) return
+
+    event.preventDefault()
+    setMenuAt({ x: event.clientX, y: event.clientY })
+  }
 
   // Both of these correct the selection as the rows change, during the render that changes them -
   // an effect would paint a mark on the wrong row for one frame before taking it away again.
@@ -269,47 +294,62 @@ export function DataTable<T>({
 
   return (
     <>
-      {/* The strip now carries the chooser as well, so it shows for either reason. The filter count
-          stays on the left and keeps its own wording: a column hidden while its funnel is set is
-          exactly when "2 column filters in effect" is the only thing left saying so. */}
-      {activeFilters > 0 || toggleableColumns.length > 0 ? (
-        <Group justify="space-between" mb="xs" gap="sm" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap">
-            {activeFilters > 0 ? (
-              <>
-                <Text fz="sm" c="dimmed">
-                  {activeFilters === 1 ? '1 column filter' : `${activeFilters} column filters`} in effect
-                </Text>
-                <Button
-                  size="compact-sm"
-                  variant="subtle"
-                  leftSection={<IconFilterOff size={15} />}
-                  onClick={() => filters?.clearAll()}
-                >
-                  Clear column filters
-                </Button>
-              </>
-            ) : null}
-          </Group>
-
-          {toggleableColumns.length > 0 ? (
-            <ColumnChooser
-              items={toggleableColumns}
-              labels={columnLabels}
-              onToggle={(accessor, toggled) =>
-                setColumnsToggle(
-                  columnsToggle.map((column) => (column.accessor === accessor ? { ...column, toggled } : column)),
-                )
-              }
-              onResetColumns={resetColumnsToggle}
-              onResetWidths={resetColumnsWidth}
-            />
-          ) : null}
+      {/* A column hidden while its funnel is still set is exactly when this line is the only thing
+          left on screen saying the result is narrowed. */}
+      {activeFilters > 0 ? (
+        <Group justify="space-between" mb="xs" gap="sm">
+          <Text fz="sm" c="dimmed">
+            {activeFilters === 1 ? '1 column filter' : `${activeFilters} column filters`} in effect
+          </Text>
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            leftSection={<IconFilterOff size={15} />}
+            onClick={() => filters?.clearAll()}
+          >
+            Clear column filters
+          </Button>
         </Group>
       ) : null}
 
+      {/* Anchored to the pointer: a 1px target parked where the click landed, which is what a
+          context menu is. Rendered only while open so it is not a stray element under the page. */}
+      <Menu opened={menuAt !== null} onClose={() => setMenuAt(null)} position="bottom-start" shadow="md" width={200}>
+        <Menu.Target>
+          <div
+            aria-hidden
+            style={{ position: 'fixed', left: menuAt?.x ?? 0, top: menuAt?.y ?? 0, width: 1, height: 1 }}
+          />
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item
+            leftSection={<IconColumns3 size={15} />}
+            onClick={() => {
+              setMenuAt(null)
+              setChooserOpen(true)
+            }}
+          >
+            Column chooser
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+
+      <ColumnChooser
+        opened={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        items={choosableColumns}
+        labels={columnLabels}
+        onToggle={(accessor, toggled) =>
+          setColumnsToggle(
+            columnsToggle.map((column) => (column.accessor === accessor ? { ...column, toggled } : column)),
+          )
+        }
+        onResetColumns={resetColumnsToggle}
+        onResetWidths={resetColumnsWidth}
+      />
+
       {/* Focusable so the arrow keys have somewhere to land; clicking a row puts the focus here. */}
-      <div ref={gridRef} className="app-grid" tabIndex={0} onKeyDown={handleKeys}>
+      <div ref={gridRef} className="app-grid" tabIndex={0} onKeyDown={handleKeys} onContextMenu={handleContextMenu}>
         <MantineDataTable<T>
           // Rows answer a click everywhere now, but only a grid whose rows LEAD somewhere says so
           // with a pointer: selecting is not navigating, and the cursor must not promise it is.
@@ -357,6 +397,8 @@ export function DataTable<T>({
 }
 
 interface ColumnChooserProps {
+  opened: boolean
+  onClose(): void
   items: DataTableColumnToggle[]
   /** Accessor -> the column's header text, which is what the reader is picking by. */
   labels: Record<string, string>
@@ -368,59 +410,56 @@ interface ColumnChooserProps {
 /**
  * Which columns the grid shows, and a way back from a layout the reader has made a mess of.
  *
- * A BUTTON RATHER THAN THE HEADER'S CONTEXT MENU. mantine-datatable already opens this list on a
- * right-click of the header, and nobody right-clicks a table to look for it; the same state driven
- * by something visible is the whole point of the control.
+ * Opened from the header's context menu, so nothing about it sits on screen until it is asked for -
+ * a grid is read far more often than it is rearranged, and a control for rearranging it is clutter
+ * on every other visit.
  *
- * Widths are reset from here too. They are dragged on the header, so there is no other control they
- * could hang off, and a column dragged down to a sliver is the one case a reader cannot undo by
+ * Widths are reset from here too. They are dragged on the header, so there is nowhere else the
+ * control could hang, and a column dragged down to a sliver is the one case a reader cannot undo by
  * dragging it back.
  */
-function ColumnChooser({ items, labels, onToggle, onResetColumns, onResetWidths }: ColumnChooserProps) {
+function ColumnChooser({
+  opened,
+  onClose,
+  items,
+  labels,
+  onToggle,
+  onResetColumns,
+  onResetWidths,
+}: ColumnChooserProps) {
   const shownCount = items.filter((item) => item.toggled).length
 
   return (
-    <Popover position="bottom-end" withArrow shadow="md" trapFocus>
-      <Popover.Target>
-        <Button size="compact-sm" variant="subtle" leftSection={<IconColumns3 size={15} />}>
-          Columns
-        </Button>
-      </Popover.Target>
-      <Popover.Dropdown>
-        <Stack gap={8}>
-          <Text fz="xs" fw={600} c="dimmed" tt="uppercase">
-            Show columns
-          </Text>
+    <Modal opened={opened} onClose={onClose} title="Column chooser" size="sm" centered>
+      <Stack gap={10}>
+        <Text fz="xs" c="dimmed">
+          Columns ticked here are the ones the grid shows. Drag the edge of a header to set its
+          width, or double-click that edge to put it back.
+        </Text>
 
-          {items.map((item) => (
-            <Checkbox
-              key={item.accessor}
-              size="xs"
-              label={labels[item.accessor] ?? item.accessor}
-              checked={item.toggled}
-              // The last one standing stays: a grid of no columns is not a narrower view of the
-              // rows, it is a blank rectangle with a paging footer under it.
-              disabled={item.toggled && shownCount === 1}
-              onChange={(event) => onToggle(item.accessor, event.currentTarget.checked)}
-            />
-          ))}
+        {items.map((item) => (
+          <Checkbox
+            key={item.accessor}
+            size="sm"
+            label={labels[item.accessor] ?? item.accessor}
+            checked={item.toggled}
+            // The last one standing stays: a grid of no columns is not a narrower view of the
+            // rows, it is a blank rectangle with a paging footer under it.
+            disabled={item.toggled && shownCount === 1}
+            onChange={(event) => onToggle(item.accessor, event.currentTarget.checked)}
+          />
+        ))}
 
-          <Group gap="xs" mt={4} wrap="nowrap">
-            <Button
-              size="compact-xs"
-              variant="light"
-              leftSection={<IconRestore size={13} />}
-              onClick={onResetColumns}
-            >
-              Reset columns
-            </Button>
-            <Button size="compact-xs" variant="light" onClick={onResetWidths}>
-              Reset widths
-            </Button>
-          </Group>
-        </Stack>
-      </Popover.Dropdown>
-    </Popover>
+        <Group gap="xs" mt="xs" wrap="nowrap">
+          <Button size="compact-sm" variant="light" leftSection={<IconRestore size={14} />} onClick={onResetColumns}>
+            Reset columns
+          </Button>
+          <Button size="compact-sm" variant="light" onClick={onResetWidths}>
+            Reset widths
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   )
 }
 

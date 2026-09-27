@@ -122,7 +122,7 @@ modifier in the hint is read from the reader's own platform.
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
 | `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
-| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on the column chooser + draggable widths and names where they are remembered). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
+| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on draggable widths and the header's right-click column chooser, and names where they are remembered). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
 | `rowNumberColumn(page, recordsPerPage)` | The leading "#" column, numbered across pages. |
@@ -253,11 +253,19 @@ A page turns this on with **one prop** - `storeKey` on `DataTable`:
 ```
 
 `storeKey` names where the choices are kept (localStorage, so per browser and per person, never sent
-to the server). The wrapper then marks every column `toggleable` and `resizable` for itself, so a
-column list needs no extra flags, and `mantine-datatable`'s own `useDataTableColumns` does the
-storing. A **Columns** button appears in the strip above the table, with one checkbox per column and
-**Reset columns** / **Reset widths**. The library also opens the same list on a right-click of the
-header; the button exists because nobody right-clicks a table to find out.
+to the server). The wrapper then marks every column `resizable` for itself, so a column list needs
+no extra flags, and `mantine-datatable`'s own `useDataTableColumns` does the storing.
+
+**The chooser is not on screen.** Right-click the grid's **header** → **Column chooser** → a small
+dialog with one checkbox per column and **Reset columns** / **Reset widths**. Nothing is shown until
+it is asked for: a grid is read far more often than it is rearranged. Widths are dragged directly on
+the header edge, and double-clicking that edge resets the one column.
+
+Note the wrapper deliberately does **not** set `toggleable` on columns, although those are exactly
+the columns the chooser offers. `mantine-datatable` treats that flag as permission to run its own
+column UI - a cross in every header, and a checkbox list that opens straight from the right-click
+with no menu in between. Hiding does not depend on the flag (`effectiveColumns` reads the stored
+toggle state either way), so the flag stays off and `FIXED_ACCESSORS` decides what the chooser lists.
 
 Conventions:
 
@@ -267,7 +275,10 @@ Conventions:
   the reader arranged.
 - **`#` and `Actions` are never hideable or resizable** (`FIXED_ACCESSORS` in `DataTable.tsx`). `#`
   is a position marker rather than data, and `Actions` is what `pinLastColumn` deliberately keeps in
-  view. `mantine-datatable` also never resizes the last column, whatever it is.
+  view. `mantine-datatable` also never resizes the last column, whatever it is, and a resize takes
+  width from the neighbouring column rather than widening the table - each keeps a 50px floor.
+- **The context menu is the header's alone.** A right-click on a row stays the browser's, so copying
+  a cell is not interrupted.
 - **A grid inside a form leaves `storeKey` out** - the document and shortage line grids, and the load
   items drawer. There a hidden column would hide a figure someone is editing. Without the prop the
   grid behaves exactly as before and stores nothing.
