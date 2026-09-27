@@ -282,6 +282,7 @@ export function BrandsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<BrandDto>
+          storeKey="masterdata.brands"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

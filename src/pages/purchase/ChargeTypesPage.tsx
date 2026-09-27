@@ -310,6 +310,7 @@ export function ChargeTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ChargeTypeDto>
+          storeKey="purchase.chargeTypes"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

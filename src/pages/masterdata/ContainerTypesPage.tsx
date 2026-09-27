@@ -202,6 +202,7 @@ export function ContainerTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ContainerTypeDto>
+          storeKey="masterdata.containerTypes"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

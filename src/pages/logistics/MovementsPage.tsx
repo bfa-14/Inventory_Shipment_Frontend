@@ -358,6 +358,7 @@ export function MovementsPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable<MovementListDto>
+          storeKey="logistics.movements"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

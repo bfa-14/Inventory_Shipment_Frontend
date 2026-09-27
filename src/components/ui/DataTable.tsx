@@ -1,9 +1,12 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
-import { Button, Group, Text } from '@mantine/core'
-import { IconFilterOff } from '@tabler/icons-react'
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Button, Checkbox, Group, Popover, Stack, Text } from '@mantine/core'
+import { IconColumns3, IconFilterOff, IconRestore } from '@tabler/icons-react'
 import {
   DataTable as MantineDataTable,
+  humanize,
+  useDataTableColumns,
   type DataTableColumn,
+  type DataTableColumnToggle,
   type DataTablePaginationProps,
   type DataTableSortProps,
   type DataTableSortStatus,
@@ -17,6 +20,16 @@ type RowId = string | number
 
 /** Anything inside a row that answers a click or a key itself, and so answers it alone. */
 const INTERACTIVE = 'button, a, input, select, textarea, [role="button"], [role="menuitem"], [contenteditable="true"]'
+
+/**
+ * The two columns the chooser and the resize handles leave alone.
+ *
+ * "#" is a position marker rather than data - hiding it or widening it says nothing about the
+ * record - and Actions is the column {@link DataTableProps.pinLastColumn} keeps in view precisely
+ * because it is the one a reader scrolled the row to reach. Both are also the columns whose fixed
+ * widths the rest of the grid is laid out against.
+ */
+const FIXED_ACCESSORS = new Set(['__rowNumber', 'actions'])
 
 interface DataTableProps<T> {
   records: T[]
@@ -75,6 +88,18 @@ interface DataTableProps<T> {
    * sideways - the actions are what a reader scrolled the row for.
    */
   pinLastColumn?: boolean
+  /**
+   * Turns on the column chooser and manual column widths, and names where the reader's choices are
+   * remembered (localStorage, per browser). Leaving it out keeps the grid exactly as it was: no
+   * Columns button, no resize handles, nothing stored - which is what the grids embedded in a form
+   * want, where a hidden column would hide something being edited.
+   *
+   * ONE STABLE KEY PER GRID, namespaced after the page ("masterdata.branches",
+   * "logistics.containers"). It is persisted, so treat a key as permanent: reusing one across two
+   * grids would have them fight over each other's widths, and renaming one silently discards
+   * whatever the reader had arranged.
+   */
+  storeKey?: string
 }
 
 /**
@@ -83,6 +108,10 @@ interface DataTableProps<T> {
  *
  * Per-column filtering is opt-in per column: give the column the props from `columnFilter()` and
  * hand the same {@link GridFilters} to `filters` here.
+ *
+ * A {@link DataTableProps.storeKey} adds the column chooser and draggable column widths, remembered
+ * per reader under that key. Both are the grid's own business rather than each page's, which is why
+ * a page asks for them with one prop and never repeats a flag down its column list.
  *
  * **Rows are selectable, on every grid, without a page asking for it.** Clicking a row - or any of
  * its action icons, which is the same click on the way up - marks it. A click that landed on a
@@ -117,9 +146,55 @@ export function DataTable<T>({
   isRecordSelectable,
   rowClassName,
   pinLastColumn = false,
+  storeKey,
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
   const idKey = idAccessor ?? 'id'
+
+  /**
+   * Every column a page did not fix or decide for itself becomes hideable and resizable, so a page
+   * opts into both features with one prop instead of repeating two flags down its column list.
+   */
+  const adjustableColumns = useMemo(
+    () =>
+      storeKey === undefined
+        ? columns
+        : columns.map((column) =>
+            FIXED_ACCESSORS.has(String(column.accessor))
+              ? column
+              : {
+                  ...column,
+                  toggleable: column.toggleable ?? true,
+                  resizable: column.resizable ?? true,
+                },
+          ),
+    [columns, storeKey],
+  )
+
+  /**
+   * Called unconditionally - hooks may not be skipped - and harmless without a key: every part of
+   * it is guarded on one, so `storeKey` left out means nothing is read or written and
+   * `effectiveColumns` is the column list as given.
+   *
+   * The grid below runs this same hook internally off `storeColumnsKey`, which is what gives the
+   * header its resize handles; this instance is here for the chooser, and the two stay in step
+   * through the stored value they share.
+   */
+  const { effectiveColumns, columnsToggle, setColumnsToggle, resetColumnsToggle, resetColumnsWidth } =
+    useDataTableColumns<T>({ key: storeKey, columns: adjustableColumns })
+
+  const columnLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        adjustableColumns.map((column) => [
+          String(column.accessor),
+          typeof column.title === 'string' ? column.title : humanize(String(column.accessor)),
+        ]),
+      ),
+    [adjustableColumns],
+  )
+
+  const toggleableColumns = storeKey === undefined ? [] : columnsToggle.filter((column) => column.toggleable)
 
   const [selectedId, setSelectedId] = useState<RowId | null>(null)
   const [lastPage, setLastPage] = useState(page)
@@ -194,19 +269,42 @@ export function DataTable<T>({
 
   return (
     <>
-      {activeFilters > 0 ? (
-        <Group justify="space-between" mb="xs" gap="sm">
-          <Text fz="sm" c="dimmed">
-            {activeFilters === 1 ? '1 column filter' : `${activeFilters} column filters`} in effect
-          </Text>
-          <Button
-            size="compact-sm"
-            variant="subtle"
-            leftSection={<IconFilterOff size={15} />}
-            onClick={() => filters?.clearAll()}
-          >
-            Clear column filters
-          </Button>
+      {/* The strip now carries the chooser as well, so it shows for either reason. The filter count
+          stays on the left and keeps its own wording: a column hidden while its funnel is set is
+          exactly when "2 column filters in effect" is the only thing left saying so. */}
+      {activeFilters > 0 || toggleableColumns.length > 0 ? (
+        <Group justify="space-between" mb="xs" gap="sm" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
+            {activeFilters > 0 ? (
+              <>
+                <Text fz="sm" c="dimmed">
+                  {activeFilters === 1 ? '1 column filter' : `${activeFilters} column filters`} in effect
+                </Text>
+                <Button
+                  size="compact-sm"
+                  variant="subtle"
+                  leftSection={<IconFilterOff size={15} />}
+                  onClick={() => filters?.clearAll()}
+                >
+                  Clear column filters
+                </Button>
+              </>
+            ) : null}
+          </Group>
+
+          {toggleableColumns.length > 0 ? (
+            <ColumnChooser
+              items={toggleableColumns}
+              labels={columnLabels}
+              onToggle={(accessor, toggled) =>
+                setColumnsToggle(
+                  columnsToggle.map((column) => (column.accessor === accessor ? { ...column, toggled } : column)),
+                )
+              }
+              onResetColumns={resetColumnsToggle}
+              onResetWidths={resetColumnsWidth}
+            />
+          ) : null}
         </Group>
       ) : null}
 
@@ -217,7 +315,8 @@ export function DataTable<T>({
           // with a pointer: selecting is not navigating, and the cursor must not promise it is.
           className={onRowClick ? undefined : 'app-grid--select-only'}
           records={records}
-          columns={columns}
+          columns={effectiveColumns}
+          {...(storeKey ? { storeColumnsKey: storeKey } : {})}
           fetching={fetching}
           noRecordsText={noRecordsText}
           minHeight={minHeight}
@@ -254,6 +353,74 @@ export function DataTable<T>({
         />
       </div>
     </>
+  )
+}
+
+interface ColumnChooserProps {
+  items: DataTableColumnToggle[]
+  /** Accessor -> the column's header text, which is what the reader is picking by. */
+  labels: Record<string, string>
+  onToggle(accessor: string, toggled: boolean): void
+  onResetColumns(): void
+  onResetWidths(): void
+}
+
+/**
+ * Which columns the grid shows, and a way back from a layout the reader has made a mess of.
+ *
+ * A BUTTON RATHER THAN THE HEADER'S CONTEXT MENU. mantine-datatable already opens this list on a
+ * right-click of the header, and nobody right-clicks a table to look for it; the same state driven
+ * by something visible is the whole point of the control.
+ *
+ * Widths are reset from here too. They are dragged on the header, so there is no other control they
+ * could hang off, and a column dragged down to a sliver is the one case a reader cannot undo by
+ * dragging it back.
+ */
+function ColumnChooser({ items, labels, onToggle, onResetColumns, onResetWidths }: ColumnChooserProps) {
+  const shownCount = items.filter((item) => item.toggled).length
+
+  return (
+    <Popover position="bottom-end" withArrow shadow="md" trapFocus>
+      <Popover.Target>
+        <Button size="compact-sm" variant="subtle" leftSection={<IconColumns3 size={15} />}>
+          Columns
+        </Button>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap={8}>
+          <Text fz="xs" fw={600} c="dimmed" tt="uppercase">
+            Show columns
+          </Text>
+
+          {items.map((item) => (
+            <Checkbox
+              key={item.accessor}
+              size="xs"
+              label={labels[item.accessor] ?? item.accessor}
+              checked={item.toggled}
+              // The last one standing stays: a grid of no columns is not a narrower view of the
+              // rows, it is a blank rectangle with a paging footer under it.
+              disabled={item.toggled && shownCount === 1}
+              onChange={(event) => onToggle(item.accessor, event.currentTarget.checked)}
+            />
+          ))}
+
+          <Group gap="xs" mt={4} wrap="nowrap">
+            <Button
+              size="compact-xs"
+              variant="light"
+              leftSection={<IconRestore size={13} />}
+              onClick={onResetColumns}
+            >
+              Reset columns
+            </Button>
+            <Button size="compact-xs" variant="light" onClick={onResetWidths}>
+              Reset widths
+            </Button>
+          </Group>
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
   )
 }
 

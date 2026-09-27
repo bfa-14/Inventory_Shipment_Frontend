@@ -468,6 +468,7 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="inventory.stockDocuments"
           records={data?.items ?? []}
           columns={columns}
           selectedRecords={selection.selected}

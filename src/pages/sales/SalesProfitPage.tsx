@@ -503,6 +503,7 @@ export function SalesProfitPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="sales.salesProfit"
           records={records}
           columns={columns}
           idAccessor="groupKey"

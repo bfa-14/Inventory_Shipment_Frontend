@@ -221,6 +221,7 @@ export function MovementTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<MovementTypeDto>
+          storeKey="masterdata.movementTypes"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

@@ -388,6 +388,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="purchase.purchaseDocuments"
           records={data?.items ?? []}
           columns={columns}
           selectedRecords={selection.selected}

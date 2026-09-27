@@ -346,6 +346,7 @@ export function PriceListsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PriceListDto>
+          storeKey="masterdata.priceLists"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

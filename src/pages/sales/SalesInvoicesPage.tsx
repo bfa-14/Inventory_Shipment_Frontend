@@ -309,6 +309,7 @@ export function SalesInvoicesPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="sales.salesInvoices"
           records={data?.items ?? []}
           columns={columns}
           selectedRecords={selection.selected}

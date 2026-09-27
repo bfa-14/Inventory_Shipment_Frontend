@@ -440,6 +440,7 @@ export function ItemFamiliesPage() {
         {/* No paging: a page break would cut a parent from its children and page 2 would be a
             list of orphans. The whole tree is here, and the filters narrow it in the browser. */}
         <DataTable<ItemFamilyDto>
+          storeKey="masterdata.itemFamilies"
           records={visibleRows}
           columns={columns}
           idAccessor="id"

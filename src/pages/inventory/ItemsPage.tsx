@@ -480,6 +480,7 @@ export function ItemsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ItemListDto>
+          storeKey="inventory.items"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

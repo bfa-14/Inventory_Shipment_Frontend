@@ -172,6 +172,7 @@ export function AttachmentTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<AttachmentTypeDto>
+          storeKey="masterdata.attachmentTypes"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

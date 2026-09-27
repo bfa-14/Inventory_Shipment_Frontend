@@ -191,6 +191,7 @@ export function PortsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PortDto>
+          storeKey="masterdata.ports"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

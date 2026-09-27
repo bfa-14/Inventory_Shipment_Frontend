@@ -550,6 +550,7 @@ export function ContainersPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable<ContainerListDto>
+          storeKey="logistics.containers"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

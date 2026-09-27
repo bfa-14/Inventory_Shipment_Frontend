@@ -90,6 +90,7 @@ export function DocumentTypesPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="configuration.documentTypes"
           records={types}
           columns={columns}
           fetching={loading}

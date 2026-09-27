@@ -293,6 +293,7 @@ export function BranchesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<BranchDto>
+          storeKey="masterdata.branches"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

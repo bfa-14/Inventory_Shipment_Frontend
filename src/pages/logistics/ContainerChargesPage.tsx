@@ -421,6 +421,7 @@ export function ContainerChargesPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="logistics.containerCharges"
           records={data?.items ?? []}
           columns={columns}
           {...(canPost

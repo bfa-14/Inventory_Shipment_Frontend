@@ -250,6 +250,7 @@ export function UnitTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<UnitTypeDto>
+          storeKey="masterdata.unitTypes"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

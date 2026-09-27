@@ -344,6 +344,7 @@ export function WarehousesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<WarehouseDto>
+          storeKey="masterdata.warehouses"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

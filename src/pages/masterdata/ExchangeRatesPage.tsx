@@ -384,6 +384,7 @@ export function ExchangeRatesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ExchangeRateDto>
+          storeKey="masterdata.exchangeRates"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

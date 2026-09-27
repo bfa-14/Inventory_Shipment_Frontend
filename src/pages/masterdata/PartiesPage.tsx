@@ -391,6 +391,7 @@ export function PartiesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PartyDto>
+          storeKey="masterdata.parties"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

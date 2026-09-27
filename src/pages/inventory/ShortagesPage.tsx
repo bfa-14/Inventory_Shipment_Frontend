@@ -258,6 +258,7 @@ export function ShortagesPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="inventory.shortages"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

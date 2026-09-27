@@ -317,6 +317,7 @@ export function UsersPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<UserDto>
+          storeKey="security.users"
           records={records}
           columns={columns}
           totalRecords={filtered.length}

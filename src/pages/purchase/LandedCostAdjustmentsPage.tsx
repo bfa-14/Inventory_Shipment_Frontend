@@ -316,6 +316,7 @@ export function LandedCostAdjustmentsPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="purchase.landedCostAdjustments"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

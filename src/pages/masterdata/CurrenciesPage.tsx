@@ -308,6 +308,7 @@ export function CurrenciesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<CurrencyDto>
+          storeKey="masterdata.currencies"
           records={data?.items ?? []}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}

@@ -238,6 +238,7 @@ export function RolesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<RoleDto>
+          storeKey="security.roles"
           records={records}
           columns={columns}
           totalRecords={filtered.length}

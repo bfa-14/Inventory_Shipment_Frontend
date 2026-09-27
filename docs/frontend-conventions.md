@@ -122,7 +122,7 @@ modifier in the hint is read from the reader's own platform.
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
 | `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
-| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row**. |
+| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on the column chooser + draggable widths and names where they are remembered). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
 | `rowNumberColumn(page, recordsPerPage)` | The leading "#" column, numbered across pages. |
@@ -242,6 +242,42 @@ repository and the controller first - add the funnels in the same story.
 
 Widths: a header cell carries caption + sort arrows + funnel, so a column sized for caption + arrows alone
 clips once it gains one. Budget about 30px more.
+
+## Column chooser and column widths
+
+Every list page's grid lets the reader hide columns and drag column edges, and remembers both.
+A page turns this on with **one prop** - `storeKey` on `DataTable`:
+
+```tsx
+<DataTable<BranchDto> storeKey="masterdata.branches" ... />
+```
+
+`storeKey` names where the choices are kept (localStorage, so per browser and per person, never sent
+to the server). The wrapper then marks every column `toggleable` and `resizable` for itself, so a
+column list needs no extra flags, and `mantine-datatable`'s own `useDataTableColumns` does the
+storing. A **Columns** button appears in the strip above the table, with one checkbox per column and
+**Reset columns** / **Reset widths**. The library also opens the same list on a right-click of the
+header; the button exists because nobody right-clicks a table to find out.
+
+Conventions:
+
+- **The key is namespaced after the page** - `masterdata.branches`, `logistics.containers`,
+  `purchase.purchaseDocuments`, `security.users`. It is persisted, so treat it as permanent: reusing
+  one key for two grids has them overwrite each other's layout, and renaming one throws away what
+  the reader arranged.
+- **`#` and `Actions` are never hideable or resizable** (`FIXED_ACCESSORS` in `DataTable.tsx`). `#`
+  is a position marker rather than data, and `Actions` is what `pinLastColumn` deliberately keeps in
+  view. `mantine-datatable` also never resizes the last column, whatever it is.
+- **A grid inside a form leaves `storeKey` out** - the document and shortage line grids, and the load
+  items drawer. There a hidden column would hide a figure someone is editing. Without the prop the
+  grid behaves exactly as before and stores nothing.
+- The last visible column cannot be unticked: a grid of no columns is a blank rectangle with a
+  paging footer under it.
+- A column can start hidden with `defaultToggle: false` on its definition.
+
+A reader can hide a column whose funnel is set, which would otherwise leave a filter narrowing the
+rows with nothing on screen saying so. The "N column filters in effect" strip above the table is what
+covers that, and it is why that strip now shows for either reason.
 
 ## Control mapping
 

@@ -206,6 +206,7 @@ export function StockValuationPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
+          storeKey="inventory.stockValuation"
           records={records}
           columns={columns}
           idAccessor="itemId"

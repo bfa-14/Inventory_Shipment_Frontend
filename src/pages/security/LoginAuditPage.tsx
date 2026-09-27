@@ -210,6 +210,7 @@ export function LoginAuditPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<LoginAuditDto>
+          storeKey="security.loginAudit"
           records={records}
           columns={columns}
           totalRecords={narrowed.length}
