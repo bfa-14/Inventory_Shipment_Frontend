@@ -99,9 +99,16 @@ export const PERMISSIONS = {
   containersClose: 'containers.close',
   containersDelete: 'containers.delete',
   containersOverCapacity: 'containers.overcapacity',
+  movementsManage: 'containers.movements.manage',
+  containerChargesView: 'containers.charges.view',
+  containerChargesCreate: 'containers.charges.create',
+  containerChargesPost: 'containers.charges.post',
+  containerChargesCancel: 'containers.charges.cancel',
+  containerAttachmentsManage: 'containers.attachments.manage',
   containerTypesManage: 'masterdata.containertypes.manage',
   portsManage: 'masterdata.ports.manage',
   attachmentTypesManage: 'masterdata.attachmenttypes.manage',
+  movementTypesManage: 'masterdata.movementtypes.manage',
 } as const
 
 export interface NavItem {
@@ -197,12 +204,15 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
-    // THE SHIPMENT BETWEEN THE INVOICE AND THE WAREHOUSE: goods loaded from purchase invoices, the
-    // route they travel, and the offload that puts them into stock at landed cost.
+    // THE SHIPMENT BETWEEN THE ORDER AND THE WAREHOUSE: containers loaded from purchase orders, the
+    // movements they travel with, the charges that make their real cost, and the tracking board.
     title: 'LOGISTICS',
     breadcrumb: 'Logistics',
     items: [
       { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
+      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.containersView, icon: 'ship' },
+      { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
+      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.containersView, icon: 'route' },
     ],
   },
   {
@@ -243,6 +253,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Container Types', to: '/setup/master-data/container-types', permission: PERMISSIONS.containerTypesManage },
           { label: 'Ports', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
+          { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
         ],
       },
       {

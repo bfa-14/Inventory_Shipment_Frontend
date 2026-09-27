@@ -31,6 +31,11 @@ import { ContainerTypesPage } from './pages/masterdata/ContainerTypesPage'
 import { PortsPage } from './pages/masterdata/PortsPage'
 import { ContainerPage } from './pages/logistics/ContainerPage'
 import { ContainersPage } from './pages/logistics/ContainersPage'
+import { ContainerChargesPage } from './pages/logistics/ContainerChargesPage'
+import { MovementPage } from './pages/logistics/MovementPage'
+import { MovementsPage } from './pages/logistics/MovementsPage'
+import { TrackingPage } from './pages/logistics/TrackingPage'
+import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
 import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
 import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
@@ -95,6 +100,9 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.attachmentTypesManage} />}>
                 <Route path="/setup/master-data/attachment-types" element={<AttachmentTypesPage />} />
               </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.movementTypesManage} />}>
+                <Route path="/setup/master-data/movement-types" element={<MovementTypesPage />} />
+              </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.containersCreate} />}>
                 <Route path="/logistics/containers/new" element={<ContainerPage />} />
@@ -102,6 +110,15 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.containersView} />}>
                 <Route path="/logistics/containers" element={<ContainersPage />} />
                 <Route path="/logistics/containers/:id" element={<ContainerPage />} />
+                <Route path="/logistics/movements" element={<MovementsPage />} />
+                <Route path="/logistics/movements/:id" element={<MovementPage />} />
+                <Route path="/logistics/tracking" element={<TrackingPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.movementsManage} />}>
+                <Route path="/logistics/movements/new" element={<MovementPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesView} />}>
+                <Route path="/logistics/container-charges" element={<ContainerChargesPage />} />
               </Route>
 
               {/* Creating an item needs its own guard: a reader who may only view items must not

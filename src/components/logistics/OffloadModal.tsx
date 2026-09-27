@@ -16,6 +16,8 @@ interface OffloadModalProps {
   busy: boolean
   error: string | null
   onSubmit: (request: Omit<OffloadRequest, 'rowVersion'>) => void
+  /** Every line covered by POSTED invoices. When false the form is replaced by what is missing. */
+  fullyInvoiced: boolean
 }
 
 interface Received {
@@ -26,8 +28,11 @@ interface Received {
 /**
  * The goods arrive: what was loaded, what actually came off the truck, and why the two differ. A
  * short line needs a reason — the server refuses it too — and the difference is not received.
+ *
+ * THE OFFLOAD NEEDS EVERY LINE INVOICED BY POSTED INVOICES (the cost the stock enters at comes from
+ * them). Until then the modal shows the lines that are not, instead of a form that would be refused.
  */
-export function OffloadModal({ opened, onClose, lines, warehouses, defaultWarehouseId, busy, error, onSubmit }: OffloadModalProps) {
+export function OffloadModal({ opened, onClose, lines, warehouses, defaultWarehouseId, busy, error, onSubmit, fullyInvoiced }: OffloadModalProps) {
   const [received, setReceived] = useState<Record<string, Received>>({})
   const [warehouseId, setWarehouseId] = useState<string | null>(defaultWarehouseId === null ? null : String(defaultWarehouseId))
   const [offloadedDate, setOffloadedDate] = useState<string | null>(isoDate(new Date()))
@@ -62,6 +67,46 @@ export function OffloadModal({ opened, onClose, lines, warehouses, defaultWareho
           }
         }),
     })
+  }
+
+  if (!fullyInvoiced) {
+    const missing = lines.filter((line) => (line.saved?.invoicedPostedBase ?? 0) < line.quantity)
+    return (
+      <Modal opened={opened} onClose={onClose} title="Offload container" size="50rem">
+        <Stack>
+          <Alert color="orange" title="Not fully invoiced">
+            Every line must be covered by posted purchase invoices before the goods can be offloaded: the stock enters at the invoice cost plus the posted charges.
+          </Alert>
+          <ScrollArea type="auto">
+            <Table miw={520} verticalSpacing={4} striped>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Item</Table.Th>
+                  <Table.Th>Order</Table.Th>
+                  <Table.Th ta="right">Loaded</Table.Th>
+                  <Table.Th ta="right">Invoiced (posted)</Table.Th>
+                  <Table.Th ta="right">In draft</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {missing.map((line) => (
+                  <Table.Tr key={line.key}>
+                    <Table.Td>{line.itemCode}</Table.Td>
+                    <Table.Td>{line.purchaseOrderNumber ?? '—'}</Table.Td>
+                    <Table.Td ta="right">{formatNumber(line.quantity)}</Table.Td>
+                    <Table.Td ta="right" c="red" fw={700}>{formatNumber(line.saved?.invoicedPostedBase ?? 0)}</Table.Td>
+                    <Table.Td ta="right">{formatNumber(line.saved?.invoicedDraftBase ?? 0)}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={onClose}>Close</Button>
+          </Group>
+        </Stack>
+      </Modal>
+    )
   }
 
   return (
@@ -101,7 +146,7 @@ export function OffloadModal({ opened, onClose, lines, warehouses, defaultWareho
                       <Text fz="sm" fw={600}>{line.itemCode}</Text>
                       <Text fz="xs" c="dimmed">{line.itemName}</Text>
                     </Table.Td>
-                    <Table.Td>{line.invoiceNumber ?? '—'}</Table.Td>
+                    <Table.Td>{line.saved?.invoiceNumbers ?? '—'}</Table.Td>
                     <Table.Td ta="right">{formatNumber(loaded)}</Table.Td>
                     <Table.Td>
                       <NumberInput

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   Alert,
   Anchor,
+  Button,
   Badge,
   Grid,
   Group,
@@ -27,7 +28,7 @@ import {
   IconDeviceFloppy,
   IconFileSpreadsheet,
   IconLock,
-  IconMapPinPlus,
+  IconLockOpen,
   IconPrinter,
   IconTrash,
   IconTruckDelivery,
@@ -37,12 +38,9 @@ import {
   containersApi,
   containerStatusColour,
   SHIPPING_METHODS,
-  type AddEventRequest,
-  type AvailableInvoiceDto,
   type ContainerDto,
   type OffloadRequest,
 } from '../../api/logistics/containers'
-import { attachmentTypesApi, type AttachmentTypeLookupDto } from '../../api/masterdata/attachmentTypes'
 import { branchesApi } from '../../api/masterdata/branches'
 import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/masterdata/containerTypes'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -55,13 +53,14 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { ContainerAttachmentsCard } from '../../components/logistics/ContainerAttachmentsCard'
+import { AddPoLinesModal } from '../../components/logistics/AddPoLinesModal'
 import { ContainerCapacityCard } from '../../components/logistics/ContainerCapacityCard'
+import { ContainerChargesCard } from '../../components/logistics/ContainerChargesCard'
+import { ContainerCostCard } from '../../components/logistics/ContainerCostCard'
+import { ContainerDocumentsCard } from '../../components/logistics/ContainerDocumentsCard'
 import {
   capacityOf,
   emptyValues,
-  fromAvailableInvoice,
-  fromContainerInvoice,
   fromContainerLine,
   lastFreeDay,
   lineOil,
@@ -69,12 +68,13 @@ import {
   toRequest,
   toValues,
   type ContainerFormValues,
-  type LinkedInvoice,
   type LoadLine,
 } from '../../components/logistics/containerForm'
-import { ContainerLoadingSection } from '../../components/logistics/ContainerLoadingSection'
-import { AddEventModal, ContainerRouteCard } from '../../components/logistics/ContainerRouteCard'
-import { LinkInvoiceModal } from '../../components/logistics/LinkInvoiceModal'
+import { ContainerInvoicesCard } from '../../components/logistics/ContainerInvoicesCard'
+import { ContainerRouteMapCard } from '../../components/logistics/ContainerRouteMapCard'
+import { ContainerRouteTimeline } from '../../components/logistics/ContainerRouteTimeline'
+import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
+import { LoadedItemsSection } from '../../components/logistics/LoadedItemsSection'
 import { OffloadModal } from '../../components/logistics/OffloadModal'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
@@ -115,14 +115,15 @@ export function ContainerPage() {
     close: hasPermission(PERMISSIONS.containersClose),
     delete: hasPermission(PERMISSIONS.containersDelete),
     overCapacity: hasPermission(PERMISSIONS.containersOverCapacity),
+    invoice: hasPermission(PERMISSIONS.purchaseInvoicesCreate),
+    movements: hasPermission(PERMISSIONS.movementsManage),
+    attachments: hasPermission(PERMISSIONS.containerAttachmentsManage),
   }
 
   const [container, setContainer] = useState<ContainerDto | null>(null)
   const [loading, setLoading] = useState(!isNew)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [invoices, setInvoices] = useState<LinkedInvoice[]>([])
   const [lines, setLines] = useState<LoadLine[]>([])
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null)
   const [lineErrors, setLineErrors] = useState<Record<number, string>>({})
   const [stale, setStale] = useState<string | null>(null)
 
@@ -131,12 +132,11 @@ export function ContainerPage() {
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
-  const [attachmentTypes, setAttachmentTypes] = useState<AttachmentTypeLookupDto[]>([])
 
   const [saving, setSaving] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
-  const [linkOpen, setLinkOpen] = useState(false)
-  const [eventOpen, setEventOpen] = useState(false)
+  const [addItemsOpen, setAddItemsOpen] = useState(false)
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
   const [offloadOpen, setOffloadOpen] = useState(false)
   const [offloadError, setOffloadError] = useState<string | null>(null)
   const [reasonDialog, setReasonDialog] = useState<ReasonDialog>(null)
@@ -164,9 +164,7 @@ export function ContainerPage() {
       setContainer(dto)
       form.setValues(toValues(dto))
       form.resetDirty(toValues(dto))
-      setInvoices(dto.invoices.map(fromContainerInvoice))
       setLines(dto.lines.map(fromContainerLine))
-      setSelectedInvoiceId((current) => current ?? dto.invoices[0]?.purchaseDocumentId ?? null)
       setLineErrors({})
       setStale(null)
       dirty.current = false
@@ -198,7 +196,6 @@ export function ContainerPage() {
     portsApi.lookup(false).then(setPorts).catch(() => {})
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
     warehousesApi.lookup(false).then(setWarehouses).catch(() => {})
-    attachmentTypesApi.lookup(true).then(setAttachmentTypes).catch(() => {})
     branchesApi
       .lookup(false)
       .then((list) => {
@@ -241,10 +238,9 @@ export function ContainerPage() {
   const type = types.find((t) => String(t.id) === values.containerTypeId) ?? null
   const freeDay = lastFreeDay(values.actualPortArrival, values.freeDays)
   const freeDayPassed = freeDay !== null && container !== null && [4, 5].includes(container.status) && freeDay < new Date().toISOString().slice(0, 10)
-  const suppliersOnBoard = useMemo(
-    () => [...new Map(invoices.map((i) => [i.supplierId, i.supplierName])).values()],
-    [invoices],
-  )
+  const suppliersOnBoard = useMemo(() => [...new Set(lines.map((l) => l.supplierName))], [lines])
+  /** Travelled with a movement: the four milestone dates are the movements', shown read-only. */
+  const datesLocked = container?.datesFromMovements === true
 
   /* ── options ─────────────────────────────────────────────────────────────────────────────── */
 
@@ -270,8 +266,10 @@ export function ContainerPage() {
     return <TextInput label={label} maxLength={maxLength} placeholder={placeholder} {...form.getInputProps(key)} />
   }
 
-  function dateField(key: keyof ContainerFormValues, label: string, required = false) {
-    if (readOnly) return <ViewField label={label} value={values[key] ? dateLabel(values[key] as string) : null} />
+  function dateField(key: keyof ContainerFormValues, label: string, required = false, fromMovements = false) {
+    if (readOnly || fromMovements) {
+      return <ViewField label={label} value={values[key] ? dateLabel(values[key] as string) : null} hint={fromMovements ? 'from the movements' : undefined} />
+    }
     return (
       <DateInput
         label={label}
@@ -347,7 +345,7 @@ export function ContainerPage() {
     setSaving(true)
     setLineErrors({})
     try {
-      const payload = toRequest(values, invoices, lines, allowOverCapacity, container?.rowVersion ?? null, container?.statusNote ?? null)
+      const payload = toRequest(values, lines, allowOverCapacity, container?.rowVersion ?? null, container?.statusNote ?? null)
       const saved = containerId === null ? await containersApi.create(payload) : await containersApi.update(containerId, payload)
       show(saved)
       notify.success(containerId === null ? `Container ${saved.containerRef} created.` : `${saved.containerRef} saved.`)
@@ -378,6 +376,12 @@ export function ContainerPage() {
       const line = lineNumberOf(err.message)
       if (line !== null) setLineErrors({ [line]: err.message })
       if (err.code === 'DUPLICATE_CONTAINER_NO') form.setErrors({ containerNo: err.message })
+      if (err.code === 'LINE_INVOICED' && line === null) {
+        // "Line 1: TVS-AP160 - 60 already invoiced…" names the container line; mark it by item code.
+        const item = /^Line \d+: (\S+)/.exec(err.message)?.[1]
+        const index = lines.findIndex((l) => l.itemCode === item)
+        if (index >= 0) setLineErrors({ [index + 1]: err.message })
+      }
       notify.error(err.message)
       return null
     } finally {
@@ -420,14 +424,6 @@ export function ContainerPage() {
     if (go) await quiet(act('confirm', (c) => containersApi.confirm(c.id, c.rowVersion), (d) => `${d.containerRef} confirmed.`))
   }
 
-  async function addEvent(request: AddEventRequest) {
-    if (!container) return
-    const result = await containersApi.addEvent(container.id, request)
-    show(result)
-    setEventOpen(false)
-    notify.success(`Event recorded - ${result.statusName}${result.currentLocation ? `, ${result.currentLocation}` : ''}.`)
-  }
-
   async function offload(request: Omit<OffloadRequest, 'rowVersion'>) {
     if (!container) return
     setOffloadError(null)
@@ -442,7 +438,10 @@ export function ContainerPage() {
         .join(', ')
       notify.success(`Stock received into ${result.warehouseCode ?? 'the warehouse'}: ${received || 'nothing'}.`)
     } catch (err) {
-      setOffloadError(err instanceof ApiError ? err.message : 'The container could not be offloaded.')
+      const message = err instanceof ApiError ? err.message : 'The container could not be offloaded.'
+      // NOT_FULLY_INVOICED, INVALID_STATUS (a movement in progress): said as a notification, the form stays.
+      notify.error(message)
+      setOffloadError(message)
     } finally {
       setBusyAction(null)
     }
@@ -466,6 +465,11 @@ export function ContainerPage() {
   async function close() {
     const go = await confirm({ title: `Close ${container?.containerRef}`, message: 'Close this offloaded container? It can no longer be reversed.', confirmLabel: 'Close container' })
     if (go) await quiet(act('close', (c) => containersApi.close(c.id, c.rowVersion), (d) => `${d.containerRef} closed.`))
+  }
+
+  async function reopen() {
+    const go = await confirm({ title: `Reopen ${container?.containerRef}`, message: 'Reopen this closed container? It goes back to Offloaded, so a late charge can be added.', confirmLabel: 'Reopen' })
+    if (go) await quiet(act('reopen', (c) => containersApi.reopen(c.id, c.rowVersion), (d) => `${d.containerRef} reopened.`))
   }
 
   async function remove() {
@@ -500,15 +504,6 @@ export function ContainerPage() {
     void navigate(CONTAINERS_ROUTE)
   }
 
-  function linkInvoice(invoice: AvailableInvoiceDto) {
-    setInvoices((current) =>
-      current.some((i) => i.purchaseDocumentId === invoice.id) ? current : [...current, fromAvailableInvoice(invoice)],
-    )
-    setSelectedInvoiceId(invoice.id)
-    setLinkOpen(false)
-    markDirty()
-  }
-
   /* ── render ──────────────────────────────────────────────────────────────────────────────── */
 
   if (loading) {
@@ -530,6 +525,25 @@ export function ContainerPage() {
     )
   }
 
+  // A CONTAINER IS CREATED FROM ITS ORDER: "Add Container…" on an approved purchase order.
+  if (isNew) {
+    return (
+      <div>
+        <PageHeader title="New Container" subtitle="Containers are created from an approved purchase order." />
+        <Alert color="blue" title="Start from the purchase order">
+          <Stack gap="sm" align="flex-start">
+            <Text fz="sm">
+              Open an approved purchase order and use <b>Add Container…</b>: the container is loaded with the order's lines, in pieces.
+            </Text>
+            <Button component={Link} to="/purchase/orders" variant="light">
+              Go to Purchase Orders
+            </Button>
+          </Stack>
+        </Alert>
+      </div>
+    )
+  }
+
   const saved = container !== null
   const actions: DocumentAction[] = [
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
@@ -539,7 +553,7 @@ export function ContainerPage() {
     { key: 'cancel', label: 'Cancel', icon: <IconBan size={16} />, onClick: () => setReasonDialog('cancel'), variant: 'default', colour: 'red', visible: saved && container.canCancel && perm.cancel },
     { key: 'cancelOffload', label: 'Cancel Offload', icon: <IconArrowBackUp size={16} />, onClick: () => setReasonDialog('cancelOffload'), variant: 'default', colour: 'orange', visible: saved && container.canCancelOffload && perm.cancel },
     { key: 'close', label: 'Close', icon: <IconLock size={16} />, onClick: () => void close(), variant: 'light', loading: busyAction === 'close', visible: saved && container.canClose && perm.close },
-    { key: 'event', label: 'Add Event', icon: <IconMapPinPlus size={16} />, onClick: () => setEventOpen(true), variant: 'light', visible: saved && container.canAddEvent && perm.create },
+    { key: 'reopen', label: 'Reopen', icon: <IconLockOpen size={16} />, onClick: () => void reopen(), variant: 'light', loading: busyAction === 'reopen', visible: saved && container.canReopen && perm.close },
     { key: 'offload', label: 'Offload', icon: <IconTruckDelivery size={16} />, onClick: () => setOffloadOpen(true), variant: 'light', colour: 'green', visible: saved && container.canOffload && perm.offload },
     { key: 'confirm', label: 'Confirm', icon: <IconCheck size={16} />, onClick: () => void confirmPlan(), variant: 'light', loading: busyAction === 'confirm', visible: saved && container.canConfirm && perm.confirm },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
@@ -615,14 +629,26 @@ export function ContainerPage() {
                 {selectField('forwarderId', 'Forwarder', supplierOptions)}
                 {selectField('transporterId', 'Transporter', supplierOptions)}
                 {selectField('branchId', 'Branch', branchOptions, { required: true, onPick: () => form.setFieldValue('warehouseId', null) })}
+                <div>
+                  <Text fz="sm" fw={500} mb={2}>
+                    Purchase Order
+                  </Text>
+                  {container?.purchaseOrderId ? (
+                    <Anchor component={Link} to={`/purchase/orders/${container.purchaseOrderId}`} fz="sm" fw={600}>
+                      {container.purchaseOrderNumber ?? `#${container.purchaseOrderId}`}
+                    </Anchor>
+                  ) : (
+                    <Text fz="sm" c="dimmed">—</Text>
+                  )}
+                </div>
               </SimpleGrid>
               <Text fz="sm" c="dimmed" mt="sm" mb={4}>
-                Suppliers (from the linked invoices)
+                Suppliers (from the loaded order lines)
               </Text>
               <Group gap="xs">
                 {suppliersOnBoard.length === 0 ? (
                   <Text fz="sm" c="dimmed">
-                    None yet - link a purchase invoice.
+                    None yet - add items from a purchase order.
                   </Text>
                 ) : (
                   suppliersOnBoard.map((name) => (
@@ -643,7 +669,7 @@ export function ContainerPage() {
                 {selectField('portOfLoadingId', 'Port of Loading', portOptions)}
                 {selectField('portOfDestinationId', 'Port of Destination', portOptions)}
                 {selectField('finalDestinationId', 'Final Destination', portOptions)}
-                {dateField('dispatchDate', 'Dispatch Date')}
+                {dateField('dispatchDate', 'Dispatch Date', false, datesLocked)}
                 {dateField('eta', 'ETA')}
                 {numberField('freeDays', 'Free days')}
                 <div>
@@ -672,25 +698,28 @@ export function ContainerPage() {
               )}
             </Section>
 
-            <ContainerLoadingSection
-              containerId={containerId}
-              invoices={invoices}
+            <LoadedItemsSection
               lines={lines}
-              readOnly={readOnly}
-              onLinkInvoice={() => setLinkOpen(true)}
-              onUnlinkInvoice={(invoiceId) => {
-                setInvoices((current) => current.filter((i) => i.purchaseDocumentId !== invoiceId))
-                markDirty()
-              }}
+              editable={!readOnly}
+              onAddItems={() => setAddItemsOpen(true)}
               onLinesChange={(next) => {
                 setLines(next)
                 setLineErrors({})
                 markDirty()
               }}
               lineErrors={lineErrors}
-              selectedInvoiceId={selectedInvoiceId}
-              onSelectInvoice={setSelectedInvoiceId}
+              baseCurrencyCode="USD"
             />
+
+            {container ? (
+              <ContainerInvoicesCard
+                invoices={container.invoices}
+                canInvoice={container.canInvoice && perm.invoice}
+                onCreate={() => setInvoiceOpen(true)}
+              />
+            ) : null}
+
+            {container ? <ContainerChargesCard container={container} onChanged={() => void load()} /> : null}
 
             <Section title="6. Operational information">
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
@@ -698,9 +727,9 @@ export function ContainerPage() {
                 {textField('waybillNo', 'Waybill No.', 30)}
                 {textField('declarationNo', 'Declaration No.', 30)}
                 {textField('feriNo', 'FERI No.', 30)}
-                {dateField('actualPortArrival', 'Actual Port Arrival')}
-                {dateField('borderCrossingDate', 'Border Crossing')}
-                {dateField('customsReleaseDate', 'Customs Release Date')}
+                {dateField('actualPortArrival', 'Actual Port Arrival', false, datesLocked)}
+                {dateField('borderCrossingDate', 'Border Crossing', false, datesLocked)}
+                {dateField('customsReleaseDate', 'Customs Release Date', false, datesLocked)}
                 {selectField('warehouseId', 'Warehouse (offloading destination)', warehouseOptions, { placeholder: values.branchId ? 'Pick a warehouse' : 'Pick the branch first' })}
                 <ViewField label="Offloaded Date" value={container?.offloadedDate ? dateLabel(container.offloadedDate) : null} />
               </SimpleGrid>
@@ -711,13 +740,9 @@ export function ContainerPage() {
               )}
             </Section>
 
-            <ContainerAttachmentsCard
-              containerId={containerId}
-              files={container?.files ?? []}
-              attachmentTypes={attachmentTypes}
-              canEdit={perm.create && (container?.status ?? 1) !== 8}
-              onChanged={() => void load()}
-            />
+            {container ? (
+              <ContainerDocumentsCard container={container} canManage={perm.attachments && container.status !== 8} onChanged={() => void load()} />
+            ) : null}
           </Stack>
         </Grid.Col>
 
@@ -732,8 +757,13 @@ export function ContainerPage() {
               readOnly={readOnly}
               totalOil={totalOil}
             />
+            {container ? <ContainerCostCard container={container} baseCurrencyCode="USD" /> : null}
+            {/* Keyed on the movements, so the map reloads when the route changes. */}
             {container ? (
-              <ContainerRouteCard events={container.events} canAdd={container.canAddEvent && perm.create} onAdd={() => setEventOpen(true)} />
+              <ContainerRouteMapCard key={container.movements.map((m) => `${m.movementId}:${m.status}`).join(',')} containerId={container.id} />
+            ) : null}
+            {container ? (
+              <ContainerRouteTimeline container={container} canManage={perm.movements && container.status < 6} onChanged={() => void load()} />
             ) : null}
             {container ? (
               <Paper radius="lg" p="md" withBorder>
@@ -751,21 +781,29 @@ export function ContainerPage() {
         <DocumentActionBar actions={actions} />
       </div>
 
-      <LinkInvoiceModal
-        opened={linkOpen}
-        onClose={() => setLinkOpen(false)}
-        containerId={containerId}
-        linkedIds={invoices.map((i) => i.purchaseDocumentId)}
-        onPick={linkInvoice}
-      />
-
-      {eventOpen && container ? (
-        <AddEventModal
+      {addItemsOpen ? (
+        <AddPoLinesModal
           opened
-          onClose={() => setEventOpen(false)}
-          ports={ports.filter((p) => p.isActive)}
-          notesOnly={container.status === 1}
-          onSubmit={addEvent}
+          onClose={() => setAddItemsOpen(false)}
+          containerId={containerId}
+          loadedPoLineIds={lines.map((l) => l.poLineId)}
+          onAdd={(added) => {
+            setLines((current) => [...current, ...added])
+            setAddItemsOpen(false)
+            markDirty()
+          }}
+        />
+      ) : null}
+
+      {invoiceOpen && container ? (
+        <InvoiceFromContainersModal
+          opened
+          onClose={() => setInvoiceOpen(false)}
+          containerId={container.id}
+          onCreated={(ids) => {
+            setInvoiceOpen(false)
+            void navigate(`/purchase/invoices/${ids[0]}`)
+          }}
         />
       ) : null}
 
@@ -779,6 +817,7 @@ export function ContainerPage() {
           busy={busyAction === 'offload'}
           error={offloadError}
           onSubmit={(request) => void offload(request)}
+          fullyInvoiced={container.isFullyInvoiced}
         />
       ) : null}
 
@@ -791,8 +830,8 @@ export function ContainerPage() {
         confirmLabel={reasonDialog === 'cancelOffload' ? 'Reverse offload' : 'Cancel container'}
         description={
           reasonDialog === 'cancelOffload'
-            ? 'The stock movements of the offload are reversed, the invoice lines released and the item costs rebuilt. The container goes back to Cleared.'
-            : 'The container is cancelled and its invoices are free to load elsewhere. No stock moves.'
+            ? 'The stock movements of the offload are reversed, the invoice lines released and the item costs rebuilt. The container goes back to Cleared. Refused once a charge was posted after the offload.'
+            : 'The container is cancelled and its order lines are free to load elsewhere. No stock moves.'
         }
       />
     </div>
@@ -811,11 +850,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** A value on a record: label above, text below — never a disabled input. */
-function ViewField({ label, value, dimmed, colour }: { label: string; value: string | null; dimmed?: boolean; colour?: string }) {
+function ViewField({ label, value, dimmed, colour, hint }: { label: string; value: string | null; dimmed?: boolean; colour?: string; hint?: string }) {
   return (
     <div>
       <Text fz="sm" fw={500} mb={2}>
         {label}
+        {hint ? (
+          <Text span fz="xs" c="dimmed" fw={400}>
+            {' '}
+            ({hint})
+          </Text>
+        ) : null}
       </Text>
       <Text fz="sm" c={colour ?? (dimmed || !value ? 'dimmed' : undefined)} fw={colour ? 700 : undefined}>
         {value ?? '—'}

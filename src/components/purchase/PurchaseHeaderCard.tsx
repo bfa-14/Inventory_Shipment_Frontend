@@ -62,6 +62,8 @@ interface PurchaseHeaderCardProps {
   disabled: boolean
   /** Invoices: a container carries it, so it is received at offload whatever the reader picks. */
   receiptModeLocked?: boolean
+  /** An invoice from containers: the exporter reference is required to post (EXPORTER_REFERENCE_REQUIRED). */
+  exporterRequired?: boolean
 }
 
 /**
@@ -93,6 +95,7 @@ export function PurchaseHeaderCard({
   errors,
   disabled,
   receiptModeLocked = false,
+  exporterRequired = false,
 }: PurchaseHeaderCardProps) {
   const isInvoice = kind.code === 'PINV'
   const isBase = rate?.isBaseCurrency === true
@@ -339,11 +342,14 @@ export function PurchaseHeaderCard({
               ) : (
                 <TextInput
                   label="Exporter's Ref."
+                  withAsterisk={exporterRequired}
                   placeholder="On the exporter's paperwork"
                   value={value.exporterReference}
                   onChange={(event) => onChange({ exporterReference: event.currentTarget.value })}
                   maxLength={50}
                   disabled={disabled}
+                  error={errors.exporterReference}
+                  data-exporter-reference
                 />
               )}
             </Grid.Col>
@@ -362,22 +368,9 @@ export function PurchaseHeaderCard({
               )}
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-              {readOnly || receiptModeLocked ? (
-                field('Receipt Mode', RECEIPT_MODE_LABELS[Number(value.receiptMode) as ReceiptMode])
-              ) : (
-                <Select
-                  label="Receipt Mode"
-                  description="When the goods enter stock"
-                  data={[
-                    { value: '1', label: RECEIPT_MODE_LABELS[1] },
-                    { value: '2', label: RECEIPT_MODE_LABELS[2] },
-                  ]}
-                  value={value.receiptMode}
-                  onChange={(next) => onChange({ receiptMode: next === '2' ? '2' : '1' })}
-                  allowDeselect={false}
-                  disabled={disabled}
-                />
-              )}
+              {/* AUTOMATIC SINCE THE CONTAINER MODEL: an invoice from containers is received at the
+                  offload, any other on posting. Shown, never chosen. */}
+              {field('Receipt Mode', RECEIPT_MODE_LABELS[(receiptModeLocked ? 2 : Number(value.receiptMode)) as ReceiptMode])}
             </Grid.Col>
           </>
         ) : null}

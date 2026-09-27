@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core'
-import { IconArrowBackUp, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash } from '@tabler/icons-react'
+import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core'
+import { IconArrowBackUp, IconBox, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { containersApi } from '../../api/logistics/containers'
 import { itemsApi } from '../../api/inventory/items'
 import { chargeTypesApi, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
@@ -27,9 +28,13 @@ import { DocumentIcons } from '../../components/documents/documentIcons'
 import { isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber } from '../../components/format'
+import { AddContainerModal } from '../../components/logistics/AddContainerModal'
+import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
 import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
+import { InvoiceContainerChargesCard } from '../../components/purchase/InvoiceContainerChargesCard'
 import { InvoiceContainersCard } from '../../components/purchase/InvoiceContainersCard'
+import { OrderContainersCard } from '../../components/purchase/OrderContainersCard'
 import { PurchaseChargesGrid } from '../../components/purchase/PurchaseChargesGrid'
 import {
   chargeFromDto,
@@ -100,6 +105,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const canLandedCost = hasPermission(PERMISSIONS.landedCostsCreate)
   const canCreateInvoice = kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.create)
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
+  const canAddContainer = kind.code === 'PO' && hasPermission(PERMISSIONS.containersCreate)
+  const canOverCapacity = hasPermission(PERMISSIONS.containersOverCapacity)
 
   const { byCode } = useDocumentTypes()
   const documentType = byCode(kind.code)
@@ -137,6 +144,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
   const [closeBusy, setCloseBusy] = useState(false)
+  /* An order shipped in containers: Add Container and the invoice made from its containers. */
+  const [addContainerOpen, setAddContainerOpen] = useState(false)
+  const [invoiceFromContainersOpen, setInvoiceFromContainersOpen] = useState(false)
+  const [invoiceCandidates, setInvoiceCandidates] = useState(0)
 
   /* THE CHARGES ARE THEIR OWN DOCUMENT HALF: the lines are the supplier's bill, the charges are
      everybody else's, and the API saves them with two different calls. Only a purchase invoice has
@@ -154,6 +165,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   /** Only a purchase invoice carries charges: an order commits nothing, a return gives goods back at cost. */
   const hasCharges = kind.code === PURCHASE_INVOICE.code
   const readOnly = !isNew && status !== 'Draft'
+  /** An invoice made from containers: lines grouped by container, charges on the containers, exporter ref. required. */
+  const containerBound = kind.code === 'PINV' && document?.isContainerBound === true
   const editable = !readOnly && (isNew ? canCreate : canCreate && document?.canEdit === true)
   const fromSource = document?.sourceDocumentId != null
 
@@ -188,12 +201,22 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     try {
       const source = await purchaseDocumentsApi.get(doc.sourceDocumentId)
       const remaining = new Map(source.lines.map((l) => [l.id, l.remainingBase]))
+      /* An invoice from containers is also capped by its CONTAINER line: loaded − invoiced elsewhere,
+         i.e. what is still available on it plus what this draft already holds. */
+      const containerCap = new Map<number, number>()
+      if (doc.isContainerBound) {
+        const candidates = await containersApi.invoiceCandidates({ purchaseOrderId: doc.sourceDocumentId, includeAll: true })
+        for (const c of candidates) containerCap.set(c.containerLineId, c.availableBase)
+      }
       setLines((current) =>
-        current.map((line) =>
-          line.sourceLineId !== null && remaining.has(line.sourceLineId)
-            ? { ...line, sourceRemainingBase: remaining.get(line.sourceLineId) ?? null }
-            : line,
-        ),
+        current.map((line) => {
+          const fromSourceLine = line.sourceLineId !== null && remaining.has(line.sourceLineId) ? (remaining.get(line.sourceLineId) ?? null) : null
+          const fromContainer = line.containerLineId != null && containerCap.has(line.containerLineId)
+            ? (containerCap.get(line.containerLineId) ?? 0) + (line.savedQuantityBase ?? 0)
+            : null
+          const caps = [fromSourceLine, fromContainer].filter((cap): cap is number => cap !== null)
+          return caps.length === 0 ? line : { ...line, sourceRemainingBase: Math.min(...caps) }
+        }),
       )
     } catch {
       /* The cap is a courtesy; the server enforces it either way. */
@@ -257,6 +280,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         importRowNumber: line.importRowNumber,
         sourceLineId: line.sourceLineId,
         sourceRemainingBase: null,
+        containerLineId: line.containerLineId,
+        containerId: line.containerId,
+        containerRef: line.containerRef,
+        containerNo: line.containerNo,
+        containerStatus: line.containerStatus,
+        estimatedLandedCostBase: line.estimatedLandedCostBase,
+        savedQuantityBase: line.quantityBase,
         transitBase: line.transitBase,
         fobCostBase: line.fobCostBase,
         allocatedChargesBase: line.allocatedChargesBase,
@@ -293,6 +323,23 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  /* An approved order with containers: is anything loaded and not yet invoiced? That is what offers
+     "Create Invoice from Containers…". */
+  useEffect(() => {
+    if (kind.code !== 'PO' || !document || document.containerCount === 0) {
+      setInvoiceCandidates(0)
+      return
+    }
+    let live = true
+    containersApi
+      .invoiceCandidates({ purchaseOrderId: document.id })
+      .then((rows) => live && setInvoiceCandidates(rows.length))
+      .catch(() => live && setInvoiceCandidates(0))
+    return () => {
+      live = false
+    }
+  }, [kind.code, document])
 
   useEffect(() => {
     if (header.branchId === null) return
@@ -658,6 +705,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         importRowNumber: line.importRowNumber,
         notes: line.notes.trim() || null,
         sourceLineId: line.sourceLineId,
+        // Every line of an invoice from containers goes back with its container line, or the server refuses the save.
+        containerLineId: line.containerLineId ?? null,
       })),
     }
   }
@@ -688,6 +737,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         for (const line of lines) if (line.itemCode === stock[1] && line.itemId) void refreshOnHand(line.key, line.itemId)
       }
     }
+    if (error.code === 'EXPORTER_REFERENCE_REQUIRED') setErrors((current) => ({ ...current, exporterReference: error.message }))
     notify.error(error.message)
     if (error.code === 'CONCURRENCY') void reload()
   }
@@ -708,7 +758,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         allocations: remapAllocations(charge.allocations, oldLineIds, newLineIds),
       }))
 
-      const withCharges = hasCharges ? await purchaseDocumentsApi.setCharges(saved.id, {
+      const withCharges = hasCharges && !saved.isContainerBound ? await purchaseDocumentsApi.setCharges(saved.id, {
         charges: toChargeRequests(remapped),
         manualAllocations: toManualAllocations(remapped),
         rowVersion: saved.rowVersion,
@@ -899,6 +949,32 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         </Alert>
       )}
 
+      {kind.code === 'PO' && document && document.status !== 'Draft' && document.orderedBase !== null ? (
+        <Paper radius="lg" p="md" withBorder data-order-progress>
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+            <div>
+              <Group justify="space-between" mb={4}>
+                <Text fz="sm" fw={600}>Invoiced</Text>
+                <Text fz="sm">
+                  {formatNumber(document.invoicedBase)} / {formatNumber(document.orderedBase)} pcs
+                  {document.inDraftInvoicesBase > 0 ? ` (+${formatNumber(document.inDraftInvoicesBase)} in drafts)` : ''}
+                </Text>
+              </Group>
+              <Progress value={document.orderedBase ? ((document.invoicedBase ?? 0) * 100) / document.orderedBase : 0} color="green" radius="xl" />
+            </div>
+            <div>
+              <Group justify="space-between" mb={4}>
+                <Text fz="sm" fw={600}>Loaded in containers</Text>
+                <Text fz="sm" data-loaded-in-containers>
+                  {formatNumber(document.loadedBase ?? 0)} / {formatNumber(document.orderedBase)} pcs
+                </Text>
+              </Group>
+              <Progress value={document.orderedBase ? ((document.loadedBase ?? 0) * 100) / document.orderedBase : 0} color="indigo" radius="xl" />
+            </div>
+          </SimpleGrid>
+        </Paper>
+      ) : null}
+
       <PurchaseHeaderCard
         kind={kind}
         value={header}
@@ -917,7 +993,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         readOnly={!editable}
         errors={errors}
         disabled={saving}
-        receiptModeLocked={document?.containers.some((c) => c.status !== 8) ?? false}
+        receiptModeLocked={containerBound}
+        exporterRequired={containerBound}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -945,6 +1022,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           </Group>
         </Group>
 
+        {containerBound && (
+          <Text fz="sm" c="dimmed" mb="sm">
+            Made from containers: the items come from the container lines. Quantities, prices and discounts can change; items cannot be added.
+          </Text>
+        )}
         {editable && !fromSource && (
           <Group mb="md" align="flex-end">
             <QuickItemSearch onPick={(item) => void addScanned(item)} />
@@ -966,13 +1048,47 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           warnOnOverdraw={kind.code === 'PRET'}
           linesFromSource={fromSource}
           showTransit={kind.code === 'PO'}
-          showCosts={hasCharges && readOnly}
+          showCosts={hasCharges && readOnly && !containerBound}
+          groupByContainer={containerBound}
+          showEstimatedLanded={containerBound}
+          allowAdd={!containerBound}
           baseCurrencyCode={baseCode}
           readOnly={!editable}
         />
       </Paper>
 
-      {hasCharges && (editable || charges.length > 0 || (document?.charges.length ?? 0) > 0) && (
+      {kind.code === 'PO' && document && document.status !== 'Draft' && (
+        <OrderContainersCard
+          containers={document.containers}
+          actions={
+            <>
+              {canAddContainer && document.status === 'Posted' && (
+                <Button size="xs" leftSection={<IconBox size={14} />} onClick={() => setAddContainerOpen(true)}>
+                  Add Container…
+                </Button>
+              )}
+              {canCreateInvoice && invoiceCandidates > 0 && (
+                <Tooltip
+                  label="This order is shipped in containers: invoices are created from its containers."
+                  withArrow
+                  multiline
+                  w={260}
+                >
+                  <Button size="xs" color="green" leftSection={<IconFileInvoice size={14} />} onClick={() => setInvoiceFromContainersOpen(true)}>
+                    Create Invoice from Containers…
+                  </Button>
+                </Tooltip>
+              )}
+            </>
+          }
+        />
+      )}
+
+      {containerBound && document && (
+        <InvoiceContainerChargesCard charges={document.charges} totalBase={document.containerChargesBase} baseCurrencyCode={baseCode} />
+      )}
+
+      {hasCharges && !containerBound && (editable || charges.length > 0 || (document?.charges.length ?? 0) > 0) && (
         <PurchaseChargesGrid
           lines={editable ? charges : (document?.charges ?? []).map((c) => chargeFromDto(c))}
           onChange={patchCharge}
@@ -1061,6 +1177,32 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={documentLabel} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
 
+
+      {kind.code === 'PO' && document && addContainerOpen && (
+        <AddContainerModal
+          opened
+          onClose={() => setAddContainerOpen(false)}
+          order={{ id: document.id, documentNumber: document.documentNumber, branchId: document.branchId, warehouseId: document.warehouseId }}
+          canOverCapacity={canOverCapacity}
+          onSaved={(container, open) => {
+            setAddContainerOpen(false)
+            if (open) void navigate(`/logistics/containers/${container.id}`)
+            else void reload()
+          }}
+        />
+      )}
+
+      {kind.code === 'PO' && document && invoiceFromContainersOpen && (
+        <InvoiceFromContainersModal
+          opened
+          onClose={() => setInvoiceFromContainersOpen(false)}
+          purchaseOrderId={document.id}
+          onCreated={(ids) => {
+            setInvoiceFromContainersOpen(false)
+            void navigate(`${PURCHASE_INVOICE.route}/${ids[0]}`)
+          }}
+        />
+      )}
 
       <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />
 

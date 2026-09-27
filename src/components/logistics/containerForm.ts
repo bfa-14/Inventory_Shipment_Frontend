@@ -1,8 +1,6 @@
 import type {
-  AvailableInvoiceDto,
-  AvailableInvoiceLineDto,
+  AvailablePoLineDto,
   ContainerDto,
-  ContainerInvoiceDto,
   ContainerLineDto,
   SaveContainerRequest,
   ShippingMethod,
@@ -53,41 +51,33 @@ export interface ContainerFormValues {
   notes: string
 }
 
-/** An invoice linked to the container, whichever list it came from. */
-export interface LinkedInvoice {
-  purchaseDocumentId: number
-  documentNumber: string | null
-  documentDate: string
-  supplierId: number
-  supplierName: string
-  currencyCode: string
-  commercialInvoiceNo: string | null
-  exporterReference: string | null
-  /** 1 Draft, 2 Posted. The offload wants every invoice posted. */
-  invoiceStatus: number
-}
-
-/** One loaded line as the page edits it. `maxBase` is the ceiling for THIS container, in base units. */
+/**
+ * One loaded line as the page edits it: an ORDER line and the pieces loaded. `maxBase` is the
+ * ceiling for THIS container (ordered − loaded elsewhere); `minBase` is what is already invoiced on
+ * it (posted and draft) — the server refuses to go below (LINE_INVOICED) or to remove such a line.
+ */
 export interface LoadLine {
   key: string
-  /** The saved container line (for the offload); null until saved. */
+  /** The saved container line (for the offload and the charges); null until saved. */
   lineId: number | null
-  purchaseLineId: number
-  purchaseDocumentId: number
-  invoiceNumber: string | null
+  poLineId: number
+  purchaseOrderId: number
+  purchaseOrderNumber: string | null
   supplierName: string
+  poLineNumber: number
   itemCode: string
   itemName: string
   model: string | null
-  unitTypeName: string
-  packingFormula: number
-  /** In the purchase unit. */
+  /** Pieces (base units). */
   quantity: number
   oilIncluded: boolean
   oilQtyPerUnit: number | null
   maxBase: number
+  minBase: number
   receivedQuantityBase: number | null
   varianceReason: string | null
+  /** The saved line's figures (null on a line added since the last save). */
+  saved: ContainerLineDto | null
 }
 
 const text = (value: string | null | undefined) => value ?? ''
@@ -179,85 +169,53 @@ export function toValues(c: ContainerDto): ContainerFormValues {
   }
 }
 
-export function fromContainerInvoice(i: ContainerInvoiceDto): LinkedInvoice {
-  return {
-    purchaseDocumentId: i.purchaseDocumentId,
-    documentNumber: i.documentNumber,
-    documentDate: i.documentDate,
-    supplierId: i.supplierId,
-    supplierName: i.supplierName,
-    currencyCode: i.currencyCode,
-    commercialInvoiceNo: i.commercialInvoiceNo,
-    exporterReference: i.exporterReference,
-    invoiceStatus: i.invoiceStatus,
-  }
-}
-
-export function fromAvailableInvoice(i: AvailableInvoiceDto): LinkedInvoice {
-  return {
-    purchaseDocumentId: i.id,
-    documentNumber: i.documentNumber,
-    documentDate: i.documentDate,
-    supplierId: i.supplierId,
-    supplierName: i.supplierName,
-    currencyCode: i.currencyCode,
-    commercialInvoiceNo: i.commercialInvoiceNo,
-    exporterReference: i.exporterReference,
-    invoiceStatus: i.status,
-  }
-}
-
 export function fromContainerLine(l: ContainerLineDto): LoadLine {
   return {
     key: `line-${l.id}`,
     lineId: l.id,
-    purchaseLineId: l.purchaseLineId,
-    purchaseDocumentId: l.purchaseDocumentId,
-    invoiceNumber: l.invoiceNumber,
+    poLineId: l.poLineId,
+    purchaseOrderId: l.purchaseOrderId,
+    purchaseOrderNumber: l.purchaseOrderNumber,
     supplierName: l.supplierName,
+    poLineNumber: l.poLineNumber,
     itemCode: l.itemCode,
     itemName: l.itemName,
     model: l.model,
-    unitTypeName: l.unitTypeName,
-    packingFormula: l.packingFormula,
-    quantity: l.quantity,
+    quantity: l.quantityBase,
     oilIncluded: l.oilIncluded,
     oilQtyPerUnit: l.oilQtyPerUnit,
-    maxBase: l.availableBase,
+    maxBase: Math.max(l.quantityBase, l.orderedBase - l.loadedElsewhereBase),
+    minBase: l.invoicedPostedBase + l.invoicedDraftBase,
     receivedQuantityBase: l.receivedQuantityBase,
     varianceReason: l.varianceReason,
+    saved: l,
   }
 }
 
-export function fromInvoiceLine(
-  l: AvailableInvoiceLineDto,
-  invoice: LinkedInvoice,
-  quantity: number,
-  oilIncluded: boolean,
-  oilQtyPerUnit: number | null,
-): LoadLine {
+export function fromPoLine(l: AvailablePoLineDto, quantity: number, oilIncluded: boolean, oilQtyPerUnit: number | null): LoadLine {
   return {
-    key: `new-${l.purchaseLineId}`,
+    key: `new-${l.poLineId}`,
     lineId: null,
-    purchaseLineId: l.purchaseLineId,
-    purchaseDocumentId: l.purchaseDocumentId,
-    invoiceNumber: invoice.documentNumber,
-    supplierName: invoice.supplierName,
+    poLineId: l.poLineId,
+    purchaseOrderId: l.purchaseOrderId,
+    purchaseOrderNumber: l.purchaseOrderNumber,
+    supplierName: l.supplierName,
+    poLineNumber: l.poLineNumber,
     itemCode: l.itemCode,
     itemName: l.itemName,
     model: l.model,
-    unitTypeName: l.unitTypeName,
-    packingFormula: l.packingFormula,
     quantity,
     oilIncluded,
     oilQtyPerUnit: oilIncluded ? oilQtyPerUnit : null,
-    maxBase: l.availableBase,
+    maxBase: l.maxHereBase,
+    minBase: 0,
     receivedQuantityBase: null,
     varianceReason: null,
+    saved: null,
   }
 }
 
-export const lineBase = (line: LoadLine) => line.quantity * line.packingFormula
+export const lineBase = (line: LoadLine) => line.quantity
 export const lineOil = (line: LoadLine) => (line.oilIncluded ? line.quantity * (line.oilQtyPerUnit ?? 0) : 0)
 
 export interface Capacity {
@@ -302,7 +260,6 @@ const optionalNumber = (value: number | '') => (value === '' ? null : Number(val
 
 export function toRequest(
   values: ContainerFormValues,
-  invoices: LinkedInvoice[],
   lines: LoadLine[],
   allowOverCapacity: boolean,
   rowVersion: string | null,
@@ -348,10 +305,9 @@ export function toRequest(
     customsReleaseDate: values.customsReleaseDate,
     statusNote,
     notes: optionalText(values.notes),
-    invoices: invoices.map((i) => i.purchaseDocumentId),
     lines: lines.map((line) => ({
-      purchaseLineId: line.purchaseLineId,
-      quantity: line.quantity,
+      poLineId: line.poLineId,
+      quantityBase: line.quantity,
       oilIncluded: line.oilIncluded,
       oilQtyPerUnit: line.oilIncluded ? line.oilQtyPerUnit : null,
       notes: null,

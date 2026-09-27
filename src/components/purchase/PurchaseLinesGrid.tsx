@@ -1,6 +1,8 @@
-import { ActionIcon, Anchor, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
+import { Fragment } from 'react'
+import { ActionIcon, Anchor, Badge, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
+import { containerStatusColour, containerStatusLabel } from '../../api/logistics/containers'
 import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
 import { unitLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber, numberInputValue } from '../format'
@@ -45,6 +47,16 @@ export interface PurchaseLine {
   allocatedChargesBase?: number | null
   /** Posted invoices: FOB plus those charges, per base unit — what the ledger took. */
   landedCostBase?: number | null
+  /* Invoices from containers: the container line this line invoices, kept and sent back on save. */
+  containerLineId?: number | null
+  containerId?: number | null
+  containerRef?: string | null
+  containerNo?: string | null
+  containerStatus?: number | null
+  /** FOB + the container charges per unit — final once the container is offloaded. */
+  estimatedLandedCostBase?: number | null
+  /** The saved line's quantity in base units: its own share of the container line counts as available to it. */
+  savedQuantityBase?: number | null
   /** A message about the row: the server's "Line N: …". */
   error?: string
 }
@@ -76,6 +88,12 @@ interface PurchaseLinesGridProps {
   showCosts?: boolean
   /** The base currency's code, for the cost column captions. */
   baseCurrencyCode?: string
+  /** An invoice from containers: the lines are grouped under a header per container. */
+  groupByContainer?: boolean
+  /** An invoice from containers: FOB + the container charges per unit. */
+  showEstimatedLanded?: boolean
+  /** False on an invoice from containers: its lines are the container lines, none can be added. */
+  allowAdd?: boolean
   readOnly: boolean
 }
 
@@ -105,14 +123,17 @@ export function PurchaseLinesGrid({
   showTransit = false,
   showCosts = false,
   baseCurrencyCode = 'USD',
+  groupByContainer = false,
+  showEstimatedLanded = false,
+  allowAdd = true,
   readOnly,
 }: PurchaseLinesGridProps) {
-  const columnCount = 11 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0)
+  const columnCount = 11 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
 
   const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
 
   return (
-    <Table.ScrollContainer minWidth={1150 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0)}>
+    <Table.ScrollContainer minWidth={1150 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -133,6 +154,7 @@ export function PurchaseLinesGrid({
                 <Table.Th w={140} ta="right">Landed cost ({baseCurrencyCode})</Table.Th>
               </>
             )}
+            {showEstimatedLanded && <Table.Th w={130} ta="right">Est. landed/unit ({baseCurrencyCode})</Table.Th>}
             <Table.Th w={160}>Notes</Table.Th>
             <Table.Th w={84} />
           </Table.Tr>
@@ -146,9 +168,33 @@ export function PurchaseLinesGrid({
             const over = max !== null && line.quantity > max
             const problem = line.error ?? (over ? `Only ${formatNumber(max)} remain on the source line.` : undefined)
             const fixed = readOnly || (linesFromSource && line.sourceLineId !== null)
+            // A header row above the first line of each container (the server returns them grouped).
+            const newGroup = groupByContainer && (index === 0 || lines[index - 1].containerId !== line.containerId)
 
             return (
-              <Table.Tr key={line.key} bg={problem ? 'var(--mantine-color-red-0)' : undefined}>
+              <Fragment key={line.key}>
+              {newGroup && (
+                <Table.Tr data-container-group={line.containerId ?? 'none'}>
+                  <Table.Td colSpan={columnCount} bg="var(--mantine-color-gray-0)">
+                    {line.containerId ? (
+                      <Group gap="xs" wrap="wrap">
+                        <Anchor component={Link} to={`/logistics/containers/${line.containerId}`} fw={700} fz="sm">
+                          {line.containerRef}
+                        </Anchor>
+                        {line.containerNo ? <Text fz="sm" c="dimmed">{line.containerNo}</Text> : null}
+                        {line.containerStatus ? (
+                          <Badge size="sm" variant="light" color={containerStatusColour(line.containerStatus)}>
+                            {containerStatusLabel(line.containerStatus)}
+                          </Badge>
+                        ) : null}
+                      </Group>
+                    ) : (
+                      <Text fz="sm" c="dimmed">Without container</Text>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              )}
+              <Table.Tr bg={problem ? 'var(--mantine-color-red-0)' : undefined}>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
                     {index + 1}
@@ -309,6 +355,12 @@ export function PurchaseLinesGrid({
                   </>
                 )}
 
+                {showEstimatedLanded && (
+                  <Table.Td ta="right" data-line-est-landed={line.key}>
+                    <Text fz="sm" fw={600}>{formatNumber(line.estimatedLandedCostBase, 2)}</Text>
+                  </Table.Td>
+                )}
+
                 <Table.Td>
                   {readOnly ? (
                     <Text fz="sm" c="dimmed">{line.notes || '—'}</Text>
@@ -358,6 +410,7 @@ export function PurchaseLinesGrid({
                   </Group>
                 </Table.Td>
               </Table.Tr>
+              </Fragment>
             )
           })}
 
@@ -371,7 +424,7 @@ export function PurchaseLinesGrid({
             </Table.Tr>
           )}
 
-          {!readOnly && (
+          {!readOnly && allowAdd && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
               <Table.Td colSpan={columnCount}>
                 <Text c="dimmed" fz="sm">

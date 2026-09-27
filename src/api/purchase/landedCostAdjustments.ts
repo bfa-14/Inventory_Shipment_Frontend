@@ -25,7 +25,8 @@ export const LANDED_COST_STATUS_COLOURS: Record<LandedCostAdjustmentStatus, stri
 export interface PurchaseChargeDto {
   id: number
   /** PINV (typed on the invoice) or LCA (on an adjustment). */
-  documentKind: 'PINV' | 'LCA'
+  /** CNT = a charge of the invoice's containers (read-only on an imported invoice). */
+  documentKind: 'PINV' | 'LCA' | 'CNT'
   documentId: number
   /** The number of the document it belongs to — the invoice's, or the adjustment's. */
   sourceNumber: string | null
@@ -51,6 +52,14 @@ export interface PurchaseChargeDto {
   allocatedBase: number | null
   /** On a charge of an adjustment: 1 Draft, 2 Posted, 3 Cancelled. Null on the invoice's own. */
   adjustmentStatus: number | null
+  /* Container charges (kind CNT) only. */
+  containerId?: number | null
+  containerRef?: string | null
+  chargeDate?: string | null
+  /** 1 Draft, 2 Posted, 3 Cancelled. */
+  chargeStatus?: number | null
+  /** The part of the container charge that falls on this invoice's lines (base). */
+  shareBase?: number | null
 }
 
 /** One charge as the page sends it. What is left null is taken from the type or the document. */

@@ -38,6 +38,7 @@ import {
   CONTAINER_STATUSES,
   containersApi,
   containerStatusColour,
+  INVOICING_STATUSES,
   type ContainerListDto,
   type ContainerStatusCode,
 } from '../../api/logistics/containers'
@@ -70,6 +71,7 @@ interface Filters {
   /** 'YYYY-MM-01' of the picked month. */
   orderMonth: string | null
   // advanced
+  purchaseOrderId: string | null
   purchaseDocumentId: string | null
   commercialInvoiceNo: string
   itemId: string | null
@@ -85,6 +87,7 @@ const NO_FILTERS: Filters = {
   supplierId: null,
   status: null,
   orderMonth: null,
+  purchaseOrderId: null,
   purchaseDocumentId: null,
   commercialInvoiceNo: '',
   itemId: null,
@@ -94,7 +97,7 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-const ADVANCED: (keyof Filters)[] = ['purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
+const ADVANCED: (keyof Filters)[] = ['purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
 const ACCESSOR_TO_SORT: Record<string, string> = {
   containerRef: 'ContainerRef',
@@ -113,9 +116,11 @@ function monthKey(value: string | null): number | undefined {
 }
 
 /**
- * The containers, one row per box: where it is, what it carries and for whom. Supplier, PI and item
- * columns are the server's summaries ("Hero MotoCorp +1", "Mixed - 3 items") because one container
- * carries several invoices. A red badge flags a container whose free time at the port is used up.
+ * The containers, one row per box: where it is, what it carries and for whom. Order, supplier, PI
+ * and item columns are the server's summaries ("PO-… +1", "Mixed - 3 items") because one container
+ * carries several orders and invoices. Invoicing is by POSTED invoices (what the offload needs); the
+ * movement is the one in progress, else the last completed. A red badge flags a container whose free
+ * time at the port is used up.
  */
 export function ContainersPage() {
   const navigate = useNavigate()
@@ -131,6 +136,7 @@ export function ContainersPage() {
   const [ports, setPorts] = useState<PortLookupDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
   const [invoices, setInvoices] = useState<{ value: string; label: string }[]>([])
+  const [orders, setOrders] = useState<{ value: string; label: string }[]>([])
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -149,6 +155,7 @@ export function ContainersPage() {
             supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
             status: filters.status === null ? undefined : (Number(filters.status) as ContainerStatusCode),
             orderMonthKey: monthKey(filters.orderMonth),
+            purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
             purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
             commercialInvoiceNo: filters.commercialInvoiceNo.trim() || undefined,
             itemId: filters.itemId === null ? undefined : Number(filters.itemId),
@@ -183,6 +190,17 @@ export function ContainersPage() {
           result.items
             .filter((i) => i.documentNumber)
             .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
+        ),
+      )
+      .catch(() => {})
+    // Same for the orders filter: the orders' own permission.
+    purchaseDocumentsApi
+      .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
+      .then((result) =>
+        setOrders(
+          result.items
+            .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
+            .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
         ),
       )
       .catch(() => {})
@@ -256,11 +274,12 @@ export function ContainersPage() {
   function exportList() {
     downloadCsv(
       'containers.csv',
-      ['Container Ref.', 'Container No.', 'Order Month', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Model / Item', 'Qty',
-        'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status'],
+      ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
+        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status'],
       (data?.items ?? []).map((r) => [
-        r.containerRef, r.containerNo ?? '', r.orderMonth, r.supplierNames ?? '', r.invoiceNumbers ?? '', r.commercialInvoiceNos ?? '',
-        r.itemSummary ?? '', String(r.totalQtyBase), r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
+        r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
+        r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
+        formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
         r.currentLocation ?? '', r.statusName,
       ]),
     )
@@ -284,9 +303,37 @@ export function ContainersPage() {
     },
     { accessor: 'containerNo', title: 'Container No.', sortable: true, width: 135, render: (row) => text(row.containerNo) },
     { accessor: 'orderMonth', title: 'Order Month', sortable: true, width: 130, render: (row) => text(row.orderMonth) },
+    {
+      accessor: 'orderNumbers',
+      title: 'Order No.',
+      width: 175,
+      render: (row) =>
+        row.purchaseOrderId && row.orderCount === 1 ? (
+          <Anchor component={Link} to={`/purchase/orders/${row.purchaseOrderId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+            {row.orderNumbers}
+          </Anchor>
+        ) : (
+          text(row.orderNumbers)
+        ),
+    },
     { accessor: 'supplierNames', title: 'Supplier', width: 170, render: (row) => text(row.supplierNames) },
     { accessor: 'invoiceNumbers', title: 'PI No.', width: 175, render: (row) => text(row.invoiceNumbers) },
     { accessor: 'commercialInvoiceNos', title: 'Commercial Invoice No.', width: 190, render: (row) => text(row.commercialInvoiceNos) },
+    {
+      accessor: 'invoicingStatus',
+      title: 'Invoicing',
+      width: 140,
+      render: (row) => {
+        const state = INVOICING_STATUSES[row.invoicingStatus]
+        return (
+          <Tooltip label={`${formatNumber(row.invoicedQtyBase)} of ${formatNumber(row.totalQtyBase)} pcs in posted invoices`} withArrow>
+            <Badge size="sm" variant="light" color={state.colour}>
+              {state.label}
+            </Badge>
+          </Tooltip>
+        )
+      },
+    },
     { accessor: 'itemSummary', title: 'Model / Item', width: 160, render: (row) => text(row.itemSummary) },
     {
       accessor: 'totalQtyBase',
@@ -294,6 +341,26 @@ export function ContainersPage() {
       width: 80,
       textAlign: 'right',
       render: (row) => formatNumber(row.totalQtyBase),
+    },
+    {
+      accessor: 'chargesPostedBase',
+      title: 'Charges',
+      width: 110,
+      textAlign: 'right',
+      render: (row) => (row.chargesPostedBase ? formatNumber(row.chargesPostedBase, 2) : dash),
+    },
+    {
+      accessor: 'currentMovementNo',
+      title: 'Movement',
+      width: 160,
+      render: (row) =>
+        row.currentMovementId ? (
+          <Anchor component={Link} to={`/logistics/movements/${row.currentMovementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+            {row.currentMovementNo}
+          </Anchor>
+        ) : (
+          dash
+        ),
     },
     { accessor: 'blNo', title: 'B/L No.', width: 110, render: (row) => text(row.blNo) },
     { accessor: 'dispatchDate', title: 'Dispatch Date', sortable: true, width: 140, render: (row) => dateLabel(row.dispatchDate) },
@@ -381,7 +448,7 @@ export function ContainersPage() {
     <div>
       <PageHeader
         title="Containers"
-        subtitle="Import shipments from the supplier's invoice to the warehouse."
+        subtitle="Import shipments from the purchase order to the warehouse."
         actions={
           <>
             <Button variant="default" leftSection={<IconTableExport size={16} />} onClick={exportList} disabled={(data?.items.length ?? 0) === 0}>
@@ -434,6 +501,9 @@ export function ContainersPage() {
 
         <Collapse expanded={advancedShown}>
           <FilterBar>
+            <FilterBar.Col span={3}>
+              <Select label="Purchase order" placeholder="Any order" data={orders} value={filters.purchaseOrderId} onChange={(next) => setFilter('purchaseOrderId', next)} clearable searchable nothingFoundMessage="No order matches" />
+            </FilterBar.Col>
             <FilterBar.Col span={3}>
               <Select label="PI No." placeholder="Any invoice" data={invoices} value={filters.purchaseDocumentId} onChange={(next) => setFilter('purchaseDocumentId', next)} clearable searchable nothingFoundMessage="No invoice matches" />
             </FilterBar.Col>

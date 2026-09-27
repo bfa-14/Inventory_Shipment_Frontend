@@ -45,6 +45,8 @@ export interface SavePurchaseDocumentLine {
   notes: string | null
   /** The order line an invoice line receives, or the invoice line a return line gives back. */
   sourceLineId: number | null
+  /** Invoices from containers: EVERY line sends its container line back (the server refuses otherwise). */
+  containerLineId?: number | null
 }
 
 export interface SavePurchaseDocumentRequest {
@@ -60,7 +62,7 @@ export interface SavePurchaseDocumentRequest {
   /** Null = resolved from the exchange rates for the document date. */
   exchangeRate: number | null
   supplierReference: string | null
-  /** Invoices only. Null = unchanged (1 on creation); forced to 2 once the invoice is in a container. */
+  /** Ignored for invoices: automatic (2 from containers, 1 otherwise). */
   receiptMode?: ReceiptMode | null
   exporterReference?: string | null
   commercialInvoiceNo?: string | null
@@ -78,7 +80,7 @@ export const RECEIPT_MODE_LABELS: Record<ReceiptMode, string> = {
   2: 'On container offload',
 }
 
-/** A container carrying (part of) a purchase invoice. */
+/** A container of the document: for an order the containers carrying its lines, for an invoice its containers. */
 export interface PurchaseInvoiceContainerDto {
   id: number
   containerRef: string
@@ -91,9 +93,20 @@ export interface PurchaseInvoiceContainerDto {
   currentLocation: string | null
   warehouseCode: string | null
   warehouseName: string | null
-  /** Of this invoice, in base units. */
+  /** Of this document, in base units. */
   allocatedBase: number
   receivedBase: number
+  /** Of this document's quantity on the container, what posted invoices cover. */
+  invoicedBase: number
+  containerTypeId: number
+  containerTypeCode: string
+  purchaseOrderId: number | null
+}
+
+/** One container line to invoice, in pieces. */
+export interface ContainerLineQuantity {
+  containerLineId: number
+  quantityBase: number
 }
 
 export interface PurchaseDocumentListDto {
@@ -196,8 +209,20 @@ export interface PurchaseDocumentLineDto {
   transitBase: number
   /** Invoices: what containers that are not cancelled hold of this line. Base units. */
   allocatedToContainersBase: number
-  /** Invoices: still free to load into a container; null on orders and returns. Base units. */
+  /** Orders: still free to load into a container; null on invoices and returns. Base units. */
   availableForContainerBase: number | null
+  /** Orders: invoiced straight from the order, without a container. */
+  invoicedDirectBase: number | null
+  /* Invoices from containers: every line points to ONE container line. */
+  containerLineId: number | null
+  containerId: number | null
+  containerRef: string | null
+  containerNo: string | null
+  containerStatus: number | null
+  /** The posted container charges that fall on this line (base). */
+  containerChargesBase: number | null
+  /** FOB + container charges per unit; final once the container is offloaded. */
+  estimatedLandedCostBase: number | null
   importRowNumber: number | null
   notes: string | null
   sourceLineId: number | null
@@ -276,6 +301,20 @@ export interface PurchaseDocumentDto {
   receiptMode: ReceiptMode
   notes: string | null
   status: PurchaseDocumentStatus
+  /** Invoices created from containers: the exporter reference is required to post. */
+  isContainerBound: boolean
+  /** Orders: containers carrying its lines; invoices: its containers. */
+  containerCount: number
+  /** Orders: loaded in containers (base units). */
+  loadedBase: number | null
+  /** Invoices from containers: the posted container charges falling on its lines. */
+  containerChargesBase: number | null
+  /* Orders: invoicing progress in base units. */
+  orderedBase: number | null
+  invoicedBase: number | null
+  inDraftInvoicesBase: number
+  /** Orders: 0 not, 1 partially, 2 fully invoiced. */
+  invoicingStatus: number | null
   totalItems: number
   totalQuantity: number
   subtotal: number
@@ -324,7 +363,7 @@ export interface PurchaseDocumentDto {
   files: PurchaseDocumentFileDto[]
   audit: PurchaseDocumentAuditDto[]
   linked: LinkedPurchaseDocumentDto[]
-  /** Invoices: the containers carrying it, with what each holds and has received. */
+  /** The containers of the order or of the invoice. */
   containers: PurchaseInvoiceContainerDto[]
 }
 
@@ -398,6 +437,13 @@ export const purchaseDocumentsApi = {
     request<PurchaseDocumentDto>(`${BASE}/${id}/create-invoice`, { method: 'POST', body: { documentDate: documentDate ?? null } }),
 
   /** A purchase return draft holding what can still be returned from the posted invoice. */
+  /** A draft invoice from container lines of the order; no lines = everything loaded and not yet invoiced. */
+  invoiceFromContainers: (orderId: number, documentDate?: string | null, lines?: ContainerLineQuantity[]) =>
+    request<{ id: number }>(`${BASE}/${orderId}/invoice-from-containers`, {
+      method: 'POST',
+      body: { documentDate: documentDate ?? null, lines: lines ?? [] },
+    }),
+
   createReturn: (id: number, documentDate?: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/create-return`, { method: 'POST', body: { documentDate: documentDate ?? null } }),
 

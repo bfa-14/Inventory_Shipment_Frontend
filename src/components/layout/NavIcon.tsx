@@ -17,6 +17,9 @@ import {
   IconShoppingCart,
   IconTruck,
   IconUsers,
+  IconCoins,
+  IconRoute,
+  IconShip,
 } from '@tabler/icons-react'
 
 const ICONS = {
@@ -38,6 +41,9 @@ const ICONS = {
   settings: IconSettings,
   plug: IconPlug,
   history: IconHistory,
+  ship: IconShip,
+  route: IconRoute,
+  coins: IconCoins,
 } as const
 
 /** Maps a navigation model icon key to its Tabler icon. */
