@@ -214,18 +214,6 @@ export function PriceListsPage() {
       render: (p) => <Text fz="sm">{priceListCurrency(p)}</Text>,
     },
     {
-      // Not sortable and not filterable: priceCount is counted by the search procedure, and neither
-      // the sort list nor the filters it accepts include it.
-      accessor: 'priceCount',
-      title: 'Prices',
-      width: 110,
-      render: (p) => (
-        <Text fz="sm" c="dimmed">
-          {p.priceCount}
-        </Text>
-      ),
-    },
-    {
       accessor: 'isActive',
       title: 'Status',
       sortable: true,
