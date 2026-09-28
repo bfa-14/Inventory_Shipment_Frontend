@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { Button, Checkbox, Group, Menu, Modal, Stack, Text } from '@mantine/core'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { Button, Checkbox, Group, Menu, Modal, Stack, Text, UnstyledButton } from '@mantine/core'
 import { IconColumns3, IconFilterOff, IconRestore } from '@tabler/icons-react'
+import { formatNumber } from '../format'
 import {
   DataTable as MantineDataTable,
   humanize,
@@ -30,6 +31,78 @@ const INTERACTIVE = 'button, a, input, select, textarea, [role="button"], [role=
  * widths the rest of the grid is laid out against.
  */
 const FIXED_ACCESSORS = new Set(['__rowNumber', 'actions'])
+
+/* ── the summary row ──────────────────────────────────────────────────────────────────────────── */
+
+/** What a column's footer cell can report. */
+type SummaryKind = 'none' | 'count' | 'sum' | 'avg' | 'min' | 'max'
+
+const SUMMARY_LABELS: Record<Exclude<SummaryKind, 'none'>, string> = {
+  count: 'Count',
+  sum: 'Sum',
+  avg: 'Average',
+  min: 'Min',
+  max: 'Max',
+}
+
+/** The four that need numbers; Count works on any column, and None clears the cell. */
+const NUMERIC_KINDS: SummaryKind[] = ['sum', 'avg', 'min', 'max']
+
+type SummaryChoices = Record<string, SummaryKind>
+
+function summaryStorageKey(storeKey: string): string {
+  return `${storeKey}-summaries`
+}
+
+/** Reading storage can throw in a private window or with site data blocked, so it never decides render. */
+function readSummaries(storeKey: string | undefined): SummaryChoices {
+  if (storeKey === undefined) return {}
+  try {
+    const raw = localStorage.getItem(summaryStorageKey(storeKey))
+    return raw ? (JSON.parse(raw) as SummaryChoices) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** The raw values of one column, keeping only the numbers - a blank cell is not a zero. */
+function numbersIn<T>(rows: T[], accessor: string): number[] {
+  const values: number[] = []
+  for (const row of rows) {
+    const value = (row as Record<string, unknown>)[accessor]
+    if (typeof value === 'number' && !Number.isNaN(value)) values.push(value)
+  }
+  return values
+}
+
+/**
+ * One column's figure over the rows the funnels LEFT - not the page on screen, which would change
+ * as the reader turned it, and not the whole table, which would answer a question they had just
+ * narrowed away from.
+ */
+function computeSummary<T>(rows: T[], accessor: string, kind: SummaryKind): number | null {
+  if (kind === 'none') return null
+  if (kind === 'count') return rows.length
+
+  const numbers = numbersIn(rows, accessor)
+  if (numbers.length === 0) return null
+
+  switch (kind) {
+    case 'sum':
+      return numbers.reduce((total, value) => total + value, 0)
+    case 'avg':
+      return numbers.reduce((total, value) => total + value, 0) / numbers.length
+    case 'min':
+      return Math.min(...numbers)
+    default:
+      return Math.max(...numbers)
+  }
+}
+
+/** Whole numbers read as whole numbers; an average or a money total keeps its two places. */
+function formatSummary(value: number): string {
+  return formatNumber(value, Number.isInteger(value) ? 0 : 2)
+}
 
 interface DataTableProps<T> {
   records: T[]
@@ -100,6 +173,19 @@ interface DataTableProps<T> {
    * whatever the reader had arranged.
    */
   storeKey?: string
+  /**
+   * The rows the footer's figures are taken over: every row the filters left, NOT the page on
+   * screen. Passing them turns the summary row on, and each column's footer cell then offers Sum,
+   * Average, Min, Max and Count.
+   *
+   * ONLY A GRID THAT HOLDS ITS WHOLE RESULT MAY PASS THIS. A server-paged grid holds one page, so
+   * its "Sum" would quietly add up ten rows out of five hundred - a wrong number, stated with the
+   * same confidence as a right one. Those grids leave it out and show no footer until the totals
+   * can be computed by the search procedure over the whole result.
+   *
+   * Requires {@link DataTableProps.storeKey}, which is where the reader's choices are remembered.
+   */
+  summaryRecords?: T[]
 }
 
 /**
@@ -148,6 +234,7 @@ export function DataTable<T>({
   rowClassName,
   pinLastColumn = false,
   storeKey,
+  summaryRecords,
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
   const idKey = idAccessor ?? 'id'
@@ -186,6 +273,48 @@ export function DataTable<T>({
    */
   const { effectiveColumns, columnsToggle, setColumnsToggle, resetColumnsToggle, resetColumnsWidth } =
     useDataTableColumns<T>({ key: storeKey, columns: adjustableColumns })
+
+  /** What each column reports in the footer. Read once from storage; absent means None. */
+  const [summaries, setSummaries] = useState<SummaryChoices>(() => readSummaries(storeKey))
+
+  useEffect(() => {
+    if (storeKey === undefined) return
+    try {
+      localStorage.setItem(summaryStorageKey(storeKey), JSON.stringify(summaries))
+    } catch {
+      // A browser that refuses storage still shows the figures; it just forgets them on reload.
+    }
+  }, [storeKey, summaries])
+
+  /**
+   * The footer cells, added to the columns the grid is about to draw.
+   *
+   * A column that brought its OWN footer keeps it - the sales profit report states its totals in
+   * its own words, and a generic Sum must not overwrite them. "#" and Actions get none: a total of
+   * row numbers is not a fact about anything.
+   */
+  const columnsWithSummary = useMemo(() => {
+    if (summaryRecords === undefined) return effectiveColumns
+
+    return effectiveColumns.map((column) => {
+      const accessor = String(column.accessor)
+      if (FIXED_ACCESSORS.has(accessor) || column.footer !== undefined) return column
+
+      const kind = summaries[accessor] ?? 'none'
+      return {
+        ...column,
+        footer: (
+          <SummaryCell
+            label={typeof column.title === 'string' ? column.title : humanize(accessor)}
+            kind={kind}
+            value={computeSummary(summaryRecords, accessor, kind)}
+            numeric={numbersIn(summaryRecords, accessor).length > 0}
+            onChange={(next) => setSummaries((current) => ({ ...current, [accessor]: next }))}
+          />
+        ),
+      }
+    })
+  }, [effectiveColumns, summaryRecords, summaries])
 
   const columnLabels = useMemo(
     () =>
@@ -355,7 +484,7 @@ export function DataTable<T>({
           // with a pointer: selecting is not navigating, and the cursor must not promise it is.
           className={onRowClick ? undefined : 'app-grid--select-only'}
           records={records}
-          columns={effectiveColumns}
+          columns={columnsWithSummary}
           {...(storeKey ? { storeColumnsKey: storeKey } : {})}
           fetching={fetching}
           noRecordsText={noRecordsText}
@@ -393,6 +522,71 @@ export function DataTable<T>({
         />
       </div>
     </>
+  )
+}
+
+interface SummaryCellProps {
+  /** The column's heading, so the menu says what is being totalled. */
+  label: string
+  kind: SummaryKind
+  value: number | null
+  /** False when no row holds a number here, which leaves only Count on offer. */
+  numeric: boolean
+  onChange(kind: SummaryKind): void
+}
+
+/**
+ * One column's figure in the footer, and the menu that chooses it.
+ *
+ * THE WHOLE CELL IS THE CONTROL, including while it reports nothing: a column showing no figure
+ * still has to be how the reader asks it for one, and a footer of separate little buttons would
+ * weigh more than the row it sits under. An unset cell shows a faint dash rather than nothing at
+ * all, so the row reads as a thing that can be clicked.
+ */
+function SummaryCell({ label, kind, value, numeric, onChange }: SummaryCellProps) {
+  const offered: SummaryKind[] = numeric ? ['count', ...NUMERIC_KINDS] : ['count']
+
+  return (
+    <Menu position="top-end" withArrow shadow="md" width={160}>
+      <Menu.Target>
+        <UnstyledButton
+          className="app-grid__summary"
+          aria-label={kind === 'none' ? `Summarise ${label}` : `${SUMMARY_LABELS[kind]} of ${label}`}
+        >
+          {kind === 'none' || value === null ? (
+            <Text fz="sm" c="dimmed" aria-hidden>
+              –
+            </Text>
+          ) : (
+            <Stack gap={0}>
+              <Text fz={10} c="dimmed" tt="uppercase" lh={1.2}>
+                {SUMMARY_LABELS[kind]}
+              </Text>
+              <Text fz="sm" fw={700} lh={1.3}>
+                {formatSummary(value)}
+              </Text>
+            </Stack>
+          )}
+        </UnstyledButton>
+      </Menu.Target>
+
+      <Menu.Dropdown>
+        <Menu.Label>{label}</Menu.Label>
+        {offered.map((option) => (
+          <Menu.Item
+            key={option}
+            onClick={() => onChange(option)}
+            fw={option === kind ? 700 : undefined}
+          >
+            {SUMMARY_LABELS[option as Exclude<SummaryKind, 'none'>]}
+          </Menu.Item>
+        ))}
+        <Menu.Divider />
+        <Menu.Item onClick={() => onChange('none')} disabled={kind === 'none'}>
+          None
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   )
 }
 

@@ -252,6 +252,8 @@ export function StockValuationPage() {
         <DataTable
           storeKey="inventory.stockValuation"
           records={records}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={sorted}
           columns={columns}
           idAccessor="itemId"
           // The count the footer reads from is what the funnels left, not what was loaded.

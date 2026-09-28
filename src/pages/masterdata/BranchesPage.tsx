@@ -339,6 +339,8 @@ export function BranchesPage() {
         <DataTable<BranchDto>
           storeKey="masterdata.branches"
           records={records}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={narrowed}
           columns={columns}
           // What the funnels left, which is what the footer must count.
           totalRecords={narrowed.length}

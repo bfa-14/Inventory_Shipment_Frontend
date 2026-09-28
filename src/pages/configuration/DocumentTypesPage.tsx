@@ -242,6 +242,8 @@ export function DocumentTypesPage() {
         <DataTable
           storeKey="configuration.documentTypes"
           records={records}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={records}
           columns={columns}
           sortStatus={sortStatus}
           onSortStatusChange={setSortStatus}

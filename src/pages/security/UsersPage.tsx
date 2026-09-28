@@ -321,6 +321,8 @@ export function UsersPage() {
         <DataTable<UserDto>
           storeKey="security.users"
           records={records}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={filtered}
           columns={columns}
           totalRecords={filtered.length}
           page={page}

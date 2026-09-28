@@ -215,6 +215,8 @@ export function LoginAuditPage() {
         <DataTable<LoginAuditDto>
           storeKey="security.loginAudit"
           records={records}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={narrowed}
           columns={columns}
           totalRecords={narrowed.length}
           page={page}

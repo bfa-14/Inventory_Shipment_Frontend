@@ -157,6 +157,31 @@
   outline: none;
 }
 
+/* The footer's summary cells. The whole cell is the control, so it fills its column and lines up
+   with the figures above it; a column reporting nothing still shows its dash, so the row reads as
+   something that answers a click. */
+.app-grid .app-grid__summary {
+  display: block;
+  width: 100%;
+  padding: 2px 4px;
+  border-radius: var(--mantine-radius-sm);
+  text-align: inherit;
+  transition: background 0.15s;
+}
+
+.app-grid .app-grid__summary:hover {
+  background: var(--mantine-color-gray-1);
+}
+
+[data-mantine-color-scheme='dark'] .app-grid .app-grid__summary:hover {
+  background: var(--mantine-color-dark-5);
+}
+
+.app-grid .app-grid__summary:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-4);
+  outline-offset: -2px;
+}
+
 .app-grid:focus-visible {
   outline: 2px solid var(--mantine-color-brand-4);
   outline-offset: 2px;

@@ -122,7 +122,7 @@ modifier in the hint is read from the reader's own platform.
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
 | `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
-| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on draggable widths and the header's right-click column chooser, and names where they are remembered). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
+| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on draggable widths and the header's right-click column chooser, and names where they are remembered), `summaryRecords` (the filtered rows the footer totals — see **The summary row**). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
 | `rowNumberColumn(page, recordsPerPage)` | The leading "#" column, numbered across pages. |
@@ -289,6 +289,35 @@ Conventions:
 A reader can hide a column whose funnel is set, which would otherwise leave a filter narrowing the
 rows with nothing on screen saying so. The "N column filters in effect" strip above the table is what
 covers that, and it is why that strip now shows for either reason.
+
+## The summary row
+
+Grids that hold their whole result carry a footer row. **Every column's footer cell is the control**:
+click it and pick **Count**, **Sum**, **Average**, **Min** or **Max** — or **None**, which is where every
+column starts. A column with no numbers in it offers only Count. Choices are remembered per grid, under
+`<storeKey>-summaries`, beside the column layout.
+
+A page turns it on by passing the rows to total:
+
+```tsx
+<DataTable<BranchDto> storeKey="masterdata.branches" records={records} summaryRecords={narrowed} … />
+```
+
+`summaryRecords` is the **filtered, unpaged** set — the same `narrowed` the footer count reads from.
+Not the page on screen, which would change as the reader turned it, and not the whole table, which would
+answer a question they had just narrowed away from.
+
+**Only a grid that holds its whole result may pass it.** A server-paged grid holds one page, so its
+"Sum" would quietly add ten rows out of five hundred — a wrong number stated with the same confidence as
+a right one. Those grids leave the prop out and show no footer until the totals can be computed by the
+search procedure over the whole result.
+
+Two columns never get a cell: `#` and `Actions` (`FIXED_ACCESSORS`) — a total of row numbers is not a
+fact about anything. A column that brings its **own** `footer` keeps it: the sales profit report states
+its totals in its own words, and a generic Sum must not overwrite them.
+
+Sum, Average, Min and Max read the row's raw field, so they work wherever that field is a number; a blank
+cell is skipped rather than counted as zero. Whole numbers print whole; anything else keeps two places.
 
 ## Control mapping
 

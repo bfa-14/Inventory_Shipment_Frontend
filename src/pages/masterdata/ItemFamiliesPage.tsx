@@ -516,6 +516,8 @@ export function ItemFamiliesPage() {
         <DataTable<ItemFamilyDto>
           storeKey="masterdata.itemFamilies"
           records={visibleRows}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={visibleRows}
           columns={columns}
           idAccessor="id"
           filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}

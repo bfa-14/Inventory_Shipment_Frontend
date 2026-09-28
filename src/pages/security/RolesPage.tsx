@@ -261,6 +261,8 @@ export function RolesPage() {
         <DataTable<RoleDto>
           storeKey="security.roles"
           records={records}
+          // The footer totals what the filters left, never just the page on screen.
+          summaryRecords={filtered}
           columns={columns}
           totalRecords={filtered.length}
           page={page}
