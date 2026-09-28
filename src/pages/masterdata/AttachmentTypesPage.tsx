@@ -1,13 +1,16 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -25,6 +28,26 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', category: null, isActive: null }
 
+/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
+const STATUS_VALUES = ['Active', 'Inactive']
+
+/** What each column SHOWS - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<AttachmentTypeDto>> = {
+  category: (r) => r.category,
+  subType: (r) => r.subType,
+  sortOrder: (r) => formatNumber(r.sortOrder),
+  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
+}
+
+/** Sorts on whatever column was clicked: numbers numerically, flags with Inactive first. */
+function compareRows(a: AttachmentTypeDto, b: AttachmentTypeDto, key: keyof AttachmentTypeDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'number' && typeof right === 'number') return left - right
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
+}
+
 type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTypeDto } | null
 
 /** What a container file is - "Shipping / Bill of Lading" - so the paperwork can be sorted and found. */
@@ -33,31 +56,61 @@ export function AttachmentTypesPage() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const canManage = hasPermission(PERMISSIONS.attachmentTypesManage)
 
-  const grid = useGridQuery<Filters, AttachmentTypeDto, Awaited<ReturnType<typeof attachmentTypesApi.list>>>({
+  const grid = useGridQuery<Filters, AttachmentTypeDto, AllRows<AttachmentTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'sortOrder', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The attachment types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        attachmentTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            category: filters.category ?? undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'SortOrder',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          attachmentTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              category: filters.category ?? undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages and counts. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof AttachmentTypeDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY row, not from the ones surviving the filters. */
+  const values = useMemo(
+    () => ({
+      category: columnOptions(rows, 'category'),
+      subType: columnOptions(rows, 'subType'),
+      sortOrder: columnOptions(rows, 'sortOrder'),
+    }),
+    [rows, columnOptions],
+  )
   const load = grid.reload
 
   async function afterSave(message: string) {
@@ -104,10 +157,37 @@ export function AttachmentTypesPage() {
 
   const columns: DataTableColumn<AttachmentTypeDto>[] = [
     rowNumberColumn<AttachmentTypeDto>(grid.page, grid.pageSize),
-    { accessor: 'category', title: 'Category', sortable: true, width: 180, render: (row) => <Text fw={600} fz="sm">{row.category}</Text> },
-    { accessor: 'subType', title: 'Sub Type', sortable: true },
-    { accessor: 'sortOrder', title: 'Sort Order', sortable: true, width: 120, textAlign: 'right', render: (row) => formatNumber(row.sortOrder) },
-    { accessor: 'isActive', title: 'Status', sortable: true, width: 120, render: (row) => <StatusBadge active={row.isActive} /> },
+    {
+      accessor: 'category',
+      title: 'Category',
+      sortable: true,
+      width: 180,
+      ...columnFilter({ ...columnFilters.bind('category'), label: 'Category', options: values.category }),
+      render: (row) => <Text fw={600} fz="sm">{row.category}</Text>,
+    },
+    {
+      accessor: 'subType',
+      title: 'Sub Type',
+      sortable: true,
+      ...columnFilter({ ...columnFilters.bind('subType'), label: 'Sub Type', options: values.subType }),
+    },
+    {
+      accessor: 'sortOrder',
+      title: 'Sort Order',
+      sortable: true,
+      width: 120,
+      textAlign: 'right',
+      ...columnFilter({ ...columnFilters.bind('sortOrder'), label: 'Sort Order', options: values.sortOrder }),
+      render: (row) => formatNumber(row.sortOrder),
+    },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      sortable: true,
+      width: 120,
+      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
+      render: (row) => <StatusBadge active={row.isActive} />,
+    },
     {
       accessor: 'actions',
       title: 'Actions',
@@ -173,9 +253,11 @@ export function AttachmentTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<AttachmentTypeDto>
           storeKey="masterdata.attachmentTypes"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -207,9 +289,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  sortOrder: 'SortOrder',
-  category: 'Category',
-  subType: 'SubType',
-  isActive: 'IsActive',
-}
