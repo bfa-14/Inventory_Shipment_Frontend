@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Group, Paper, Select, Stack, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import {
   MOVEMENT_STAGES,
@@ -12,9 +13,11 @@ import {
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
 import { StageIcon } from '../../components/logistics/movementStage'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -34,6 +37,31 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', stage: null, isActive: null }
 
+/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
+const STATUS_VALUES = ['Active', 'Inactive']
+
+/**
+ * What each column SHOWS - the text its header filter matches and its funnel lists. The Stage cell
+ * prints the stage over its explanation; the funnel matches the stage, which is what it is picked by.
+ */
+const COLUMN_TEXT: Record<string, ColumnText<MovementTypeDto>> = {
+  typeCode: (r) => r.typeCode,
+  typeName: (r) => r.typeName,
+  stage: (r) => r.stage,
+  sortOrder: (r) => formatNumber(r.sortOrder),
+  usedCount: (r) => formatNumber(r.usedCount),
+  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
+}
+
+/** Sorts on whatever column was clicked: numbers numerically, flags with Inactive first. */
+function compareRows(a: MovementTypeDto, b: MovementTypeDto, key: keyof MovementTypeDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'number' && typeof right === 'number') return left - right
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
+}
+
 type Dialog = { kind: 'create' } | { kind: 'edit'; movementType: MovementTypeDto } | null
 
 /**
@@ -46,25 +74,26 @@ export function MovementTypesPage() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const canManage = hasPermission(PERMISSIONS.movementTypesManage)
 
-  const grid = useGridQuery<Filters, MovementTypeDto, Awaited<ReturnType<typeof movementTypesApi.list>>>({
+  const grid = useGridQuery<Filters, MovementTypeDto, AllRows<MovementTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'sortOrder', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The movement types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        movementTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            stage: (filters.stage as MovementStage | null) ?? undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'SortOrder',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          movementTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              stage: (filters.stage as MovementStage | null) ?? undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -72,6 +101,37 @@ export function MovementTypesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages and counts. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof MovementTypeDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY row, not from the ones surviving the filters. */
+  const values = useMemo(
+    () => ({
+      typeCode: columnOptions(rows, 'typeCode'),
+      typeName: columnOptions(rows, 'typeName'),
+      stage: columnOptions(rows, 'stage'),
+      sortOrder: columnOptions(rows, 'sortOrder'),
+      usedCount: columnOptions(rows, 'usedCount'),
+    }),
+    [rows, columnOptions],
+  )
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -130,13 +190,26 @@ export function MovementTypesPage() {
 
   const columns: DataTableColumn<MovementTypeDto>[] = [
     rowNumberColumn<MovementTypeDto>(grid.page, grid.pageSize),
-    { accessor: 'typeCode', title: 'Code', sortable: true, width: 120, render: (row) => <Text fw={600} fz="sm">{row.typeCode}</Text> },
-    { accessor: 'typeName', title: 'Name', sortable: true },
+    {
+      accessor: 'typeCode',
+      title: 'Code',
+      sortable: true,
+      width: 120,
+      ...columnFilter({ ...columnFilters.bind('typeCode'), label: 'Code', options: values.typeCode }),
+      render: (row) => <Text fw={600} fz="sm">{row.typeCode}</Text>,
+    },
+    {
+      accessor: 'typeName',
+      title: 'Name',
+      sortable: true,
+      ...columnFilter({ ...columnFilters.bind('typeName'), label: 'Name', options: values.typeName }),
+    },
     {
       accessor: 'stage',
       title: 'Stage',
       sortable: true,
       width: 320,
+      ...columnFilter({ ...columnFilters.bind('stage'), label: 'Stage', options: values.stage, withText: false }),
       render: (row) => (
         <Group gap="xs" wrap="nowrap" align="flex-start">
           <StageIcon stage={row.stage} />
@@ -149,9 +222,32 @@ export function MovementTypesPage() {
         </Group>
       ),
     },
-    { accessor: 'sortOrder', title: 'Sort Order', sortable: true, width: 110, textAlign: 'right', render: (row) => formatNumber(row.sortOrder) },
-    { accessor: 'usedCount', title: 'Movements', width: 110, textAlign: 'right', render: (row) => formatNumber(row.usedCount) },
-    { accessor: 'isActive', title: 'Status', sortable: true, width: 120, render: (row) => <StatusBadge active={row.isActive} /> },
+    {
+      accessor: 'sortOrder',
+      title: 'Sort Order',
+      sortable: true,
+      width: 110,
+      textAlign: 'right',
+      ...columnFilter({ ...columnFilters.bind('sortOrder'), label: 'Sort Order', options: values.sortOrder }),
+      render: (row) => formatNumber(row.sortOrder),
+    },
+    {
+      accessor: 'usedCount',
+      title: 'Movements',
+      sortable: true,
+      width: 110,
+      textAlign: 'right',
+      ...columnFilter({ ...columnFilters.bind('usedCount'), label: 'Movements', options: values.usedCount }),
+      render: (row) => formatNumber(row.usedCount),
+    },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      sortable: true,
+      width: 120,
+      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
+      render: (row) => <StatusBadge active={row.isActive} />,
+    },
     {
       accessor: 'actions',
       title: 'Actions',
@@ -222,9 +318,11 @@ export function MovementTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<MovementTypeDto>
           storeKey="masterdata.movementTypes"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -258,10 +356,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  typeCode: 'TypeCode',
-  typeName: 'TypeName',
-  stage: 'Stage',
-  sortOrder: 'SortOrder',
-  isActive: 'IsActive',
-}

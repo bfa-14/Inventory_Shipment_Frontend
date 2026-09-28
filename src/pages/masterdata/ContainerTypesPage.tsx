@@ -1,13 +1,16 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { containerTypesApi, type ContainerTypeDto } from '../../api/masterdata/containerTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -24,6 +27,34 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', isActive: null }
 
+/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
+const STATUS_VALUES = ['Active', 'Inactive']
+
+/** An unset capacity reads as a dash, and its funnel has to match the dash the reader sees. */
+const DASH = '—'
+
+/** What each column SHOWS - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<ContainerTypeDto>> = {
+  typeCode: (r) => r.typeCode,
+  typeName: (r) => r.typeName,
+  maxUnits: (r) => (r.maxUnits === null ? DASH : formatNumber(r.maxUnits)),
+  maxWeightKg: (r) => (r.maxWeightKg === null ? DASH : formatNumber(r.maxWeightKg, 0)),
+  maxVolumeCbm: (r) => (r.maxVolumeCbm === null ? DASH : formatNumber(r.maxVolumeCbm, 1)),
+  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
+}
+
+/** Sorts on whatever column was clicked: numbers numerically, flags with Inactive first. */
+function compareRows(a: ContainerTypeDto, b: ContainerTypeDto, key: keyof ContainerTypeDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'number' || typeof right === 'number') {
+    // An unset capacity sorts as nothing rather than as zero, which would read as "holds none".
+    return (typeof left === 'number' ? left : -Infinity) - (typeof right === 'number' ? right : -Infinity)
+  }
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
+}
+
 type Dialog = { kind: 'create' } | { kind: 'edit'; containerType: ContainerTypeDto } | null
 
 /**
@@ -35,24 +66,25 @@ export function ContainerTypesPage() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const canManage = hasPermission(PERMISSIONS.containerTypesManage)
 
-  const grid = useGridQuery<Filters, ContainerTypeDto, Awaited<ReturnType<typeof containerTypesApi.list>>>({
+  const grid = useGridQuery<Filters, ContainerTypeDto, AllRows<ContainerTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'typeCode', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The container types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        containerTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'TypeCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          containerTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -60,6 +92,35 @@ export function ContainerTypesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages and counts. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof ContainerTypeDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY row, not from the ones surviving the filters. */
+  const values = useMemo(
+    () => ({
+      typeCode: columnOptions(rows, 'typeCode'),
+      typeName: columnOptions(rows, 'typeName'),
+      maxUnits: columnOptions(rows, 'maxUnits'),
+    }),
+    [rows, columnOptions],
+  )
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -110,32 +171,50 @@ export function ContainerTypesPage() {
       title: 'Type Code',
       sortable: true,
       width: 120,
+      ...columnFilter({ ...columnFilters.bind('typeCode'), label: 'Type Code', options: values.typeCode }),
       render: (row) => <Text fw={600} fz="sm">{row.typeCode}</Text>,
     },
-    { accessor: 'typeName', title: 'Type Name', sortable: true },
+    {
+      accessor: 'typeName',
+      title: 'Type Name',
+      sortable: true,
+      ...columnFilter({ ...columnFilters.bind('typeName'), label: 'Type Name', options: values.typeName }),
+    },
     {
       accessor: 'maxUnits',
       title: 'Max Units',
       sortable: true,
       width: 120,
       textAlign: 'right',
-      render: (row) => (row.maxUnits === null ? <Text c="dimmed">—</Text> : formatNumber(row.maxUnits)),
+      ...columnFilter({ ...columnFilters.bind('maxUnits'), label: 'Max Units', options: values.maxUnits }),
+      render: (row) => (row.maxUnits === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxUnits)),
     },
     {
       accessor: 'maxWeightKg',
       title: 'Max Weight (kg)',
+      sortable: true,
       width: 150,
       textAlign: 'right',
-      render: (row) => (row.maxWeightKg === null ? <Text c="dimmed">—</Text> : formatNumber(row.maxWeightKg, 0)),
+      ...columnFilter({ ...columnFilters.bind('maxWeightKg'), label: 'Max Weight' }),
+      render: (row) => (row.maxWeightKg === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxWeightKg, 0)),
     },
     {
       accessor: 'maxVolumeCbm',
       title: 'Max Volume (CBM)',
+      sortable: true,
       width: 160,
       textAlign: 'right',
-      render: (row) => (row.maxVolumeCbm === null ? <Text c="dimmed">—</Text> : formatNumber(row.maxVolumeCbm, 1)),
+      ...columnFilter({ ...columnFilters.bind('maxVolumeCbm'), label: 'Max Volume' }),
+      render: (row) => (row.maxVolumeCbm === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxVolumeCbm, 1)),
     },
-    { accessor: 'isActive', title: 'Status', sortable: true, width: 120, render: (row) => <StatusBadge active={row.isActive} /> },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      sortable: true,
+      width: 120,
+      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
+      render: (row) => <StatusBadge active={row.isActive} />,
+    },
     {
       accessor: 'actions',
       title: 'Actions',
@@ -203,9 +282,11 @@ export function ContainerTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ContainerTypeDto>
           storeKey="masterdata.containerTypes"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -239,9 +320,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  typeCode: 'TypeCode',
-  typeName: 'TypeName',
-  maxUnits: 'MaxUnits',
-  isActive: 'IsActive',
-}

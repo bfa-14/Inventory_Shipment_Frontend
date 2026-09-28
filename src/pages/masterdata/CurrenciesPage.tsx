@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Paper, Select, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { currenciesApi } from '../../api/masterdata/currencies'
-import type { CurrencyDto, CurrencySortBy } from '../../api/types'
+import type { CurrencyDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
@@ -11,7 +12,7 @@ import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -46,37 +47,70 @@ export function CurrenciesPage() {
    * every other control lands at once, and the hook guarantees one request per settled state with
    * the newest one winning.
    */
-  const grid = useGridQuery<Filters, CurrencyDto, Awaited<ReturnType<typeof currenciesApi.search>>>({
+  const grid = useGridQuery<Filters, CurrencyDto, AllRows<CurrencyDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'currencyCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The currencies could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        currenciesApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            isBaseCurrency: filters.isBaseCurrency === null ? undefined : filters.isBaseCurrency === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'CurrencyCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          currenciesApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              isBaseCurrency: filters.isBaseCurrency === null ? undefined : filters.isBaseCurrency === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof CurrencyDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY currency, not from the rows surviving the filters. */
+  const values = useMemo(
+    () => ({
+      currencyCode: columnOptions(rows, 'currencyCode'),
+      currencyName: columnOptions(rows, 'currencyName'),
+      symbol: columnOptions(rows, 'symbol'),
+      decimalPlaces: columnOptions(rows, 'decimalPlaces'),
+    }),
+    [rows, columnOptions],
+  )
   const load = grid.reload
 
   function exportCsv() {
     downloadCsv(
       'currencies.csv',
       ['Code', 'Name', 'Symbol', 'Decimals', 'Base Currency', 'Status'],
-      (data?.items ?? []).map((c) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      sorted.map((c) => [
         c.currencyCode,
         c.currencyName,
         c.symbol ?? '',
@@ -153,15 +187,39 @@ export function CurrenciesPage() {
        endpoint takes one free-text parameter matching code OR name, so a per-column box here could
        only narrow by something other than the column it sits on. The search box in the filter bar
        is that parameter, under its own name. Decimals has no server filter at all. */
-    { accessor: 'currencyCode', title: 'Code', sortable: true, width: 110 },
-    { accessor: 'currencyName', title: 'Name', sortable: true },
-    { accessor: 'symbol', title: 'Symbol', width: 100, render: (c) => c.symbol ?? '-' },
+    {
+      accessor: 'currencyCode',
+      title: 'Code',
+      sortable: true,
+      width: 110,
+      ...columnFilter({ ...columnFilters.bind('currencyCode'), label: 'Code', options: values.currencyCode }),
+    },
+    {
+      accessor: 'currencyName',
+      title: 'Name',
+      sortable: true,
+      ...columnFilter({ ...columnFilters.bind('currencyName'), label: 'Name', options: values.currencyName }),
+    },
+    {
+      accessor: 'symbol',
+      title: 'Symbol',
+      sortable: true,
+      width: 100,
+      ...columnFilter({ ...columnFilters.bind('symbol'), label: 'Symbol', options: values.symbol }),
+      render: (c) => c.symbol ?? '-',
+    },
     {
       accessor: 'decimalPlaces',
       title: 'Decimals',
       sortable: true,
       width: 120,
       textAlign: 'right',
+      ...columnFilter({
+        ...columnFilters.bind('decimalPlaces'),
+        label: 'Decimals',
+        options: values.decimalPlaces,
+        withText: false,
+      }),
     },
     {
       accessor: 'isBaseCurrency',
@@ -196,6 +254,8 @@ export function CurrenciesPage() {
       title: 'Created',
       sortable: true,
       width: 180,
+      // No tick list: every row is a different instant, so the list would be one entry per row.
+      ...columnFilter({ ...columnFilters.bind('createdAtUtc'), label: 'Created' }),
       render: (c) => formatDateTime(c.createdAtUtc),
     },
     {
@@ -309,9 +369,11 @@ export function CurrenciesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<CurrencyDto>
           storeKey="masterdata.currencies"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -357,11 +419,22 @@ const BASE_OPTIONS = [
 const STATUS_VALUES = ['Active', 'Inactive']
 const BASE_VALUES = ['Base', 'Not base']
 
-const ACCESSOR_TO_SORT: Record<string, CurrencySortBy> = {
-  currencyCode: 'CurrencyCode',
-  currencyName: 'CurrencyName',
-  decimalPlaces: 'DecimalPlaces',
-  isBaseCurrency: 'IsBaseCurrency',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
+/** What each column SHOWS - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<CurrencyDto>> = {
+  currencyCode: (c) => c.currencyCode,
+  currencyName: (c) => c.currencyName,
+  symbol: (c) => c.symbol ?? '-',
+  decimalPlaces: (c) => String(c.decimalPlaces),
+  isBaseCurrency: (c) => (c.isBaseCurrency ? 'Base' : 'Not base'),
+  isActive: (c) => (c.isActive ? 'Active' : 'Inactive'),
+  createdAtUtc: (c) => formatDateTime(c.createdAtUtc),
+}
+
+/** Sorts on whatever column was clicked: numbers numerically, flags with the false side first. */
+function compareRows(a: CurrencyDto, b: CurrencyDto, key: keyof CurrencyDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'number' && typeof right === 'number') return left - right
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
 }

@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { priceListsApi } from '../../api/masterdata/priceLists'
-import type { CurrencyLookupDto, PriceListDto, PriceListSortBy } from '../../api/types'
+import type { CurrencyLookupDto, PriceListDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { currencyLabel } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
@@ -57,24 +58,26 @@ export function PriceListsPage() {
    * The filter bar and the column funnels are two ways into the SAME filter, and both go through
    * `setFilter`, so a header reading "Active" over a bar reading "All" is not a state that exists.
    */
-  const grid = useGridQuery<Filters, PriceListDto, Awaited<ReturnType<typeof priceListsApi.search>>>({
+  const grid = useGridQuery<Filters, PriceListDto, AllRows<PriceListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'priceListCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The price lists could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        priceListsApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            currencyId: filters.currencyId === null ? undefined : Number(filters.currencyId),
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'PriceListCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          priceListsApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              currencyId: filters.currencyId === null ? undefined : Number(filters.currencyId),
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -82,6 +85,34 @@ export function PriceListsPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof PriceListDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY price list, not from the rows surviving the filters. */
+  const values = useMemo(
+    () => ({
+      priceListCode: columnOptions(rows, 'priceListCode'),
+      priceListName: columnOptions(rows, 'priceListName'),
+    }),
+    [rows, columnOptions],
+  )
 
   // Every currency, including inactive ones, so lists priced in a deactivated currency can still
   // be filtered out of the grid.
@@ -98,7 +129,8 @@ export function PriceListsPage() {
     downloadCsv(
       'price-lists.csv',
       ['Price List Code', 'Price List Name', 'Currency', 'Prices', 'Description', 'Status'],
-      (data?.items ?? []).map((p) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      sorted.map((p) => [
         p.priceListCode,
         p.priceListName,
         priceListCurrency(p),
@@ -187,13 +219,27 @@ export function PriceListsPage() {
       title: 'Price List Code',
       sortable: true,
       width: 170,
+      ...columnFilter({
+        ...columnFilters.bind('priceListCode'),
+        label: 'Price List Code',
+        options: values.priceListCode,
+      }),
       render: (p) => (
         <Text fz="sm" fw={600}>
           {p.priceListCode}
         </Text>
       ),
     },
-    { accessor: 'priceListName', title: 'Price List Name', sortable: true },
+    {
+      accessor: 'priceListName',
+      title: 'Price List Name',
+      sortable: true,
+      ...columnFilter({
+        ...columnFilters.bind('priceListName'),
+        label: 'Price List Name',
+        options: values.priceListName,
+      }),
+    },
     {
       accessor: 'currencyCode',
       title: 'Currency',
@@ -335,9 +381,11 @@ export function PriceListsPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PriceListDto>
           storeKey="masterdata.priceLists"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -377,9 +425,18 @@ const STATUS_OPTIONS = [
 /** The words the Status funnel offers - the labels above, as the cells print them. */
 const STATUS_VALUES = ['Active', 'Inactive']
 
-const ACCESSOR_TO_SORT: Record<string, PriceListSortBy> = {
-  priceListCode: 'PriceListCode',
-  priceListName: 'PriceListName',
-  currencyCode: 'CurrencyCode',
-  isActive: 'IsActive',
+/** What each column SHOWS - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<PriceListDto>> = {
+  priceListCode: (p) => p.priceListCode,
+  priceListName: (p) => p.priceListName,
+  currencyCode: priceListCurrency,
+  isActive: (p) => (p.isActive ? 'Active' : 'Inactive'),
+}
+
+/** Sorts on whatever column was clicked: flags with Inactive first, the rest as text. */
+function compareRows(a: PriceListDto, b: PriceListDto, key: keyof PriceListDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
 }
