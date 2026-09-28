@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
-import type { BranchLookupDto, WarehouseDto, WarehouseSortBy } from '../../api/types'
+import type { BranchLookupDto, WarehouseDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { branchLabel } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
@@ -12,7 +13,7 @@ import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { columnFilter } from '../../components/ui/columnFilter'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -53,32 +54,63 @@ export function WarehousesPage() {
    * The filter bar and the column funnels are two ways into the SAME filter, and both go through
    * `setFilter`, so a header reading "Active" over a bar reading "All" is not a state that exists.
    */
-  const grid = useGridQuery<Filters, WarehouseDto, Awaited<ReturnType<typeof warehousesApi.search>>>({
+  const grid = useGridQuery<Filters, WarehouseDto, AllRows<WarehouseDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'warehouseCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The warehouses could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        warehousesApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            isMainWarehouse:
-              filters.isMainWarehouse === null ? undefined : filters.isMainWarehouse === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'WarehouseCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          warehousesApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              isMainWarehouse:
+                filters.isMainWarehouse === null ? undefined : filters.isMainWarehouse === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof WarehouseDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY warehouse, not from the rows surviving the filters. */
+  const values = useMemo(
+    () => ({
+      warehouseCode: columnOptions(rows, 'warehouseCode'),
+      warehouseName: columnOptions(rows, 'warehouseName'),
+      address: columnOptions(rows, 'address'),
+    }),
+    [rows, columnOptions],
+  )
   const load = grid.reload
 
   // Every branch, including inactive ones, so rows on a deactivated branch can still be filtered.
@@ -96,7 +128,8 @@ export function WarehousesPage() {
     downloadCsv(
       'warehouses.csv',
       ['Warehouse Code', 'Warehouse Name', 'Branch / Site', 'Address', 'Is Main Warehouse', 'Status'],
-      (data?.items ?? []).map((w) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      sorted.map((w) => [
         w.warehouseCode,
         w.warehouseName,
         `${w.branchCode} - ${w.branchName}`,
@@ -168,12 +201,30 @@ export function WarehousesPage() {
 
   const columns: DataTableColumn<WarehouseDto>[] = [
     rowNumberColumn<WarehouseDto>(grid.page, grid.pageSize),
-    /* Warehouse Code, Warehouse Name and Address carry no header filter: this grid pages on the
-       server and the search endpoint takes one free-text parameter that matches code OR name, so a
-       per-column box here could only narrow by something other than the column it sits on. The
-       search box in the filter bar is that parameter, under its own name. */
-    { accessor: 'warehouseCode', title: 'Warehouse Code', sortable: true, width: 160 },
-    { accessor: 'warehouseName', title: 'Warehouse Name', sortable: true },
+    /* These three now carry their own funnel. The page holds the whole table, so each is matched
+       here against the text its own cell shows - which the filter bar's search box could never do,
+       being one parameter over code OR name. */
+    {
+      accessor: 'warehouseCode',
+      title: 'Warehouse Code',
+      sortable: true,
+      width: 160,
+      ...columnFilter({
+        ...columnFilters.bind('warehouseCode'),
+        label: 'Warehouse Code',
+        options: values.warehouseCode,
+      }),
+    },
+    {
+      accessor: 'warehouseName',
+      title: 'Warehouse Name',
+      sortable: true,
+      ...columnFilter({
+        ...columnFilters.bind('warehouseName'),
+        label: 'Warehouse Name',
+        options: values.warehouseName,
+      }),
+    },
     {
       accessor: 'branchName',
       title: 'Branch / Site',
@@ -192,7 +243,13 @@ export function WarehousesPage() {
       }),
       render: (w) => <Text fz="sm" title={w.branchCode}>{w.branchName}</Text>,
     },
-    { accessor: 'address', title: 'Address', sortable: true, render: (w) => w.address ?? '-' },
+    {
+      accessor: 'address',
+      title: 'Address',
+      sortable: true,
+      ...columnFilter({ ...columnFilters.bind('address'), label: 'Address', options: values.address }),
+      render: (w) => w.address ?? '-',
+    },
     {
       accessor: 'isMainWarehouse',
       title: 'Is Main Warehouse',
@@ -345,9 +402,11 @@ export function WarehousesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<WarehouseDto>
           storeKey="masterdata.warehouses"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -394,12 +453,20 @@ const YES_NO_OPTIONS = [
 ]
 
 
-const ACCESSOR_TO_SORT: Record<string, WarehouseSortBy> = {
-  warehouseCode: 'WarehouseCode',
-  warehouseName: 'WarehouseName',
-  branchName: 'BranchName',
-  address: 'Address',
-  isMainWarehouse: 'IsMainWarehouse',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
+/** What each column SHOWS - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<WarehouseDto>> = {
+  warehouseCode: (w) => w.warehouseCode,
+  warehouseName: (w) => w.warehouseName,
+  branchName: (w) => w.branchName,
+  address: (w) => w.address ?? '',
+  isMainWarehouse: (w) => (w.isMainWarehouse ? 'Yes' : 'No'),
+  isActive: (w) => (w.isActive ? 'Active' : 'Inactive'),
+}
+
+/** Sorts on whatever column was clicked: flags with the false side first, the rest as text. */
+function compareRows(a: WarehouseDto, b: WarehouseDto, key: keyof WarehouseDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
 }

@@ -16,9 +16,11 @@ import { ApiError } from '../../api/http'
 import { itemFamiliesApi } from '../../api/masterdata/itemFamilies'
 import type { ItemFamilyDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -33,6 +35,22 @@ const EXPANDED_KEY = 'inventory_shipment.itemFamilies.expanded'
 
 /** Pixels of indent per level - the only thing that makes the hierarchy readable in a flat grid. */
 const INDENT = 20
+
+/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
+const STATUS_VALUES = ['Active', 'Inactive']
+
+/**
+ * What each column SHOWS for a family - the text its header filter matches and its funnel lists.
+ * Parent Family is added to this in the page, because the cell prints the parent's NAME and only
+ * the tree index can look that up from a parent id.
+ */
+const BASE_COLUMN_TEXT: Record<string, ColumnText<ItemFamilyDto>> = {
+  familyCode: (f) => f.familyCode,
+  familyName: (f) => f.familyName,
+  description: (f) => f.description ?? '',
+  childCount: (f) => String(f.childCount),
+  isActive: (f) => (f.isActive ? 'Active' : 'Inactive'),
+}
 
 /**
  * The combined message for both refusals to delete. The customer asked for one wording: to the
@@ -103,7 +121,28 @@ export function ItemFamiliesPage() {
 
   const index = useMemo(() => indexFamilies(families), [families])
 
-  const filtering = appliedSearch.trim() !== '' || status !== null || scopeId !== null
+  /**
+   * The header funnels. They cannot go through `apply` the way a flat grid's do: a match three
+   * levels down has to keep its ancestors, or it would float free of the families it belongs to.
+   * So the matcher is asked ROW BY ROW below, inside the walk that already does that keeping.
+   *
+   * No sorting on this grid: the order is the tree, and re-ordering it would cut parents from
+   * their children - the same reason it does not page.
+   */
+  const columnText = useMemo(
+    () => ({
+      ...BASE_COLUMN_TEXT,
+      parentId: (family: ItemFamilyDto) =>
+        family.parentId === null ? '' : (index.byId.get(family.parentId)?.familyName ?? ''),
+    }),
+    [index],
+  )
+
+  const columnFilters = useGridFilters(columnText)
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  const filtering =
+    appliedSearch.trim() !== '' || status !== null || scopeId !== null || columnFilters.activeCount > 0
 
   /**
    * The rows the grid draws, top to bottom. Unfiltered that is a depth-first walk that stops at
@@ -134,7 +173,9 @@ export function ItemFamiliesPage() {
         family.familyCode.toLowerCase().includes(term) ||
         family.familyName.toLowerCase().includes(term)
       const matchesStatus = wantActive === null || family.isActive === wantActive
-      if (!matchesTerm || !matchesStatus) continue
+      // One row at a time, so the ancestor-keeping below still applies to a funnel's matches.
+      const matchesColumns = applyColumnFilters([family]).length > 0
+      if (!matchesTerm || !matchesStatus || !matchesColumns) continue
 
       keep.add(family.id)
       // Keep the path down to the match, clipped at the scope so the Family filter still shows
@@ -148,12 +189,23 @@ export function ItemFamiliesPage() {
     // A filtered tree is always fully open: a match hidden inside a collapsed parent would read
     // as no match at all.
     return flattenTree(index, () => true, keep)
-  }, [index, filtering, expanded, appliedSearch, status, scopeId])
+  }, [index, filtering, expanded, appliedSearch, status, scopeId, applyColumnFilters])
 
   /**
    * A row is drawn open when its children are actually on screen. Reading it back from the rows
    * rather than from `expanded` keeps the chevron honest while a filter forces the tree open.
    */
+  /** The tick lists come from EVERY family, not from the rows surviving the filters. */
+  const values = useMemo(
+    () => ({
+      familyCode: columnOptions(families, 'familyCode'),
+      familyName: columnOptions(families, 'familyName'),
+      parentId: columnOptions(families, 'parentId'),
+      childCount: columnOptions(families, 'childCount'),
+    }),
+    [families, columnOptions],
+  )
+
   const shownIds = useMemo(() => new Set(visibleRows.map((f) => f.id)), [visibleRows])
   const isOpen = useCallback(
     (family: ItemFamilyDto) => childrenOf(index, family.id).some((child) => shownIds.has(child.id)),
@@ -259,6 +311,7 @@ export function ItemFamiliesPage() {
       title: 'Family Code',
       // Wide enough that a level-4 code still clears its indent before the column ends.
       width: 280,
+      ...columnFilter({ ...columnFilters.bind('familyCode'), label: 'Family Code', options: values.familyCode }),
       render: (family) => {
         const open = isOpen(family)
         const hasChildren = family.childCount > 0
@@ -293,12 +346,19 @@ export function ItemFamiliesPage() {
         )
       },
     },
-    { accessor: 'familyName', title: 'Family Name', width: 180, ellipsis: true },
+    {
+      accessor: 'familyName',
+      title: 'Family Name',
+      width: 180,
+      ellipsis: true,
+      ...columnFilter({ ...columnFilters.bind('familyName'), label: 'Family Name', options: values.familyName }),
+    },
     {
       accessor: 'parentId',
       title: 'Parent Family',
       width: 150,
       ellipsis: true,
+      ...columnFilter({ ...columnFilters.bind('parentId'), label: 'Parent Family', options: values.parentId }),
       render: (family) =>
         family.parentId === null ? (
           <Text c="dimmed">—</Text>
@@ -309,6 +369,8 @@ export function ItemFamiliesPage() {
     {
       accessor: 'description',
       title: 'Description',
+      // No tick list: a description is prose, so the list would be one entry per row.
+      ...columnFilter({ ...columnFilters.bind('description'), label: 'Description' }),
       // No width: it takes whatever the fixed columns leave, so the grid fits a laptop.
       render: (family) =>
         family.description ? (
@@ -321,11 +383,23 @@ export function ItemFamiliesPage() {
           <Text c="dimmed">—</Text>
         ),
     },
-    { accessor: 'childCount', title: 'Children', width: 90, textAlign: 'right' },
+    {
+      accessor: 'childCount',
+      title: 'Children',
+      width: 90,
+      textAlign: 'right',
+      ...columnFilter({
+        ...columnFilters.bind('childCount'),
+        label: 'Children',
+        options: values.childCount,
+        withText: false,
+      }),
+    },
     {
       accessor: 'isActive',
       title: 'Status',
       width: 110,
+      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (family) => <StatusBadge active={family.isActive} />,
     },
     {
@@ -444,6 +518,7 @@ export function ItemFamiliesPage() {
           records={visibleRows}
           columns={columns}
           idAccessor="id"
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', family: record }) : undefined}

@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import {
   allocationMethodLabel,
@@ -10,9 +11,11 @@ import {
 } from '../../api/purchase/chargeTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -47,33 +50,63 @@ export function ChargeTypesPage() {
    * every other control lands at once, and the hook guarantees one request per settled state with
    * the newest one winning.
    */
-  const grid = useGridQuery<Filters, ChargeTypeDto, Awaited<ReturnType<typeof chargeTypesApi.list>>>({
+  const grid = useGridQuery<Filters, ChargeTypeDto, AllRows<ChargeTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'chargeCode', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The charge types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        chargeTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            allocationMethod: filters.allocationMethod ?? undefined,
-            includeInLandedCost:
-              filters.includeInLandedCost === null ? undefined : filters.includeInLandedCost === 'true',
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'ChargeCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          chargeTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              allocationMethod: filters.allocationMethod ?? undefined,
+              includeInLandedCost:
+                filters.includeInLandedCost === null ? undefined : filters.includeInLandedCost === 'true',
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
+  /** What the funnels left - the rows this page then sorts, pages and counts. */
+  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
+
+  const sortKey = grid.sortStatus.columnAccessor as keyof ChargeTypeDto
+  const sortDirection = grid.sortStatus.direction
+
+  const sorted = useMemo(() => {
+    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
+    if (sortDirection === 'desc') ordered.reverse()
+    return ordered
+  }, [narrowed, sortKey, sortDirection])
+
+  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+
+  /** The tick lists come from EVERY charge type, not from the rows surviving the filters. */
+  const values = useMemo(
+    () => ({
+      chargeCode: columnOptions(rows, 'chargeCode'),
+      chargeName: columnOptions(rows, 'chargeName'),
+      allocationMethod: columnOptions(rows, 'allocationMethod'),
+    }),
+    [rows, columnOptions],
+  )
   const load = grid.reload
 
   async function afterSave(message: string) {
@@ -148,30 +181,57 @@ export function ChargeTypesPage() {
       title: 'Charge Code',
       sortable: true,
       width: 130,
+      ...columnFilter({ ...columnFilters.bind('chargeCode'), label: 'Charge Code', options: values.chargeCode }),
       render: (c) => (
         <Text fw={600} fz="sm">
           {c.chargeCode}
         </Text>
       ),
     },
-    { accessor: 'chargeName', title: 'Charge Name', sortable: true, width: 200 },
+    {
+      accessor: 'chargeName',
+      title: 'Charge Name',
+      sortable: true,
+      width: 200,
+      ...columnFilter({ ...columnFilters.bind('chargeName'), label: 'Charge Name', options: values.chargeName }),
+    },
     {
       accessor: 'allocationMethod',
       title: 'Allocation Method',
       sortable: true,
       width: 170,
+      ...columnFilter({
+        ...columnFilters.bind('allocationMethod'),
+        label: 'Allocation Method',
+        options: values.allocationMethod,
+        withText: false,
+      }),
       render: (c) => allocationMethodLabel(c.allocationMethod),
     },
     {
       accessor: 'includeInLandedCost',
       title: 'Include in Landed Cost',
+      sortable: true,
       width: 180,
+      ...columnFilter({
+        ...columnFilters.bind('includeInLandedCost'),
+        label: 'Include in Landed Cost',
+        options: YES_NO_VALUES,
+        withText: false,
+      }),
       render: (c) => <YesNo value={c.includeInLandedCost} />,
     },
     {
       accessor: 'isRecoverableTax',
       title: 'Recoverable Tax',
+      sortable: true,
       width: 150,
+      ...columnFilter({
+        ...columnFilters.bind('isRecoverableTax'),
+        label: 'Recoverable Tax',
+        options: YES_NO_VALUES,
+        withText: false,
+      }),
       render: (c) => <YesNo value={c.isRecoverableTax} />,
     },
     {
@@ -179,11 +239,15 @@ export function ChargeTypesPage() {
       title: 'Status',
       sortable: true,
       width: 120,
+      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (c) => <StatusBadge active={c.isActive} />,
     },
     {
       accessor: 'description',
       title: 'Description',
+      sortable: true,
+      // No tick list: a description is prose, so the list would be one entry per row.
+      ...columnFilter({ ...columnFilters.bind('description'), label: 'Description' }),
       // No width: it takes whatever the fixed columns leave, so the grid fits a laptop.
       render: (c) =>
         c.description ? (
@@ -311,9 +375,11 @@ export function ChargeTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ChargeTypeDto>
           storeKey="purchase.chargeTypes"
-          records={data?.items ?? []}
+          records={records}
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
+          // What the funnels left, which is what the footer must count.
+          totalRecords={narrowed.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}
@@ -373,10 +439,25 @@ const STATUS_OPTIONS = [
 ]
 
 /** Grid accessor -> the name the search procedure sorts by. */
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  chargeCode: 'ChargeCode',
-  chargeName: 'ChargeName',
-  allocationMethod: 'AllocationMethod',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
+/** The closed sets the funnels offer, whatever the loaded rows happen to contain. */
+const STATUS_VALUES = ['Active', 'Inactive']
+const YES_NO_VALUES = ['Yes', 'No']
+
+/** What each column SHOWS - the text its header filter matches and its funnel lists. */
+const COLUMN_TEXT: Record<string, ColumnText<ChargeTypeDto>> = {
+  chargeCode: (c) => c.chargeCode,
+  chargeName: (c) => c.chargeName,
+  allocationMethod: (c) => allocationMethodLabel(c.allocationMethod),
+  includeInLandedCost: (c) => (c.includeInLandedCost ? 'Yes' : 'No'),
+  isRecoverableTax: (c) => (c.isRecoverableTax ? 'Yes' : 'No'),
+  isActive: (c) => (c.isActive ? 'Active' : 'Inactive'),
+  description: (c) => c.description ?? '',
+}
+
+/** Sorts on whatever column was clicked: flags with the false side first, the rest as text. */
+function compareRows(a: ChargeTypeDto, b: ChargeTypeDto, key: keyof ChargeTypeDto): number {
+  const left = a[key]
+  const right = b[key]
+  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
 }
