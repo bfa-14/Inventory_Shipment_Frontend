@@ -197,6 +197,8 @@ export function UsersPage() {
     {
       accessor: 'roles',
       title: 'Roles',
+      // Sorts on the joined text the cell shows, so users group by their first role.
+      sortable: true,
       // No tick list: a cell holding several roles would offer combinations ("Admin, Manager")
       // rather than roles, so the box - which matches inside the joined text - is the honest control.
       ...columnFilter({ ...grid.bind('roles'), label: 'Roles', placeholder: 'Role contains...' }),

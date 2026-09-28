@@ -123,12 +123,14 @@ export function LoginAuditPage() {
     {
       accessor: 'failureReason',
       title: 'Reason',
+      sortable: true,
       ...columnFilter({ ...grid.bind('failureReason'), label: 'Reason', options: values.failureReason }),
       render: (e) => e.failureReason ?? '-',
     },
     {
       accessor: 'ipAddress',
       title: 'IP address',
+      sortable: true,
       width: 175,
       ...columnFilter({ ...grid.bind('ipAddress'), label: 'IP address', options: values.ipAddress }),
       render: (e) => e.ipAddress ?? '-',
@@ -136,6 +138,7 @@ export function LoginAuditPage() {
     {
       accessor: 'userAgent',
       title: 'User agent',
+      sortable: true,
       // No tick list: a user agent is prose, one string per browser build, so the box is the control
       // that helps - "Chrome" or "Windows" narrows it, a list of 200 full strings does not.
       ...columnFilter({ ...grid.bind('userAgent'), label: 'User agent' }),

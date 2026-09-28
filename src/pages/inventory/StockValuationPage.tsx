@@ -11,8 +11,10 @@ import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { WarehouseLookupDto } from '../../api/types'
 import { money } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
+import { columnFilter } from '../../components/ui/columnFilter'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useGridQuery } from '../../hooks/useGridQuery'
@@ -26,6 +28,25 @@ interface Filters {
 const NO_FILTERS: Filters = { warehouseId: null }
 
 const NO_ROWS: InventoryValuationRowDto[] = []
+
+/** How a warehouse cell reads - shared by the column's render and its filter, so the two agree. */
+function warehouseText(row: InventoryValuationRowDto): string {
+  return row.warehouseName === null ? '—' : `${row.warehouseCode ?? ''} - ${row.warehouseName}`
+}
+
+/**
+ * What each column SHOWS for a row - the text its header filter matches. The figures are matched as
+ * the cell formats them ("1,250.00"), so a filter narrows by what is read rather than by the raw
+ * number behind it. Module-level so the filter callbacks keep their identity between renders.
+ */
+const COLUMN_TEXT: Record<string, ColumnText<InventoryValuationRowDto>> = {
+  itemCode: (r) => r.itemCode,
+  itemName: (r) => r.itemName,
+  warehouseName: warehouseText,
+  onHandBase: (r) => formatNumber(r.onHandBase),
+  averageCost: (r) => (r.averageCost === null ? '—' : formatNumber(r.averageCost, 2)),
+  inventoryValue: (r) => formatNumber(r.inventoryValue, 2),
+}
 
 /** Sorts on whatever column was clicked: numbers numerically, codes and names as text. */
 function compareRows(a: InventoryValuationRowDto, b: InventoryValuationRowDto, key: keyof InventoryValuationRowDto): number {
@@ -68,14 +89,21 @@ export function StockValuationPage() {
     warehousesApi.lookup(false).then(setWarehouses).catch(() => {})
   }, [])
 
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
+  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
+
   const sortKey = grid.sortStatus.columnAccessor as keyof InventoryValuationRowDto
   const sortDirection = grid.sortStatus.direction
 
   const sorted = useMemo(() => {
-    const ordered = [...rows].sort((a, b) => compareRows(a, b, sortKey))
+    const ordered = [...applyColumnFilters(rows)].sort((a, b) => compareRows(a, b, sortKey))
     if (sortDirection === 'desc') ordered.reverse()
     return ordered
-  }, [rows, sortKey, sortDirection])
+  }, [rows, sortKey, sortDirection, applyColumnFilters])
+
+  /** The tick list comes from EVERY row, not from the rows surviving the filters. */
+  const warehouseOptions = useMemo(() => columnOptions(rows, 'warehouseName'), [rows, columnOptions])
 
   const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
 
@@ -88,11 +116,20 @@ export function StockValuationPage() {
   }
 
   const columns: DataTableColumn<InventoryValuationRowDto>[] = [
-    { accessor: 'itemCode', title: 'Item Code', sortable: true, width: 140 },
+    {
+      accessor: 'itemCode',
+      title: 'Item Code',
+      sortable: true,
+      width: 140,
+      // No tick list on the item columns, the figures or the codes: each is very nearly one entry
+      // per row, so the list would be a copy of the grid. The box matches the text as it reads.
+      ...columnFilter({ ...columnFilters.bind('itemCode'), label: 'Item Code' }),
+    },
     {
       accessor: 'itemName',
       title: 'Item',
       sortable: true,
+      ...columnFilter({ ...columnFilters.bind('itemName'), label: 'Item' }),
       render: (row) => (
         <Text fz="sm" fw={500}>
           {row.itemName}
@@ -108,8 +145,12 @@ export function StockValuationPage() {
             title: 'Warehouse',
             sortable: true,
             width: 200,
-            render: (row: InventoryValuationRowDto) =>
-              row.warehouseName === null ? '—' : `${row.warehouseCode ?? ''} - ${row.warehouseName}`,
+            ...columnFilter({
+              ...columnFilters.bind('warehouseName'),
+              label: 'Warehouse',
+              options: warehouseOptions,
+            }),
+            render: (row: InventoryValuationRowDto) => warehouseText(row),
           } satisfies DataTableColumn<InventoryValuationRowDto>,
         ]
       : []),
@@ -119,6 +160,7 @@ export function StockValuationPage() {
       sortable: true,
       width: 110,
       textAlign: 'right',
+      ...columnFilter({ ...columnFilters.bind('onHandBase'), label: 'On Hand' }),
       render: (row) => (
         <Text fz="sm" c={row.onHandBase > 0 ? undefined : 'dimmed'}>
           {formatNumber(row.onHandBase)}
@@ -131,6 +173,7 @@ export function StockValuationPage() {
       sortable: true,
       width: 150,
       textAlign: 'right',
+      ...columnFilter({ ...columnFilters.bind('averageCost'), label: 'Average Cost' }),
       render: (row) => (
         <Text fz="sm" c={row.averageCost === null ? 'dimmed' : undefined}>
           {row.averageCost === null ? '—' : formatNumber(row.averageCost, 2)}
@@ -143,6 +186,7 @@ export function StockValuationPage() {
       sortable: true,
       width: 170,
       textAlign: 'right',
+      ...columnFilter({ ...columnFilters.bind('inventoryValue'), label: 'Inventory Value' }),
       render: (row) => (
         <Text fz="sm" fw={500}>
           {formatNumber(row.inventoryValue, 2)}
@@ -210,7 +254,9 @@ export function StockValuationPage() {
           records={records}
           columns={columns}
           idAccessor="itemId"
-          totalRecords={rows.length}
+          // The count the footer reads from is what the funnels left, not what was loaded.
+          totalRecords={sorted.length}
+          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
           page={grid.page}
           recordsPerPage={grid.pageSize}
           onPageChange={grid.setPage}

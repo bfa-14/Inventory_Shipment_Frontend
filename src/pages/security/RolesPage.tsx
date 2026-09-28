@@ -33,6 +33,10 @@ import { rolePermissionsRoute } from './rolePermissionsRoute'
 const COLUMN_TEXT: Record<string, ColumnText<RoleDto>> = {
   name: (r) => r.name,
   description: (r) => r.description ?? '',
+  userCount: (r) => String(r.userCount),
+  // 'All' rather than the stored number, because that is what the cell shows for a system role -
+  // the filter has to match what is read, not what is behind it.
+  permissionCount: (r) => (r.isSystem ? 'All' : String(r.permissionCount)),
   isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
 }
 
@@ -97,6 +101,11 @@ export function RolesPage() {
 
   /** The tick list comes from EVERY role, not from the rows surviving the filters. */
   const nameOptions = useMemo(() => columnOptions(roles, 'name'), [roles, columnOptions])
+  const userCountOptions = useMemo(() => columnOptions(roles, 'userCount'), [roles, columnOptions])
+  const permissionCountOptions = useMemo(
+    () => columnOptions(roles, 'permissionCount'),
+    [roles, columnOptions],
+  )
 
   async function handleDelete(role: RoleDto) {
     const confirmed = await confirm({
@@ -159,13 +168,25 @@ export function RolesPage() {
       ...columnFilter({ ...grid.bind('description'), label: 'Description' }),
       render: (role) => role.description ?? '-',
     },
-    { accessor: 'userCount', title: 'Users', sortable: true, width: 110, textAlign: 'right' },
+    {
+      accessor: 'userCount',
+      title: 'Users',
+      sortable: true,
+      width: 110,
+      textAlign: 'right',
+      ...columnFilter({ ...grid.bind('userCount'), label: 'Users', options: userCountOptions }),
+    },
     {
       accessor: 'permissionCount',
       title: 'Permissions',
       sortable: true,
       width: 140,
       textAlign: 'right',
+      ...columnFilter({
+        ...grid.bind('permissionCount'),
+        label: 'Permissions',
+        options: permissionCountOptions,
+      }),
       // A system role's stored count says nothing: it holds everything by definition.
       render: (role) =>
         role.isSystem ? (
