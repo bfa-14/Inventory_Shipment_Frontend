@@ -470,6 +470,11 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
         <DataTable
           storeKey="inventory.stockDocuments"
           records={data?.items ?? []}
+          /* This grid pages on the SERVER, so the footer can only add up the rows it was
+             sent. Each figure says so under itself, rather than passing a total of ten
+             off as a total of five hundred. */
+          summaryRecords={data?.items ?? []}
+          summaryScope="page"
           columns={columns}
           selectedRecords={selection.selected}
           onSelectedRecordsChange={selection.setSelected}

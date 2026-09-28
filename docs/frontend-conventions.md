@@ -307,10 +307,20 @@ A page turns it on by passing the rows to total:
 Not the page on screen, which would change as the reader turned it, and not the whole table, which would
 answer a question they had just narrowed away from.
 
-**Only a grid that holds its whole result may pass it.** A server-paged grid holds one page, so its
-"Sum" would quietly add ten rows out of five hundred — a wrong number stated with the same confidence as
-a right one. Those grids leave the prop out and show no footer until the totals can be computed by the
-search procedure over the whole result.
+A grid that pages on the **server** can only add up the rows it was sent, so it passes the page and says
+so — `summaryScope="page"` prints **“of this page”** under every figure:
+
+```tsx
+<DataTable storeKey="inventory.stockDocuments" records={data?.items ?? []}
+           summaryRecords={data?.items ?? []} summaryScope="page" … />
+```
+
+The qualifier is in the **cell**, not once above the grid, because the figure is what gets read, quoted
+and screenshotted — and on its own a Sum looks like a total of everything. A total of ten rows passed
+off as a total of five hundred is how a grid lies, and the label is what stops it.
+
+The honest version of those figures is the search procedure returning aggregates over the whole filtered
+result. Until a grid's procedure does that, its footer covers the page and admits it.
 
 Two columns never get a cell: `#` and `Actions` (`FIXED_ACCESSORS`) — a total of row numbers is not a
 fact about anything. A column that brings its **own** `footer` keeps it: the sales profit report states

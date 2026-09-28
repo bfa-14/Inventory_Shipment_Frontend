@@ -186,6 +186,15 @@ interface DataTableProps<T> {
    * Requires {@link DataTableProps.storeKey}, which is where the reader's choices are remembered.
    */
   summaryRecords?: T[]
+  /**
+   * What {@link DataTableProps.summaryRecords} actually covers, which is what the footer says out loud.
+   *
+   * 'filtered' (the default) is a grid holding its whole result: the figures answer for every row the
+   * filters left, so they stand on their own. 'page' is a grid that pages on the SERVER and can only
+   * add up the rows it was sent - there the cell prints "of this page" under the figure, because a
+   * total of ten rows out of five hundred read as a total of five hundred is how a grid lies.
+   */
+  summaryScope?: 'filtered' | 'page'
 }
 
 /**
@@ -235,6 +244,7 @@ export function DataTable<T>({
   pinLastColumn = false,
   storeKey,
   summaryRecords,
+  summaryScope = 'filtered',
 }: DataTableProps<T>) {
   const activeFilters = filters?.activeCount ?? 0
   const idKey = idAccessor ?? 'id'
@@ -309,12 +319,13 @@ export function DataTable<T>({
             kind={kind}
             value={computeSummary(summaryRecords, accessor, kind)}
             numeric={numbersIn(summaryRecords, accessor).length > 0}
+            scope={summaryScope}
             onChange={(next) => setSummaries((current) => ({ ...current, [accessor]: next }))}
           />
         ),
       }
     })
-  }, [effectiveColumns, summaryRecords, summaries])
+  }, [effectiveColumns, summaryRecords, summaryScope, summaries])
 
   const columnLabels = useMemo(
     () =>
@@ -532,6 +543,8 @@ interface SummaryCellProps {
   value: number | null
   /** False when no row holds a number here, which leaves only Count on offer. */
   numeric: boolean
+  /** 'page' makes the cell say so, because the figure then describes less than the whole result. */
+  scope: 'filtered' | 'page'
   onChange(kind: SummaryKind): void
 }
 
@@ -543,15 +556,23 @@ interface SummaryCellProps {
  * weigh more than the row it sits under. An unset cell shows a faint dash rather than nothing at
  * all, so the row reads as a thing that can be clicked.
  */
-function SummaryCell({ label, kind, value, numeric, onChange }: SummaryCellProps) {
+function SummaryCell({ label, kind, value, numeric, scope, onChange }: SummaryCellProps) {
   const offered: SummaryKind[] = numeric ? ['count', ...NUMERIC_KINDS] : ['count']
 
+  // Said in the cell rather than once above the grid, because the figure is what gets read, quoted
+  // and screenshotted - and on its own it looks like a total of everything.
+  const covers = scope === 'page' ? 'of this page' : null
+
   return (
-    <Menu position="top-end" withArrow shadow="md" width={160}>
+    <Menu position="top-end" withArrow shadow="md" width={180}>
       <Menu.Target>
         <UnstyledButton
           className="app-grid__summary"
-          aria-label={kind === 'none' ? `Summarise ${label}` : `${SUMMARY_LABELS[kind]} of ${label}`}
+          aria-label={
+            kind === 'none'
+              ? `Summarise ${label}`
+              : `${SUMMARY_LABELS[kind]} of ${label}${covers ? ', this page only' : ''}`
+          }
         >
           {kind === 'none' || value === null ? (
             <Text fz="sm" c="dimmed" aria-hidden>
@@ -565,6 +586,11 @@ function SummaryCell({ label, kind, value, numeric, onChange }: SummaryCellProps
               <Text fz="sm" fw={700} lh={1.3}>
                 {formatSummary(value)}
               </Text>
+              {covers ? (
+                <Text fz={10} c="dimmed" lh={1.2}>
+                  {covers}
+                </Text>
+              ) : null}
             </Stack>
           )}
         </UnstyledButton>
