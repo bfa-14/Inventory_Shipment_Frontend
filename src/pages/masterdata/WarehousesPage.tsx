@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
-import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ActionIcon, Alert, Box, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
+import {
+  IconBuildingWarehouse,
+  IconChevronDown,
+  IconChevronRight,
+  IconFilterOff,
+  IconPlus,
+  IconRefresh,
+  IconSearch,
+  IconTableExport,
+} from '@tabler/icons-react'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
@@ -11,7 +20,6 @@ import { branchLabel } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { columnFilter } from '../../components/ui/columnFilter'
 import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
 import { FilterBar } from '../../components/ui/FilterBar'
@@ -23,6 +31,98 @@ import { MainFlag, StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
 import { WarehouseFormModal } from './WarehouseFormModal'
+
+/* ── the branch tree ──────────────────────────────────────────────────────────────────────────────
+   A warehouse has no parent warehouse - the only hierarchy in the table is the branch it belongs
+   to - so the tree is exactly two deep: a branch, and the warehouses standing in it. That is the
+   same shape the Item Families page draws, with the depth fixed at two instead of arbitrary.
+   ─────────────────────────────────────────────────────────────────────────────────────────────── */
+
+const EXPANDED_KEY = 'inventory_shipment.warehouses.expanded'
+
+/** Pixels of indent for a warehouse under its branch - the only thing that makes the nesting read. */
+const INDENT = 26
+
+/**
+ * A row of the grid: either a branch heading or a warehouse standing in one.
+ *
+ * The branch rows are carried in the same list as the warehouses so the grid stays one flat table -
+ * mantine-datatable draws rows, not trees - and are told apart by `isBranch`. Their `id` is the
+ * branch id NEGATED, which cannot collide with a warehouse id and keeps row selection and the
+ * keyboard honest without a second id space.
+ */
+type TreeRow = WarehouseDto & {
+  isBranch: boolean
+  branchRowId: number
+  /** How many warehouses stand in this branch, for the heading's count. */
+  childCount: number
+}
+
+function branchRowFor(warehouse: WarehouseDto, childCount: number): TreeRow {
+  return {
+    ...warehouse,
+    id: -warehouse.branchId,
+    isBranch: true,
+    branchRowId: warehouse.branchId,
+    childCount,
+  }
+}
+
+/**
+ * The rows the grid draws, top to bottom: each branch that still has warehouses, followed by its
+ * warehouses when it is open.
+ *
+ * SORTING HAPPENS INSIDE A BRANCH, never across the whole list. A sort that reordered every
+ * warehouse by name would scatter them out of the branches they belong to, which is the one thing
+ * the tree exists to show. The branches themselves keep their own order, by code.
+ */
+function buildTree(
+  warehouses: WarehouseDto[],
+  isOpen: (branchId: number) => boolean,
+  compare: (a: WarehouseDto, b: WarehouseDto) => number,
+): TreeRow[] {
+  const byBranch = new Map<number, WarehouseDto[]>()
+  for (const warehouse of warehouses) {
+    const existing = byBranch.get(warehouse.branchId)
+    if (existing) existing.push(warehouse)
+    else byBranch.set(warehouse.branchId, [warehouse])
+  }
+
+  const branches = [...byBranch.entries()].sort(([, a], [, b]) =>
+    a[0].branchCode.localeCompare(b[0].branchCode, undefined, { numeric: true }),
+  )
+
+  const rows: TreeRow[] = []
+  for (const [branchId, group] of branches) {
+    rows.push(branchRowFor(group[0], group.length))
+    if (!isOpen(branchId)) continue
+    for (const warehouse of [...group].sort(compare)) {
+      rows.push({ ...warehouse, isBranch: false, branchRowId: branchId, childCount: 0 })
+    }
+  }
+  return rows
+}
+
+function readExpanded(): Set<number> | null {
+  try {
+    const raw = localStorage.getItem(EXPANDED_KEY)
+    if (raw === null) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return null
+    return new Set(parsed.filter((id): id is number => typeof id === 'number'))
+  } catch {
+    // A browser that refuses storage still gets a working tree, just a forgetful one.
+    return null
+  }
+}
+
+function writeExpanded(ids: Set<number>): void {
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Same again: the tree works, it just will not remember what was open.
+  }
+}
 
 /** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
 interface Filters {
@@ -94,13 +194,40 @@ export function WarehousesPage() {
   const sortKey = grid.sortStatus.columnAccessor as keyof WarehouseDto
   const sortDirection = grid.sortStatus.direction
 
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
+  /** Nothing stored yet: open every branch on the first visit, so the tree does not read as empty. */
+  const [storedExpanded] = useState(readExpanded)
+  const [expanded, setExpanded] = useState<Set<number>>(() => storedExpanded ?? new Set())
+  const seeded = useRef(storedExpanded !== null)
 
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
+  useEffect(() => {
+    if (seeded.current) writeExpanded(expanded)
+  }, [expanded])
+
+  // Branches only appear once their warehouses have loaded, so the first seeding waits for them.
+  useEffect(() => {
+    if (seeded.current || rows.length === 0) return
+    seeded.current = true
+    setExpanded(new Set(rows.map((w) => w.branchId)))
+  }, [rows])
+
+  const records = useMemo(
+    () =>
+      buildTree(
+        narrowed,
+        (branchId) => expanded.has(branchId),
+        (a, b) => (sortDirection === 'desc' ? -1 : 1) * compareRows(a, b, sortKey),
+      ),
+    [narrowed, expanded, sortKey, sortDirection],
+  )
+
+  function toggleBranch(branchId: number) {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(branchId)) next.delete(branchId)
+      else next.add(branchId)
+      return next
+    })
+  }
 
   /** The tick lists come from EVERY warehouse, not from the rows surviving the filters. */
   const values = useMemo(
@@ -128,15 +255,18 @@ export function WarehousesPage() {
     downloadCsv(
       'warehouses.csv',
       ['Warehouse Code', 'Warehouse Name', 'Branch / Site', 'Address', 'Is Main Warehouse', 'Status'],
-      // What the reader is looking at, funnels and all - not the whole table behind them.
-      sorted.map((w) => [
-        w.warehouseCode,
-        w.warehouseName,
-        `${w.branchCode} - ${w.branchName}`,
-        w.address ?? '',
-        w.isMainWarehouse ? 'Yes' : 'No',
-        w.isActive ? 'Active' : 'Inactive',
-      ]),
+      // The warehouses the funnels left, in the order the tree shows them. The branch headings are
+      // structure rather than records, so they are left out; each row names its branch anyway.
+      records
+        .filter((row) => !row.isBranch)
+        .map((w) => [
+          w.warehouseCode,
+          w.warehouseName,
+          `${w.branchCode} - ${w.branchName}`,
+          w.address ?? '',
+          w.isMainWarehouse ? 'Yes' : 'No',
+          w.isActive ? 'Active' : 'Inactive',
+        ]),
     )
   }
 
@@ -199,8 +329,7 @@ export function WarehousesPage() {
   const branchOptions = branches.map(branchLabel)
   const filteredBranch = branches.find((b) => String(b.id) === filters.branchId)
 
-  const columns: DataTableColumn<WarehouseDto>[] = [
-    rowNumberColumn<WarehouseDto>(grid.page, grid.pageSize),
+  const columns: DataTableColumn<TreeRow>[] = [
     /* These three now carry their own funnel. The page holds the whole table, so each is matched
        here against the text its own cell shows - which the filter bar's search box could never do,
        being one parameter over code OR name. */
@@ -208,12 +337,40 @@ export function WarehousesPage() {
       accessor: 'warehouseCode',
       title: 'Warehouse Code',
       sortable: true,
-      width: 160,
+      // Wide enough that an indented code still clears its chevron before the column ends.
+      width: 300,
       ...columnFilter({
         ...columnFilters.bind('warehouseCode'),
         label: 'Warehouse Code',
         options: values.warehouseCode,
       }),
+      render: (row) =>
+        row.isBranch ? (
+          <Group gap={6} wrap="nowrap">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
+              aria-label={`${expanded.has(row.branchRowId) ? 'Collapse' : 'Expand'} ${row.branchName}`}
+              onClick={() => toggleBranch(row.branchRowId)}
+            >
+              {expanded.has(row.branchRowId) ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
+            </ActionIcon>
+            <Text fz="sm" fw={600}>
+              {row.branchCode} - {row.branchName}
+            </Text>
+            <Text fz="xs" c="dimmed">
+              ({row.childCount})
+            </Text>
+          </Group>
+        ) : (
+          <Group gap={6} wrap="nowrap" style={{ paddingLeft: INDENT }}>
+            {/* Keeps every code on the same left edge, under the branch's chevron. */}
+            <Box w={18} />
+            <IconBuildingWarehouse size={16} color="var(--mantine-color-gray-5)" />
+            <Text fz="sm">{row.warehouseCode}</Text>
+          </Group>
+        ),
     },
     {
       accessor: 'warehouseName',
@@ -224,6 +381,8 @@ export function WarehousesPage() {
         label: 'Warehouse Name',
         options: values.warehouseName,
       }),
+      // A branch heading names itself in the first column; repeating it here would read as a row.
+      render: (row) => (row.isBranch ? '' : row.warehouseName),
     },
     {
       accessor: 'branchName',
@@ -241,14 +400,15 @@ export function WarehousesPage() {
         withText: false,
         single: true,
       }),
-      render: (w) => <Text fz="sm" title={w.branchCode}>{w.branchName}</Text>,
+      render: (row) =>
+        row.isBranch ? '' : <Text fz="sm" title={row.branchCode}>{row.branchName}</Text>,
     },
     {
       accessor: 'address',
       title: 'Address',
       sortable: true,
       ...columnFilter({ ...columnFilters.bind('address'), label: 'Address', options: values.address }),
-      render: (w) => w.address ?? '-',
+      render: (row) => (row.isBranch ? '' : (row.address ?? '-')),
     },
     {
       accessor: 'isMainWarehouse',
@@ -262,7 +422,7 @@ export function WarehousesPage() {
         options: YES_NO_VALUES,
         withText: false,
       }),
-      render: (w) => <MainFlag isMain={w.isMainWarehouse} />,
+      render: (row) => (row.isBranch ? '' : <MainFlag isMain={row.isMainWarehouse} />),
     },
     {
       accessor: 'isActive',
@@ -276,14 +436,16 @@ export function WarehousesPage() {
         options: STATUS_VALUES,
         withText: false,
       }),
-      render: (w) => <StatusBadge active={w.isActive} />,
+      render: (row) => (row.isBranch ? '' : <StatusBadge active={row.isActive} />),
     },
     {
       accessor: 'actions',
       title: 'Actions',
       width: 130,
       textAlign: 'right',
-      render: (warehouse) => (
+      // A branch heading is not a record: there is nothing here to edit, deactivate or delete.
+      render: (warehouse) =>
+        warehouse.isBranch ? null : (
         <RowActions
           label={warehouse.warehouseCode}
           edit={{ visible: canEdit, onClick: () => setDialog({ kind: 'edit', warehouse }) }}
@@ -301,7 +463,7 @@ export function WarehousesPage() {
             onClick: () => void handleDelete(warehouse),
           }}
         />
-      ),
+        ),
     },
   ]
 
@@ -400,24 +562,25 @@ export function WarehousesPage() {
       ) : null}
 
       <Paper radius="lg" p="md" withBorder>
-        <DataTable<WarehouseDto>
+        {/* No paging: a page break would cut a branch from the warehouses standing in it, and page 2
+            would be a list of warehouses with no branch above them. The table is small and already
+            loads in full, so every row is here. */}
+        <DataTable<TreeRow>
           storeKey="masterdata.warehouses"
           records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          // The footer totals the WAREHOUSES the filters left - the branch headings are structure,
+          // not records, and counting them would inflate every figure.
+          summaryRecords={narrowed as TreeRow[]}
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
           filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
-          // Enter on the selected row does what its pencil does.
-          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', warehouse: record }) : undefined}
+          // Enter on the selected row does what its pencil does - and a branch heading opens instead.
+          onRowActivate={({ record }) => {
+            if (record.isBranch) toggleBranch(record.branchRowId)
+            else if (canEdit) setDialog({ kind: 'edit', warehouse: record })
+          }}
           noRecordsText={
             filtered ? 'No warehouses found. Try clearing the filters to see every warehouse.' : 'No warehouses found.'
           }
