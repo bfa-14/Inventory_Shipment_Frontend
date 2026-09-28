@@ -37,14 +37,22 @@ export function LoginPage() {
     setErrors([])
 
     const identifier = username.trim()
-    if (!identifier || !password) {
+
+    /* TRIMMED BECAUSE A PASTED PASSWORD USUALLY ARRIVES WITH A SPACE ON IT - out of an e-mail, a
+       chat message, a spreadsheet cell - and the sign-in that follows fails while showing the
+       reader a field that looks exactly right. Nothing sign-innable is lost: the password policy
+       refuses to store one that begins or ends with a space, so a trimmed password and the stored
+       one can only differ by characters that could never have been saved. */
+    const secret = password.trim()
+
+    if (!identifier || !secret) {
       setErrors(['Please enter your username and password.'])
       return
     }
 
     setSubmitting(true)
     try {
-      const signedIn = await login(identifier, password)
+      const signedIn = await login(identifier, secret)
       navigate(requested ?? landingRoute(signedIn.permissions), { replace: true })
     } catch (error) {
       setErrors(error instanceof ApiError ? error.messages : ['Sign-in failed. Please try again.'])
