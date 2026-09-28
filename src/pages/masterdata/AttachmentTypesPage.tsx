@@ -143,7 +143,7 @@ export function AttachmentTypesPage() {
           <TextInput
             placeholder="Category or sub type"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -152,10 +152,10 @@ export function AttachmentTypesPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
+          <Select label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
+          <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
           <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={grid.clearFilters} disabled={grid.isDefault}>

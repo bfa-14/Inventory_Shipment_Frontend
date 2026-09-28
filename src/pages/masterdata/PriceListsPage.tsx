@@ -280,7 +280,7 @@ export function PriceListsPage() {
           <TextInput
             placeholder="Search by price list code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search price lists"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -292,7 +292,7 @@ export function PriceListsPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Currency"
+            label="Currency"
             placeholder="All"
             searchable
             clearable
@@ -305,7 +305,7 @@ export function PriceListsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}

@@ -162,7 +162,7 @@ export function PortsPage() {
           <TextInput
             placeholder="Port code or name"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -171,10 +171,10 @@ export function PortsPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Kind" placeholder="All kinds" data={PORT_KINDS} value={filters.kind} onChange={(value) => setFilter('kind', value)} clearable />
+          <Select label="Kind" placeholder="All kinds" data={PORT_KINDS} value={filters.kind} onChange={(value) => setFilter('kind', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
+          <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
           <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={grid.clearFilters} disabled={grid.isDefault}>

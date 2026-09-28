@@ -210,7 +210,7 @@ export function UnitTypesPage() {
           <TextInput
             placeholder="Search by name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search unit types"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -221,7 +221,7 @@ export function UnitTypesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}

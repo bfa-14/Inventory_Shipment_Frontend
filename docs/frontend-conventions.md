@@ -329,6 +329,16 @@ Any filter change resets to **page 1** (the page size and the sort are kept). So
 never touches the filters. **Clear Filters** stays: it restores every filter to its default and applies at
 once, and it is **disabled while nothing is filtered**.
 
+**Every filter control carries a visible `label`** - the field it filters on, worded as the column is
+(`Status`, `Is Main Branch`, `Branch / Site`, `Date from`). A search box is labelled just `Search`,
+whatever it searches; its placeholder is what says which columns it matches ("Search by branch code or
+name..."). `aria-label` is not enough: a lone `All` in a dropdown tells a sighted reader nothing about
+which field is narrowed, and the page cannot be read at a glance. The placeholder then says what
+*no choice* means (`All`, `Any`) and never repeats the label. An icon-only control - the Containers
+page's **Advanced filters** toggle - keeps `aria-label`, since a visible label would be wrong there.
+`FilterBar` aligns its columns on `flex-end`, so a **Clear Filters** button with no label of its own
+still lines up with the inputs beside it.
+
 Grids that filter on the **server** get all of this from one hook, [`src/hooks/useGridQuery.ts`](../src/hooks/useGridQuery.ts):
 
 ```tsx

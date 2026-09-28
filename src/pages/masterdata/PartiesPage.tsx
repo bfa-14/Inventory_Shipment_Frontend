@@ -326,7 +326,7 @@ export function PartiesPage() {
           <TextInput
             placeholder="Search by party code, name, phone or email..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search parties"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -338,7 +338,7 @@ export function PartiesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Party type"
+            label="Party type"
             placeholder="All types"
             data={PARTY_TYPE_OPTIONS}
             value={filters.partyType}
@@ -349,7 +349,7 @@ export function PartiesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Branch"
+            label="Branch"
             placeholder="All branches"
             data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
             value={filters.branchId}
@@ -362,7 +362,7 @@ export function PartiesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}

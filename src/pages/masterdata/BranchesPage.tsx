@@ -241,7 +241,7 @@ export function BranchesPage() {
           <TextInput
             placeholder="Search by branch code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search branches"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -253,7 +253,7 @@ export function BranchesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -264,7 +264,7 @@ export function BranchesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Is Main Branch"
+            label="Is Main Branch"
             placeholder="All"
             data={YES_NO_OPTIONS}
             value={filters.isMainBranch}

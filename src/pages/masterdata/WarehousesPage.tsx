@@ -279,7 +279,7 @@ export function WarehousesPage() {
           <TextInput
             placeholder="Search by warehouse code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search warehouses"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -291,7 +291,7 @@ export function WarehousesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Branch / Site"
+            label="Branch / Site"
             placeholder="All"
             searchable
             clearable
@@ -304,7 +304,7 @@ export function WarehousesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -315,7 +315,7 @@ export function WarehousesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Is Main Warehouse"
+            label="Is Main Warehouse"
             placeholder="All"
             data={YES_NO_OPTIONS}
             value={filters.isMainWarehouse}

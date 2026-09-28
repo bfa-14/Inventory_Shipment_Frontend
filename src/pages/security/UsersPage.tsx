@@ -299,7 +299,7 @@ export function UsersPage() {
           <TextInput
             placeholder="Search username, name or e-mail"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search users"
+            label="Search"
             value={search}
             onChange={(e) => {
               setSearch(e.currentTarget.value)

@@ -256,7 +256,7 @@ export function CurrenciesPage() {
           <TextInput
             placeholder="Search by currency code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search currencies"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -268,7 +268,7 @@ export function CurrenciesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -279,7 +279,7 @@ export function CurrenciesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Base currency"
+            label="Base currency"
             placeholder="All"
             data={BASE_OPTIONS}
             value={filters.isBaseCurrency}

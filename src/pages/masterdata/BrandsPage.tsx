@@ -241,7 +241,7 @@ export function BrandsPage() {
           <TextInput
             placeholder="Search by brand code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search brands"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -253,7 +253,7 @@ export function BrandsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}

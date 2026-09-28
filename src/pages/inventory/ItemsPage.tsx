@@ -382,7 +382,7 @@ export function ItemsPage() {
           <TextInput
             placeholder="Search by code, name, SKU or barcode..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search items"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -393,7 +393,7 @@ export function ItemsPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Family"
+            label="Family"
             placeholder="All families"
             description="Includes every sub-family"
             data={familyOptions(lookups.families)}
@@ -407,7 +407,7 @@ export function ItemsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Brand"
+            label="Brand"
             placeholder="All brands"
             data={lookups.brands.map((b) => ({ value: String(b.id), label: brandLabel(b) }))}
             value={filters.brandId}
@@ -420,7 +420,7 @@ export function ItemsPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Default warehouse"
+            label="Default warehouse"
             placeholder="All warehouses"
             data={lookups.warehouses.map((w) => ({ value: String(w.id), label: warehouseLabel(w) }))}
             value={filters.defaultWarehouseId}
@@ -433,9 +433,8 @@ export function ItemsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
-            // Named, not just "All": six filters stacked on a phone need to say what each one is.
-            placeholder="Status: All"
+            label="Status"
+            placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
             onChange={(value) => setFilter('isActive', value)}
@@ -445,8 +444,8 @@ export function ItemsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="BIVAC"
-            placeholder="BIVAC: All"
+            label="BIVAC"
+            placeholder="All"
             data={BIVAC_OPTIONS}
             value={filters.isBivac}
             onChange={(value) => setFilter('isBivac', value)}

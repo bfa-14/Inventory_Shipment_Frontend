@@ -291,7 +291,7 @@ export function ExchangeRatesPage() {
       <FilterBar>
         <FilterBar.Col span={4}>
           <Select
-            aria-label="Currency"
+            label="Currency"
             placeholder="All currencies"
             searchable
             clearable
@@ -304,7 +304,7 @@ export function ExchangeRatesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Rate Type"
+            label="Rate Type"
             placeholder="All types"
             data={RATE_TYPE_OPTIONS}
             value={filters.rateType}
@@ -315,8 +315,8 @@ export function ExchangeRatesPage() {
 
         <FilterBar.Col span={2}>
           <DatePickerInput
-            aria-label="Date from"
-            placeholder="Date from"
+            label="Date from"
+            placeholder="Any"
             clearable
             valueFormat="DD MMM YYYY"
             maxDate={filters.dateTo ?? undefined}
@@ -327,8 +327,8 @@ export function ExchangeRatesPage() {
 
         <FilterBar.Col span={2}>
           <DatePickerInput
-            aria-label="Date to"
-            placeholder="Date to"
+            label="Date to"
+            placeholder="Any"
             clearable
             valueFormat="DD MMM YYYY"
             minDate={filters.dateFrom ?? undefined}

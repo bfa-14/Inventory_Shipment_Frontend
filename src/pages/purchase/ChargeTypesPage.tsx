@@ -245,7 +245,7 @@ export function ChargeTypesPage() {
           <TextInput
             placeholder="Charge code or name"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -259,7 +259,7 @@ export function ChargeTypesPage() {
             being off, which is the same thing and one fewer row in each list. */}
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Allocation method"
+            label="Allocation method"
             placeholder="All"
             data={ALLOCATION_OPTIONS}
             value={filters.allocationMethod}
@@ -270,7 +270,7 @@ export function ChargeTypesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Cost impact"
+            label="Cost impact"
             placeholder="All"
             data={COST_IMPACT_OPTIONS}
             value={filters.includeInLandedCost}
@@ -281,7 +281,7 @@ export function ChargeTypesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}

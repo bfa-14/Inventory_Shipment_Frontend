@@ -384,7 +384,7 @@ export function ItemFamiliesPage() {
           <TextInput
             placeholder="Search by family code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search item families"
+            label="Search"
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
             // Enter applies what is typed now instead of waiting out the debounce.
@@ -396,7 +396,7 @@ export function ItemFamiliesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={status}
@@ -407,7 +407,7 @@ export function ItemFamiliesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Family"
+            label="Family"
             placeholder="All families"
             data={familyOptions}
             value={scopeId}
