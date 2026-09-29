@@ -395,8 +395,14 @@ export function ItemsPage() {
           <Select
             label="Family"
             placeholder="All families"
-            description="Includes every sub-family"
-            data={familyOptions(lookups.families)}
+            /* Leaves only, as on the item card: an item is filed under one, so those are the
+               families worth narrowing by. The old "Includes every sub-family" note went with it -
+               a leaf has no sub-families, and the sentence would have been describing a choice the
+               list no longer offers. */
+            data={familyOptions(lookups.families, {
+              leavesOnly: true,
+              keepId: Number(filters.itemFamilyId) || null,
+            })}
             value={filters.itemFamilyId}
             onChange={(value) => setFilter('itemFamilyId', value)}
             searchable
