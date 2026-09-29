@@ -42,7 +42,7 @@ import { ItemImageCard } from './ItemImageCard'
 import { ItemAuditCard, ItemQuickLinksCard, ItemStockCard } from './ItemSideCards'
 import { ItemUnitFormModal } from './ItemUnitFormModal'
 import { ItemUnitsCard } from './ItemUnitsCard'
-import { brandLabel, familyOptions, useItemLookups, warehouseLabel } from './lookups'
+import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
 
 const MAX_CODE = 30
 const MAX_NAME = 200
@@ -1003,11 +1003,13 @@ function ItemDetails() {
                               searchable
                               clearable
                               nothingFoundMessage="No family found"
-                              /* Leaves only: an item is filed under one particular family, not
-                                 under the heading above it. The family it already carries stays on
-                                 offer whatever happens to the tree, so an edit cannot blank it. */
+                              /* Headings shown but greyed: an item is filed under one particular
+                                 family, not under the heading above it - and a leaf on its own
+                                 ("Battery") means little without the branch standing over it. The
+                                 family it already carries stays selectable whatever happens to the
+                                 tree, so an edit cannot blank it. */
                               data={familyOptions(lookups.families, {
-                                leavesOnly: true,
+                                leavesSelectableOnly: true,
                                 keepId: Number(form.values.itemFamilyId) || null,
                               })}
                               {...form.getInputProps('itemFamilyId')}
@@ -1028,7 +1030,9 @@ function ItemDetails() {
                               searchable
                               clearable
                               nothingFoundMessage="No warehouse found"
-                              data={lookups.warehouses.map((w) => ({ value: String(w.id), label: warehouseLabel(w) }))}
+                              // Grouped under their branch: the heading is the parent, unselectable,
+                              // and the warehouses beneath it are what can be picked.
+                              data={warehouseOptions(lookups.warehouses)}
                               {...form.getInputProps('defaultWarehouseId')}
                             />
                           </Field>

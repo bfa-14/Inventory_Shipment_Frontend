@@ -83,26 +83,39 @@ export function familyOptionLabel(family: ItemFamilyLookupDto): string {
   return `${indent}${family.familyName}${family.isActive ? '' : ' (inactive)'}`
 }
 
+/** One entry of a picker. `disabled` shows it without letting it be chosen. */
+export interface PickerOption {
+  value: string
+  label: string
+  disabled?: boolean
+}
+
+/** A heading with its choices under it. The heading itself is never selectable. */
+export interface PickerGroup {
+  group: string
+  items: PickerOption[]
+}
+
 /**
  * Options for a family Select, in tree order (a parent immediately before its children).
  *
- * `leavesOnly` offers only the families nothing sits under - a family with no children, whether it
- * is a root standing alone or the last child of a long branch. WHERE AN ITEM IS FILED, it belongs
- * to one particular family rather than to the group above it: "Motorcycles" is a heading, and
- * filing a bike under the heading instead of under its model is how a catalogue stops answering
- * "how many of these do we have". A FILTER keeps every family, since narrowing by a heading is a
- * fair question to ask of a list.
+ * `leavesSelectableOnly` GREYS THE PARENTS OUT RATHER THAN HIDING THEM. An item is filed under one
+ * particular family, not under the heading above it - filing a bike under "Motorcycles" instead of
+ * under its model is how a catalogue stops answering "how many of these do we have". But a list of
+ * leaves alone loses the thing that made the leaf make sense: "Battery" means little until you can
+ * see "Motorcycles › Electricals" standing over it. So the headings stay, dimmed and unclickable,
+ * and the reader keeps their bearings while only the leaves can be chosen.
  *
- * `keepId` is always offered whatever the rest of the rule says. An item already filed under a
- * family that has since been given children must go on showing it: dropping it would blank the
- * field, and the next save would write that blank back as a real change.
+ * `keepId` stays selectable whatever the rest of the rule says. An item already filed under a
+ * family that has since been given children must go on showing it: greying it out would blank the
+ * field on the next save and write that blank back as a real change.
  */
 export function familyOptions(
   families: ItemFamilyLookupDto[],
-  options?: { leavesOnly?: boolean; keepId?: number | null },
-): { value: string; label: string }[] {
+  options?: { leavesSelectableOnly?: boolean; keepId?: number | null },
+): PickerOption[] {
   const ordered = orderAsTree(families)
-  if (options?.leavesOnly !== true) return ordered.map(toFamilyOption)
+  if (options?.leavesSelectableOnly !== true) return ordered.map((family) => toFamilyOption(family, false))
 
   // Judged on the families in hand. The lookup carries the active ones, so a family whose children
   // are all deactivated reads as a leaf - which is right: they are not on offer either.
@@ -111,13 +124,40 @@ export function familyOptions(
     if (family.parentId !== null) parents.add(family.parentId)
   }
 
-  return ordered
-    .filter((family) => !parents.has(family.id) || family.id === options.keepId)
-    .map(toFamilyOption)
+  return ordered.map((family) =>
+    toFamilyOption(family, parents.has(family.id) && family.id !== options.keepId),
+  )
 }
 
-function toFamilyOption(family: ItemFamilyLookupDto): { value: string; label: string } {
-  return { value: String(family.id), label: familyOptionLabel(family) }
+function toFamilyOption(family: ItemFamilyLookupDto, disabled: boolean): PickerOption {
+  return { value: String(family.id), label: familyOptionLabel(family), disabled }
+}
+
+/**
+ * Warehouses grouped under the branch they stand in.
+ *
+ * The same idea as the family tree, with the depth fixed at two: a warehouse has no parent
+ * warehouse, so its branch is the only thing above it. The branch is a Select group heading, which
+ * Mantine already draws unselectable - the parent is shown, the leaf is chosen - and it answers the
+ * question a flat list of codes could not, which is which site a warehouse actually belongs to.
+ */
+export function warehouseOptions(warehouses: WarehouseLookupDto[]): PickerGroup[] {
+  const byBranch = new Map<string, WarehouseLookupDto[]>()
+  for (const warehouse of warehouses) {
+    const heading = `${warehouse.branchCode} - ${warehouse.branchName}`
+    const siblings = byBranch.get(heading)
+    if (siblings) siblings.push(warehouse)
+    else byBranch.set(heading, [warehouse])
+  }
+
+  return [...byBranch.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([group, items]) => ({
+      group,
+      items: items
+        .sort((a, b) => a.warehouseCode.localeCompare(b.warehouseCode, undefined, { numeric: true }))
+        .map((warehouse) => ({ value: String(warehouse.id), label: warehouseLabel(warehouse) })),
+    }))
 }
 
 /**

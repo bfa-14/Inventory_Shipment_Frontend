@@ -22,7 +22,7 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
-import { brandLabel, familyOptions, useItemLookups, warehouseLabel } from './lookups'
+import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
 
 /** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
 interface Filters {
@@ -395,12 +395,12 @@ export function ItemsPage() {
           <Select
             label="Family"
             placeholder="All families"
-            /* Leaves only, as on the item card: an item is filed under one, so those are the
-               families worth narrowing by. The old "Includes every sub-family" note went with it -
-               a leaf has no sub-families, and the sentence would have been describing a choice the
-               list no longer offers. */
+            /* Headings shown but greyed, as on the item card: an item is filed under a leaf, so
+               those are the families worth narrowing by, while the branch above still tells the
+               reader where they are. The old "Includes every sub-family" note went with the
+               selectable headings - a leaf has no sub-families to include. */
             data={familyOptions(lookups.families, {
-              leavesOnly: true,
+              leavesSelectableOnly: true,
               keepId: Number(filters.itemFamilyId) || null,
             })}
             value={filters.itemFamilyId}
@@ -428,7 +428,8 @@ export function ItemsPage() {
           <Select
             label="Default warehouse"
             placeholder="All warehouses"
-            data={lookups.warehouses.map((w) => ({ value: String(w.id), label: warehouseLabel(w) }))}
+            // Grouped under their branch, as on the item card.
+            data={warehouseOptions(lookups.warehouses)}
             value={filters.defaultWarehouseId}
             onChange={(value) => setFilter('defaultWarehouseId', value)}
             searchable
