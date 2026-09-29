@@ -74,13 +74,34 @@ export function warehouseLabel(warehouse: WarehouseLookupDto): string {
 }
 
 /**
- * The family's label in a picker, indented one dash per level below the root so the hierarchy is
- * readable in a flat list. A Select has no room for a real tree, and the codes alone
- * ("FAM-001-03-01") do not tell a reader where a family sits.
+ * The family's label in a picker: its whole path, parents first -
+ * "Motorcycles \ Electricals \ Battery".
+ *
+ * THE PATH RATHER THAN AN INDENT. An indented name reads as a tree in the open list and as nothing
+ * at all in the closed field: "Battery" alone does not say WHICH Battery, and the codes
+ * ("FAM-001-03-01") say it only to whoever has memorised them. The path says it in both places,
+ * and it makes the search behave the way a reader expects - typing "Electricals" now finds
+ * everything standing under it, which an indented list could never do.
+ *
+ * `byId` is every family that was loaded, so the walk can climb to the root. A family whose parent
+ * is missing from it - deactivated, say - stops there and shows the path it can.
  */
-export function familyOptionLabel(family: ItemFamilyLookupDto): string {
-  const indent = '— '.repeat(Math.max(0, family.level - 1))
-  return `${indent}${family.familyName}${family.isActive ? '' : ' (inactive)'}`
+export function familyOptionLabel(
+  family: ItemFamilyLookupDto,
+  byId: Map<number, ItemFamilyLookupDto>,
+): string {
+  const names: string[] = []
+  const seen = new Set<number>()
+
+  let current: ItemFamilyLookupDto | undefined = family
+  // Guarded against a cycle the API forbids but a stale reload could still be holding.
+  while (current !== undefined && !seen.has(current.id)) {
+    seen.add(current.id)
+    names.unshift(current.familyName)
+    current = current.parentId === null ? undefined : byId.get(current.parentId)
+  }
+
+  return `${names.join(' \\ ')}${family.isActive ? '' : ' (inactive)'}`
 }
 
 /** One entry of a picker. `disabled` shows it without letting it be chosen. */
@@ -103,8 +124,9 @@ export interface PickerGroup {
  * particular family, not under the heading above it - filing a bike under "Motorcycles" instead of
  * under its model is how a catalogue stops answering "how many of these do we have". But a list of
  * leaves alone loses the thing that made the leaf make sense: "Battery" means little until you can
- * see "Motorcycles › Electricals" standing over it. So the headings stay, dimmed and unclickable,
- * and the reader keeps their bearings while only the leaves can be chosen.
+ * see "Motorcycles \ Electricals" standing over it. So the headings stay, dimmed and unclickable,
+ * and the reader keeps their bearings while only the leaves can be chosen. Each label carries its
+ * own path as well, so the chosen family still reads in full once the list has closed.
  *
  * `keepId` stays selectable whatever the rest of the rule says. An item already filed under a
  * family that has since been given children must go on showing it: greying it out would blank the
@@ -115,7 +137,12 @@ export function familyOptions(
   options?: { leavesSelectableOnly?: boolean; keepId?: number | null },
 ): PickerOption[] {
   const ordered = orderAsTree(families)
-  if (options?.leavesSelectableOnly !== true) return ordered.map((family) => toFamilyOption(family, false))
+  // Every family that was loaded, so a label can climb from a leaf to its root.
+  const byId = new Map(families.map((family) => [family.id, family]))
+
+  if (options?.leavesSelectableOnly !== true) {
+    return ordered.map((family) => toFamilyOption(family, byId, false))
+  }
 
   // Judged on the families in hand. The lookup carries the active ones, so a family whose children
   // are all deactivated reads as a leaf - which is right: they are not on offer either.
@@ -125,12 +152,16 @@ export function familyOptions(
   }
 
   return ordered.map((family) =>
-    toFamilyOption(family, parents.has(family.id) && family.id !== options.keepId),
+    toFamilyOption(family, byId, parents.has(family.id) && family.id !== options.keepId),
   )
 }
 
-function toFamilyOption(family: ItemFamilyLookupDto, disabled: boolean): PickerOption {
-  return { value: String(family.id), label: familyOptionLabel(family), disabled }
+function toFamilyOption(
+  family: ItemFamilyLookupDto,
+  byId: Map<number, ItemFamilyLookupDto>,
+  disabled: boolean,
+): PickerOption {
+  return { value: String(family.id), label: familyOptionLabel(family, byId), disabled }
 }
 
 /**
