@@ -83,9 +83,41 @@ export function familyOptionLabel(family: ItemFamilyLookupDto): string {
   return `${indent}${family.familyName}${family.isActive ? '' : ' (inactive)'}`
 }
 
-/** Options for a family Select, in tree order (a parent immediately before its children). */
-export function familyOptions(families: ItemFamilyLookupDto[]): { value: string; label: string }[] {
-  return orderAsTree(families).map((family) => ({ value: String(family.id), label: familyOptionLabel(family) }))
+/**
+ * Options for a family Select, in tree order (a parent immediately before its children).
+ *
+ * `leavesOnly` offers only the families nothing sits under - a family with no children, whether it
+ * is a root standing alone or the last child of a long branch. WHERE AN ITEM IS FILED, it belongs
+ * to one particular family rather than to the group above it: "Motorcycles" is a heading, and
+ * filing a bike under the heading instead of under its model is how a catalogue stops answering
+ * "how many of these do we have". A FILTER keeps every family, since narrowing by a heading is a
+ * fair question to ask of a list.
+ *
+ * `keepId` is always offered whatever the rest of the rule says. An item already filed under a
+ * family that has since been given children must go on showing it: dropping it would blank the
+ * field, and the next save would write that blank back as a real change.
+ */
+export function familyOptions(
+  families: ItemFamilyLookupDto[],
+  options?: { leavesOnly?: boolean; keepId?: number | null },
+): { value: string; label: string }[] {
+  const ordered = orderAsTree(families)
+  if (options?.leavesOnly !== true) return ordered.map(toFamilyOption)
+
+  // Judged on the families in hand. The lookup carries the active ones, so a family whose children
+  // are all deactivated reads as a leaf - which is right: they are not on offer either.
+  const parents = new Set<number>()
+  for (const family of families) {
+    if (family.parentId !== null) parents.add(family.parentId)
+  }
+
+  return ordered
+    .filter((family) => !parents.has(family.id) || family.id === options.keepId)
+    .map(toFamilyOption)
+}
+
+function toFamilyOption(family: ItemFamilyLookupDto): { value: string; label: string } {
+  return { value: String(family.id), label: familyOptionLabel(family) }
 }
 
 /**

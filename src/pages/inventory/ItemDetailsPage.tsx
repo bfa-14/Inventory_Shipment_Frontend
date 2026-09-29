@@ -1003,7 +1003,13 @@ function ItemDetails() {
                               searchable
                               clearable
                               nothingFoundMessage="No family found"
-                              data={familyOptions(lookups.families)}
+                              /* Leaves only: an item is filed under one particular family, not
+                                 under the heading above it. The family it already carries stays on
+                                 offer whatever happens to the tree, so an edit cannot blank it. */
+                              data={familyOptions(lookups.families, {
+                                leavesOnly: true,
+                                keepId: Number(form.values.itemFamilyId) || null,
+                              })}
                               {...form.getInputProps('itemFamilyId')}
                             />
                           </Field>
