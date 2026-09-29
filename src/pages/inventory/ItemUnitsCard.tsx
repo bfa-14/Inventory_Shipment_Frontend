@@ -12,6 +12,12 @@ interface ItemUnitsCardProps {
   onDelete(unit: ItemUnitDto): void
   /** The unit a request is currently running for; its icons are disabled meanwhile. */
   busyUnitId?: number | null
+  /**
+   * True while the item is being created, when a unit is not optional: an item with no units
+   * cannot be sold, bought or counted, so Save refuses. Said here as well, because the rule belongs
+   * to this card and a reader should meet it before the Save button tells them.
+   */
+  required?: boolean
 }
 
 /** A green tick or a dimmed dash - a yes/no cell reads faster than the words. */
@@ -34,13 +40,23 @@ export function ItemUnitsCard({
   onEdit,
   onDelete,
   busyUnitId,
+  required = false,
 }: ItemUnitsCardProps) {
+  const missing = required && units.length === 0
+
   return (
     <Card radius="lg" p="lg" withBorder>
       <Group justify="space-between" align="center" mb="md" wrap="wrap" gap="sm">
         <Box>
           <Text fw={600} fz="md">
             Units &amp; Packaging
+            {required ? (
+              // The same asterisk the required fields carry, so the card reads as one of them.
+              <Text component="span" c="red" aria-hidden>
+                {' '}
+                *
+              </Text>
+            ) : null}
           </Text>
           <Text c="dimmed" fz="sm">
             The base unit is the quantity everything else converts to.
@@ -59,7 +75,7 @@ export function ItemUnitsCard({
           <Skeleton height={34} radius="sm" />
         </Stack>
       ) : units.length === 0 ? (
-        <Text c="dimmed" fz="sm" py="md">
+        <Text c={missing ? 'red' : 'dimmed'} fz="sm" py="md">
           No units yet.{' '}
           {editable
             ? 'Add the unit this item is counted in - the first one becomes the base unit.'

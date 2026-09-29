@@ -390,6 +390,18 @@ function ItemDetails() {
    * honest thing to say when that is what happened.
    */
   async function save(values: FormValues) {
+    /* AT LEAST ONE UNIT, and checked BEFORE the item is created rather than after. An item with no
+       units cannot be sold, bought or counted - there is no quantity to state it in - and the
+       create call below is the point of no return: once it returns, the item exists and a refusal
+       here would leave a half-made record behind. The rest of the required fields are @mantine/form
+       rules on the fields themselves; this one belongs to the Units card, which has no field. */
+    if (isNew && draftUnits.length === 0) {
+      const message = 'Add at least one unit before saving. An item with no units cannot be sold, bought or counted.'
+      setFormError(message)
+      notify.error(message)
+      return
+    }
+
     setSaving(true)
     setFormError(null)
     setStale(false)
@@ -1265,6 +1277,9 @@ function ItemDetails() {
                     editable={editable}
                     loading={loading}
                     busyUnitId={busyUnitId}
+                    // Only while creating: an existing item that has somehow lost its units is a
+                    // problem to fix, not a form to refuse, and its own page already says so.
+                    required={isNew}
                     onAdd={() => setUnitDialog({})}
                     onEdit={(unit) => setUnitDialog({ unit })}
                     onDelete={(unit) => void deleteUnit(unit)}
