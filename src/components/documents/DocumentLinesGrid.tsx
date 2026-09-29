@@ -1,10 +1,9 @@
 import { ActionIcon, Anchor, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
 import { formatNumber, numberInputValue } from '../format'
-import { fromIsoDate, isoDate, money, unitLabel } from './documentKind'
+import { money, unitLabel } from './documentKind'
 
 /**
  * One row of the grid while it is being edited.
@@ -102,7 +101,6 @@ export function DocumentLinesGrid({
             <Table.Th w={240}>Item Code</Table.Th>
             <Table.Th w={200}>Item Name</Table.Th>
             <Table.Th w={140}>Unit</Table.Th>
-            <Table.Th w={150}>Expiry Date</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
             <Table.Th w={130} ta="right">Unit Cost</Table.Th>
@@ -207,23 +205,6 @@ export function DocumentLinesGrid({
                         })
                       }}
                       comboboxProps={{ withinPortal: true }}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td>
-                  {readOnly ? (
-                    <Text fz="sm">{line.expiryDate?.slice(0, 10) ?? '—'}</Text>
-                  ) : (
-                    <DateInput
-                      value={fromIsoDate(line.expiryDate)}
-                      placeholder="Optional"
-                      clearable
-                      valueFormat="DD/MM/YYYY"
-                      onChange={(next) =>
-                        onChange(line.key, { expiryDate: next ? isoDate(new Date(next)) : null })
-                      }
-                      popoverProps={{ withinPortal: true }}
                     />
                   )}
                 </Table.Td>
@@ -347,7 +328,7 @@ export function DocumentLinesGrid({
 
           {lines.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={10}>
                 <Text ta="center" c="dimmed" py="lg">
                   No lines yet. Scan an item above, or add one below.
                 </Text>
@@ -359,7 +340,7 @@ export function DocumentLinesGrid({
               it makes people hunt upwards after every line they finish. */}
           {!readOnly && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={10}>
                 <Text c="dimmed" fz="sm">
                   + Click to add an item…
                 </Text>
