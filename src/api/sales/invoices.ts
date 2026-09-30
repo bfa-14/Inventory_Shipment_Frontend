@@ -385,7 +385,7 @@ export const salesInvoicesApi = {
 
   bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
 
-  /** One invoice per warehouse found in the lines, each posted at once when asked. */
+  /** ONE invoice holding every line, each in the warehouse it names; posted at once when asked. */
   importCreate: (payload: ImportCreateSalesInvoicesRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 

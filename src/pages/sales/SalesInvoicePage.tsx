@@ -908,8 +908,11 @@ export function SalesInvoicePage() {
             void navigate(ROUTE, { state: { highlight: created.documents.map((d) => d.id) } })
           }}
           onSwitchWarehouse={(warehouseId) => {
+            /* The invoice has no warehouse of its own to switch any more, so this moves the LINES
+               and the seed for new rows — which is what "the file is for another warehouse" meant. */
             markDirty()
-            setHeader((current) => ({ ...current, warehouseId: String(warehouseId) }))
+            setDefaultWarehouseId(warehouseId)
+            setLines((current) => current.map((line) => ({ ...line, warehouseId, onHandBase: null })))
           }}
         />
       )}

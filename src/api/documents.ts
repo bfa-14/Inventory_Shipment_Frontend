@@ -2,7 +2,7 @@
  * Shapes every document family's bulk and import-create endpoints share.
  *
  * ONE SHAPE, THREE FAMILIES. Inventory, sales and purchase each post and delete in bulk and each
- * turn an imported file into one document per warehouse; the answers are the same for all of them,
+ * turn an imported file into ONE document, each line keeping its own warehouse; the answers are the same,
  * so the list pages and the wizard read one type rather than three that would drift.
  */
 
@@ -42,15 +42,19 @@ export interface ImportCreateLine {
 export interface ImportCreateDocument {
   id: number
   documentNumber: string | null
+  /** The document's own (header) warehouse — the first line's. The lines may name others. */
   warehouseId: number
   warehouseName: string
+  /** How many distinct warehouses the lines name. More than 1 is a mixed document. */
+  warehouseCount: number
   lineCount: number
   /** Draft | Posted — Draft when posting was not asked for, or was refused (see failed). */
   status: string
 }
 
 export interface ImportCreateFailure {
-  warehouseId: number
+  /** The document's header warehouse. Null when it was never created and has none. */
+  warehouseId: number | null
   warehouseName: string | null
   code: string
   message: string

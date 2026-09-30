@@ -545,8 +545,8 @@ New rows are seeded from the branch's main warehouse (the page's `defaultWarehou
 ordinary single-warehouse document still needs no picking; the row's own cell overrides it. Changing
 the branch clears every line's warehouse, because warehouses belong to one branch.
 
-The import still creates one document per warehouse — see below. That grouping is no longer
-*required* by the data model, only by the wizard.
+The import creates ONE document however many warehouses the file names — see below. Each row keeps
+the warehouse the file gave it.
 
 ## Bulk actions
 
@@ -558,16 +558,18 @@ selectable) held by **`useBulkSelection()`** so the selection survives paging. `
 shows **`BulkResultsModal`** (number, result badge, message per document), drops the succeeded rows from
 the selection and reloads the grid. Sales and purchase lists reuse the same three pieces.
 
-## Import: one document per warehouse
+## Import: one document, whatever warehouses the file names
 
 `ImportInvoiceItemsWizard` always sends the hosting page's `documentTypeCode` (the template download uses
 it too, and the preview shows a **Type** column; rows typed for another kind are Errors). When the
-validated rows span several warehouses and the host passed **`importCreate`**, step 3 lists the groups
-("WH-001 - 12 lines, WH-002 - 3 lines") with a "Post immediately" checkbox and creates one document per
-warehouse through the family's `import-create` endpoint; the result panel links the new documents and
-"Go to the list" calls `onDocumentsCreated`, where the host navigates with `state.highlight` (the list
-tints those rows). With one warehouse the lines are appended as before; if it is not the header warehouse
-the wizard asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`.
+validated rows span several warehouses and the host passed **`importCreate`**, step 3 lists them
+("WH-001 - 12 lines, WH-002 - 3 lines") with a "Post immediately" checkbox and creates **one** document
+through the family's `import-create` endpoint — every line keeping the warehouse the file named. The
+result's Warehouse column says "2 warehouses" rather than naming one (`warehouseCount`); "Go to the
+list" calls `onDocumentsCreated`, where the host navigates with `state.highlight` (the list tints those
+rows). With one warehouse the lines are appended as before; if it is not the seeded warehouse the wizard
+asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`, which now
+moves the lines and the seed rather than a header field.
 ## Sales invoice page
 
 `/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are
@@ -590,7 +592,7 @@ lifecycle where posted and cancelled are read-only text. What is the invoice's o
   sent to the API (`unitPrice`), a list price is left for the server to re-find. On Hand turns red when
   qty × formula exceeds it; the page repeats the count above the grid.
 - **Import from Excel**: the wizard in invoice mode with `checkStock`; a multi-warehouse file becomes one
-  invoice per warehouse through `importCreate` (Manual prices only are sent).
+  mixed-warehouse invoice through `importCreate` (Manual prices only are sent).
 - **Errors**: `Line N:` messages land on line N; INSUFFICIENT_STOCK highlights every line of the named
   item and refreshes its On Hand; CONCURRENCY reloads. Same unsaved-changes guard as Inventory In.
 - **List**: filters (search, branch, client, salesman, status, dates), bulk Post / Delete on ticked
@@ -622,7 +624,7 @@ in **cost mode**:
   under it; a larger quantity turns the row red before the server's SOURCE_INVALID does, and that message
   ("Line 1: … only 6 remain on the order line.") lands on line N like every other `Line N:` error.
 - **Import from Excel**: the wizard in stock (cost) mode with the kind's `documentTypeCode`; the Unit Price
-  / Cost column is the unit cost; a multi-warehouse file becomes one document per warehouse through
+  / Cost column is the unit cost; a multi-warehouse file becomes one mixed-warehouse document through
   `purchaseDocumentsApi.importCreate`.
 - **Summary** (`SalesTotals` reused): subtotal, discount, grand total in the document currency and the
   "≈ … USD" line at the document rate. **Linked Documents** (`LinkedDocumentsCard`): the source and every

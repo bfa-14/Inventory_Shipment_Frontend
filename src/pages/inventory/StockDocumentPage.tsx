@@ -921,7 +921,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           mode="stock"
           draftReference={document ? `${kind.code}-${document.id}` : null}
           onImported={appendImported}
-          // A file naming several warehouses becomes one document per warehouse, on the server.
+          // A file naming several warehouses becomes ONE document, each line keeping its own.
           importCreate={(imported, postImmediately) =>
             stockDocumentsApi.importCreate({
               documentTypeCode: kind.code,
@@ -952,7 +952,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           onSwitchWarehouse={(warehouseId) => {
             markDirty()
             setDefaultWarehouseId(warehouseId)
-            setLines((current) => current.map((line) => ({ ...line, warehouseId })))
+            setLines((current) => current.map((line) => ({ ...line, warehouseId, onHandBase: null })))
           }}
         />
       )}
