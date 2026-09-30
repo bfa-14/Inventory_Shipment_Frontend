@@ -6,6 +6,7 @@ import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
 import { branchesApi } from '../../api/masterdata/branches'
+import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
 import { priceListsApi } from '../../api/masterdata/priceLists'
 import { unitPricesApi } from '../../api/masterdata/unitPrices'
@@ -16,7 +17,7 @@ import {
   type SalesInvoiceDto,
   type SaveSalesInvoiceRequest,
 } from '../../api/sales/invoices'
-import type { BranchLookupDto, ItemListDto, ItemLookupDto, ItemUnitDto, PartyLookupDto, PriceListLookupDto, WarehouseLookupDto } from '../../api/types'
+import type { BranchLookupDto, CurrencyLookupDto, ItemListDto, ItemLookupDto, ItemUnitDto, PartyLookupDto, PriceListLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { AttachmentsDrawer } from '../../components/documents/AttachmentsDrawer'
 import { AuditTrail } from '../../components/documents/AuditTrail'
@@ -46,6 +47,8 @@ const nextKey = () => `inv-${++keySeed}`
 function emptyLine(warehouseId: number | null): InvoiceLine {
   return {
     key: nextKey(), id: null, itemId: null, itemCode: '', itemName: '', itemUnitId: null, unitTypeName: '', packingFormula: 1,
+    specification: null,
+    specifications: [],
     warehouseId,
     units: [], quantity: 1, unitPrice: null, systemPrice: null, priceSource: 'PriceList', discountPercent: 0, expiryDate: null,
     notes: '', onHandBase: null, importRowNumber: null,
@@ -118,10 +121,11 @@ export function SalesInvoicePage() {
   const [clients, setClients] = useState<PartyLookupDto[]>([])
   const [salesmen, setSalesmen] = useState<PartyLookupDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
+  const [currencies, setCurrencies] = useState<CurrencyLookupDto[]>([])
 
   const [header, setHeader] = useState<SalesInvoiceHeader>({
     documentDate: isoDate(new Date()), dueDate: null, branchId: null, clientId: null, salesmanId: null,
-    priceListId: null, rateType: 1, exchangeRate: null, referenceNo: '', notes: '',
+    priceListId: null, currencyId: null, rateType: 1, exchangeRate: null, referenceNo: '', notes: '',
   })
   const [errors, setErrors] = useState<SalesInvoiceHeaderErrors>({})
   const [lines, setLines] = useState<InvoiceLine[]>([])
@@ -185,6 +189,7 @@ export function SalesInvoicePage() {
       .catch(() => {})
     // SALES UNITS ONLY: an item with nothing sellable cannot be put on an invoice.
     itemsApi.lookup(true, undefined, undefined, true).then(setItems).catch(() => {})
+    currenciesApi.lookup().then(setCurrencies).catch(() => notify.error('Currencies could not be loaded.'))
     // isNew comes from the route and the user from the session; neither changes without a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -198,6 +203,8 @@ export function SalesInvoicePage() {
       clientId: String(doc.clientId),
       salesmanId: doc.salesmanId === null ? null : String(doc.salesmanId),
       priceListId: String(doc.priceListId),
+      // The saved invoice always names its currency; it may or may not be the price list's.
+      currencyId: String(doc.currencyId),
       rateType: doc.rateType,
       exchangeRate: doc.exchangeRate,
       referenceNo: doc.referenceNo ?? '',
@@ -212,6 +219,9 @@ export function SalesInvoicePage() {
         itemName: line.itemName,
         itemUnitId: line.itemUnitId,
         warehouseId: line.warehouseId,
+        specification: line.specification ?? null,
+        // Filled in by loadUnits when the row's units arrive; the saved value shows meanwhile.
+        specifications: [],
         unitTypeName: line.unitTypeName,
         packingFormula: line.packingFormula,
         units: [],
@@ -229,6 +239,21 @@ export function SalesInvoicePage() {
     priceListTouched.current = true
     rateDirty.current = false
     dirty.current = false
+
+    /* THE SUGGESTIONS FOLLOW, ONE CALL PER DISTINCT ITEM. A reopened draft must offer the same list
+       a fresh row does, or the box would look emptier on the invoice that has been saved. The
+       saved text already shows without them; this only fills what the dropdown proposes. */
+    const items = [...new Set(doc.lines.map((l) => l.itemId))]
+    for (const itemId of items) {
+      salesInvoicesApi
+        .itemSpecifications(itemId)
+        .then((rows) =>
+          setLines((current) =>
+            current.map((l) => (l.itemId === itemId ? { ...l, specifications: rows } : l)),
+          ),
+        )
+        .catch(() => {})
+    }
   }, [])
 
   const reload = useCallback(async () => {
@@ -270,13 +295,13 @@ export function SalesInvoicePage() {
 
   /* The rate follows the price list, the type and the date — but overwrites a loaded invoice's own
      rate only once the reader changed one of the three. */
-  const rateKey = header.priceListId ? `${header.priceListId}|${header.rateType}|${header.documentDate}` : ''
+  const rateKey = header.priceListId ? `${header.priceListId}|${header.rateType}|${header.documentDate}|${header.currencyId ?? ''}` : ''
   useEffect(() => {
     if (!header.priceListId) return
-    const key = `${header.priceListId}|${header.rateType}|${header.documentDate}`
+    const key = `${header.priceListId}|${header.rateType}|${header.documentDate}|${header.currencyId ?? ''}`
     const controller = new AbortController()
     salesInvoicesApi
-      .rate(Number(header.priceListId), header.rateType, header.documentDate || null, controller.signal)
+      .rate(Number(header.priceListId), header.rateType, header.documentDate || null, controller.signal, header.currencyId ? Number(header.currencyId) : null)
       .then((answer) => {
         setRate(answer)
         setRateFor(key)
@@ -293,7 +318,7 @@ export function SalesInvoicePage() {
         notify.error(error instanceof ApiError ? error.message : 'The exchange rate could not be looked up.')
       })
     return () => controller.abort()
-  }, [header.priceListId, header.rateType, header.documentDate])
+  }, [header.priceListId, header.rateType, header.documentDate, header.currencyId])
 
   const rateLoading = rateKey !== '' && rateFor !== rateKey
   const priceList = priceLists.find((p) => String(p.id) === header.priceListId) ?? null
@@ -378,6 +403,20 @@ export function SalesInvoicePage() {
    * document nobody is allowed to change — the same trap the item picker has with inactive items.
    * A unit kept this way is the only non-sales one in the list, and only on that line.
    */
+  /**
+   * Fills a row's Specification suggestions from what other invoices called the same item.
+   *
+   * FETCHED PER ITEM, NOT HELD FOR THE PAGE. The list is small, it only changes when somebody
+   * invoices that item, and a row without an item has nothing to ask about. A failure is silent:
+   * the cell is free text, so losing the suggestions costs the reader nothing but convenience.
+   */
+  const loadSpecifications = useCallback(async (key: string, itemId: number) => {
+    try {
+      const rows = await salesInvoicesApi.itemSpecifications(itemId)
+      setLines((current) => current.map((l) => (l.key === key ? { ...l, specifications: rows } : l)))
+    } catch {}
+  }, [])
+
   const sellableUnits = (units: ItemUnitDto[], keepId?: number | null) =>
     units.filter((u) => u.isSalesUnit || (keepId != null && u.id === keepId))
 
@@ -406,6 +445,7 @@ export function SalesInvoicePage() {
         )
         if (unit) await priceLine(key, unit)
         void refreshOnHand(key, details.id, lines.find((l) => l.key === key)?.warehouseId ?? defaultWarehouseId)
+        void loadSpecifications(key, details.id)
         focusWhenDrawn(`[data-line-qty="${key}"] input`)
       } catch (error) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
@@ -438,21 +478,52 @@ export function SalesInvoicePage() {
         notify.error(`${details.itemCode} has no unit marked as a sales unit, so it cannot be sold.`)
         return
       }
-      const existing = lines.find((l) => l.itemId === details.id && l.itemUnitId === unit.id)
-      if (existing) {
-        patchLine(existing.key, { quantity: existing.quantity + 1 })
-        focusWhenDrawn(`[data-line-qty="${existing.key}"] input`)
+      /*
+       * THE MATCH HAPPENS INSIDE THE UPDATER, not against `lines`.
+       *
+       * This function awaits the item before it can look for a row to add to, and a barcode scanner
+       * fires faster than that: two scans of the same code both read the lines as they were BEFORE
+       * either had added anything, both found nothing, and both appended — the duplicate row. Only
+       * the updater is handed the current lines, so only there can the second scan see the first.
+       *
+       * SAME ITEM, SAME UNIT, SAME WAREHOUSE, SAME PRICE. The warehouse is a line's own now, so two
+       * rows for one item in two warehouses are two different things. A row somebody has priced by
+       * hand is left alone as well: a scan re-applies the list price, and quietly adding to an
+       * overridden row would sell the extra unit at a price nobody chose for it.
+       */
+      const key = nextKey()
+      let addedTo: string | null = null
+
+      setLines((current) => {
+        const existing = current.find(
+          (l) => l.itemId === details.id
+            && l.itemUnitId === unit.id
+            && l.warehouseId === defaultWarehouseId
+            && l.priceSource !== 'Manual',
+        )
+        if (existing) {
+          addedTo = existing.key
+          return current.map((l) =>
+            l.key === existing.key ? { ...l, quantity: l.quantity + 1, error: undefined } : l,
+          )
+        }
+        return [...current, { ...emptyLine(defaultWarehouseId), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: sellableUnits(details.units, unit.id), itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula }]
+      })
+
+      // A row that was added to already has its price and its stock; only a new one needs them.
+      if (addedTo !== null) {
+        focusWhenDrawn(`[data-line-qty="${addedTo}"] input`)
         return
       }
-      const key = nextKey()
-      setLines((current) => [...current, { ...emptyLine(defaultWarehouseId), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: sellableUnits(details.units, unit.id), itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula }])
+
       await priceLine(key, unit)
       void refreshOnHand(key, details.id, defaultWarehouseId)
+      void loadSpecifications(key, details.id)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
     },
     // priceLine reads the header through resolvePrice
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, patchLine, refreshOnHand, resolvePrice],
+    [defaultWarehouseId, patchLine, refreshOnHand, resolvePrice],
   )
 
   async function loadUnits(key: string) {
@@ -566,6 +637,8 @@ export function SalesInvoicePage() {
       clientId: Number(header.clientId),
       salesmanId: header.salesmanId === null ? null : Number(header.salesmanId),
       priceListId: Number(header.priceListId),
+      // Null follows the price list's currency, which is what an untouched header means.
+      currencyId: header.currencyId ? Number(header.currencyId) : null,
       rateType: header.rateType,
       exchangeRate: isBaseCurrency ? null : header.exchangeRate,
       referenceNo: header.referenceNo.trim() || null,
@@ -576,6 +649,7 @@ export function SalesInvoicePage() {
         lineNo: index + 1,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
+        specification: line.specification,
         warehouseId: line.warehouseId!,
         expiryDate: line.expiryDate,
         quantity: line.quantity,
@@ -777,6 +851,7 @@ export function SalesInvoicePage() {
         branches={branches}
         priceLists={priceLists}
         clients={clients}
+        currencies={currencies}
         salesmen={salesmen}
         rate={rate}
         rateLoading={rateLoading}

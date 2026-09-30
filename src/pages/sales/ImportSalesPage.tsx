@@ -451,6 +451,8 @@ export function ImportSalesPage() {
         lineNo: index + 1,
         itemId: line.itemId,
         itemUnitId: line.itemUnitId,
+        // The Excel import has no Specification column; the line is saved without one.
+        specification: null,
         warehouseId: line.warehouseId,
         expiryDate: line.expiryDate,
         quantity: line.quantity,

@@ -68,6 +68,8 @@ export interface SaveSalesInvoiceLine {
   itemId: number
   itemUnitId: number
   warehouseId: number
+  /** Chosen from the specifications of the item's units; null when it has none. */
+  specification: string | null
   expiryDate: string | null
   quantity: number
   /**
@@ -96,6 +98,8 @@ export interface SaveSalesInvoiceRequest {
   clientId: number
   salesmanId: number | null
   priceListId: number
+  /** The currency the customer is billed in. Null follows the price list's. */
+  currencyId?: number | null
   rateType: SalesRateType
   /** Null: the server takes the rate in force for the date. A value overrides it. */
   exchangeRate: number | null
@@ -192,6 +196,8 @@ export interface SalesInvoiceLineDto {
   skuCode: string | null
   barcode: string | null
   packingFormula: number
+  /** The specification the line was sold as — a snapshot on the line. */
+  specification: string | null
   warehouseId: number
   warehouseCode: string
   warehouseName: string
@@ -389,14 +395,35 @@ export const salesInvoicesApi = {
   importCreate: (payload: ImportCreateSalesInvoicesRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 
-  /** The rate in force for a price list's currency on a date (today when omitted). */
-  rate: (priceListId: number, rateType: SalesRateType, date?: string | null, signal?: AbortSignal) => {
+  /**
+   * The rate in force on a date (today when omitted) for the invoice's currency.
+   *
+   * `currencyId` is the currency the invoice is billed in; omitted, the answer is for the price
+   * list's currency, which is what an invoice that has not chosen one is billed in.
+   */
+  rate: (
+    priceListId: number,
+    rateType: SalesRateType,
+    date?: string | null,
+    signal?: AbortSignal,
+    currencyId?: number | null,
+  ) => {
     const params = new URLSearchParams({ priceListId: String(priceListId), rateType: String(rateType) })
     if (date) params.set('date', date)
+    if (currencyId != null) params.set('currencyId', String(currencyId))
     return request<RateResolutionDto>(`${BASE}/rate?${params.toString()}`, { signal })
   },
 
   /** The posted invoice as a workbook, saved by the browser. */
+  /**
+   * The specifications already typed for this item on sales lines, newest first.
+   *
+   * SUGGESTIONS, NOT A LIST TO PICK FROM. The line's Specification is free text; this only saves
+   * retyping what the last invoice for the same item said, so an unsold item answers `[]`.
+   */
+  itemSpecifications: (itemId: number, signal?: AbortSignal) =>
+    request<string[]>(`${BASE}/item-specifications?itemId=${itemId}`, { signal }),
+
   exportToExcel: async (id: number, fileName: string) => save(await fetchBlob(`${BASE}/${id}/export`), fileName),
 }
 

@@ -1,12 +1,11 @@
 import { Grid, NumberInput, Paper, Select, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import {
-  SALES_RATE_TYPES,
   salesRateTypeLabel,
   type RateResolutionDto,
   type SalesRateType,
 } from '../../api/sales/invoices'
-import type { BranchLookupDto, PartyLookupDto, PriceListLookupDto } from '../../api/types'
+import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto, PriceListLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { partyLabel, priceListLabel } from './salesLines'
@@ -19,6 +18,8 @@ export interface SalesInvoiceHeader {
   clientId: string | null
   salesmanId: string | null
   priceListId: string | null
+  /** The currency the customer is billed in. Null follows the price list's. */
+  currencyId: string | null
   rateType: SalesRateType
   /** The rate the invoice is valued at; null while none is known, and the page refuses to post then. */
   exchangeRate: number | null
@@ -34,6 +35,8 @@ interface SalesInvoiceHeaderCardProps {
   branches: BranchLookupDto[]
   priceLists: PriceListLookupDto[]
   clients: PartyLookupDto[]
+  /** Active currencies, for the Invoice Currency select beside the client. */
+  currencies: CurrencyLookupDto[]
   salesmen: PartyLookupDto[]
   rate: RateResolutionDto | null
   rateLoading: boolean
@@ -63,6 +66,7 @@ export function SalesInvoiceHeaderCard({
   branches,
   priceLists,
   clients,
+  currencies,
   salesmen,
   rate,
   rateLoading,
@@ -184,6 +188,29 @@ export function SalesInvoiceHeaderCard({
           {field('Client Address', client?.address ?? '')}
         </Grid.Col>
 
+        {/* WHAT THE CUSTOMER IS BILLED IN, which need not be what the price list prices in. Leaving
+            it on the price list's currency is the ordinary case and changes nothing; choosing
+            another converts every line through the base currency at both currencies' rates. */}
+        <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+          {readOnly ? (
+            field('Invoice Currency', currencies.find((c) => String(c.id) === value.currencyId)?.currencyCode
+              ?? priceList?.currencyCode ?? '')
+          ) : (
+            <Select
+              label="Invoice Currency"
+              data={currencies.map((c) => ({ value: String(c.id), label: c.currencyCode }))}
+              value={value.currencyId}
+              placeholder={priceList ? `${priceList.currencyCode} (the price list's)` : 'Choose a price list first'}
+              onChange={(next) => onChange({ currencyId: next })}
+              disabled={disabled || !value.priceListId}
+              error={errors.currencyId}
+              /* Clearing it goes back to the price list's currency, which is what null means. */
+              clearable
+              searchable
+            />
+          )}
+        </Grid.Col>
+
         <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
           {readOnly ? (
             field('Salesman', salesman ? partyLabel(salesman) : '')
@@ -220,20 +247,10 @@ export function SalesInvoiceHeaderCard({
           )}
         </Grid.Col>
 
-        <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-          {readOnly ? (
-            field('Rate Type', salesRateTypeLabel(value.rateType))
-          ) : (
-            <Select
-              label="Rate Type"
-              data={SALES_RATE_TYPES.map((t) => ({ value: String(t.value), label: t.label }))}
-              value={String(value.rateType)}
-              onChange={(next) => next && onChange({ rateType: Number(next) as SalesRateType })}
-              disabled={disabled || !value.priceListId || isBase}
-              allowDeselect={false}
-            />
-          )}
-        </Grid.Col>
+        {/* RATE TYPE IS NOT SHOWN. The invoice still HAS one — it picks which published rate the
+            exchange rate is read from, and it is still saved and still drives that lookup — but it
+            is not a choice the header offers any more. A new invoice takes the default (Official)
+            and a saved one keeps whatever it was issued with. */}
 
         <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
           {readOnly ? (
