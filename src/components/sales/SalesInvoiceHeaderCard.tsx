@@ -6,7 +6,7 @@ import {
   type RateResolutionDto,
   type SalesRateType,
 } from '../../api/sales/invoices'
-import type { BranchLookupDto, PartyLookupDto, PriceListLookupDto, WarehouseLookupDto } from '../../api/types'
+import type { BranchLookupDto, PartyLookupDto, PriceListLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { partyLabel, priceListLabel } from './salesLines'
@@ -16,7 +16,6 @@ export interface SalesInvoiceHeader {
   documentDate: string
   dueDate: string | null
   branchId: string | null
-  warehouseId: string | null
   clientId: string | null
   salesmanId: string | null
   priceListId: string | null
@@ -33,7 +32,6 @@ interface SalesInvoiceHeaderCardProps {
   value: SalesInvoiceHeader
   onChange: (patch: Partial<SalesInvoiceHeader>) => void
   branches: BranchLookupDto[]
-  warehouses: WarehouseLookupDto[]
   priceLists: PriceListLookupDto[]
   clients: PartyLookupDto[]
   salesmen: PartyLookupDto[]
@@ -63,7 +61,6 @@ export function SalesInvoiceHeaderCard({
   value,
   onChange,
   branches,
-  warehouses,
   priceLists,
   clients,
   salesmen,
@@ -152,32 +149,9 @@ export function SalesInvoiceHeaderCard({
               placeholder="Choose a branch"
               data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))}
               value={value.branchId}
-              onChange={(next) => onChange({ branchId: next, warehouseId: null })}
+              onChange={(next) => onChange({ branchId: next })}
               error={errors.branchId}
               disabled={disabled}
-              searchable
-            />
-          )}
-        </Grid.Col>
-
-        <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-          {readOnly ? (
-            field('Warehouse', warehouses.find((w) => String(w.id) === value.warehouseId)?.warehouseName ?? '')
-          ) : (
-            <Select
-              label="Warehouse"
-              withAsterisk
-              placeholder={value.branchId ? 'Choose a warehouse' : 'Choose a branch first'}
-              data={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
-              value={value.warehouseId}
-              onChange={(next) => onChange({ warehouseId: next })}
-              disabled={disabled || !value.branchId}
-              error={
-                errors.warehouseId
-                ?? (value.branchId && warehouses.length === 0
-                  ? 'This branch has no active warehouses. Pick another branch, or add one first.'
-                  : undefined)
-              }
               searchable
             />
           )}

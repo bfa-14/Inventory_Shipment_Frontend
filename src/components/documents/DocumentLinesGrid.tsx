@@ -48,6 +48,14 @@ interface DocumentLinesGridProps {
   onAdd: () => void
   /** Every active item, for the Item Code select. Searchable, so the whole list is fine. */
   items: ItemLookupDto[]
+  /**
+   * The warehouses of the document's branch, for the per-line Warehouse select.
+   *
+   * THE WAREHOUSE IS A LINE'S, NOT THE DOCUMENT'S. One document may move stock in several
+   * warehouses, so the choice belongs next to the quantity it applies to — and On Hand, the column
+   * beside it, is only meaningful once this cell has a value.
+   */
+  warehouses: { value: string; label: string }[]
   /** When an item is picked, the page fetches its units and its last cost. */
   onItemChosen: (key: string, itemId: number) => void
   currencyCode: string
@@ -75,6 +83,7 @@ export function DocumentLinesGrid({
   onRemove,
   onAdd,
   items,
+  warehouses,
   onItemChosen,
   currencyCode,
   costIsEditable,
@@ -97,7 +106,7 @@ export function DocumentLinesGrid({
   const total = (line: EditableLine) => line.quantity * line.unitCost
 
   return (
-    <Table.ScrollContainer minWidth={1050}>
+    <Table.ScrollContainer minWidth={1240}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -105,6 +114,7 @@ export function DocumentLinesGrid({
             <Table.Th w={240}>Item Code</Table.Th>
             <Table.Th w={200}>Item Name</Table.Th>
             <Table.Th w={140}>Unit</Table.Th>
+            <Table.Th w={190}>Warehouse</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
             <Table.Th w={130} ta="right">Unit Cost</Table.Th>
@@ -208,6 +218,31 @@ export function DocumentLinesGrid({
                           packingFormula: unit.packingFormula,
                         })
                       }}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                  )}
+                </Table.Td>
+
+                <Table.Td>
+                  {readOnly ? (
+                    <Text fz="sm">
+                      {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
+                    </Text>
+                  ) : (
+                    <Select
+                      data={warehouses}
+                      value={line.warehouseId === null ? null : String(line.warehouseId)}
+                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      disabled={warehouses.length === 0}
+                      searchable
+                      /* On Hand belongs to the item AND the warehouse, so changing this makes the
+                         number beside it stale. Clearing it back to null shows a dash rather than
+                         the previous warehouse's stock while the new figure is fetched. */
+                      onChange={(next) => {
+                        if (!next) return
+                        onChange(line.key, { warehouseId: Number(next), onHandBase: null })
+                      }}
+                      error={Boolean(line.error) && line.warehouseId === null}
                       comboboxProps={{ withinPortal: true }}
                     />
                   )}
@@ -332,7 +367,7 @@ export function DocumentLinesGrid({
 
           {lines.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={10}>
+              <Table.Td colSpan={11}>
                 <Text ta="center" c="dimmed" py="lg">
                   No lines yet. Scan an item above, or add one below.
                 </Text>
@@ -344,7 +379,7 @@ export function DocumentLinesGrid({
               it makes people hunt upwards after every line they finish. */}
           {!readOnly && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={10}>
+              <Table.Td colSpan={11}>
                 <Text c="dimmed" fz="sm">
                   + Click to add an item…
                 </Text>

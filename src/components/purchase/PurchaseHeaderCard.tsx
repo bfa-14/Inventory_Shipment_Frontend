@@ -4,7 +4,7 @@ import { IconLink } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { RECEIPT_MODE_LABELS, type PurchaseRateResolutionDto, type ReceiptMode } from '../../api/purchase/documents'
 import { SALES_RATE_TYPES, salesRateTypeLabel, type SalesRateType } from '../../api/sales/invoices'
-import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
+import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { currencyLabel, purchaseKindOf, supplierLabel, type PurchaseKind } from './purchaseKind'
@@ -14,7 +14,6 @@ export interface PurchaseHeader {
   documentDate: string
   expectedDate: string | null
   branchId: string | null
-  warehouseId: string | null
   supplierId: string | null
   currencyId: string | null
   rateType: SalesRateType
@@ -43,7 +42,6 @@ interface PurchaseHeaderCardProps {
   value: PurchaseHeader
   onChange: (patch: Partial<PurchaseHeader>) => void
   branches: BranchLookupDto[]
-  warehouses: WarehouseLookupDto[]
   suppliers: PartyLookupDto[]
   currencies: CurrencyLookupDto[]
   rate: PurchaseRateResolutionDto | null
@@ -81,7 +79,6 @@ export function PurchaseHeaderCard({
   value,
   onChange,
   branches,
-  warehouses,
   suppliers,
   currencies,
   rate,
@@ -224,32 +221,9 @@ export function PurchaseHeaderCard({
               placeholder="Choose a branch"
               data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))}
               value={value.branchId}
-              onChange={(next) => onChange({ branchId: next, warehouseId: null })}
+              onChange={(next) => onChange({ branchId: next })}
               error={errors.branchId}
               disabled={disabled}
-              searchable
-            />
-          )}
-        </Grid.Col>
-
-        <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-          {readOnly ? (
-            field('Warehouse', warehouses.find((w) => String(w.id) === value.warehouseId)?.warehouseName ?? '')
-          ) : (
-            <Select
-              label="Warehouse"
-              withAsterisk
-              placeholder={value.branchId ? 'Choose a warehouse' : 'Choose a branch first'}
-              data={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
-              value={value.warehouseId}
-              onChange={(next) => onChange({ warehouseId: next })}
-              disabled={disabled || !value.branchId}
-              error={
-                errors.warehouseId
-                ?? (value.branchId && warehouses.length === 0
-                  ? 'This branch has no active warehouses. Pick another branch, or add one first.'
-                  : undefined)
-              }
               searchable
             />
           )}

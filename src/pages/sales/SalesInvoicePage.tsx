@@ -43,9 +43,10 @@ const TYPE = 'SINV'
 let keySeed = 0
 const nextKey = () => `inv-${++keySeed}`
 
-function emptyLine(): InvoiceLine {
+function emptyLine(warehouseId: number | null): InvoiceLine {
   return {
     key: nextKey(), id: null, itemId: null, itemCode: '', itemName: '', itemUnitId: null, unitTypeName: '', packingFormula: 1,
+    warehouseId,
     units: [], quantity: 1, unitPrice: null, systemPrice: null, priceSource: 'PriceList', discountPercent: 0, expiryDate: null,
     notes: '', onHandBase: null, importRowNumber: null,
   }
@@ -105,13 +106,21 @@ export function SalesInvoicePage() {
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
+  /**
+   * The warehouse a NEW line starts in — not the invoice's.
+   *
+   * The warehouse belongs to each line now, but picking one on every row would be a step backwards
+   * for the ordinary invoice that ships from a single warehouse. The branch's main warehouse seeds
+   * new rows and the row's own cell overrides it.
+   */
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
   const [priceLists, setPriceLists] = useState<PriceListLookupDto[]>([])
   const [clients, setClients] = useState<PartyLookupDto[]>([])
   const [salesmen, setSalesmen] = useState<PartyLookupDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
 
   const [header, setHeader] = useState<SalesInvoiceHeader>({
-    documentDate: isoDate(new Date()), dueDate: null, branchId: null, warehouseId: null, clientId: null, salesmanId: null,
+    documentDate: isoDate(new Date()), dueDate: null, branchId: null, clientId: null, salesmanId: null,
     priceListId: null, rateType: 1, exchangeRate: null, referenceNo: '', notes: '',
   })
   const [errors, setErrors] = useState<SalesInvoiceHeaderErrors>({})
@@ -185,7 +194,6 @@ export function SalesInvoicePage() {
       documentDate: doc.documentDate.slice(0, 10),
       dueDate: doc.dueDate ? doc.dueDate.slice(0, 10) : null,
       branchId: String(doc.branchId),
-      warehouseId: String(doc.warehouseId),
       clientId: String(doc.clientId),
       salesmanId: doc.salesmanId === null ? null : String(doc.salesmanId),
       priceListId: String(doc.priceListId),
@@ -202,6 +210,7 @@ export function SalesInvoicePage() {
         itemCode: line.itemCode,
         itemName: line.itemName,
         itemUnitId: line.itemUnitId,
+        warehouseId: line.warehouseId,
         unitTypeName: line.unitTypeName,
         packingFormula: line.packingFormula,
         units: [],
@@ -246,10 +255,10 @@ export function SalesInvoicePage() {
       .then((rows) => {
         if (cancelled) return
         setWarehouses(rows)
-        setHeader((current) => {
-          if (current.warehouseId !== null) return current
+        setDefaultWarehouseId((current) => {
+          if (current !== null) return current
           const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? { ...current, warehouseId: String(main.id) } : current
+          return main ? main.id : null
         })
       })
       .catch(() => {})
@@ -302,7 +311,13 @@ export function SalesInvoicePage() {
       if (client && client.defaultPriceListId !== null) next.priceListId = String(client.defaultPriceListId)
     }
     if (next.priceListId !== undefined || next.rateType !== undefined || next.documentDate !== undefined) rateDirty.current = true
-    if (next.branchId !== undefined) setWarehouses([])
+    /* A BRANCH CHANGE INVALIDATES EVERY LINE'S WAREHOUSE: warehouses belong to one branch, so
+       a row still holding the old one would be refused on save. Clearing them shows the gap. */
+    if (next.branchId !== undefined) {
+      setWarehouses([])
+      setDefaultWarehouseId(null)
+      setLines((current) => current.map((line) => ({ ...line, warehouseId: null, onHandBase: null })))
+    }
     setErrors({})
     setHeader((current) => ({ ...current, ...next }))
     // A new price list re-prices every line; the lines are re-resolved when they are next touched or saved.
@@ -337,14 +352,16 @@ export function SalesInvoicePage() {
   }
 
   const refreshOnHand = useCallback(
-    async (key: string, itemId: number) => {
-      if (!header.warehouseId) return
+    /* THE WAREHOUSE IS THE CALLER'S, not the header's: every row may ship from a different one, so
+       a lookup that read one shared warehouse would put the wrong stock against most rows. */
+    async (key: string, itemId: number, warehouseId: number | null) => {
+      if (warehouseId === null) return
       try {
-        const { onHandBase } = await inventoryLookupsApi.onHand(itemId, Number(header.warehouseId))
+        const { onHandBase } = await inventoryLookupsApi.onHand(itemId, warehouseId)
         setLines((current) => current.map((l) => (l.key === key ? { ...l, onHandBase } : l)))
       } catch {}
     },
-    [header.warehouseId],
+    [],
   )
 
   const patchLine = useCallback((key: string, patch: Partial<InvoiceLine>) => {
@@ -376,7 +393,7 @@ export function SalesInvoicePage() {
           ),
         )
         if (unit) await priceLine(key, unit)
-        void refreshOnHand(key, details.id)
+        void refreshOnHand(key, details.id, lines.find((l) => l.key === key)?.warehouseId ?? defaultWarehouseId)
         focusWhenDrawn(`[data-line-qty="${key}"] input`)
       } catch (error) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
@@ -409,9 +426,9 @@ export function SalesInvoicePage() {
         return
       }
       const key = nextKey()
-      setLines((current) => [...current, { ...emptyLine(), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: details.units, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula }])
+      setLines((current) => [...current, { ...emptyLine(defaultWarehouseId), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: details.units, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula }])
       await priceLine(key, unit)
-      void refreshOnHand(key, details.id)
+      void refreshOnHand(key, details.id, defaultWarehouseId)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
     },
     // priceLine reads the header through resolvePrice
@@ -430,7 +447,7 @@ export function SalesInvoicePage() {
 
   function addEmptyLine() {
     markDirty()
-    setLines((current) => [...current, emptyLine()])
+    setLines((current) => [...current, emptyLine(defaultWarehouseId)])
     focusWhenDrawn(`[data-line-item="${lines.length}"] input`)
   }
 
@@ -450,7 +467,7 @@ export function SalesInvoicePage() {
   function appendImported(imported: ImportedLine[]) {
     markDirty()
     const added: InvoiceLine[] = imported.map((line) => ({
-      ...emptyLine(),
+      ...emptyLine(line.warehouseId ?? defaultWarehouseId),
       itemId: line.itemId,
       itemCode: line.itemCode,
       itemName: line.itemName,
@@ -469,8 +486,8 @@ export function SalesInvoicePage() {
     }))
     setLines((current) => [...current, ...added])
     notify.success(`${imported.length} line(s) imported.`)
-    // On hand for the new rows: one lookup per line, in the header's warehouse.
-    for (const line of added) if (line.itemId !== null) void refreshOnHand(line.key, line.itemId)
+    // On hand for the new rows: one lookup per line, each in that LINE's warehouse.
+    for (const line of added) if (line.itemId !== null) void refreshOnHand(line.key, line.itemId, line.warehouseId)
   }
 
   /* ── totals ───────────────────────────────────────────────────────────────────────────────── */
@@ -492,7 +509,6 @@ export function SalesInvoicePage() {
     const next: SalesInvoiceHeaderErrors = {}
     if (!header.documentDate) next.documentDate = 'Choose a date.'
     if (!header.branchId) next.branchId = 'Choose a branch.'
-    if (!header.warehouseId) next.warehouseId = 'Choose a warehouse.'
     if (!header.clientId) next.clientId = 'Choose a client.'
     if (!header.priceListId) next.priceListId = 'Choose a price list.'
     if (header.priceListId && !isBaseCurrency && header.exchangeRate === null) next.exchangeRate = 'Enter an exchange rate.'
@@ -526,7 +542,8 @@ export function SalesInvoicePage() {
       documentDate: header.documentDate,
       dueDate: header.dueDate,
       branchId: Number(header.branchId),
-      warehouseId: Number(header.warehouseId),
+      // Omitted on purpose: the warehouse is a LINE's now, and the server keeps the first one.
+      warehouseId: null,
       clientId: Number(header.clientId),
       salesmanId: header.salesmanId === null ? null : Number(header.salesmanId),
       priceListId: Number(header.priceListId),
@@ -540,7 +557,7 @@ export function SalesInvoicePage() {
         lineNo: index + 1,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
-        warehouseId: Number(header.warehouseId),
+        warehouseId: line.warehouseId!,
         expiryDate: line.expiryDate,
         quantity: line.quantity,
         // Only a real override goes up; a list price echoed back would be recorded as one.
@@ -566,7 +583,7 @@ export function SalesInvoicePage() {
       const stock = /^Insufficient stock for (\S+) in/.exec(error.message)
       if (stock) {
         setLines((current) => current.map((line) => (line.itemCode === stock[1] ? { ...line, error: error.message } : line)))
-        for (const line of lines) if (line.itemCode === stock[1] && line.itemId) void refreshOnHand(line.key, line.itemId)
+        for (const line of lines) if (line.itemCode === stock[1] && line.itemId) void refreshOnHand(line.key, line.itemId, line.warehouseId)
       }
     }
     notify.error(error.message)
@@ -700,8 +717,7 @@ export function SalesInvoicePage() {
     )
   }
 
-  const warehouseName = warehouses.find((w) => String(w.id) === header.warehouseId)?.warehouseName ?? invoice?.warehouseName ?? ''
-  const canImportHere = editable && canImport && header.branchId !== null && header.warehouseId !== null && header.priceListId !== null
+  const canImportHere = editable && canImport && header.branchId !== null && defaultWarehouseId !== null && header.priceListId !== null
 
   const actions: DocumentAction[] = readOnly
     ? [
@@ -740,7 +756,6 @@ export function SalesInvoicePage() {
         value={header}
         onChange={changeHeader}
         branches={branches}
-        warehouses={warehouses}
         priceLists={priceLists}
         clients={clients}
         salesmen={salesmen}
@@ -790,6 +805,7 @@ export function SalesInvoicePage() {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
+          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => {
             markDirty()
@@ -848,8 +864,8 @@ export function SalesInvoicePage() {
           onClose={() => setImportOpen(false)}
           header={{
             branchId: Number(header.branchId),
-            warehouseId: Number(header.warehouseId),
-            warehouseCode: warehouses.find((w) => String(w.id) === header.warehouseId)?.warehouseCode,
+            warehouseId: defaultWarehouseId!,
+            warehouseCode: warehouses.find((w) => w.id === defaultWarehouseId)?.warehouseCode,
             priceListId: Number(header.priceListId),
             currencyCode,
             decimalPlaces,
@@ -901,7 +917,9 @@ export function SalesInvoicePage() {
       {/* The count of lines whose stock is short, said once above the grid rather than only per row. */}
       {editable && lines.some((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase) && (
         <Alert color="orange">
-          {formatNumber(lines.filter((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase).length)} line(s) ask for more than the stock on hand in {warehouseName}. The posting will be refused unless the quantities are reduced.
+          {/* NO WAREHOUSE IS NAMED HERE any more: each line has its own, so one name would be wrong
+              for most of the rows it is counting. The Warehouse column on the row says which. */}
+          {formatNumber(lines.filter((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase).length)} line(s) ask for more than the stock on hand in their warehouse. The posting will be refused unless the quantities are reduced.
         </Alert>
       )}
     </Stack>

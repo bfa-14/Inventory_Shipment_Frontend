@@ -88,7 +88,11 @@ export interface SaveSalesInvoiceRequest {
   documentDate: string
   dueDate?: string | null
   branchId: number
-  warehouseId: number
+  /**
+   * The invoice's warehouse, which is now only a label: the warehouse lives on each LINE. Null
+   * lets the server keep the first line's, which is what the editor sends.
+   */
+  warehouseId?: number | null
   clientId: number
   salesmanId: number | null
   priceListId: number

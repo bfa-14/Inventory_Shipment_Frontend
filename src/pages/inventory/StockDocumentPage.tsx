@@ -123,6 +123,14 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
+  /**
+   * The warehouse a NEW line starts in — not the document's.
+   *
+   * The warehouse belongs to each line now, but typing one on every row would be a step backwards
+   * for the common document that never leaves one warehouse. So the branch's main warehouse seeds
+   * new rows and the row's own cell overrides it. Nothing but new rows reads this.
+   */
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
   const [reasons, setReasons] = useState<StockReasonDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
   /* THE TYPE CONFIGURATION DECIDES the numbering, the reason and — since the configuration page —
@@ -136,7 +144,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
 
   const [header, setHeader] = useState<DocumentHeaderValue>({
     branchId: null,
-    warehouseId: null,
     documentDate: isoDate(new Date()),
     reasonId: null,
     referenceNo: '',
@@ -194,7 +201,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
     setDocument(doc)
     setHeader({
       branchId: String(doc.branchId),
-      warehouseId: String(doc.warehouseId),
       documentDate: doc.documentDate.slice(0, 10),
       reasonId: doc.reasonId === null ? null : String(doc.reasonId),
       referenceNo: doc.referenceNo ?? '',
@@ -288,14 +294,14 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       .then((rows) => {
         if (cancelled) return
         setWarehouses(rows)
-        setHeader((current) => {
-          if (current.warehouseId !== null) return current
+        setDefaultWarehouseId((current) => {
+          if (current !== null) return current
           const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? { ...current, warehouseId: String(main.id) } : current
+          return main ? main.id : null
         })
       })
       .catch(() => {
-        /* the warehouse select is then empty and the form refuses to save, which is correct */
+        /* the per-line warehouse selects are then empty and the form refuses to save, which is correct */
       })
 
     return () => {
@@ -354,14 +360,14 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         )
 
         const line = lines.find((l) => l.key === key)
-        const warehouseId = line?.warehouseId ?? (header.warehouseId ? Number(header.warehouseId) : null)
+        const warehouseId = line?.warehouseId ?? defaultWarehouseId
         if (warehouseId !== null) void refreshOnHand(key, itemId, warehouseId)
         focusQuantity(key)
       } catch (error) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
       }
     },
-    [costIsEditable, lines, header.warehouseId, refreshOnHand],
+    [costIsEditable, lines, defaultWarehouseId, refreshOnHand],
   )
 
   /**
@@ -374,7 +380,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const addScanned = useCallback(
     async (item: ItemListDto) => {
       markDirty()
-      const warehouseId = header.warehouseId ? Number(header.warehouseId) : null
+      const warehouseId = defaultWarehouseId
 
       let details
       try {
@@ -420,12 +426,12 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       if (warehouseId !== null) void refreshOnHand(key, details.id, warehouseId)
       focusQuantity(key)
     },
-    [header.warehouseId, lines, patchLine, costIsEditable, refreshOnHand],
+    [defaultWarehouseId, lines, patchLine, costIsEditable, refreshOnHand],
   )
 
   function addEmptyLine() {
     markDirty()
-    setLines((current) => [...current, emptyLine(header.warehouseId ? Number(header.warehouseId) : null)])
+    setLines((current) => [...current, emptyLine(defaultWarehouseId)])
     focusItem(lines.length)
   }
 
@@ -495,7 +501,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   function validate(): boolean {
     const next: Partial<Record<keyof DocumentHeaderValue, string>> = {}
     if (!header.branchId) next.branchId = 'Choose a branch.'
-    if (!header.warehouseId) next.warehouseId = 'Choose a warehouse.'
     if (!header.documentDate) next.documentDate = 'Choose a date.'
     if (reasonRequired && !header.reasonId) next.reasonId = 'Choose a reason.'
     setErrors(next)
@@ -526,7 +531,8 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       documentTypeCode: kind.code,
       documentDate: header.documentDate,
       branchId: Number(header.branchId),
-      warehouseId: Number(header.warehouseId),
+      // Omitted on purpose: the warehouse is a LINE's now, and the server keeps the first one.
+      warehouseId: null,
       reasonId: header.reasonId === null ? null : Number(header.reasonId),
       referenceNo: header.referenceNo.trim() || null,
       notes: header.notes.trim() || null,
@@ -535,8 +541,8 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         lineNo: index + 1,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
-        // ONE DOCUMENT = ONE WAREHOUSE: every line carries the header's, whatever the row once held.
-        warehouseId: Number(header.warehouseId),
+        // The row's OWN warehouse. Validated non-null above, so the assertion is safe.
+        warehouseId: line.warehouseId!,
         expiryDate: line.expiryDate,
         quantity: line.quantity,
         unitCost: costIsEditable ? line.unitCost : null,
@@ -734,7 +740,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           key: 'import',
           label: 'Import from File',
           icon: DocumentIcons.import,
-          visible: editable && header.branchId !== null && header.warehouseId !== null,
+          visible: editable && header.branchId !== null && defaultWarehouseId !== null,
           onClick: () => setImportOpen(true),
         },
         {
@@ -795,12 +801,18 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         value={header}
         onChange={(patch) => {
           markDirty()
-          // A branch change clears the warehouse (the card sends both) and the list under it.
-          if (patch.branchId !== undefined) setWarehouses([])
+          /* A BRANCH CHANGE INVALIDATES EVERY LINE'S WAREHOUSE, not just a header field: warehouses
+             belong to one branch, so a row still holding the old branch's warehouse would be
+             refused on save with a message about a row the reader never touched. Clearing them puts
+             the empty cells in plain sight instead. */
+          if (patch.branchId !== undefined) {
+            setWarehouses([])
+            setDefaultWarehouseId(null)
+            setLines((current) => current.map((line) => ({ ...line, warehouseId: null, onHandBase: null })))
+          }
           setHeader((current) => ({ ...current, ...patch }))
         }}
         branches={branches.map((b) => ({ value: String(b.id), label: b.branchName }))}
-        warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
         reasons={reasons}
         reasonRequired={reasonRequired}
         documentNumber={document?.documentNumber ?? null}
@@ -852,6 +864,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
+          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           currencyCode={document?.currencyCode ?? 'USD'}
           costIsEditable={costIsEditable}
@@ -891,14 +904,14 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         onConfirm={(reason) => void cancelDocument(reason)}
       />
 
-      {header.branchId !== null && header.warehouseId !== null && (
+      {header.branchId !== null && defaultWarehouseId !== null && (
         <ImportInvoiceItemsWizard
           opened={importOpen}
           onClose={() => setImportOpen(false)}
           header={{
             branchId: Number(header.branchId),
-            warehouseId: Number(header.warehouseId),
-            warehouseCode: warehouses.find((w) => String(w.id) === header.warehouseId)?.warehouseCode,
+            warehouseId: defaultWarehouseId!,
+            warehouseCode: warehouses.find((w) => w.id === defaultWarehouseId)?.warehouseCode,
             // STOCK MODE: no price list at all, so nothing is priced and the price column is the cost.
             priceListId: null,
             currencyCode: document?.currencyCode ?? 'USD',
@@ -938,7 +951,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           }}
           onSwitchWarehouse={(warehouseId) => {
             markDirty()
-            setHeader((current) => ({ ...current, warehouseId: String(warehouseId) }))
+            setDefaultWarehouseId(warehouseId)
             setLines((current) => current.map((line) => ({ ...line, warehouseId })))
           }}
         />

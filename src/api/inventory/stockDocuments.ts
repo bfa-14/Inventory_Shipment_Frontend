@@ -227,7 +227,11 @@ export interface SaveStockDocumentRequest {
   /** 'yyyy-MM-dd'. */
   documentDate: string
   branchId: number
-  warehouseId: number
+  /**
+   * The document's warehouse, which is now only a label: the warehouse lives on each LINE. Null
+   * lets the server keep the first line's, which is what the editor sends.
+   */
+  warehouseId?: number | null
   reasonId?: number | null
   referenceNo?: string | null
   notes?: string | null

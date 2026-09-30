@@ -531,11 +531,22 @@ override permission (sales). The pages no longer hard-code `INV_IN` / `INV_OUT` 
 keeps the direction only (the fallback while the configuration loads). Document numbers run per branch
 (`IN-KLW-000012`): the number column is 190 px and never truncates.
 
-## One document = one warehouse
+## The warehouse is a line's, not the document's
 
-The header warehouse is *the* warehouse of the document (the header card labels it "Warehouse"); the
-lines grid has no Warehouse column, and every line is sent with `warehouseId` = the header warehouse
-to keep the API contract. A file naming several warehouses does not become one document — see below.
+Inventory In/Out, Sales and Purchase all take the warehouse per LINE: the lines grid has a Warehouse
+column and the header card has no Warehouse field. One document may move stock in several
+warehouses.
+
+The header still *has* a warehouse, because the document lists, filters, reports and Excel exports
+all show one — but it is now only a label. The editors send `warehouseId: null` in the header and
+the server keeps the first line's.
+
+New rows are seeded from the branch's main warehouse (the page's `defaultWarehouseId`), so the
+ordinary single-warehouse document still needs no picking; the row's own cell overrides it. Changing
+the branch clears every line's warehouse, because warehouses belong to one branch.
+
+The import still creates one document per warehouse — see below. That grouping is no longer
+*required* by the data model, only by the wizard.
 
 ## Bulk actions
 
