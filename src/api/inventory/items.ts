@@ -45,9 +45,14 @@ export const itemsApi = {
   get: (id: number, signal?: AbortSignal) => request<ItemDetailsDto>(`${BASE}/${id}`, { signal }),
 
   /** Items for a dropdown, each with the SKU of its base unit. */
-  lookup: (activeOnly = true, includeId?: number, signal?: AbortSignal) => {
+  /**
+   * `salesOnly` keeps only the items with a unit that may be sold, and reports that unit rather
+   * than the base one — the sales invoice passes it, because it cannot sell the others.
+   */
+  lookup: (activeOnly = true, includeId?: number, signal?: AbortSignal, salesOnly = false) => {
     const params = new URLSearchParams({ activeOnly: String(activeOnly) })
     if (includeId !== undefined) params.set('includeId', String(includeId))
+    if (salesOnly) params.set('salesOnly', 'true')
     return request<ItemLookupDto[]>(`${BASE}/lookup?${params.toString()}`, { signal })
   },
 

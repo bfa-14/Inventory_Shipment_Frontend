@@ -183,7 +183,8 @@ export function SalesInvoicePage() {
         if (mine) setHeader((current) => (current.salesmanId === null ? { ...current, salesmanId: String(mine.id) } : current))
       })
       .catch(() => {})
-    itemsApi.lookup().then(setItems).catch(() => {})
+    // SALES UNITS ONLY: an item with nothing sellable cannot be put on an invoice.
+    itemsApi.lookup(true, undefined, undefined, true).then(setItems).catch(() => {})
     // isNew comes from the route and the user from the session; neither changes without a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -369,6 +370,17 @@ export function SalesInvoicePage() {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch, error: undefined } : line)))
   }, [])
 
+  /**
+   * The units an invoice line may offer: the ones marked as sales units.
+   *
+   * KEEPS THE UNIT THE LINE ALREADY HOLDS, whatever its flag. A saved invoice may carry a unit that
+   * has since been taken off sale, and dropping it from the list would blank the Unit cell on a
+   * document nobody is allowed to change — the same trap the item picker has with inactive items.
+   * A unit kept this way is the only non-sales one in the list, and only on that line.
+   */
+  const sellableUnits = (units: ItemUnitDto[], keepId?: number | null) =>
+    units.filter((u) => u.isSalesUnit || (keepId != null && u.id === keepId))
+
   /** The unit a sale defaults to: the sales unit, else the base unit. */
   const defaultUnit = (units: ItemUnitDto[]) => units.find((u) => u.isSalesUnit) ?? units.find((u) => u.isBaseUnit) ?? units[0]
 
@@ -388,7 +400,7 @@ export function SalesInvoicePage() {
         setLines((current) =>
           current.map((line) =>
             line.key === key
-              ? { ...line, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: details.units, itemUnitId: unit?.id ?? null, unitTypeName: unit?.unitTypeName ?? '', packingFormula: unit?.packingFormula ?? 1, unitPrice: null, systemPrice: null, priceSource: 'PriceList', onHandBase: null, error: undefined }
+              ? { ...line, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: sellableUnits(details.units, unit?.id), itemUnitId: unit?.id ?? null, unitTypeName: unit?.unitTypeName ?? '', packingFormula: unit?.packingFormula ?? 1, unitPrice: null, systemPrice: null, priceSource: 'PriceList', onHandBase: null, error: undefined }
               : line,
           ),
         )
@@ -419,6 +431,13 @@ export function SalesInvoicePage() {
         notify.error(`${details.itemCode} has no units configured.`)
         return
       }
+      /* A SCAN CAN REACH AN ITEM THE PICKER HIDES. The Item list is filtered to what may be sold,
+         but a barcode goes straight to the item, so the same rule is enforced here — otherwise a
+         scan would be the way round it. */
+      if (!unit.isSalesUnit) {
+        notify.error(`${details.itemCode} has no unit marked as a sales unit, so it cannot be sold.`)
+        return
+      }
       const existing = lines.find((l) => l.itemId === details.id && l.itemUnitId === unit.id)
       if (existing) {
         patchLine(existing.key, { quantity: existing.quantity + 1 })
@@ -426,7 +445,7 @@ export function SalesInvoicePage() {
         return
       }
       const key = nextKey()
-      setLines((current) => [...current, { ...emptyLine(defaultWarehouseId), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: details.units, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula }])
+      setLines((current) => [...current, { ...emptyLine(defaultWarehouseId), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: sellableUnits(details.units, unit.id), itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula }])
       await priceLine(key, unit)
       void refreshOnHand(key, details.id, defaultWarehouseId)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
@@ -441,7 +460,7 @@ export function SalesInvoicePage() {
     if (!line?.itemId) return
     try {
       const details = await itemsApi.get(line.itemId)
-      setLines((current) => current.map((l) => (l.key === key ? { ...l, units: details.units } : l)))
+      setLines((current) => current.map((l) => (l.key === key ? { ...l, units: sellableUnits(details.units, l.itemUnitId) } : l)))
     } catch {}
   }
 

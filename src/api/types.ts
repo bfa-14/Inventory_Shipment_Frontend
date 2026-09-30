@@ -924,4 +924,6 @@ export interface PartyLookupDto {
   defaultCurrencyId: number | null
   userId: number | null
   isActive: boolean
+  /** The address as Parties holds it, so a document header can show it. */
+  address: string | null
 }

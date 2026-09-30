@@ -176,6 +176,14 @@ export function SalesInvoiceHeaderCard({
           )}
         </Grid.Col>
 
+        {/* THE CLIENT'S ADDRESS, NOT THE INVOICE'S. It is read from Parties and shown, never typed
+            here: editing it on one invoice would either change the client for every other document
+            or quietly disagree with the record it came from. It is read-only in every mode for that
+            reason, not because the invoice is posted. */}
+        <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+          {field('Client Address', client?.address ?? '')}
+        </Grid.Col>
+
         <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
           {readOnly ? (
             field('Salesman', salesman ? partyLabel(salesman) : '')
