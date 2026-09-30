@@ -31,8 +31,12 @@ export interface EditableLine {
   notes: string
   /** Stock in this item and warehouse, or null while it is being fetched. */
   onHandBase: number | null
-  /** That item's units, fetched when the item is chosen, so the Unit select has something to offer. */
-  units: ItemUnitDto[]
+  /**
+   * What the Unit select offers. Narrowed to the three fields it actually draws with, so a line
+   * loaded from the server can seed this from the unit it already carries without inventing the
+   * rest of an ItemUnitDto - the full list replaces it once the item's units arrive.
+   */
+  units: Pick<ItemUnitDto, 'id' | 'unitTypeName' | 'packingFormula'>[]
   /** A "Line N: …" message the API sent back about this row. */
   error?: string
 }

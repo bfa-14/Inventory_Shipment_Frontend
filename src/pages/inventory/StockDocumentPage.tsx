@@ -216,24 +216,62 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         unitCost: line.unitCost,
         notes: line.notes ?? '',
         onHandBase: line.onHandBase,
-        units: [],
+        /* SEEDED WITH THE LINE'S OWN UNIT, not left empty. The Unit cell is a Select whose options
+           are this list: with nothing in it, Mantine has no label for the id the line carries, so a
+           saved draft reopened showing "PC" a moment earlier came back blank - and the control
+           disables itself on an empty list, so there was no way to put it right either. The full
+           list of the item's units arrives just after, from loadLineUnits. */
+        units: [{ id: line.itemUnitId, unitTypeName: line.unitTypeName, packingFormula: line.packingFormula }],
       })),
     )
     dirty.current = false
+  }, [])
+
+  /**
+   * The full unit list for every item on the document, so the Unit select can still be CHANGED and
+   * not merely read. The seeded single unit above is enough to show what a line already says; this
+   * is what makes the dropdown worth opening.
+   *
+   * One request per DISTINCT item, and failures are swallowed on purpose: a line whose list did not
+   * arrive keeps the unit it was saved with, which is the right answer anyway. It is never the
+   * reason a document refuses to open.
+   */
+  const loadLineUnits = useCallback(async (doc: StockDocumentDto) => {
+    const itemIds = [...new Set(doc.lines.map((line) => line.itemId))]
+    const lists = await Promise.all(
+      itemIds.map(async (itemId) => {
+        try {
+          return [itemId, (await itemsApi.get(itemId)).units] as const
+        } catch {
+          return [itemId, null] as const
+        }
+      }),
+    )
+
+    const byItem = new Map(lists.filter(([, units]) => units !== null))
+    setLines((current) =>
+      current.map((line) => {
+        const units = line.itemId === null ? undefined : byItem.get(line.itemId)
+        return units ? { ...line, units } : line
+      }),
+    )
   }, [])
 
   const reload = useCallback(async () => {
     if (documentId === null) return
     setLoading(true)
     try {
-      applyDocument(await stockDocumentsApi.get(documentId))
+      const doc = await stockDocumentsApi.get(documentId)
+      applyDocument(doc)
       setLoadError(null)
+      // After the document is on screen: the lines already show their units, this only widens the choice.
+      void loadLineUnits(doc)
     } catch (error) {
       setLoadError(error instanceof ApiError ? error.message : 'The document could not be loaded.')
     } finally {
       setLoading(false)
     }
-  }, [documentId, applyDocument])
+  }, [documentId, applyDocument, loadLineUnits])
 
   useEffect(() => {
     void reload()
