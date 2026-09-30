@@ -4,7 +4,7 @@ import { useForm } from '@mantine/form'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
-import type { BranchLookupDto, SaveWarehouseRequest, WarehouseDto } from '../../api/types'
+import type { BranchLookupDto, SaveWarehouseRequest, WarehouseDto, WarehouseLookupDto } from '../../api/types'
 import { branchLabel } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { FormModal } from '../../components/ui/FormModal'
@@ -20,6 +20,7 @@ interface FormValues {
   warehouseCode: string
   warehouseName: string
   branchId: string | null
+  parentId: string | null
   address: string
   isMainWarehouse: boolean
   isActive: boolean
@@ -29,9 +30,36 @@ const MAX_CODE = 20
 const MAX_NAME = 150
 const MAX_ADDRESS = 500
 
+/**
+ * The warehouses this one may be filed under: everything except itself and its own descendants.
+ *
+ * A WAREHOUSE CANNOT MOVE INSIDE ITSELF. The procedure refuses it too - that is where the rule
+ * really lives - but a picker that offers the impossible and then reports an error is a worse way
+ * to learn it. The walk down is iterative and remembers what it has seen, so a cycle left by older
+ * data stops rather than spinning.
+ */
+function eligibleParents(warehouses: WarehouseLookupDto[], selfId: number | undefined): WarehouseLookupDto[] {
+  if (selfId === undefined) return warehouses
+
+  const banned = new Set<number>([selfId])
+  let added = true
+  while (added) {
+    added = false
+    for (const warehouse of warehouses) {
+      if (warehouse.parentId !== null && banned.has(warehouse.parentId) && !banned.has(warehouse.id)) {
+        banned.add(warehouse.id)
+        added = true
+      }
+    }
+  }
+
+  return warehouses.filter((warehouse) => !banned.has(warehouse.id))
+}
+
 export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: WarehouseFormModalProps) {
   const [rowVersion, setRowVersion] = useState(warehouse?.rowVersion ?? null)
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
+  const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
   const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -41,6 +69,7 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       warehouseCode: warehouse?.warehouseCode ?? '',
       warehouseName: warehouse?.warehouseName ?? '',
       branchId: warehouse ? String(warehouse.branchId) : null,
+      parentId: warehouse?.parentId != null ? String(warehouse.parentId) : null,
       address: warehouse?.address ?? '',
       isMainWarehouse: warehouse?.isMainWarehouse ?? false,
       isActive: warehouse?.isActive ?? true,
@@ -74,11 +103,21 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       })
   }, [warehouse?.branchId])
 
+  // Every warehouse, of every branch: a parent need not share the branch, and an inactive one
+  // still holds its children. Failing here leaves the Parent picker empty rather than the form dead.
+  useEffect(() => {
+    warehousesApi
+      .lookup(false)
+      .then(setWarehouses)
+      .catch(() => {})
+  }, [])
+
   function buildPayload(values: FormValues, replaceMainWarehouse: boolean): SaveWarehouseRequest {
     return {
       warehouseCode: values.warehouseCode.trim(),
       warehouseName: values.warehouseName.trim(),
       branchId: Number(values.branchId),
+      parentId: values.parentId ? Number(values.parentId) : null,
       address: values.address.trim() ? values.address.trim() : null,
       isMainWarehouse: values.isMainWarehouse,
       isActive: values.isActive,
@@ -216,6 +255,22 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
         nothingFoundMessage="No branch found"
         data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
         {...form.getInputProps('branchId')}
+      />
+
+      <Select
+        label="Parent Warehouse"
+        placeholder="None - a top-level warehouse"
+        description="Leave empty for a top-level warehouse. A parent groups the warehouses under it; stock is held by the ones with nothing beneath them."
+        searchable
+        clearable
+        nothingFoundMessage="No warehouse found"
+        /* Itself and its own descendants are left out: a warehouse cannot move inside itself, and
+           offering the choice only to refuse it afterwards is a worse way to learn that. */
+        data={eligibleParents(warehouses, warehouse?.id).map((w) => ({
+          value: String(w.id),
+          label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}`,
+        }))}
+        {...form.getInputProps('parentId')}
       />
 
       <Textarea

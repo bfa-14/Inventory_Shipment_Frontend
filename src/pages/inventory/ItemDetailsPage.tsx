@@ -1030,9 +1030,13 @@ function ItemDetails() {
                               searchable
                               clearable
                               nothingFoundMessage="No warehouse found"
-                              // Grouped under their branch: the heading is the parent, unselectable,
-                              // and the warehouses beneath it are what can be picked.
-                              data={warehouseOptions(lookups.warehouses)}
+                              /* Leaves only: stock lives on the warehouses with nothing standing
+                                 under them, so a grouping is shown for its bearings but cannot be
+                                 the default an item is stocked in. */
+                              data={warehouseOptions(lookups.warehouses, {
+                                leavesSelectableOnly: true,
+                                keepId: Number(form.values.defaultWarehouseId) || null,
+                              })}
                               {...form.getInputProps('defaultWarehouseId')}
                             />
                           </Field>

@@ -214,6 +214,14 @@ export interface WarehouseDto {
   branchCode: string
   branchName: string
   address: string | null
+  /** The warehouse this one stands under; null for a root. */
+  parentId: number | null
+  parentCode: string | null
+  parentName: string | null
+  /** Depth in the tree, 1 for a root. */
+  level: number
+  /** Warehouses directly under this one. 0 means a leaf - and stock lives on the leaves. */
+  childCount: number
   isMainWarehouse: boolean
   isActive: boolean
   createdAtUtc: string
@@ -228,6 +236,8 @@ export interface SaveWarehouseRequest {
   warehouseName: string
   branchId: number
   address?: string | null
+  /** The warehouse this one stands under; null makes it a root. It need not share the branch. */
+  parentId?: number | null
   isMainWarehouse: boolean
   isActive: boolean
   /** Confirms taking the Main Warehouse flag away from the warehouse that currently holds it. */
@@ -273,6 +283,10 @@ export interface WarehouseLookupDto {
   branchName: string
   isMainWarehouse: boolean
   isActive: boolean
+  /** The tree, so a picker can draw it and offer only the leaves that may hold stock. */
+  parentId: number | null
+  level: number
+  childCount: number
 }
 
 // ----- master data: currencies -----

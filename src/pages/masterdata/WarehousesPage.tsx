@@ -38,68 +38,76 @@ import { WarehouseFormModal } from './WarehouseFormModal'
    same shape the Item Families page draws, with the depth fixed at two instead of arbitrary.
    ─────────────────────────────────────────────────────────────────────────────────────────────── */
 
-const EXPANDED_KEY = 'inventory_shipment.warehouses.expanded'
+/*
+ * The suffix matters. The first version of this tree grouped warehouses under their BRANCH and
+ * stored branch ids here; the tree is now the warehouses' own, so those ids name nothing and would
+ * leave every parent shut with no way to tell why. A new key lets the stale set be ignored rather
+ * than migrated.
+ */
+const EXPANDED_KEY = 'inventory_shipment.warehouses.expanded.tree'
 
-/** Pixels of indent for a warehouse under its branch - the only thing that makes the nesting read. */
+/** Pixels of indent per level - the only thing that makes the nesting readable in a flat grid. */
 const INDENT = 26
 
 /**
- * A row of the grid: either a branch heading or a warehouse standing in one.
+ * A row of the grid: a warehouse, with what the tree needs to draw it.
  *
- * The branch rows are carried in the same list as the warehouses so the grid stays one flat table -
- * mantine-datatable draws rows, not trees - and are told apart by `isBranch`. Their `id` is the
- * branch id NEGATED, which cannot collide with a warehouse id and keeps row selection and the
- * keyboard honest without a second id space.
+ * `depth` is counted from the rows actually shown rather than taken from the record's own Level,
+ * so a warehouse whose parent was filtered away still draws flush against the ones beside it
+ * instead of hanging at an indent with nothing above it.
  */
 type TreeRow = WarehouseDto & {
-  isBranch: boolean
-  branchRowId: number
-  /** How many warehouses stand in this branch, for the heading's count. */
-  childCount: number
-}
-
-function branchRowFor(warehouse: WarehouseDto, childCount: number): TreeRow {
-  return {
-    ...warehouse,
-    id: -warehouse.branchId,
-    isBranch: true,
-    branchRowId: warehouse.branchId,
-    childCount,
-  }
+  depth: number
+  /** True when it has children among the rows shown, which is when the chevron is worth drawing. */
+  hasChildren: boolean
 }
 
 /**
- * The rows the grid draws, top to bottom: each branch that still has warehouses, followed by its
- * warehouses when it is open.
+ * The rows the grid draws, top to bottom: each warehouse followed by the ones standing under it,
+ * as deep as the reader has opened.
  *
- * SORTING HAPPENS INSIDE A BRANCH, never across the whole list. A sort that reordered every
- * warehouse by name would scatter them out of the branches they belong to, which is the one thing
- * the tree exists to show. The branches themselves keep their own order, by code.
+ * SORTING HAPPENS AMONG SIBLINGS, never across the whole list. A sort that reordered every
+ * warehouse by name would scatter children away from the parents they stand under, which is the
+ * one thing the tree exists to show.
  */
 function buildTree(
   warehouses: WarehouseDto[],
-  isOpen: (branchId: number) => boolean,
+  isOpen: (id: number) => boolean,
   compare: (a: WarehouseDto, b: WarehouseDto) => number,
 ): TreeRow[] {
-  const byBranch = new Map<number, WarehouseDto[]>()
+  const shown = new Set(warehouses.map((w) => w.id))
+
+  // A warehouse whose parent is not in the list stands as a root here: it has to appear somewhere,
+  // and hiding it because a filter removed its parent would lose the row entirely.
+  const byParent = new Map<number, WarehouseDto[]>()
+  const ROOT = 0
   for (const warehouse of warehouses) {
-    const existing = byBranch.get(warehouse.branchId)
-    if (existing) existing.push(warehouse)
-    else byBranch.set(warehouse.branchId, [warehouse])
+    const key = warehouse.parentId !== null && shown.has(warehouse.parentId) ? warehouse.parentId : ROOT
+    const siblings = byParent.get(key)
+    if (siblings) siblings.push(warehouse)
+    else byParent.set(key, [warehouse])
   }
 
-  const branches = [...byBranch.entries()].sort(([, a], [, b]) =>
-    a[0].branchCode.localeCompare(b[0].branchCode, undefined, { numeric: true }),
-  )
+  for (const siblings of byParent.values()) siblings.sort(compare)
 
   const rows: TreeRow[] = []
-  for (const [branchId, group] of branches) {
-    rows.push(branchRowFor(group[0], group.length))
-    if (!isOpen(branchId)) continue
-    for (const warehouse of [...group].sort(compare)) {
-      rows.push({ ...warehouse, isBranch: false, branchRowId: branchId, childCount: 0 })
+  const seen = new Set<number>()
+
+  // An explicit walk rather than recursion: the tree has no depth limit, and a cycle left by
+  // older data must not blow the stack.
+  const walk = (parentKey: number, depth: number): void => {
+    for (const warehouse of byParent.get(parentKey) ?? []) {
+      if (seen.has(warehouse.id)) continue
+      seen.add(warehouse.id)
+
+      const children = byParent.get(warehouse.id) ?? []
+      rows.push({ ...warehouse, depth, hasChildren: children.length > 0 })
+
+      if (children.length > 0 && isOpen(warehouse.id)) walk(warehouse.id, depth + 1)
     }
   }
+
+  walk(ROOT, 0)
   return rows
 }
 
@@ -194,7 +202,7 @@ export function WarehousesPage() {
   const sortKey = grid.sortStatus.columnAccessor as keyof WarehouseDto
   const sortDirection = grid.sortStatus.direction
 
-  /** Nothing stored yet: open every branch on the first visit, so the tree does not read as empty. */
+  /** Nothing stored yet: open every parent on the first visit, so the tree does not read as a flat list. */
   const [storedExpanded] = useState(readExpanded)
   const [expanded, setExpanded] = useState<Set<number>>(() => storedExpanded ?? new Set())
   const seeded = useRef(storedExpanded !== null)
@@ -203,28 +211,28 @@ export function WarehousesPage() {
     if (seeded.current) writeExpanded(expanded)
   }, [expanded])
 
-  // Branches only appear once their warehouses have loaded, so the first seeding waits for them.
+  // The parents are only known once the warehouses have loaded, so the first seeding waits for them.
   useEffect(() => {
     if (seeded.current || rows.length === 0) return
     seeded.current = true
-    setExpanded(new Set(rows.map((w) => w.branchId)))
+    setExpanded(new Set(rows.filter((w) => w.childCount > 0).map((w) => w.id)))
   }, [rows])
 
   const records = useMemo(
     () =>
       buildTree(
         narrowed,
-        (branchId) => expanded.has(branchId),
+        (id) => expanded.has(id),
         (a, b) => (sortDirection === 'desc' ? -1 : 1) * compareRows(a, b, sortKey),
       ),
     [narrowed, expanded, sortKey, sortDirection],
   )
 
-  function toggleBranch(branchId: number) {
+  function toggleRow(id: number) {
     setExpanded((current) => {
       const next = new Set(current)
-      if (next.has(branchId)) next.delete(branchId)
-      else next.add(branchId)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
@@ -255,10 +263,10 @@ export function WarehousesPage() {
     downloadCsv(
       'warehouses.csv',
       ['Warehouse Code', 'Warehouse Name', 'Branch / Site', 'Address', 'Is Main Warehouse', 'Status'],
-      // The warehouses the funnels left, in the order the tree shows them. The branch headings are
-      // structure rather than records, so they are left out; each row names its branch anyway.
+      // The warehouses the funnels left, in the order the tree shows them. Every row is a real
+      // warehouse now, parents included: a parent is a record like any other, just not one stock
+      // sits in.
       records
-        .filter((row) => !row.isBranch)
         .map((w) => [
           w.warehouseCode,
           w.warehouseName,
@@ -344,33 +352,42 @@ export function WarehousesPage() {
         label: 'Warehouse Code',
         options: values.warehouseCode,
       }),
-      render: (row) =>
-        row.isBranch ? (
-          <Group gap={6} wrap="nowrap">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              aria-label={`${expanded.has(row.branchRowId) ? 'Collapse' : 'Expand'} ${row.branchName}`}
-              onClick={() => toggleBranch(row.branchRowId)}
-            >
-              {expanded.has(row.branchRowId) ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
-            </ActionIcon>
-            <Text fz="sm" fw={600}>
-              {row.branchCode} - {row.branchName}
+      render: (row) => {
+        const open = expanded.has(row.id)
+
+        return (
+          <Group gap={6} wrap="nowrap" style={{ paddingLeft: row.depth * INDENT }}>
+            {row.hasChildren ? (
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                aria-label={`${open ? 'Collapse' : 'Expand'} ${row.warehouseName}`}
+                onClick={() => toggleRow(row.id)}
+              >
+                {open ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
+              </ActionIcon>
+            ) : (
+              // Keeps every code on the same left edge, chevron or not.
+              <Box w={26} />
+            )}
+
+            <IconBuildingWarehouse
+              size={16}
+              color={row.hasChildren ? 'var(--mantine-color-brand-6)' : 'var(--mantine-color-gray-5)'}
+            />
+            {/* A parent is a grouping rather than a place stock sits in, so it carries its weight. */}
+            <Text fz="sm" fw={row.hasChildren ? 600 : 400}>
+              {row.warehouseCode}
             </Text>
-            <Text fz="xs" c="dimmed">
-              ({row.childCount})
-            </Text>
+            {row.childCount > 0 ? (
+              <Text fz="xs" c="dimmed">
+                ({row.childCount})
+              </Text>
+            ) : null}
           </Group>
-        ) : (
-          <Group gap={6} wrap="nowrap" style={{ paddingLeft: INDENT }}>
-            {/* Keeps every code on the same left edge, under the branch's chevron. */}
-            <Box w={18} />
-            <IconBuildingWarehouse size={16} color="var(--mantine-color-gray-5)" />
-            <Text fz="sm">{row.warehouseCode}</Text>
-          </Group>
-        ),
+        )
+      },
     },
     {
       accessor: 'warehouseName',
@@ -382,7 +399,7 @@ export function WarehousesPage() {
         options: values.warehouseName,
       }),
       // A branch heading names itself in the first column; repeating it here would read as a row.
-      render: (row) => (row.isBranch ? '' : row.warehouseName),
+      render: (row) => row.warehouseName,
     },
     {
       accessor: 'branchName',
@@ -401,14 +418,14 @@ export function WarehousesPage() {
         single: true,
       }),
       render: (row) =>
-        row.isBranch ? '' : <Text fz="sm" title={row.branchCode}>{row.branchName}</Text>,
+        <Text fz="sm" title={row.branchCode}>{row.branchName}</Text>,
     },
     {
       accessor: 'address',
       title: 'Address',
       sortable: true,
       ...columnFilter({ ...columnFilters.bind('address'), label: 'Address', options: values.address }),
-      render: (row) => (row.isBranch ? '' : (row.address ?? '-')),
+      render: (row) => row.address ?? '-',
     },
     {
       accessor: 'isMainWarehouse',
@@ -422,7 +439,7 @@ export function WarehousesPage() {
         options: YES_NO_VALUES,
         withText: false,
       }),
-      render: (row) => (row.isBranch ? '' : <MainFlag isMain={row.isMainWarehouse} />),
+      render: (row) => <MainFlag isMain={row.isMainWarehouse} />,
     },
     {
       accessor: 'isActive',
@@ -436,16 +453,14 @@ export function WarehousesPage() {
         options: STATUS_VALUES,
         withText: false,
       }),
-      render: (row) => (row.isBranch ? '' : <StatusBadge active={row.isActive} />),
+      render: (row) => <StatusBadge active={row.isActive} />,
     },
     {
       accessor: 'actions',
       title: 'Actions',
       width: 130,
       textAlign: 'right',
-      // A branch heading is not a record: there is nothing here to edit, deactivate or delete.
-      render: (warehouse) =>
-        warehouse.isBranch ? null : (
+      render: (warehouse) => (
         <RowActions
           label={warehouse.warehouseCode}
           edit={{ visible: canEdit, onClick: () => setDialog({ kind: 'edit', warehouse }) }}
@@ -458,12 +473,15 @@ export function WarehousesPage() {
           }}
           remove={{
             visible: canDelete,
-            disabled: warehouse.isMainWarehouse,
-            disabledReason: 'The main warehouse cannot be deleted',
+            // A parent's children have to be moved or deleted first; the procedure says so too.
+            disabled: warehouse.isMainWarehouse || warehouse.childCount > 0,
+            disabledReason: warehouse.isMainWarehouse
+              ? 'The main warehouse cannot be deleted'
+              : 'Warehouses stand under this one. Move or delete them first.',
             onClick: () => void handleDelete(warehouse),
           }}
         />
-        ),
+      ),
     },
   ]
 
@@ -576,11 +594,8 @@ export function WarehousesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
-          // Enter on the selected row does what its pencil does - and a branch heading opens instead.
-          onRowActivate={({ record }) => {
-            if (record.isBranch) toggleBranch(record.branchRowId)
-            else if (canEdit) setDialog({ kind: 'edit', warehouse: record })
-          }}
+          // Enter on the selected row does what its pencil does.
+          onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', warehouse: record }) : undefined}
           noRecordsText={
             filtered ? 'No warehouses found. Try clearing the filters to see every warehouse.' : 'No warehouses found.'
           }

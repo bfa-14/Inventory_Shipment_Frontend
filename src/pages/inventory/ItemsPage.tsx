@@ -428,8 +428,12 @@ export function ItemsPage() {
           <Select
             label="Default warehouse"
             placeholder="All warehouses"
-            // Grouped under their branch, as on the item card.
-            data={warehouseOptions(lookups.warehouses)}
+            /* A filter narrows by the warehouse an item is stocked in, and that is always a leaf -
+               so the groupings above are shown for their bearings but cannot be picked. */
+            data={warehouseOptions(lookups.warehouses, {
+              leavesSelectableOnly: true,
+              keepId: Number(filters.defaultWarehouseId) || null,
+            })}
             value={filters.defaultWarehouseId}
             onChange={(value) => setFilter('defaultWarehouseId', value)}
             searchable

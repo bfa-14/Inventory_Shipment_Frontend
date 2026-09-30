@@ -165,30 +165,77 @@ function toFamilyOption(
 }
 
 /**
- * Warehouses grouped under the branch they stand in.
+ * Warehouses as the tree they now form, each labelled by its whole path.
  *
- * The same idea as the family tree, with the depth fixed at two: a warehouse has no parent
- * warehouse, so its branch is the only thing above it. The branch is a Select group heading, which
- * Mantine already draws unselectable - the parent is shown, the leaf is chosen - and it answers the
- * question a flat list of codes could not, which is which site a warehouse actually belongs to.
+ * `leavesSelectableOnly` GREYS OUT THE PARENTS. Stock lives on the leaves: a warehouse with others
+ * standing under it is a grouping, and what it holds is the sum of them, so naming it on a document
+ * would leave the quantity belonging to no particular place. The parents stay visible because a
+ * leaf code on its own does not say where it sits.
+ *
+ * `keepId` stays selectable whatever the rule says, so a record already pointing at a warehouse
+ * that has since been given children does not silently lose it on the next save.
  */
-export function warehouseOptions(warehouses: WarehouseLookupDto[]): PickerGroup[] {
-  const byBranch = new Map<string, WarehouseLookupDto[]>()
-  for (const warehouse of warehouses) {
-    const heading = `${warehouse.branchCode} - ${warehouse.branchName}`
-    const siblings = byBranch.get(heading)
-    if (siblings) siblings.push(warehouse)
-    else byBranch.set(heading, [warehouse])
+export function warehouseOptions(
+  warehouses: WarehouseLookupDto[],
+  options?: { leavesSelectableOnly?: boolean; keepId?: number | null },
+): PickerOption[] {
+  const byId = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]))
+
+  /** The whole path, parents first - the same reasoning as a family's label. */
+  const label = (warehouse: WarehouseLookupDto): string => {
+    const names: string[] = []
+    const seen = new Set<number>()
+
+    let current: WarehouseLookupDto | undefined = warehouse
+    while (current !== undefined && !seen.has(current.id)) {
+      seen.add(current.id)
+      names.unshift(current.warehouseCode)
+      current = current.parentId === null ? undefined : byId.get(current.parentId)
+    }
+
+    return `${names.join(' \\ ')} - ${warehouse.warehouseName}${warehouse.isActive ? '' : ' (inactive)'}`
   }
 
-  return [...byBranch.entries()]
-    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(([group, items]) => ({
-      group,
-      items: items
-        .sort((a, b) => a.warehouseCode.localeCompare(b.warehouseCode, undefined, { numeric: true }))
-        .map((warehouse) => ({ value: String(warehouse.id), label: warehouseLabel(warehouse) })),
-    }))
+  // A parent whose own parent is not in the list stands as a root, so nothing is dropped.
+  const byParent = new Map<number, WarehouseLookupDto[]>()
+  const ROOT = 0
+  for (const warehouse of warehouses) {
+    const key = warehouse.parentId !== null && byId.has(warehouse.parentId) ? warehouse.parentId : ROOT
+    const siblings = byParent.get(key)
+    if (siblings) siblings.push(warehouse)
+    else byParent.set(key, [warehouse])
+  }
+
+  for (const siblings of byParent.values()) {
+    siblings.sort((a, b) => a.warehouseCode.localeCompare(b.warehouseCode, undefined, { numeric: true }))
+  }
+
+  const ordered: WarehouseLookupDto[] = []
+  const seen = new Set<number>()
+  const stack = [...(byParent.get(ROOT) ?? [])].reverse()
+
+  while (stack.length > 0) {
+    const warehouse = stack.pop() as WarehouseLookupDto
+    if (seen.has(warehouse.id)) continue
+    seen.add(warehouse.id)
+    ordered.push(warehouse)
+
+    const children = byParent.get(warehouse.id) ?? []
+    for (let i = children.length - 1; i >= 0; i -= 1) stack.push(children[i] as WarehouseLookupDto)
+  }
+
+  for (const warehouse of warehouses) {
+    if (!seen.has(warehouse.id)) ordered.push(warehouse)
+  }
+
+  return ordered.map((warehouse) => ({
+    value: String(warehouse.id),
+    label: label(warehouse),
+    disabled:
+      options?.leavesSelectableOnly === true &&
+      (byParent.get(warehouse.id)?.length ?? 0) > 0 &&
+      warehouse.id !== options.keepId,
+  }))
 }
 
 /**
