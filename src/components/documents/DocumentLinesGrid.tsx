@@ -104,7 +104,7 @@ export function DocumentLinesGrid({
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
             <Table.Th w={130} ta="right">Unit Cost</Table.Th>
-            <Table.Th w={130} ta="right">Amount</Table.Th>
+            <Table.Th w={130} ta="right">Total Cost</Table.Th>
             <Table.Th w={160}>Notes</Table.Th>
             <Table.Th w={84} />
           </Table.Tr>
