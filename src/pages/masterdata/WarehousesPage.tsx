@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionIcon, Alert, Box, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import {
   IconBuildingWarehouse,
@@ -10,8 +10,8 @@ import {
   IconSearch,
   IconTableExport,
 } from '@tabler/icons-react'
-import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, WarehouseDto } from '../../api/types'
@@ -20,8 +20,7 @@ import { branchLabel } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { columnFilter } from '../../components/ui/columnFilter'
-import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -38,99 +37,21 @@ import { WarehouseFormModal } from './WarehouseFormModal'
    same shape the Item Families page draws, with the depth fixed at two instead of arbitrary.
    ─────────────────────────────────────────────────────────────────────────────────────────────── */
 
-/*
- * The suffix matters. The first version of this tree grouped warehouses under their BRANCH and
- * stored branch ids here; the tree is now the warehouses' own, so those ids name nothing and would
- * leave every parent shut with no way to tell why. A new key lets the stale set be ignored rather
- * than migrated.
+/**
+ * What each column IS, for the grid engine. The tree itself (parents, children, which are open) is the
+ * engine's too: see the `tree` option where the grid is made.
  */
-const EXPANDED_KEY = 'inventory_shipment.warehouses.expanded.tree'
+const GRID_COLUMNS: GridColumnMeta<WarehouseDto>[] = [
+  { accessor: 'warehouseCode', summary: 'count' },
+  { accessor: 'warehouseName' },
+  { accessor: 'branchName', kind: 'list' },
+  { accessor: 'address', text: (w) => w.address ?? '' },
+  { accessor: 'isMainWarehouse', kind: 'boolean', text: (w) => (w.isMainWarehouse ? 'Yes' : 'No') },
+  { accessor: 'isActive', kind: 'boolean', text: (w) => (w.isActive ? 'Active' : 'Inactive') },
+]
 
 /** Pixels of indent per level - the only thing that makes the nesting readable in a flat grid. */
 const INDENT = 26
-
-/**
- * A row of the grid: a warehouse, with what the tree needs to draw it.
- *
- * `depth` is counted from the rows actually shown rather than taken from the record's own Level,
- * so a warehouse whose parent was filtered away still draws flush against the ones beside it
- * instead of hanging at an indent with nothing above it.
- */
-type TreeRow = WarehouseDto & {
-  depth: number
-  /** True when it has children among the rows shown, which is when the chevron is worth drawing. */
-  hasChildren: boolean
-}
-
-/**
- * The rows the grid draws, top to bottom: each warehouse followed by the ones standing under it,
- * as deep as the reader has opened.
- *
- * SORTING HAPPENS AMONG SIBLINGS, never across the whole list. A sort that reordered every
- * warehouse by name would scatter children away from the parents they stand under, which is the
- * one thing the tree exists to show.
- */
-function buildTree(
-  warehouses: WarehouseDto[],
-  isOpen: (id: number) => boolean,
-  compare: (a: WarehouseDto, b: WarehouseDto) => number,
-): TreeRow[] {
-  const shown = new Set(warehouses.map((w) => w.id))
-
-  // A warehouse whose parent is not in the list stands as a root here: it has to appear somewhere,
-  // and hiding it because a filter removed its parent would lose the row entirely.
-  const byParent = new Map<number, WarehouseDto[]>()
-  const ROOT = 0
-  for (const warehouse of warehouses) {
-    const key = warehouse.parentId !== null && shown.has(warehouse.parentId) ? warehouse.parentId : ROOT
-    const siblings = byParent.get(key)
-    if (siblings) siblings.push(warehouse)
-    else byParent.set(key, [warehouse])
-  }
-
-  for (const siblings of byParent.values()) siblings.sort(compare)
-
-  const rows: TreeRow[] = []
-  const seen = new Set<number>()
-
-  // An explicit walk rather than recursion: the tree has no depth limit, and a cycle left by
-  // older data must not blow the stack.
-  const walk = (parentKey: number, depth: number): void => {
-    for (const warehouse of byParent.get(parentKey) ?? []) {
-      if (seen.has(warehouse.id)) continue
-      seen.add(warehouse.id)
-
-      const children = byParent.get(warehouse.id) ?? []
-      rows.push({ ...warehouse, depth, hasChildren: children.length > 0 })
-
-      if (children.length > 0 && isOpen(warehouse.id)) walk(warehouse.id, depth + 1)
-    }
-  }
-
-  walk(ROOT, 0)
-  return rows
-}
-
-function readExpanded(): Set<number> | null {
-  try {
-    const raw = localStorage.getItem(EXPANDED_KEY)
-    if (raw === null) return null
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return null
-    return new Set(parsed.filter((id): id is number => typeof id === 'number'))
-  } catch {
-    // A browser that refuses storage still gets a working tree, just a forgetful one.
-    return null
-  }
-}
-
-function writeExpanded(ids: Set<number>): void {
-  try {
-    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...ids]))
-  } catch {
-    // Same again: the tree works, it just will not remember what was open.
-  }
-}
 
 /** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
 interface Filters {
@@ -192,60 +113,22 @@ export function WarehousesPage() {
   const { filters, setFilter, data, loading, error } = grid
   const rows = useMemo(() => data?.items ?? [], [data])
 
-  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof WarehouseDto
-  const sortDirection = grid.sortStatus.direction
-
-  /** Nothing stored yet: open every parent on the first visit, so the tree does not read as a flat list. */
-  const [storedExpanded] = useState(readExpanded)
-  const [expanded, setExpanded] = useState<Set<number>>(() => storedExpanded ?? new Set())
-  const seeded = useRef(storedExpanded !== null)
-
-  useEffect(() => {
-    if (seeded.current) writeExpanded(expanded)
-  }, [expanded])
-
-  // The parents are only known once the warehouses have loaded, so the first seeding waits for them.
-  useEffect(() => {
-    if (seeded.current || rows.length === 0) return
-    seeded.current = true
-    setExpanded(new Set(rows.filter((w) => w.childCount > 0).map((w) => w.id)))
-  }, [rows])
-
-  const records = useMemo(
-    () =>
-      buildTree(
-        narrowed,
-        (id) => expanded.has(id),
-        (a, b) => (sortDirection === 'desc' ? -1 : 1) * compareRows(a, b, sortKey),
-      ),
-    [narrowed, expanded, sortKey, sortDirection],
-  )
-
-  function toggleRow(id: number) {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  /** The tick lists come from EVERY warehouse, not from the rows surviving the filters. */
-  const values = useMemo(
-    () => ({
-      warehouseCode: columnOptions(rows, 'warehouseCode'),
-      warehouseName: columnOptions(rows, 'warehouseName'),
-      address: columnOptions(rows, 'address'),
-    }),
-    [rows, columnOptions],
-  )
+  /* THE ENGINE HOLDS THE LOADED WAREHOUSES AS A TREE and answers for every column: typed filters (a match
+     keeps the parents it stands under), sort among siblings, footer totals, CSV. The bar above the grid
+     still narrows what is loaded from the server. A tree has no pager: a page break would cut a parent
+     from its children. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.warehouses',
+    sort: [{ accessor: 'warehouseCode', direction: 'asc' }],
+    tree: {
+      idOf: (w) => w.id,
+      parentOf: (w) => w.parentId,
+      // The first visit opens every parent, so the tree does not read as a flat list.
+      openByDefault: (w) => w.childCount > 0,
+    },
+  })
   const load = grid.reload
 
   // Every branch, including inactive ones, so rows on a deactivated branch can still be filtered.
@@ -266,7 +149,7 @@ export function WarehousesPage() {
       // The warehouses the funnels left, in the order the tree shows them. Every row is a real
       // warehouse now, parents included: a parent is a record like any other, just not one stock
       // sits in.
-      records
+      engine.rows
         .map((w) => [
           w.warehouseCode,
           w.warehouseName,
@@ -331,39 +214,25 @@ export function WarehousesPage() {
     if (confirmed) await setStatus(warehouse, activating)
   }
 
-  /* The Branch funnel picks ONE branch, because the endpoint filters by a single branchId - see
-     the `single` note on ColumnFilter. Its options carry the branch code as well as the name, which
-     the cell has no room for, so two branches sharing a name stay tellable apart. */
-  const branchOptions = branches.map(branchLabel)
-  const filteredBranch = branches.find((b) => String(b.id) === filters.branchId)
-
-  const columns: DataTableColumn<TreeRow>[] = [
-    /* These three now carry their own funnel. The page holds the whole table, so each is matched
-       here against the text its own cell shows - which the filter bar's search box could never do,
-       being one parameter over code OR name. */
+  const columns: DataTableColumn<WarehouseDto>[] = [
     {
       accessor: 'warehouseCode',
       title: 'Warehouse Code',
-      sortable: true,
       // Wide enough that an indented code still clears its chevron before the column ends.
       width: 300,
-      ...columnFilter({
-        ...columnFilters.bind('warehouseCode'),
-        label: 'Warehouse Code',
-        options: values.warehouseCode,
-      }),
       render: (row) => {
-        const open = expanded.has(row.id)
+        const info = engine.treeInfo(row)
+        const open = info.open
 
         return (
-          <Group gap={6} wrap="nowrap" style={{ paddingLeft: row.depth * INDENT }}>
-            {row.hasChildren ? (
+          <Group gap={6} wrap="nowrap" style={{ paddingLeft: info.depth * INDENT }}>
+            {info.hasChildren ? (
               <ActionIcon
                 variant="subtle"
                 color="gray"
                 size="sm"
                 aria-label={`${open ? 'Collapse' : 'Expand'} ${row.warehouseName}`}
-                onClick={() => toggleRow(row.id)}
+                onClick={() => engine.toggleNode(row)}
               >
                 {open ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
               </ActionIcon>
@@ -374,10 +243,10 @@ export function WarehousesPage() {
 
             <IconBuildingWarehouse
               size={16}
-              color={row.hasChildren ? 'var(--mantine-color-brand-6)' : 'var(--mantine-color-gray-5)'}
+              color={info.hasChildren ? 'var(--mantine-color-brand-6)' : 'var(--mantine-color-gray-5)'}
             />
             {/* A parent is a grouping rather than a place stock sits in, so it carries its weight. */}
-            <Text fz="sm" fw={row.hasChildren ? 600 : 400}>
+            <Text fz="sm" fw={info.hasChildren ? 600 : 400}>
               {row.warehouseCode}
             </Text>
             {row.childCount > 0 ? (
@@ -392,67 +261,28 @@ export function WarehousesPage() {
     {
       accessor: 'warehouseName',
       title: 'Warehouse Name',
-      sortable: true,
-      ...columnFilter({
-        ...columnFilters.bind('warehouseName'),
-        label: 'Warehouse Name',
-        options: values.warehouseName,
-      }),
-      // A branch heading names itself in the first column; repeating it here would read as a row.
-      render: (row) => row.warehouseName,
     },
     {
       accessor: 'branchName',
       title: 'Branch / Site',
-      sortable: true,
-      ...columnFilter({
-        label: 'Branch / Site',
-        value: filteredBranch ? { values: [branchLabel(filteredBranch)] } : undefined,
-        onApply: (next) => {
-          const picked = next?.values?.[0]
-          const branch = picked ? branches.find((b) => branchLabel(b) === picked) : undefined
-          setFilter('branchId', branch ? String(branch.id) : null)
-        },
-        options: branchOptions,
-        withText: false,
-        single: true,
-      }),
       render: (row) =>
         <Text fz="sm" title={row.branchCode}>{row.branchName}</Text>,
     },
     {
       accessor: 'address',
       title: 'Address',
-      sortable: true,
-      ...columnFilter({ ...columnFilters.bind('address'), label: 'Address', options: values.address }),
       render: (row) => row.address ?? '-',
     },
     {
       accessor: 'isMainWarehouse',
       title: 'Is Main Warehouse',
-      sortable: true,
       width: 205,
-      ...columnFilter({
-        label: 'Is Main Warehouse',
-        value: triStateFilter(filters.isMainWarehouse, 'Yes', 'No'),
-        onApply: (next) => setFilter('isMainWarehouse', triStateQuery(next, 'Yes')),
-        options: YES_NO_VALUES,
-        withText: false,
-      }),
       render: (row) => <MainFlag isMain={row.isMainWarehouse} />,
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (row) => <StatusBadge active={row.isActive} />,
     },
     {
@@ -583,16 +413,11 @@ export function WarehousesPage() {
         {/* No paging: a page break would cut a branch from the warehouses standing in it, and page 2
             would be a list of warehouses with no branch above them. The table is small and already
             loads in full, so every row is here. */}
-        <DataTable<TreeRow>
+        <DataTable<WarehouseDto>
           storeKey="masterdata.warehouses"
-          records={records}
-          // The footer totals the WAREHOUSES the filters left - the branch headings are structure,
-          // not records, and counting them would inflate every figure.
-          summaryRecords={narrowed as TreeRow[]}
+          engine={engine}
+          exportFileName="warehouses"
           columns={columns}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', warehouse: record }) : undefined}
@@ -623,30 +448,7 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the header funnels offer - the labels below, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
-const YES_NO_VALUES = ['Yes', 'No']
-
 const YES_NO_OPTIONS = [
   { value: 'true', label: 'Yes' },
   { value: 'false', label: 'No' },
 ]
-
-
-/** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<WarehouseDto>> = {
-  warehouseCode: (w) => w.warehouseCode,
-  warehouseName: (w) => w.warehouseName,
-  branchName: (w) => w.branchName,
-  address: (w) => w.address ?? '',
-  isMainWarehouse: (w) => (w.isMainWarehouse ? 'Yes' : 'No'),
-  isActive: (w) => (w.isActive ? 'Active' : 'Inactive'),
-}
-
-/** Sorts on whatever column was clicked: flags with the false side first, the rest as text. */
-function compareRows(a: WarehouseDto, b: WarehouseDto, key: keyof WarehouseDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}

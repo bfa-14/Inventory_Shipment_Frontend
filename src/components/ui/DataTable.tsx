@@ -230,8 +230,8 @@ interface DataTableProps<T> {
  * The application's grid: mantine-datatable wired for server-side paging and sorting.
  * Every list page uses this so paging, sorting and the footer wording stay identical.
  *
- * Per-column filtering is opt-in per column: give the column the props from `columnFilter()` and
- * hand the same {@link GridFilters} to `filters` here.
+ * Pass an `engine` (see useDataGrid) for typed column filters, multi-column sort, paging, footer
+ * totals, grouping and CSV export - every list page does.
  *
  * A {@link DataTableProps.storeKey} adds draggable column widths and the column chooser - reached by
  * right-clicking the header, never shown otherwise - both remembered per reader under that key.
@@ -283,7 +283,8 @@ export function DataTable<T>({
 
   // The rows on screen, the paging and the sort: the engine's when there is one, the page's otherwise.
   const records = engine ? engine.pageRows : (recordsProp ?? [])
-  const effPage = engine ? engine.page : page
+  // A tree shows every row it has: no pager.
+  const effPage = engine ? (engine.paging ? engine.page : undefined) : page
   const effPerPage = engine ? engine.pageSize : recordsPerPage
   // Rows hidden inside a collapsed group do not count towards the pages.
   const effTotal = engine ? engine.visibleTotal : totalRecords
@@ -702,6 +703,7 @@ export function DataTable<T>({
 
           {engine ? (
             <Group gap={4} wrap="nowrap">
+              {engine.tree ? null : (
               <Menu position="bottom-end" shadow="md" width={220} withinPortal>
                 <Menu.Target>
                   <Tooltip label="Group rows by a column" withArrow>
@@ -734,6 +736,7 @@ export function DataTable<T>({
                   ) : null}
                 </Menu.Dropdown>
               </Menu>
+              )}
               <Tooltip label={engine.filterRow ? 'Hide the filter row' : 'Show a filter row under the headers'} withArrow>
                 <ActionIcon
                   variant={engine.filterRow ? 'filled' : 'subtle'}
