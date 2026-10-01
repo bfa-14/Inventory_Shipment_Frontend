@@ -8,6 +8,7 @@ import type { BranchLookupDto, SaveWarehouseRequest, WarehouseDto, WarehouseLook
 import { branchLabel } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { FormModal } from '../../components/ui/FormModal'
+import { useSettingBool } from '../../settings/useSetting'
 
 interface WarehouseFormModalProps {
   mode: 'create' | 'edit'
@@ -24,7 +25,12 @@ interface FormValues {
   address: string
   isMainWarehouse: boolean
   isActive: boolean
+  /** global = follow the setting; allow / deny = this warehouse decides. */
+  outOfStock: 'global' | 'allow' | 'deny'
 }
+
+const outOfStockOf = (value: boolean | null | undefined): FormValues['outOfStock'] =>
+  value === null || value === undefined ? 'global' : value ? 'allow' : 'deny'
 
 const MAX_CODE = 20
 const MAX_NAME = 150
@@ -63,6 +69,7 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
   const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
+  const globalOutOfStock = useSettingBool('Sales.AllowOutOfStock')
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -73,6 +80,7 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       address: warehouse?.address ?? '',
       isMainWarehouse: warehouse?.isMainWarehouse ?? false,
       isActive: warehouse?.isActive ?? true,
+      outOfStock: outOfStockOf(warehouse?.allowOutOfStockOverride),
     },
     validate: {
       warehouseCode: (value) => {
@@ -121,6 +129,7 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       address: values.address.trim() ? values.address.trim() : null,
       isMainWarehouse: values.isMainWarehouse,
       isActive: values.isActive,
+      allowOutOfStockOverride: values.outOfStock === 'global' ? null : values.outOfStock === 'allow',
       replaceMainWarehouse,
       ...(mode === 'edit' ? { rowVersion } : {}),
     }
@@ -212,6 +221,7 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
         address: fresh.address ?? '',
         isMainWarehouse: fresh.isMainWarehouse,
         isActive: fresh.isActive,
+        outOfStock: outOfStockOf(fresh.allowOutOfStockOverride),
       })
       setRowVersion(fresh.rowVersion)
       setStale(false)
@@ -280,6 +290,18 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
         minRows={3}
         maxLength={MAX_ADDRESS}
         {...form.getInputProps('address')}
+      />
+
+      <Select
+        label="Out-of-stock sales"
+        description="Whether a sales invoice may sell more than this warehouse holds (its stock then goes negative, after a warning)."
+        allowDeselect={false}
+        data={[
+          { value: 'global', label: `Use the global setting (currently ${globalOutOfStock.value ? 'allowed' : 'not allowed'})` },
+          { value: 'allow', label: 'Allow' },
+          { value: 'deny', label: 'Do not allow' },
+        ]}
+        {...form.getInputProps('outOfStock')}
       />
 
       <Group grow align="flex-start">

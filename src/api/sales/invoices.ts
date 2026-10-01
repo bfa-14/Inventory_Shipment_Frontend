@@ -51,6 +51,33 @@ export interface RateResolutionDto {
   baseCurrencyCode: string | null
 }
 
+/** One item + warehouse an invoice asks more of than the warehouse holds, with the policy's verdict. */
+export interface OutOfStockLineDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  /** What the warehouse holds now, in base units. */
+  currentQty: number
+  /** What the invoice sells from it, in base units. */
+  quantitySold: number
+  /** True: may be sold after the user confirms. False: the post will be refused. */
+  allowed: boolean
+  /** Which level decided: the warehouse's own override, or the global setting. */
+  policySource: 'Warehouse' | 'Global'
+}
+
+/** What posting an invoice would run into, so the page can warn BEFORE it posts. */
+export interface StockCheckDto {
+  lines: OutOfStockLineDto[]
+  /** A shortage the policy does not allow: the post would be refused. */
+  hasBlocked: boolean
+  /** Every shortage is allowed, so posting needs the user's confirmation. */
+  needsConfirmation: boolean
+}
+
 /** What import-post answers: the posted invoice in summary, and how many ledger rows it wrote. */
 export interface ImportPostResult {
   id: number
@@ -95,6 +122,8 @@ export interface SaveSalesInvoiceLine {
 }
 
 export interface SaveSalesInvoiceRequest {
+  /** Import-post only: the user has seen the out-of-stock warning and chose to proceed. */
+  acknowledgeOutOfStock?: boolean
   documentDate: string
   dueDate?: string | null
   branchId: number
@@ -412,8 +441,15 @@ export const salesInvoicesApi = {
   update: (id: number, payload: SaveSalesInvoiceRequest) =>
     request<SalesInvoiceDto>(`${BASE}/${id}`, { method: 'PUT', body: payload }),
 
-  post: (id: number, rowVersion: string | null) =>
-    request<SalesInvoiceDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion } }),
+  /**
+   * `acknowledgeOutOfStock` says the user saw the out-of-stock warning and chose to proceed. Without it a
+   * shortage the policy allows is refused with OUT_OF_STOCK_CONFIRM; one it forbids is INSUFFICIENT_STOCK either way.
+   */
+  post: (id: number, rowVersion: string | null, acknowledgeOutOfStock = false) =>
+    request<SalesInvoiceDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion, acknowledgeOutOfStock } }),
+
+  /** What posting would run into: the shortages and the policy's verdict on each. Empty = nothing to warn about. */
+  stockCheck: (id: number) => request<StockCheckDto>(`${BASE}/${id}/stock-check`),
 
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<SalesInvoiceDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),

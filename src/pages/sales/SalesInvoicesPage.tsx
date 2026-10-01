@@ -18,6 +18,7 @@ import { dateLabel, isoDate, STATUS_COLOURS } from '../../components/documents/d
 import { formatNumber } from '../../components/format'
 import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { partyLabel } from '../../components/sales/salesLines'
+import { decideOutOfStock } from '../../components/sales/outOfStock'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
@@ -168,7 +169,10 @@ export function SalesInvoicesPage() {
     })
     if (!go) return
     try {
-      await salesInvoicesApi.post(row.id, row.rowVersion)
+      // Out of stock: warned here, before posting, with the real figures; a refusal is explained instead of attempted.
+      const decision = await decideOutOfStock(row.id)
+      if (!decision.proceed) return
+      await salesInvoicesApi.post(row.id, row.rowVersion, decision.acknowledge)
       notify.success('Invoice posted.')
       await load()
     } catch (err) {

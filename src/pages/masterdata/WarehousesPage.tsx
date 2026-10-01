@@ -41,11 +41,14 @@ import { WarehouseFormModal } from './WarehouseFormModal'
  * What each column IS, for the grid engine. The tree itself (parents, children, which are open) is the
  * engine's too: see the `tree` option where the grid is made.
  */
+const outOfStockLabel = (value: boolean | null): string => (value === null ? 'Global setting' : value ? 'Allowed' : 'Not allowed')
+
 const GRID_COLUMNS: GridColumnMeta<WarehouseDto>[] = [
   { accessor: 'warehouseCode', summary: 'count' },
   { accessor: 'warehouseName' },
   { accessor: 'branchName', kind: 'list' },
   { accessor: 'address', text: (w) => w.address ?? '' },
+  { accessor: 'allowOutOfStockOverride', kind: 'list', text: (w) => outOfStockLabel(w.allowOutOfStockOverride) },
   { accessor: 'isMainWarehouse', kind: 'boolean', text: (w) => (w.isMainWarehouse ? 'Yes' : 'No') },
   { accessor: 'isActive', kind: 'boolean', text: (w) => (w.isActive ? 'Active' : 'Inactive') },
 ]
@@ -272,6 +275,16 @@ export function WarehousesPage() {
       accessor: 'address',
       title: 'Address',
       render: (row) => row.address ?? '-',
+    },
+    {
+      accessor: 'allowOutOfStockOverride',
+      title: 'Out-of-stock sales',
+      width: 170,
+      render: (row) => (
+        <Text fz="sm" c={row.allowOutOfStockOverride === null ? 'dimmed' : undefined}>
+          {outOfStockLabel(row.allowOutOfStockOverride)}
+        </Text>
+      ),
     },
     {
       accessor: 'isMainWarehouse',

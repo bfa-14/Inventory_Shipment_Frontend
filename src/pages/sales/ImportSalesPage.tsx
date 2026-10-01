@@ -41,6 +41,7 @@ import { SalesPaymentCard } from '../../components/sales/SalesPaymentCard'
 import { EMPTY_PAYMENT, type SalesPaymentErrors, type SalesPaymentForm } from '../../components/sales/salesPayment'
 import { SalesTotals } from '../../components/sales/SalesTotals'
 import { mergeImported, stockKey } from '../../components/sales/salesLines'
+import { confirmOutOfStock, parseOutOfStockMessage, type OutOfStockRow } from '../../components/sales/outOfStock'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -555,7 +556,22 @@ export function ImportSalesPage() {
 
     setPosting(true)
     try {
-      const posted = await salesInvoicesApi.importPost(toRequest())
+      let posted
+      try {
+        posted = await salesInvoicesApi.importPost(toRequest())
+      } catch (error) {
+        /* An out-of-stock sale the policy allows is refused until the user confirms. There is no invoice to
+           ask about yet (this call saves and posts in one go), so the warning is built from what the server
+           said, with the names this page already knows; Proceed sends the same lines again, confirmed. */
+        if (!(error instanceof ApiError) || error.code !== 'OUT_OF_STOCK_CONFIRM') throw error
+        const rows: OutOfStockRow[] = parseOutOfStockMessage(error.message).map((row) => ({
+          ...row,
+          itemName: lines.find((l) => l.itemCode === row.itemCode)?.itemName,
+          warehouseName: warehouses.find((w) => w.warehouseCode === row.warehouseCode)?.warehouseName,
+        }))
+        if (rows.length === 0 || !(await confirmOutOfStock(rows))) return
+        posted = await salesInvoicesApi.importPost({ ...toRequest(), acknowledgeOutOfStock: true })
+      }
       setResult(posted)
       setLineErrors({})
       notify.success(`Posted ${posted.documentNumber} — ${posted.movementsWritten} line(s) written to the stock movements.`)

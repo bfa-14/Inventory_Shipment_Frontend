@@ -36,6 +36,7 @@ import { SalesPaymentCard } from '../../components/sales/SalesPaymentCard'
 import { EMPTY_PAYMENT, type SalesPaymentErrors, type SalesPaymentForm } from '../../components/sales/salesPayment'
 import { SalesInvoiceProfitCard } from '../../components/sales/SalesInvoiceProfitCard'
 import { SalesTotals } from '../../components/sales/SalesTotals'
+import { decideOutOfStock } from '../../components/sales/outOfStock'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -777,7 +778,11 @@ export function SalesInvoicePage() {
     if (!go) return
     setSaving(true)
     try {
-      applyInvoice(await salesInvoicesApi.post(saved.id, saved.rowVersion))
+      /* THE OUT-OF-STOCK GATE. Asked of the server now, so the warning names the real figures and a refusal
+         is explained before anything is attempted. The warning is shown even where the setting allows the sale. */
+      const decision = await decideOutOfStock(saved.id)
+      if (!decision.proceed) return
+      applyInvoice(await salesInvoicesApi.post(saved.id, saved.rowVersion, decision.acknowledge))
       notify.success('Invoice posted.')
     } catch (error) {
       showApiError(error)
@@ -1121,7 +1126,7 @@ export function SalesInvoicePage() {
         <Alert color="orange">
           {/* NO WAREHOUSE IS NAMED HERE any more: each line has its own, so one name would be wrong
               for most of the rows it is counting. The Warehouse column on the row says which. */}
-          {formatNumber(lines.filter((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase).length)} line(s) ask for more than the stock on hand in their warehouse. The posting will be refused unless the quantities are reduced.
+          {formatNumber(lines.filter((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase).length)} line(s) ask for more than the stock on hand in their warehouse. Posting will ask you to confirm if selling out-of-stock items is allowed there, and will be refused if it is not.
         </Alert>
       )}
     </Stack>

@@ -224,6 +224,8 @@ export interface WarehouseDto {
   childCount: number
   isMainWarehouse: boolean
   isActive: boolean
+  /** Sales invoices selling more than it holds: true allows (after a warning), false refuses, null follows the global setting. */
+  allowOutOfStockOverride: boolean | null
   createdAtUtc: string
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
@@ -242,6 +244,8 @@ export interface SaveWarehouseRequest {
   isActive: boolean
   /** Confirms taking the Main Warehouse flag away from the warehouse that currently holds it. */
   replaceMainWarehouse: boolean
+  /** True allows selling out-of-stock items from this warehouse, false refuses, null follows the global setting. */
+  allowOutOfStockOverride?: boolean | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }
