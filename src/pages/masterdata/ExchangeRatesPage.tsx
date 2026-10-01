@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Grid, Group, Paper, Select, Text, Tooltip } from '@mantine/core'
 import { DatePickerInput } from '@mantine/dates'
 import { IconFilterOff, IconPlus, IconRefresh, IconTableExport } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { exchangeRatesApi } from '../../api/masterdata/exchangeRates'
-import type { CurrencyLookupDto, ExchangeRateDto, ExchangeRateSortBy, RateType } from '../../api/types'
+import type { CurrencyLookupDto, ExchangeRateDto, RateType } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { currencyLabel, formatDateOnly, formatDateTime, formatRate } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -23,10 +24,8 @@ import { PERMISSIONS } from '../../navigation'
 import { ExchangeRateFormModal } from './ExchangeRateFormModal'
 import {
   RATE_TYPES,
-  RATE_TYPE_LABELS,
   RATE_TYPE_OPTIONS,
   rateTypeColor,
-  rateTypeFromLabel,
   rateTypeLabel,
 } from './rateTypes'
 
@@ -39,6 +38,16 @@ interface Filters {
 }
 
 const NO_FILTERS: Filters = { currencyId: null, rateType: null, dateFrom: null, dateTo: null }
+
+/** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
+const GRID_COLUMNS: GridColumnMeta<ExchangeRateDto>[] = [
+  { accessor: 'rateDate', kind: 'date', text: (r) => formatDateOnly(r.rateDate), summary: 'count' },
+  { accessor: 'currencyCode', kind: 'list', text: (r) => `${r.currencyCode} - ${r.currencyName}` },
+  { accessor: 'rateType', kind: 'list', text: (r) => rateTypeLabel(r.rateType) },
+  { accessor: 'rate', kind: 'number', text: (r) => formatRate(r.rate, r.decimalPlaces) },
+  { accessor: 'notes', text: (r) => r.notes ?? '' },
+  { accessor: 'updatedAtUtc', kind: 'date', text: (r) => formatDateTime(r.updatedAtUtc) },
+]
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; rate: ExchangeRateDto } | null
 
@@ -54,25 +63,29 @@ export function ExchangeRatesPage() {
   const canEdit = hasPermission(PERMISSIONS.exchangeRatesEdit)
   const canDelete = hasPermission(PERMISSIONS.exchangeRatesDelete)
 
-  const grid = useGridQuery<Filters, ExchangeRateDto, Awaited<ReturnType<typeof exchangeRatesApi.search>>>({
+  const grid = useGridQuery<Filters, ExchangeRateDto, AllRows<ExchangeRateDto>>({
     initialFilters: NO_FILTERS,
     // Nothing here is typed into: every control is a pick, so every change lands at once.
     initialSort: { columnAccessor: 'rateDate', direction: 'desc' },
+    // The rates are loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The exchange rates could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        exchangeRatesApi.search(
-          {
-            currencyId: filters.currencyId === null ? undefined : Number(filters.currencyId),
-            rateType: filters.rateType ?? undefined,
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'RateDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          exchangeRatesApi.search(
+            {
+              currencyId: filters.currencyId === null ? undefined : Number(filters.currencyId),
+              rateType: filters.rateType ?? undefined,
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'RateDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -80,6 +93,17 @@ export function ExchangeRatesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED RATES AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals, grouping, CSV. The currency, type and date range above the grid still narrow
+     what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.exchangeRates',
+    sort: [{ accessor: 'rateDate', direction: 'desc' }],
+  })
 
   // Every currency, including inactive ones, so rows on a deactivated currency stay filterable.
   useEffect(() => {
@@ -123,7 +147,7 @@ export function ExchangeRatesPage() {
     downloadCsv(
       'exchange-rates.csv',
       ['Date', 'Currency', 'Type', 'Rate', 'Notes'],
-      (data?.items ?? []).map((r) => [
+      engine.rows.map((r) => [
         r.rateDate,
         `${r.currencyCode} - ${r.currencyName}`,
         rateTypeLabel(r.rateType),
@@ -159,34 +183,17 @@ export function ExchangeRatesPage() {
   }
 
   const columns: DataTableColumn<ExchangeRateDto>[] = [
-    rowNumberColumn<ExchangeRateDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ExchangeRateDto>(engine.page, engine.pageSize),
     {
       accessor: 'rateDate',
       title: 'Date',
-      sortable: true,
       width: 140,
-      /* No funnel: the API narrows dates by a from/to RANGE, which a tick list of individual days
-         cannot express. The filter bar carries that range under its own name. */
       render: (r) => formatDateOnly(r.rateDate),
     },
     {
       accessor: 'currencyCode',
       title: 'Currency',
-      sortable: true,
       width: 220,
-      /* One currency at a time, because the endpoint filters by a single currencyId. */
-      ...columnFilter({
-        label: 'Currency',
-        value: selectedCurrency ? { values: [currencyLabel(selectedCurrency)] } : undefined,
-        onApply: (next) => {
-          const picked = next?.values?.[0]
-          const currency = picked ? currencies.find((c) => currencyLabel(c) === picked) : undefined
-          setFilter('currencyId', currency ? String(currency.id) : null)
-        },
-        options: currencies.map(currencyLabel),
-        withText: false,
-        single: true,
-      }),
       render: (r) => (
         <Text fz="sm" title={r.currencyName}>
           {r.currencyCode} - {r.currencyName}
@@ -196,19 +203,7 @@ export function ExchangeRatesPage() {
     {
       accessor: 'rateType',
       title: 'Type',
-      sortable: true,
       width: 160,
-      ...columnFilter({
-        label: 'Type',
-        value: filters.rateType ? { values: [rateTypeLabel(filters.rateType)] } : undefined,
-        onApply: (next) => {
-          const picked = next?.values?.[0]
-          setFilter('rateType', picked ? (rateTypeFromLabel(picked) ?? null) : null)
-        },
-        options: RATE_TYPE_LABELS,
-        withText: false,
-        single: true,
-      }),
       render: (r) => (
         <Badge variant="light" color={rateTypeColor(r.rateType)}>
           {rateTypeLabel(r.rateType)}
@@ -218,7 +213,6 @@ export function ExchangeRatesPage() {
     {
       accessor: 'rate',
       title: 'Rate',
-      sortable: true,
       width: 150,
       textAlign: 'right',
       render: (r) => formatRate(r.rate, r.decimalPlaces),
@@ -241,8 +235,6 @@ export function ExchangeRatesPage() {
       accessor: 'updatedAtUtc',
       title: 'Updated',
       width: 180,
-      /* Not sortable: the search procedure sorts by RateDate, CurrencyCode, RateType, Rate or
-         CreatedAtUtc, and an arrow that quietly sorted by something else would be lying. */
       render: (r) => formatDateTime(r.updatedAtUtc),
     },
     {
@@ -382,23 +374,18 @@ export function ExchangeRatesPage() {
         </Alert>
       ) : null}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more exchange rates than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ExchangeRateDto>
           storeKey="masterdata.exchangeRates"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="exchange-rates"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', rate: record }) : undefined}
@@ -424,12 +411,4 @@ export function ExchangeRatesPage() {
       ) : null}
     </>
   )
-}
-
-const ACCESSOR_TO_SORT: Record<string, ExchangeRateSortBy> = {
-  rateDate: 'RateDate',
-  currencyCode: 'CurrencyCode',
-  rateType: 'RateType',
-  rate: 'Rate',
-  createdAtUtc: 'CreatedAtUtc',
 }

@@ -231,10 +231,10 @@ export const NAVIGATION: NavSection[] = [
     breadcrumb: 'Sales',
     items: [
       { label: 'Sales Invoices', to: '/sales/invoices', permission: PERMISSIONS.invoicesView, icon: 'invoice' },
-      { label: 'Receipts', to: '/sales/receipts', permission: PERMISSIONS.receiptsView, icon: 'wallet' },
-      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.receiptsView, icon: 'reports' },
       // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
+      { label: 'Receipts', to: '/sales/receipts', permission: PERMISSIONS.receiptsView, icon: 'wallet' },
+      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.receiptsView, icon: 'reports' },
       {
         label: 'Import Sales from Excel',
         to: '/sales/import-preview',

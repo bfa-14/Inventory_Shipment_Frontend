@@ -1,19 +1,19 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconEye, IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
 import { Link, useNavigate } from 'react-router'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { itemsApi } from '../../api/inventory/items'
-import type { ItemListDto, ItemSortBy } from '../../api/types'
+import type { ItemListDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { formatNumber } from '../../components/format'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -43,6 +43,21 @@ const NO_FILTERS: Filters = {
   isBivac: null,
 }
 
+/** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
+const GRID_COLUMNS: GridColumnMeta<ItemListDto>[] = [
+  { accessor: 'itemCode', summary: 'count' },
+  { accessor: 'itemName' },
+  { accessor: 'familyName', kind: 'list' },
+  { accessor: 'brandName', kind: 'list' },
+  { accessor: 'baseUnitName', kind: 'list', text: (r) => r.baseUnitName ?? '' },
+  { accessor: 'warehouseName', kind: 'list' },
+  { accessor: 'isBivac', kind: 'boolean', text: (r) => (r.isBivac ? 'BIVAC' : 'Not BIVAC') },
+  { accessor: 'onHand', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.onHand) },
+  { accessor: 'averageCost', kind: 'number', value: (r) => r.averageCost, text: (r) => (r.averageCost === null ? '' : formatNumber(r.averageCost, 2)) },
+  { accessor: 'inventoryValue', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.inventoryValue, 2) },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
+
 /** Below this the Family and Warehouse columns are dropped; both stay on the details page. */
 const NARROW = '(max-width: 768px)'
 
@@ -59,27 +74,31 @@ export function ItemsPage() {
   const canEdit = hasPermission(PERMISSIONS.itemsEdit)
   const canDelete = hasPermission(PERMISSIONS.itemsDelete)
 
-  const grid = useGridQuery<Filters, ItemListDto, Awaited<ReturnType<typeof itemsApi.search>>>({
+  const grid = useGridQuery<Filters, ItemListDto, AllRows<ItemListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'itemCode', direction: 'asc' },
+    // The list is loaded whole (by code, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The items could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        itemsApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            itemFamilyId: numberOrUndefined(filters.itemFamilyId),
-            brandId: numberOrUndefined(filters.brandId),
-            defaultWarehouseId: numberOrUndefined(filters.defaultWarehouseId),
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            isBivac: filters.isBivac === null ? undefined : filters.isBivac === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'ItemCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          itemsApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              itemFamilyId: numberOrUndefined(filters.itemFamilyId),
+              brandId: numberOrUndefined(filters.brandId),
+              defaultWarehouseId: numberOrUndefined(filters.defaultWarehouseId),
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              isBivac: filters.isBivac === null ? undefined : filters.isBivac === 'true',
+              sortBy: 'ItemCode',
+              sortDir: 'asc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -87,12 +106,23 @@ export function ItemsPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED ITEMS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, grouping, CSV. The filters above the grid
+     still narrow what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'inventory.items',
+    sort: [{ accessor: 'itemCode', direction: 'asc' }],
+  })
 
   function exportCsv() {
     downloadCsv(
       'items.csv',
       ['Item Code', 'Item Name', 'Family', 'Brand', 'Base Unit', 'Default Warehouse', 'BIVAC', 'On Hand', 'Status'],
-      (data?.items ?? []).map((i) => [
+      engine.rows.map((i) => [
         i.itemCode,
         i.itemName,
         i.familyName,
@@ -165,11 +195,10 @@ export function ItemsPage() {
   }
 
   const columns: DataTableColumn<ItemListDto>[] = [
-    rowNumberColumn<ItemListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ItemListDto>(engine.page, engine.pageSize),
     {
       accessor: 'itemCode',
       title: 'Item Code',
-      sortable: true,
       width: 115,
       render: (item) => (
         <Anchor
@@ -187,7 +216,6 @@ export function ItemsPage() {
     {
       accessor: 'itemName',
       title: 'Item Name',
-      sortable: true,
       // No width: it takes whatever the fixed columns leave, so all eleven fit a laptop. The name
       // is the column most likely to be clipped, so it carries the tooltip that gives it back.
       render: (item) => (
@@ -204,7 +232,6 @@ export function ItemsPage() {
           {
             accessor: 'familyName',
             title: 'Family',
-            sortable: true,
             width: 120,
             render: (item: ItemListDto) => (
               <Tooltip label={item.familyCode} withArrow position="top-start">
@@ -215,7 +242,7 @@ export function ItemsPage() {
             ),
           } satisfies DataTableColumn<ItemListDto>,
         ]),
-    { accessor: 'brandName', title: 'Brand', sortable: true, width: 95 },
+    { accessor: 'brandName', title: 'Brand', width: 95 },
     {
       accessor: 'baseUnitName',
       title: 'Base Unit',
@@ -237,7 +264,6 @@ export function ItemsPage() {
           {
             accessor: 'warehouseName',
             title: 'Default Warehouse',
-            sortable: true,
             width: 130,
             render: (item: ItemListDto) => (
               <Text fz="sm" lineClamp={1}>
@@ -250,13 +276,6 @@ export function ItemsPage() {
       accessor: 'isBivac',
       title: 'BIVAC',
       width: 80,
-      ...columnFilter({
-        label: 'BIVAC',
-        value: triStateFilter(filters.isBivac, 'BIVAC', '—'),
-        onApply: (next) => setFilter('isBivac', triStateQuery(next, 'BIVAC')),
-        options: BIVAC_VALUES,
-        withText: false,
-      }),
       render: (item) =>
         item.isBivac ? (
           <Badge variant="light" color="orange" size="sm">
@@ -269,7 +288,6 @@ export function ItemsPage() {
     {
       accessor: 'onHand',
       title: 'On Hand',
-      sortable: true,
       width: 85,
       textAlign: 'right',
       /* A REAL FIGURE NOW, read from the stock ledger. It used to carry a "coming soon" tooltip over
@@ -310,15 +328,7 @@ export function ItemsPage() {
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 100,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (item) => <StatusBadge active={item.isActive} />,
     },
     {
@@ -488,23 +498,18 @@ export function ItemsPage() {
         </Alert>
       ) : null}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more items than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ItemListDto>
           storeKey="inventory.items"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="items"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowClick={({ record }) => void navigate(`/inventory/items/${record.id}`)}
           noRecordsText={filtered ? 'No items found. Try clearing the filters to see every item.' : 'No items found.'}
@@ -529,18 +534,3 @@ const BIVAC_OPTIONS = [
   { value: 'true', label: 'BIVAC only' },
   { value: 'false', label: 'Not BIVAC' },
 ]
-
-/** The words each funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
-const BIVAC_VALUES = ['BIVAC', '—']
-
-const ACCESSOR_TO_SORT: Record<string, ItemSortBy> = {
-  onHand: 'OnHand',
-  itemCode: 'ItemCode',
-  itemName: 'ItemName',
-  brandName: 'BrandName',
-  familyName: 'FamilyName',
-  warehouseName: 'WarehouseName',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
-}
