@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Anchor, Badge, Group, Paper, ScrollArea, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
 import { chargeStatusColour, CHARGE_STATUSES } from '../../api/logistics/containerCharges'
@@ -5,29 +6,39 @@ import type { PurchaseChargeDto } from '../../api/purchase/landedCostAdjustments
 import { dateLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
 
+/** Where a draft container charge is posted. */
+const CONTAINER_CHARGES_ROUTE = '/logistics/container-charges'
+
 /**
  * The charges of an imported invoice's CONTAINERS (documentKind CNT), read-only: an import's
  * freight, clearing and insurance are entered on its containers, and this invoice only shows the
  * part that falls on its lines ("Share on this invoice"). The total is the header's
- * containerChargesBase — posted charges that enter the landed cost.
+ * containerChargesBase — posted charges that enter the landed cost. A draft charge says where it is
+ * posted: it costs the goods nothing until then.
  */
 export function InvoiceContainerChargesCard({
   charges,
   totalBase,
   baseCurrencyCode,
+  actions,
 }: {
   charges: PurchaseChargeDto[]
   totalBase: number | null
   baseCurrencyCode: string
+  /** The card's buttons — "Add charge", which opens the container charge dialog. */
+  actions?: ReactNode
 }) {
   const rows = charges.filter((c) => c.documentKind === 'CNT')
   return (
     <Paper radius="lg" p="md" withBorder data-invoice-container-charges>
-      <Group justify="space-between" mb="sm" wrap="wrap">
-        <Title order={5}>Container charges</Title>
-        <Text fz="sm" c="dimmed">
-          Entered on the containers - read-only here
-        </Text>
+      <Group justify="space-between" align="flex-end" mb="sm" wrap="wrap">
+        <div>
+          <Title order={5}>Container charges</Title>
+          <Text fz="xs" c="dimmed">
+            Entered on the containers - read-only here
+          </Text>
+        </div>
+        {actions}
       </Group>
       {rows.length === 0 ? (
         <Text fz="sm" c="dimmed" ta="center" py="md">
@@ -75,6 +86,11 @@ export function InvoiceContainerChargesCard({
                       <Text fz="xs" c="dimmed">
                         not in the cost
                       </Text>
+                    ) : null}
+                    {c.chargeStatus === 1 ? (
+                      <Anchor component={Link} to={CONTAINER_CHARGES_ROUTE} fz="xs" display="block" data-post-in-container-charges>
+                        Post it in Container Charges
+                      </Anchor>
                     ) : null}
                   </Table.Td>
                   <Table.Td ta="right" fw={600}>
