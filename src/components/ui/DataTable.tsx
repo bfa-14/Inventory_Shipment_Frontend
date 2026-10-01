@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import { ActionIcon, Badge, Button, Checkbox, Group, Menu, Modal, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
-import { IconColumns3, IconDownload, IconFilter, IconFilterOff, IconRestore } from '@tabler/icons-react'
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { ActionIcon, Badge, Button, Checkbox, Group, Menu, Modal, Stack, Table, Text, Tooltip, UnstyledButton } from '@mantine/core'
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconColumns3,
+  IconDownload,
+  IconFilter,
+  IconFilterOff,
+  IconLayoutList,
+  IconRestore,
+  IconX,
+} from '@tabler/icons-react'
 import { formatNumber } from '../format'
 import { GridFilterCell } from './grid/GridFilterCell'
 import { GridFilterPopover } from './grid/GridFilterPopover'
@@ -275,7 +285,8 @@ export function DataTable<T>({
   const records = engine ? engine.pageRows : (recordsProp ?? [])
   const effPage = engine ? engine.page : page
   const effPerPage = engine ? engine.pageSize : recordsPerPage
-  const effTotal = engine ? engine.total : totalRecords
+  // Rows hidden inside a collapsed group do not count towards the pages.
+  const effTotal = engine ? engine.visibleTotal : totalRecords
   const effOnPage = engine ? engine.setPage : onPageChange
   const effOnPerPage = engine ? engine.setPageSize : onRecordsPerPageChange
   const effPageSizes: number[] = engine ? engine.pageSizeOptions : [...PAGE_SIZE_OPTIONS]
@@ -532,7 +543,7 @@ export function DataTable<T>({
         : Math.min(Math.max(current + (event.key === 'ArrowDown' ? 1 : -1), 0), records.length - 1)
 
     setSelectedId(ids[next] ?? null)
-    gridRef.current?.querySelectorAll('tbody tr')[next]?.scrollIntoView({ block: 'nearest' })
+    gridRef.current?.querySelectorAll('tbody tr:not(.app-grid__group)')[next]?.scrollIntoView({ block: 'nearest' })
   }
 
   // Paging and sorting are each all-or-nothing unions in mantine-datatable's own props, so they
@@ -571,6 +582,79 @@ export function DataTable<T>({
           paginationText: ({ from, to, totalRecords: total }) => `Showing ${from} to ${to} of ${total} entries`,
         }
 
+  /**
+   * Group header rows, drawn in front of the first row of each group ON THE PAGE (a group that runs
+   * over a page break gets its header again, so a page never starts with rows of an unnamed group).
+   * The header names the group and carries ITS figure for every column that has a footer figure, under
+   * that column, so a group reads like a small footer of its own.
+   */
+  const groupBy = engine?.groupBy ?? null
+  const visibleColumns = effectiveColumns.filter((column) => !(column as { hidden?: boolean }).hidden)
+  const hasSelection = Boolean(selectedRecords && onSelectedRecordsChange)
+  const rowFactory =
+    engine && groupBy
+      ? ({
+          record,
+          index,
+          rowProps,
+          children,
+        }: {
+          record: T
+          index: number
+          rowProps: object
+          children: ReactNode
+          expandedElement?: ReactNode
+        }) => {
+          const key = engine.groupKeyOf(record)
+          const first = index === 0 || engine.groupKeyOf(records[index - 1]) !== key
+          const figured = visibleColumns.map((column) => {
+            const accessor = String(column.accessor)
+            const kind = FIXED_ACCESSORS.has(accessor) ? 'none' : engine.summaryKind(accessor)
+            return { column, accessor, kind, value: kind === 'none' ? null : engine.groupSummary(key, accessor) }
+          })
+          // The label gets room to read: at least the first three columns, and every column up to the
+          // first one that has a figure of its own beyond that.
+          const minSpan = Math.min(3, figured.length)
+          const firstFigure = figured.findIndex((entry, at) => at >= minSpan && entry.kind !== 'none' && entry.value !== null)
+          const labelSpan = Math.max(1, firstFigure === -1 ? figured.length : firstFigure)
+          const collapsed = engine.isCollapsed(key)
+          return (
+            <Fragment>
+              {first ? (
+                <Table.Tr className="app-grid__group" onClick={() => engine.toggleGroup(key)}>
+                  <Table.Td colSpan={labelSpan + (hasSelection ? 1 : 0)}>
+                    <Group gap="xs" wrap="nowrap">
+                      {collapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
+                      <Text fz="sm" fw={700} style={{ whiteSpace: 'nowrap' }}>
+                        {labelOf(groupBy)}: {key}
+                      </Text>
+                      <Badge size="sm" variant="light" color="gray">
+                        {engine.groupCount(key)}
+                      </Badge>
+                    </Group>
+                  </Table.Td>
+                  {figured.slice(labelSpan).map(({ column, accessor, kind, value }) => (
+                    <Table.Td key={accessor} style={{ textAlign: column.textAlign ?? 'left' }}>
+                      {kind !== 'none' && value !== null ? (
+                        <Stack gap={0}>
+                          <Text fz={10} c="dimmed" tt="uppercase" lh={1.2}>
+                            {SUMMARY_LABELS[kind]}
+                          </Text>
+                          <Text fz="sm" fw={700} lh={1.3}>
+                            {formatSummary(value)}
+                          </Text>
+                        </Stack>
+                      ) : null}
+                    </Table.Td>
+                  ))}
+                </Table.Tr>
+              ) : null}
+              {collapsed ? null : <Table.Tr {...rowProps}>{children}</Table.Tr>}
+            </Fragment>
+          )
+        }
+      : undefined
+
   function exportToCsv() {
     if (!engine) return
     const shownColumns = effectiveColumns
@@ -603,10 +687,53 @@ export function DataTable<T>({
                 </Button>
               </>
             ) : null}
+            {engine && groupBy ? (
+              <Button
+                size="compact-sm"
+                variant="light"
+                rightSection={<IconX size={14} />}
+                onClick={() => engine.setGroupBy(null)}
+                aria-label="Remove grouping"
+              >
+                Grouped by {labelOf(groupBy)}
+              </Button>
+            ) : null}
           </Group>
 
           {engine ? (
             <Group gap={4} wrap="nowrap">
+              <Menu position="bottom-end" shadow="md" width={220} withinPortal>
+                <Menu.Target>
+                  <Tooltip label="Group rows by a column" withArrow>
+                    <ActionIcon variant={groupBy ? 'filled' : 'subtle'} aria-label="Group by">
+                      <IconLayoutList size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Menu.Target>
+                <Menu.Dropdown mah={360} style={{ overflowY: 'auto' }}>
+                  <Menu.Label>Group by</Menu.Label>
+                  {visibleColumns
+                    .map((column) => String(column.accessor))
+                    .filter((accessor) => !FIXED_ACCESSORS.has(accessor) && engine.meta.some((entry) => entry.accessor === accessor))
+                    .map((accessor) => (
+                      <Menu.Item
+                        key={accessor}
+                        onClick={() => engine.setGroupBy(accessor === groupBy ? null : accessor)}
+                        fw={accessor === groupBy ? 700 : undefined}
+                      >
+                        {labelOf(accessor)}
+                      </Menu.Item>
+                    ))}
+                  {groupBy ? (
+                    <>
+                      <Menu.Divider />
+                      <Menu.Item onClick={() => engine.setAllGroups(true)}>Collapse all groups</Menu.Item>
+                      <Menu.Item onClick={() => engine.setAllGroups(false)}>Expand all groups</Menu.Item>
+                      <Menu.Item onClick={() => engine.setGroupBy(null)}>No grouping</Menu.Item>
+                    </>
+                  ) : null}
+                </Menu.Dropdown>
+              </Menu>
               <Tooltip label={engine.filterRow ? 'Hide the filter row' : 'Show a filter row under the headers'} withArrow>
                 <ActionIcon
                   variant={engine.filterRow ? 'filled' : 'subtle'}
@@ -715,6 +842,7 @@ export function DataTable<T>({
           {...(idAccessor ? { idAccessor } : {})}
           {...sortProps}
           {...pagingProps}
+          {...(rowFactory ? { rowFactory } : {})}
         />
       </div>
     </>

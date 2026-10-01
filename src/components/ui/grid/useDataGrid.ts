@@ -86,6 +86,21 @@ export interface DataGrid<T> {
   setSummaryKind(accessor: string, kind: SummaryKind): void
   /** Is any numeric value present in this column? Decides whether Sum and the like are on offer. */
   isNumeric(accessor: string): boolean
+  /** The column the rows are grouped by, or null. Groups are collapsible and carry their own totals. */
+  groupBy: string | null
+  setGroupBy(accessor: string | null): void
+  /** Each group's label, in the order the groups appear. Empty when the grid is not grouped. */
+  groupKeys: string[]
+  /** The group a row belongs to; '' when the grid is not grouped. */
+  groupKeyOf(row: T): string
+  groupCount(key: string): number
+  /** A column's figure over ONE group's rows (the same kind the footer uses), or null. */
+  groupSummary(key: string, accessor: string): number | null
+  isCollapsed(key: string): boolean
+  toggleGroup(key: string): void
+  setAllGroups(collapsed: boolean): void
+  /** Rows on screen: every filtered row except those in collapsed groups. This is what pages. */
+  visibleTotal: number
   filterRow: boolean
   setFilterRow(on: boolean): void
   /** Downloads the filtered rows as CSV: `accessors` are the visible columns, in order, with their headings. */
@@ -186,16 +201,73 @@ export function useDataGrid<T>({
     )
   }, [rows, active, byAccessor])
 
-  const sorted = useMemo(
-    () =>
-      sortRows(filtered, sort, (row, accessor) => {
-        const column = byAccessor.get(accessor)
-        return column && column.sortable !== false ? { kind: column.kind ?? 'text', raw: rawOf(column, row) } : undefined
-      }),
-    [filtered, sort, byAccessor],
+  const [groupBy, setGroupByState] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+
+  const groupKeyOf = useCallback(
+    (row: T): string => {
+      const column = groupBy ? byAccessor.get(groupBy) : undefined
+      if (!column) return ''
+      const text = textOf(column, row)
+      return text.trim() === '' ? BLANKS : text
+    },
+    [groupBy, byAccessor],
   )
 
-  const paged = useMemo(() => pageOf(sorted, page, pageSize), [sorted, page, pageSize])
+  /**
+   * THE ORDER, GROUPED. The group column leads the sort (in the direction the reader gave it, else
+   * ascending) and the reader's own sort orders the rows inside each group. The rows are then
+   * gathered by the label they display, groups in order of first appearance: a column whose label is
+   * coarser than its value (an order MONTH over an order DATE) still ends up in one group per label.
+   */
+  const sorted = useMemo(() => {
+    const keys = groupBy && byAccessor.has(groupBy)
+      ? [{ accessor: groupBy, direction: sort.find((spec) => spec.accessor === groupBy)?.direction ?? ('asc' as const) }, ...sort.filter((spec) => spec.accessor !== groupBy)]
+      : sort
+    const ordered = sortRows(filtered, keys, (row, accessor) => {
+      const column = byAccessor.get(accessor)
+      return column && column.sortable !== false ? { kind: column.kind ?? 'text', raw: rawOf(column, row) } : undefined
+    })
+    if (!groupBy || !byAccessor.has(groupBy)) return ordered
+    const buckets = new Map<string, T[]>()
+    for (const row of ordered) {
+      const key = groupKeyOf(row)
+      const bucket = buckets.get(key)
+      if (bucket) bucket.push(row)
+      else buckets.set(key, [row])
+    }
+    return [...buckets.values()].flat()
+  }, [filtered, sort, byAccessor, groupBy, groupKeyOf])
+
+  const groups = useMemo(() => {
+    const map = new Map<string, T[]>()
+    if (groupBy && byAccessor.has(groupBy)) {
+      for (const row of sorted) {
+        const key = groupKeyOf(row)
+        const bucket = map.get(key)
+        if (bucket) bucket.push(row)
+        else map.set(key, [row])
+      }
+    }
+    return map
+  }, [sorted, groupBy, byAccessor, groupKeyOf])
+
+  // A collapsed group drops out BEFORE paging, so a page is always a page of what can be seen - but
+  // keeps its FIRST row as a stub, which is what the group's header row hangs on. The table draws
+  // the header and not the stub (see DataTable), so a collapsed group is one line.
+  const visible = useMemo(() => {
+    if (collapsed.size === 0 || groups.size === 0) return sorted
+    const seen = new Set<string>()
+    return sorted.filter((row) => {
+      const key = groupKeyOf(row)
+      if (!collapsed.has(key)) return true
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [sorted, collapsed, groups, groupKeyOf])
+
+  const paged = useMemo(() => pageOf(visible, page, pageSize), [visible, page, pageSize])
 
   const setFilter = useCallback((accessor: string, value: FilterValue | undefined) => {
     setFilters((current) => {
@@ -256,6 +328,16 @@ export function useDataGrid<T>({
     [byAccessor, sorted, summaryKind],
   )
 
+  const groupSummary = useCallback(
+    (key: string, accessor: string): number | null => {
+      const column = byAccessor.get(accessor)
+      const rowsOfGroup = groups.get(key)
+      if (!column || !rowsOfGroup) return null
+      return summarize(rowsOfGroup.map((row) => rawOf(column, row)), summaryKind(accessor))
+    },
+    [byAccessor, groups, summaryKind],
+  )
+
   const exportCsv = useCallback(
     (visible: { accessor: string; title: string }[], fileName: string) => {
       const usable = visible.filter((entry) => {
@@ -305,6 +387,28 @@ export function useDataGrid<T>({
     summaryKind,
     setSummaryKind: (accessor, kind) => setSummaryChoices((current) => ({ ...current, [accessor]: kind })),
     isNumeric,
+    groupBy,
+    setGroupBy: (accessor) => {
+      setGroupByState(accessor)
+      setCollapsed(new Set())
+      setPageState(1)
+    },
+    groupKeys: [...groups.keys()],
+    groupKeyOf,
+    groupCount: (key) => groups.get(key)?.length ?? 0,
+    groupSummary,
+    isCollapsed: (key) => collapsed.has(key),
+    toggleGroup: (key) =>
+      setCollapsed((current) => {
+        const next = new Set(current)
+        if (!next.delete(key)) next.add(key)
+        return next
+      }),
+    setAllGroups: (collapse) => {
+      setCollapsed(collapse ? new Set(groups.keys()) : new Set())
+      setPageState(1)
+    },
+    visibleTotal: visible.length,
     filterRow,
     setFilterRow: setFilterRowState,
     exportCsv,

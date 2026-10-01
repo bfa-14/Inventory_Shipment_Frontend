@@ -391,3 +391,23 @@
     print-color-adjust: exact;
   }
 }
+
+/* A group's header row: names the group and carries its own figures, so it reads as a small footer.
+   The whole row is the control that collapses it. */
+.app-grid .app-grid__group > td {
+  background: var(--mantine-color-gray-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+[data-mantine-color-scheme='dark'] .app-grid .app-grid__group > td {
+  background: var(--mantine-color-dark-6);
+}
+
+.app-grid .app-grid__group:hover > td {
+  background: var(--mantine-color-gray-2);
+}
+
+[data-mantine-color-scheme='dark'] .app-grid .app-grid__group:hover > td {
+  background: var(--mantine-color-dark-5);
+}
