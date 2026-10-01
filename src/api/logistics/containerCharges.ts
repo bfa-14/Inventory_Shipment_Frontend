@@ -22,6 +22,14 @@ export function chargeStatusColour(status: number): string {
   return CHARGE_STATUSES.find((s) => s.value === status)?.colour ?? 'gray'
 }
 
+/**
+ * Draft or posted, on a container that is not closed or cancelled: what "Apply to other containers"
+ * needs — the charge DTO says it as canCopy; a container's charge row is judged with this.
+ */
+export function canCopyCharge(chargeStatus: number, containerStatus: number): boolean {
+  return (chargeStatus === 1 || chargeStatus === 2) && containerStatus !== 7 && containerStatus !== 8
+}
+
 export type SplitRule = 'Same' | 'Equal' | 'Pieces' | 'Value'
 
 export const SPLIT_RULES: { value: SplitRule; label: string }[] = [
@@ -43,6 +51,8 @@ export interface ChargeFlags {
   canDelete: boolean
   canPost: boolean
   canCancel: boolean
+  /** "Apply to other containers": draft or posted, and the container not closed or cancelled. */
+  canCopy: boolean
 }
 
 export interface ContainerChargeListDto extends ChargeFlags {
@@ -232,6 +242,48 @@ export interface ContainerChargeQuery {
   pageSize?: number
 }
 
+/** A container that can receive a copy of a charge (not closed, not cancelled). */
+export interface ChargeCopyCandidateDto {
+  containerId: number
+  containerRef: string
+  containerNo: string | null
+  containerTypeCode: string
+  status: number
+  currentLocation: string | null
+  purchaseOrderId: number | null
+  purchaseOrderNumber: string | null
+  totalAllocatedBase: number
+  itemSummary: string | null
+  /** The charge's own container. */
+  isSource: boolean
+  /** The charge's own container, or one already carrying a charge of its group. */
+  hasThisCharge: boolean
+}
+
+/** Null values = the original's (a Manual original gives the charge type's method). */
+export interface CopyContainerChargeRequest {
+  containerIds: number[]
+  /** Per container, in the charge's currency. */
+  amount?: number | null
+  chargeDate?: string | null
+  allocationMethod?: Exclude<AllocationMethod, 'Manual'> | null
+  /** Post the copies at once: needs containers.charges.post. */
+  post: boolean
+}
+
+export interface CopiedContainerChargeDto {
+  id: number
+  containerId: number
+  containerRef: string
+  containerNo: string | null
+  groupId: string | null
+  amount: number
+  amountBase: number
+  allocationMethod: AllocationMethod
+  status: ChargeStatusCode
+  rowVersion: string
+}
+
 export const containerChargesApi = {
   list: (query: ContainerChargeQuery, signal?: AbortSignal) =>
     request<ContainerChargePageDto>(`${BASE}${toQueryString(query)}`, { signal }),
@@ -256,6 +308,13 @@ export const containerChargesApi = {
     request<ContainerChargeDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
+
+  copyCandidates: (id: number, query: { search?: string; sameOrder: boolean }, signal?: AbortSignal) =>
+    request<ChargeCopyCandidateDto[]>(`${BASE}/${id}/copy-candidates${toQueryString(query)}`, { signal }),
+
+  /** One draft per container in the charge's group (posted at once with post). 409 DUPLICATE names a container that has it. */
+  copy: (id: number, payload: CopyContainerChargeRequest) =>
+    request<CopiedContainerChargeDto[]>(`${BASE}/${id}/copy`, { method: 'POST', body: payload }),
 
   exportToExcel: async (query: ContainerChargeQuery) =>
     saveBlob(await fetchBlob(`${BASE}/export${toQueryString({ ...query, page: undefined, pageSize: undefined })}`), 'ContainerCharges.xlsx'),

@@ -728,6 +728,148 @@ export interface AttachmentCreatedDto {
   chargeId: number | null
 }
 
+/* ── many containers per order: auto-plan and bulk actions ────────────────────────────────── */
+
+/** Pieces of one item in a full container, as typed in the auto-plan dialog. */
+export interface ItemCapacity {
+  itemId: number
+  pcsPerContainer: number
+}
+
+export interface AutoPlanRequest {
+  purchaseOrderId: number
+  containerTypeId: number
+  /** False = the rest of every order line gets its own container. */
+  mixRemainders: boolean
+  capacities?: ItemCapacity[]
+}
+
+/** One proposed container. */
+export interface PlannedContainerDto {
+  seq: number
+  itemCount: number
+  units: number
+  /** Sum of quantity / pieces per container, in % (one decimal); null when an item has no capacity. */
+  fillPct: number | null
+  /** The equivalent capacity in pieces (84 for a full 84-piece container, 102 for 42 × 84 + 60 × 120). */
+  maxUnits: number | null
+  /** The item code, or "Mixed - 2 items". */
+  itemSummary: string
+}
+
+/** One line of a proposed container. */
+export interface PlannedContainerLineDto {
+  seq: number
+  lineNumber: number
+  poLineId: number
+  poLineNumber: number
+  itemId: number
+  itemCode: string
+  itemName: string
+  model: string | null
+  quantityBase: number
+  pcsPerContainer: number | null
+  oilIncluded: boolean
+  oilQtyPerUnit: number | null
+}
+
+/** Where the pieces per container of an order line come from. */
+export type CapacitySource = 'Entered' | 'Item' | 'Type' | 'None'
+
+/** One line of the order: what can still be loaded and what the plan loads. */
+export interface PlanOrderLineDto {
+  poLineId: number
+  poLineNumber: number
+  itemId: number
+  itemCode: string
+  itemName: string
+  model: string | null
+  orderedBase: number
+  availableBase: number
+  plannedBase: number
+  pcsPerContainer: number | null
+  capacitySource: CapacitySource
+  containersNeeded: number
+  oilIncluded: boolean
+}
+
+export interface AutoPlanDto {
+  containers: PlannedContainerDto[]
+  lines: PlannedContainerLineDto[]
+  orderLines: PlanOrderLineDto[]
+}
+
+export interface PlanLineRequest {
+  poLineId: number
+  quantityBase: number
+  /** Null = yes when the item has an oil quantity per unit. */
+  oilIncluded?: boolean | null
+}
+
+/** 1..N in the order shown: an error names "Container <seq> of <N>". */
+export interface PlanContainerRequest {
+  seq: number
+  lines: PlanLineRequest[]
+}
+
+export interface CreateContainersFromPlanRequest {
+  purchaseOrderId: number
+  containerTypeId: number
+  orderDate?: string | null
+  branchId?: number | null
+  warehouseId?: number | null
+  shippingMethod?: ShippingMethod | null
+  countryOfOrigin?: string | null
+  forwarderId?: number | null
+  shippingLine?: string | null
+  portOfLoadingId?: number | null
+  portOfDestinationId?: number | null
+  finalDestinationId?: number | null
+  eta?: string | null
+  freeDays?: number | null
+  containers: PlanContainerRequest[]
+  /** The SAME capacities as the proposal: the server recomputes each container's Max units from them. */
+  capacities?: ItemCapacity[]
+  allowOverCapacity: boolean
+  confirm: boolean
+}
+
+export interface CreatedContainerDto {
+  seq: number
+  containerId: number
+  containerRef: string
+  status: ContainerStatusCode
+  totalLines: number
+  totalAllocatedBase: number
+  maxUnits: number | null
+  utilizationPct: number | null
+  rowVersion: string
+}
+
+/** Both values are sent for every container: an empty one clears it. */
+export interface ContainerNumberRequest {
+  containerId: number
+  containerNo: string | null
+  sealNo: string | null
+}
+
+export interface ContainerNumberDto {
+  id: number
+  containerRef: string
+  containerNo: string | null
+  sealNo: string | null
+  rowVersion: string
+}
+
+export interface ContainerConfirmedDto {
+  id: number
+  containerRef: string
+  status: ContainerStatusCode
+  /** False when it was no longer a draft (left as it was). */
+  confirmedNow: boolean
+  rowVersion: string
+}
+
 export function toQueryString(query: object): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
@@ -807,6 +949,27 @@ export const containersApi = {
   /** allShared = the file from every container holding it. */
   removeAttachment: (attachmentId: number, allShared: boolean) =>
     request<void>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, { method: 'DELETE' }),
+
+  /** The proposed containers of an approved order for one container type; nothing is saved. */
+  autoPlan: (payload: AutoPlanRequest, signal?: AbortSignal) =>
+    request<AutoPlanDto>(`${BASE}/auto-plan`, { method: 'POST', body: payload, signal }),
+
+  /**
+   * Creates the plan, all or nothing. 409 OVER_CAPACITY ("Container 3 of 30: …", data.canOverride) or
+   * ALLOCATION_EXCEEDS_INVOICE ("Order line 2 (…): 70 pieces planned but only 60 can still be loaded.").
+   */
+  createFromPlan: (payload: CreateContainersFromPlanRequest) =>
+    request<CreatedContainerDto[]>(`${BASE}/auto-plan/create`, { method: 'POST', body: payload }),
+
+  /** 409 DUPLICATE_CONTAINER_NO: a number typed twice or used by another open container. */
+  setNumbers: (items: ContainerNumberRequest[]) =>
+    request<ContainerNumberDto[]>(`${BASE}/bulk/numbers`, { method: 'PUT', body: { items } }),
+
+  /** Confirms the drafts among the ids; the others come back with confirmedNow false. */
+  confirmMany: (ids: number[]) => request<ContainerConfirmedDto[]>(`${BASE}/bulk/confirm`, { method: 'POST', body: { ids } }),
+
+  /** Drafts only, all or nothing: 409 NOT_EDITABLE names the first that is not. */
+  deleteMany: (ids: number[]) => request<{ deleted: number }>(`${BASE}/bulk/delete`, { method: 'POST', body: { ids } }),
 }
 
 export function saveBlob(blob: Blob, fileName: string): void {

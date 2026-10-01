@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core'
-import { IconArrowBackUp, IconBox, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash } from '@tabler/icons-react'
+import { IconArrowBackUp, IconBox, IconBoxMultiple, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { containersApi } from '../../api/logistics/containers'
+import { containersApi, type ContainerListDto } from '../../api/logistics/containers'
 import { itemsApi } from '../../api/inventory/items'
 import { chargeTypesApi, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
@@ -29,6 +29,7 @@ import { isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber } from '../../components/format'
 import { AddContainerModal } from '../../components/logistics/AddContainerModal'
+import { AutoPlanModal } from '../../components/logistics/AutoPlanModal'
 import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
 import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
@@ -107,6 +108,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
   const canAddContainer = kind.code === 'PO' && hasPermission(PERMISSIONS.containersCreate)
   const canOverCapacity = hasPermission(PERMISSIONS.containersOverCapacity)
+  const canConfirmContainers = hasPermission(PERMISSIONS.containersConfirm)
 
   const { byCode } = useDocumentTypes()
   const documentType = byCode(kind.code)
@@ -146,6 +148,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [closeBusy, setCloseBusy] = useState(false)
   /* An order shipped in containers: Add Container and the invoice made from its containers. */
   const [addContainerOpen, setAddContainerOpen] = useState(false)
+  const [autoPlanOpen, setAutoPlanOpen] = useState(false)
+  /* The containers ticked on the order's Containers card: kept here, the card unmounts while the order reloads. */
+  const [containerSelection, setContainerSelection] = useState<ContainerListDto[]>([])
   const [invoiceFromContainersOpen, setInvoiceFromContainersOpen] = useState(false)
   const [invoiceCandidates, setInvoiceCandidates] = useState(0)
 
@@ -1059,12 +1064,21 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       {kind.code === 'PO' && document && document.status !== 'Draft' && (
         <OrderContainersCard
+          purchaseOrderId={document.id}
           containers={document.containers}
+          selected={containerSelection}
+          onSelectedChange={setContainerSelection}
+          onChanged={() => void reload()}
           actions={
             <>
               {canAddContainer && document.status === 'Posted' && (
                 <Button size="xs" leftSection={<IconBox size={14} />} onClick={() => setAddContainerOpen(true)}>
                   Add Container…
+                </Button>
+              )}
+              {canAddContainer && document.status === 'Posted' && (
+                <Button size="xs" variant="light" leftSection={<IconBoxMultiple size={14} />} onClick={() => setAutoPlanOpen(true)} data-auto-plan>
+                  Auto-plan containers…
                 </Button>
               )}
               {canCreateInvoice && invoiceCandidates > 0 && (
@@ -1188,6 +1202,19 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             setAddContainerOpen(false)
             if (open) void navigate(`/logistics/containers/${container.id}`)
             else void reload()
+          }}
+        />
+      )}
+
+      {kind.code === 'PO' && document && autoPlanOpen && (
+        <AutoPlanModal
+          order={{ id: document.id, documentNumber: document.documentNumber, branchId: document.branchId, warehouseId: document.warehouseId }}
+          canOverCapacity={canOverCapacity}
+          canConfirm={canConfirmContainers}
+          onClose={() => setAutoPlanOpen(false)}
+          onCreated={() => {
+            setAutoPlanOpen(false)
+            void reload()
           }}
         />
       )}

@@ -1,8 +1,8 @@
 import { Fragment, useState } from 'react'
 import { Anchor, Badge, Button, Group, Paper, Table, Text, Title } from '@mantine/core'
-import { IconEye, IconPlus, IconSend } from '@tabler/icons-react'
+import { IconCopy, IconEye, IconPlus, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { chargeStatusColour, containerChargesApi } from '../../api/logistics/containerCharges'
+import { canCopyCharge, chargeStatusColour, containerChargesApi } from '../../api/logistics/containerCharges'
 import type { ContainerChargeRowDto, ContainerDto } from '../../api/logistics/containers'
 import { allocationMethodLabel } from '../../api/purchase/chargeTypes'
 import { useAuth } from '../../auth/useAuth'
@@ -12,6 +12,7 @@ import { formatMoney, formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { RowActions } from '../ui/RowActions'
+import { ApplyChargeModal } from './ApplyChargeModal'
 import { ChargeDrawer } from './ChargeDrawer'
 import { NewChargeModal } from './NewChargeModal'
 
@@ -37,6 +38,7 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
 
   const [adding, setAdding] = useState(false)
   const [openId, setOpenId] = useState<number | null>(null)
+  const [copying, setCopying] = useState<ContainerChargeRowDto | null>(null)
 
   async function post(row: ContainerChargeRowDto) {
     const go = await confirm({
@@ -155,6 +157,12 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
                             custom={[
                               { icon: <IconEye size={16} />, tooltip: 'Open', onClick: () => setOpenId(row.id) },
                               { icon: <IconSend size={16} />, tooltip: 'Post', visible: canPost && isDraft, onClick: () => void post(row) },
+                              {
+                                icon: <IconCopy size={16} />,
+                                tooltip: 'Apply to other containers…',
+                                visible: canCreate && canCopyCharge(row.status, container.status),
+                                onClick: () => setCopying(row),
+                              },
                             ]}
                             remove={{ visible: canCreate && isDraft, onClick: () => void remove(row) }}
                           />
@@ -208,6 +216,17 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
       />
 
       <ChargeDrawer chargeId={openId} onClose={() => setOpenId(null)} onChanged={onChanged} />
+
+      {copying && (
+        <ApplyChargeModal
+          charge={copying}
+          onClose={() => setCopying(null)}
+          onCopied={() => {
+            setCopying(null)
+            onChanged()
+          }}
+        />
+      )}
     </Paper>
   )
 }

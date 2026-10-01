@@ -209,6 +209,47 @@ export interface MovementQuery {
   pageSize?: number
 }
 
+/**
+ * One movement for the chosen containers: drafts confirmed, the movement created (default SEA, from
+ * their common port of loading to their common port of destination) and started unless startNow is
+ * false; vessel, voyage, B/L and ETA copied to the containers when updateContainers.
+ */
+export interface ShipContainersRequest {
+  containerIds: number[]
+  /** Null = SEA. */
+  movementTypeId?: number | null
+  /** Null = the containers' common ports (Sea only). */
+  fromPlaceId?: number | null
+  toPlaceId?: number | null
+  /** Null = today (the planned date when startNow is false). */
+  startDate?: string | null
+  eta?: string | null
+  carrierPartyId?: number | null
+  vehicleOrVessel?: string | null
+  voyageNo?: string | null
+  /** Booking, waybill… */
+  reference?: string | null
+  blNo?: string | null
+  blDate?: string | null
+  notes?: string | null
+  startNow: boolean
+  /** Honoured only with containers.confirm; the server refuses drafts by name otherwise. */
+  confirmDrafts: boolean
+  updateContainers: boolean
+}
+
+/** The movement created for the chosen containers. */
+export interface ShippedMovementDto {
+  id: number
+  movementNo: string
+  status: MovementStatusCode
+  startDate: string | null
+  plannedDate: string | null
+  eta: string | null
+  containerCount: number
+  rowVersion: string
+}
+
 export const movementsApi = {
   list: (query: MovementQuery, signal?: AbortSignal) =>
     request<PagedResult<MovementListDto>>(`${BASE}${toQueryString(query)}`, { signal }),
@@ -233,6 +274,10 @@ export const movementsApi = {
 
   /** Planned only. */
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
+
+  /** 409 CONTAINER_BUSY names a container travelling with another movement; nothing is created then. */
+  shipContainers: (payload: ShipContainersRequest) =>
+    request<ShippedMovementDto>(`${BASE}/ship-containers`, { method: 'POST', body: payload }),
 
   exportToExcel: async (query: MovementQuery) =>
     saveBlob(await fetchBlob(`${BASE}/export${toQueryString({ ...query, page: undefined, pageSize: undefined })}`), 'Movements.xlsx'),

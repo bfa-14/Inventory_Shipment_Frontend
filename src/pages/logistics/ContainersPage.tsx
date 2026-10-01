@@ -48,6 +48,8 @@ import { purchaseDocumentsApi } from '../../api/purchase/documents'
 import type { ItemLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { ContainerSelectionBar } from '../../components/logistics/ContainerSelectionBar'
+import { refreshSelection } from '../../components/logistics/containerSelection'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
@@ -140,6 +142,7 @@ export function ContainersPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
+  const [selected, setSelected] = useState<ContainerListDto[]>([])
 
   const grid = useGridQuery<Filters, ContainerListDto, Awaited<ReturnType<typeof containersApi.list>>>({
     initialFilters: NO_FILTERS,
@@ -176,6 +179,8 @@ export function ContainersPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  // The ticked rows as they are now: a reload after a bulk action brings their new status.
+  const selectedRows = refreshSelection(selected, data?.items ?? [])
 
   useEffect(() => {
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
@@ -548,9 +553,13 @@ export function ContainersPage() {
         </Alert>
       ) : null}
 
+      <ContainerSelectionBar rows={data?.items ?? []} selected={selectedRows} onSelectedChange={setSelected} onChanged={load} />
+
       <Paper radius="lg" withBorder>
         <DataTable<ContainerListDto>
           records={data?.items ?? []}
+          selectedRecords={selectedRows}
+          onSelectedRecordsChange={setSelected}
           columns={columns}
           totalRecords={data?.totalCount ?? 0}
           page={grid.page}

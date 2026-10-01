@@ -44,6 +44,8 @@ interface NewChargeModalProps {
   onClose: () => void
   presetContainerIds?: number[]
   presetMovementId?: number | null
+  /** The split rule the dialog opens with (By pieces when left out). */
+  presetSplitRule?: SplitRule
   onCreated: () => void
 }
 
@@ -91,13 +93,14 @@ function splitPreview(rule: SplitRule, total: number, rows: ContainerOption[]): 
  * makes one DRAFT per container, all in one group, split by the rule chosen here; the preview below
  * the amount is the same arithmetic done in the browser so the reader sees the split before saving.
  */
-export function NewChargeModal({ opened, onClose, presetContainerIds, presetMovementId, onCreated }: NewChargeModalProps) {
+export function NewChargeModal({ opened, onClose, presetContainerIds, presetMovementId, presetSplitRule, onCreated }: NewChargeModalProps) {
   if (!opened) return null
   return (
     <NewChargeDialog
       onClose={onClose}
       presetContainerIds={presetContainerIds}
       presetMovementId={presetMovementId ?? null}
+      presetSplitRule={presetSplitRule ?? 'Pieces'}
       onCreated={onCreated}
     />
   )
@@ -107,11 +110,13 @@ function NewChargeDialog({
   onClose,
   presetContainerIds,
   presetMovementId,
+  presetSplitRule,
   onCreated,
 }: {
   onClose: () => void
   presetContainerIds?: number[]
   presetMovementId: number | null
+  presetSplitRule: SplitRule
   onCreated: () => void
 }) {
   const { hasPermission } = useAuth()
@@ -137,7 +142,7 @@ function NewChargeDialog({
   const [rateLoading, setRateLoading] = useState(false)
   const [rateMissing, setRateMissing] = useState(false)
   const [total, setTotal] = useState<number | null>(null)
-  const [splitRule, setSplitRule] = useState<SplitRule>('Pieces')
+  const [splitRule, setSplitRule] = useState<SplitRule>(presetSplitRule)
   const [notes, setNotes] = useState('')
 
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -390,7 +395,10 @@ function NewChargeDialog({
       {formError && <Alert color="red">{formError}</Alert>}
 
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" verticalSpacing="sm">
+        {/* openOnFocus off: the dialog opens with the cursor here, and an open list over the form would take
+            the next click - picking a movement replaces the containers the dialog was opened with. */}
         <Select
+          openOnFocus={false}
           label="Movement"
           placeholder="Optional"
           description="Picking one puts the charge on its containers"

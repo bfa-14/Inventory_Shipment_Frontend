@@ -26,7 +26,7 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
-import { IconDeviceFloppy, IconDownload, IconSend, IconTrash, IconUpload, IconX } from '@tabler/icons-react'
+import { IconCopy, IconDeviceFloppy, IconDownload, IconSend, IconTrash, IconUpload, IconX } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
   ALLOCATION_METHODS,
@@ -49,6 +49,7 @@ import { dateLabel, stamp } from '../documents/documentKind'
 import { currencyLabel, formatMoney, formatNumber, numberInputValue } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
+import { ApplyChargeModal } from './ApplyChargeModal'
 
 interface ChargeDrawerProps {
   chargeId: number | null
@@ -151,6 +152,7 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
 
   const [busy, setBusy] = useState<'save' | 'post' | 'cancel' | 'delete' | 'upload' | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
   const [rateLoading, setRateLoading] = useState(false)
 
   const adopt = useCallback((next: ContainerChargeDto) => {
@@ -690,6 +692,19 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
       <Divider />
 
       <Group justify="flex-end" gap="xs" wrap="wrap">
+        {dto.canCopy && mayEdit && (
+          <Tooltip label="Save your changes first" disabled={!dirty} withArrow>
+            <Button
+              variant="light"
+              leftSection={<IconCopy size={16} />}
+              disabled={dirty || busy !== null}
+              onClick={() => setCopyOpen(true)}
+              data-apply-charge
+            >
+              Apply to other containers…
+            </Button>
+          </Tooltip>
+        )}
         {dto.canDelete && mayEdit && (
           <Button color="red" variant="light" leftSection={<IconTrash size={16} />} loading={busy === 'delete'} disabled={busy !== null && busy !== 'delete'} onClick={() => void remove()}>
             Delete
@@ -726,6 +741,19 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
           </Tooltip>
         )}
       </Group>
+
+      {copyOpen && (
+        <ApplyChargeModal
+          charge={dto}
+          onClose={() => setCopyOpen(false)}
+          onCopied={() => {
+            setCopyOpen(false)
+            // The group now lists the new containers.
+            void load()
+            onChanged()
+          }}
+        />
+      )}
 
       <CancelReasonModal
         opened={cancelOpen}
