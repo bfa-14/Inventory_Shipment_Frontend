@@ -7,6 +7,7 @@ import { PURCHASE_INVOICE, PURCHASE_ORDER, PURCHASE_RETURN } from './components/
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DocumentTypesPage } from './pages/configuration/DocumentTypesPage'
+import { SettingsPage } from './pages/configuration/SettingsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
@@ -246,6 +247,10 @@ export default function App() {
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.documentTypesManage} />}>
                 <Route path="/configuration/document-types" element={<DocumentTypesPage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.settingsManage} />}>
+                <Route path="/configuration/settings" element={<SettingsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

@@ -91,6 +91,7 @@ export const PERMISSIONS = {
   purchaseReturnsCancel: 'purchase.returns.cancel',
   purchaseReturnsDelete: 'purchase.returns.delete',
   chargeTypesManage: 'purchase.chargetypes.manage',
+  settingsManage: 'configuration.settings.manage',
   landedCostsView: 'purchase.landedcosts.view',
   landedCostsCreate: 'purchase.landedcosts.create',
   landedCostsPost: 'purchase.landedcosts.post',
@@ -300,6 +301,8 @@ export const NAVIGATION: NavSection[] = [
         permission: PERMISSIONS.documentTypesManage,
         icon: 'settings',
       },
+      // Switches that change how the whole system behaves; each setting is a row, drawn by one page.
+      { label: 'Settings', to: '/configuration/settings', permission: PERMISSIONS.settingsManage, icon: 'settings' },
     ],
   },
 ]
