@@ -8,10 +8,9 @@ import type { BrandDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
@@ -77,39 +76,24 @@ export function BrandsPage() {
   const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.brands',
+    sort: [{ accessor: 'brandCode', direction: 'asc' }],
+  })
+
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof BrandDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick lists come from EVERY brand, not from the rows surviving the filters. */
-  const values = useMemo(
-    () => ({
-      brandCode: columnOptions(rows, 'brandCode'),
-      brandName: columnOptions(rows, 'brandName'),
-    }),
-    [rows, columnOptions],
-  )
 
   function exportCsv() {
     downloadCsv(
       'brands.csv',
       ['Brand Code', 'Brand Name', 'Description', 'Status', 'Created'],
       // What the reader is looking at, funnels and all - not the whole table behind them.
-      sorted.map((b) => [
+      engine.rows.map((b) => [
         b.brandCode,
         b.brandName,
         b.description ?? '',
@@ -178,30 +162,24 @@ export function BrandsPage() {
   }
 
   const columns: DataTableColumn<BrandDto>[] = [
-    rowNumberColumn<BrandDto>(grid.page, grid.pageSize),
+    rowNumberColumn<BrandDto>(engine.page, engine.pageSize),
     /* These three now carry their own funnel. The page holds the whole table, so each is matched
        here against the text its own cell shows - which the filter bar's search box could never do,
        being one parameter over code OR name, and never over Description at all. */
     {
       accessor: 'brandCode',
       title: 'Brand Code',
-      sortable: true,
       width: 150,
-      ...columnFilter({ ...columnFilters.bind('brandCode'), label: 'Brand Code', options: values.brandCode }),
     },
     {
       accessor: 'brandName',
       title: 'Brand Name',
-      sortable: true,
       width: 220,
-      ...columnFilter({ ...columnFilters.bind('brandName'), label: 'Brand Name', options: values.brandName }),
     },
     {
       accessor: 'description',
       title: 'Description',
-      sortable: true,
       // No tick list: a description is prose, so the list would be one entry per row.
-      ...columnFilter({ ...columnFilters.bind('description'), label: 'Description' }),
       // No width: it takes whatever the fixed columns leave, so the grid fits a laptop.
       render: (brand) =>
         brand.description ? (
@@ -217,24 +195,14 @@ export function BrandsPage() {
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (b) => <StatusBadge active={b.isActive} />,
     },
     {
       accessor: 'createdAtUtc',
       title: 'Created',
-      sortable: true,
       width: 180,
       // No tick list: every row is a different instant, so the list would be one entry per row.
-      ...columnFilter({ ...columnFilters.bind('createdAtUtc'), label: 'Created' }),
       render: (b) => formatDateTime(b.createdAtUtc),
     },
     {
@@ -330,19 +298,9 @@ export function BrandsPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<BrandDto>
           storeKey="masterdata.brands"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="brands"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', brand: record }) : undefined}
@@ -371,22 +329,15 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<BrandDto>[] = [
+  { accessor: 'brandCode', summary: 'count' },
+  { accessor: 'brandName' },
+  { accessor: 'description', text: (b) => b.description ?? '' },
+  { accessor: 'isActive', kind: 'boolean', text: (b) => (b.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'createdAtUtc', kind: 'date', text: (b) => formatDateTime(b.createdAtUtc) },
+]
 
-/** What each column SHOWS for a brand - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<BrandDto>> = {
-  brandCode: (b) => b.brandCode,
-  brandName: (b) => b.brandName,
-  description: (b) => b.description ?? '',
-  isActive: (b) => (b.isActive ? 'Active' : 'Inactive'),
-  createdAtUtc: (b) => formatDateTime(b.createdAtUtc),
-}
-
-/** Sorts on whatever column was clicked: flags with Inactive first, the rest as text. */
-function compareRows(a: BrandDto, b: BrandDto, key: keyof BrandDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}

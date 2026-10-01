@@ -1,5 +1,3 @@
-import type { PagedResult } from './types'
-
 /**
  * Loading a whole reference table, so its grid can sort and filter EVERY column in the browser.
  *
@@ -37,7 +35,7 @@ export interface AllRows<T> {
  * AbortSignal through so an abandoned load stops mid-way like any other.
  */
 export async function fetchAllPages<T>(
-  fetchPage: (page: number, pageSize: number) => Promise<PagedResult<T>>,
+  fetchPage: (page: number, pageSize: number) => Promise<{ items: T[]; totalCount: number }>,
 ): Promise<AllRows<T>> {
   const first = await fetchPage(1, PAGE_SIZE)
   const items = [...first.items]

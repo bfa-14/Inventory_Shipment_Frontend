@@ -4,10 +4,9 @@ import { IconFilterOff, IconRefresh } from '@tabler/icons-react'
 import { securityApi } from '../../api/security'
 import type { LoginAuditDto } from '../../api/types'
 import { formatDateTime } from '../../components/format'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useGridQuery } from '../../hooks/useGridQuery'
 
@@ -23,21 +22,17 @@ interface Filters {
 const NO_FILTERS: Filters = { username: '', onlyFailed: false, take: '200' }
 
 /**
- * What each column SHOWS for an attempt - the text its header filter matches and, where the column
- * offers a tick list, the values that list is built from. Module-level so the filter callbacks keep
- * their identity between renders.
+ * What each column IS, for the grid engine: its kind (so a time compares as a time) and what it
+ * shows. How a cell LOOKS stays in the column definitions below.
  */
-const COLUMN_TEXT: Record<string, ColumnText<LoginAuditDto>> = {
-  attemptedAtUtc: (e) => formatDateTime(e.attemptedAtUtc),
-  username: (e) => e.username,
-  succeeded: (e) => (e.succeeded ? 'Success' : 'Failed'),
-  failureReason: (e) => e.failureReason ?? '',
-  ipAddress: (e) => e.ipAddress ?? '',
-  userAgent: (e) => e.userAgent ?? '',
-}
-
-/** The closed set the Result funnel offers, whatever the loaded rows happen to contain. */
-const RESULT_VALUES = ['Success', 'Failed']
+const GRID_COLUMNS: GridColumnMeta<LoginAuditDto>[] = [
+  { accessor: 'attemptedAtUtc', kind: 'date', text: (e) => formatDateTime(e.attemptedAtUtc), summary: 'count' },
+  { accessor: 'username' },
+  { accessor: 'succeeded', kind: 'boolean', text: (e) => (e.succeeded ? 'Success' : 'Failed') },
+  { accessor: 'failureReason', text: (e) => e.failureReason ?? '' },
+  { accessor: 'ipAddress', text: (e) => e.ipAddress ?? '' },
+  { accessor: 'userAgent', text: (e) => e.userAgent ?? '' },
+]
 
 export function LoginAuditPage() {
   /**
@@ -68,52 +63,32 @@ export function LoginAuditPage() {
 
   const { filters, setFilter, loading, error } = query
   const entries = query.data ?? []
-  const { page, pageSize, sortStatus } = query
 
-  // The header funnels narrow what the request already returned - a second, purely local layer.
-  const grid = useGridFilters(COLUMN_TEXT, () => query.setPage(1))
-
-  /** The endpoint returns one flat list, so column filtering, sorting and paging all happen here. */
-  const narrowed = grid.apply(entries)
-  const key = sortStatus.columnAccessor as keyof LoginAuditDto
-  const sorted = [...narrowed].sort((a, b) => String(a[key] ?? '').localeCompare(String(b[key] ?? '')))
-  if (sortStatus.direction === 'desc') sorted.reverse()
-  const records = sorted.slice((page - 1) * pageSize, page * pageSize)
-
-  /**
-   * The tick lists come from every loaded attempt, not from the rows surviving the filters - a list
-   * that shrank as values were ticked would leave a filtered-out value impossible to un-tick.
-   */
-  const values = {
-    username: grid.options(entries, 'username'),
-    failureReason: grid.options(entries, 'failureReason'),
-    ipAddress: grid.options(entries, 'ipAddress'),
-  }
+  /* The header filters narrow what the request already returned - a second, purely local layer,
+     answered by the engine for every column. */
+  const engine = useDataGrid({
+    rows: entries,
+    columns: GRID_COLUMNS,
+    storeKey: 'security.loginAudit',
+    sort: [{ accessor: 'attemptedAtUtc', direction: 'desc' }],
+  })
 
   const columns: DataTableColumn<LoginAuditDto>[] = [
     {
       accessor: 'attemptedAtUtc',
       title: 'Time',
-      sortable: true,
       width: 215,
-      // No tick list: every attempt is a different instant, so the list would be one entry per row.
-      // The box matches the formatted text, so a date or an hour narrows it the way it reads.
-      ...columnFilter({ ...grid.bind('attemptedAtUtc'), label: 'Time' }),
       render: (e) => formatDateTime(e.attemptedAtUtc),
     },
     {
       accessor: 'username',
       title: 'Username',
-      sortable: true,
       width: 195,
-      ...columnFilter({ ...grid.bind('username'), label: 'Username', options: values.username }),
     },
     {
       accessor: 'succeeded',
       title: 'Result',
-      sortable: true,
       width: 145,
-      ...columnFilter({ ...grid.bind('succeeded'), label: 'Result', options: RESULT_VALUES, withText: false }),
       render: (e) => (
         <Badge variant="light" color={e.succeeded ? 'green' : 'red'}>
           {e.succeeded ? 'Success' : 'Failed'}
@@ -123,25 +98,19 @@ export function LoginAuditPage() {
     {
       accessor: 'failureReason',
       title: 'Reason',
-      sortable: true,
-      ...columnFilter({ ...grid.bind('failureReason'), label: 'Reason', options: values.failureReason }),
       render: (e) => e.failureReason ?? '-',
     },
     {
       accessor: 'ipAddress',
       title: 'IP address',
-      sortable: true,
       width: 175,
-      ...columnFilter({ ...grid.bind('ipAddress'), label: 'IP address', options: values.ipAddress }),
       render: (e) => e.ipAddress ?? '-',
     },
     {
       accessor: 'userAgent',
       title: 'User agent',
-      sortable: true,
       // No tick list: a user agent is prose, one string per browser build, so the box is the control
       // that helps - "Chrome" or "Windows" narrows it, a list of 200 full strings does not.
-      ...columnFilter({ ...grid.bind('userAgent'), label: 'User agent' }),
       render: (e) => (
         <Text fz="sm" lineClamp={1} title={e.userAgent ?? undefined}>
           {e.userAgent ?? '-'}
@@ -214,19 +183,10 @@ export function LoginAuditPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<LoginAuditDto>
           storeKey="security.loginAudit"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="login-audit"
           columns={columns}
-          totalRecords={narrowed.length}
-          page={page}
-          recordsPerPage={pageSize}
-          onPageChange={query.setPage}
-          onRecordsPerPageChange={query.setPageSize}
-          sortStatus={sortStatus}
-          onSortStatusChange={query.setSortStatus}
           fetching={loading}
-          filters={grid}
           noRecordsText="No sign-in attempts match these filters."
         />
       </Paper>

@@ -9,10 +9,9 @@ import type { CurrencyLookupDto, PriceListDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { currencyLabel } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
@@ -87,32 +86,17 @@ export function PriceListsPage() {
   const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.priceLists',
+    sort: [{ accessor: 'priceListCode', direction: 'asc' }],
+  })
+
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof PriceListDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick lists come from EVERY price list, not from the rows surviving the filters. */
-  const values = useMemo(
-    () => ({
-      priceListCode: columnOptions(rows, 'priceListCode'),
-      priceListName: columnOptions(rows, 'priceListName'),
-    }),
-    [rows, columnOptions],
-  )
 
   // Every currency, including inactive ones, so lists priced in a deactivated currency can still
   // be filtered out of the grid.
@@ -130,7 +114,7 @@ export function PriceListsPage() {
       'price-lists.csv',
       ['Price List Code', 'Price List Name', 'Currency', 'Prices', 'Description', 'Status'],
       // What the reader is looking at, funnels and all - not the whole table behind them.
-      sorted.map((p) => [
+      engine.rows.map((p) => [
         p.priceListCode,
         p.priceListName,
         priceListCurrency(p),
@@ -204,26 +188,12 @@ export function PriceListsPage() {
     if (confirmed) await setStatus(priceList, activating)
   }
 
-  /* The Currency funnel picks ONE currency, because the endpoint filters by a single currencyId -
-     see the `single` note on ColumnFilter. */
-  const filteredCurrency = currencies.find((c) => String(c.id) === filters.currencyId)
-
   const columns: DataTableColumn<PriceListDto>[] = [
-    rowNumberColumn<PriceListDto>(grid.page, grid.pageSize),
-    /* Price List Code and Price List Name carry no header filter: this grid pages on the server and
-       the search endpoint takes one free-text parameter that matches code OR name, so a per-column
-       box here could only narrow by something other than the column it sits on. The search box in
-       the filter bar is that parameter, under its own name. See docs/frontend-conventions.md. */
+    rowNumberColumn<PriceListDto>(engine.page, engine.pageSize),
     {
       accessor: 'priceListCode',
       title: 'Price List Code',
-      sortable: true,
       width: 170,
-      ...columnFilter({
-        ...columnFilters.bind('priceListCode'),
-        label: 'Price List Code',
-        options: values.priceListCode,
-      }),
       render: (p) => (
         <Text fz="sm" fw={600}>
           {p.priceListCode}
@@ -233,44 +203,17 @@ export function PriceListsPage() {
     {
       accessor: 'priceListName',
       title: 'Price List Name',
-      sortable: true,
-      ...columnFilter({
-        ...columnFilters.bind('priceListName'),
-        label: 'Price List Name',
-        options: values.priceListName,
-      }),
     },
     {
       accessor: 'currencyCode',
       title: 'Currency',
-      sortable: true,
       width: 220,
-      ...columnFilter({
-        label: 'Currency',
-        value: filteredCurrency ? { values: [currencyLabel(filteredCurrency)] } : undefined,
-        onApply: (next) => {
-          const picked = next?.values?.[0]
-          const currency = picked ? currencies.find((c) => currencyLabel(c) === picked) : undefined
-          setFilter('currencyId', currency ? String(currency.id) : null)
-        },
-        options: currencies.map(currencyLabel),
-        withText: false,
-        single: true,
-      }),
       render: (p) => <Text fz="sm">{priceListCurrency(p)}</Text>,
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (p) => <StatusBadge active={p.isActive} />,
     },
     {
@@ -381,19 +324,9 @@ export function PriceListsPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PriceListDto>
           storeKey="masterdata.priceLists"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="price-lists"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={
             filtered
@@ -424,21 +357,14 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<PriceListDto>[] = [
+  { accessor: 'priceListCode', summary: 'count' },
+  { accessor: 'priceListName' },
+  { accessor: 'currencyCode', text: priceListCurrency },
+  { accessor: 'isActive', kind: 'boolean', text: (p) => (p.isActive ? 'Active' : 'Inactive') },
+]
 
-/** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<PriceListDto>> = {
-  priceListCode: (p) => p.priceListCode,
-  priceListName: (p) => p.priceListName,
-  currencyCode: priceListCurrency,
-  isActive: (p) => (p.isActive ? 'Active' : 'Inactive'),
-}
-
-/** Sorts on whatever column was clicked: flags with Inactive first, the rest as text. */
-function compareRows(a: PriceListDto, b: PriceListDto, key: keyof PriceListDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}

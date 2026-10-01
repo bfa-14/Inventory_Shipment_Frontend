@@ -10,12 +10,12 @@ import type { PartyLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { partyLabel } from '../../components/sales/salesLines'
-import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { STATEMENT_ROUTE } from '../../components/sales/receipt/receiptModel'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
-import { PAGE_SIZE_OPTIONS } from '../../config'
 
 /** What each entry did to the balance: owed more is orange, owed less is green. */
 const TYPE_COLOURS: Record<string, string> = {
@@ -27,6 +27,21 @@ const TYPE_COLOURS: Record<string, string> = {
 }
 
 type Row = CustomerStatementEntryDto & { rowKey: string }
+
+/**
+ * What each column IS, for the grid engine. The debit and credit columns are totalled over every row
+ * the filters leave; the balance is a RUNNING figure and has no total, and the document's own
+ * amount mixes currencies and cannot be added up.
+ */
+const GRID_COLUMNS: GridColumnMeta<Row>[] = [
+  { accessor: 'entryDate', kind: 'date' },
+  { accessor: 'entryType', kind: 'list', summary: 'count' },
+  { accessor: 'documentNumber', text: (r) => r.documentNumber ?? '' },
+  { accessor: 'docAmount', kind: 'number', text: (r) => `${formatNumber(r.docAmount, r.decimalPlaces)} ${r.currencyCode ?? ''}` },
+  { accessor: 'debit', kind: 'number', summary: 'sum', text: (r) => (r.debit === 0 ? '' : formatNumber(r.debit, 2)) },
+  { accessor: 'credit', kind: 'number', summary: 'sum', text: (r) => (r.credit === 0 ? '' : formatNumber(r.credit, 2)) },
+  { accessor: 'balance', kind: 'number', text: (r) => formatNumber(r.balance, 2) },
+]
 
 /**
  * One customer's account: what they were invoiced, what they paid, and what is still owed.
@@ -48,9 +63,6 @@ export function CustomerStatementPage() {
   const requestKey = `${clientId}|${dateFrom}|${dateTo}`
   const loading = clientId !== null && loadedFor !== requestKey
   const [error, setError] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Row>>({ columnAccessor: 'entryDate', direction: 'asc' })
-  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
 
   useEffect(() => {
     partiesApi.lookup({ partyType: 'Client', activeOnly: false }).then(setClients).catch(() => setError('Customers could not be loaded.'))
@@ -65,7 +77,6 @@ export function CustomerStatementPage() {
         setStatement(doc)
         setLoadedFor(requestKey)
         setError(null)
-        setPage(1)
       })
       .catch((err) => {
         if (controller.signal.aborted) return
@@ -79,45 +90,33 @@ export function CustomerStatementPage() {
   const statement = clientId === null ? null : loaded
   const base = statement?.baseCurrencyCode ?? 'USD'
   const rows: Row[] = useMemo(() => (statement?.entries ?? []).map((e, i) => ({ ...e, rowKey: `${i}-${e.entryType}-${e.documentId}` })), [statement])
-  /* SORTED HERE, over every row, because the whole statement is loaded at once. The original index
-     breaks ties so same-day entries keep their ledger order, and the running balance still reads
-     correctly when the date is the sort. */
-  const sorted = useMemo(() => {
-    const key = sortStatus.columnAccessor as keyof Row
-    const ordered = rows
-      .map((row, index) => ({ row, index }))
-      .sort((a, b) => {
-        const left = a.row[key]
-        const right = b.row[key]
-        const result =
-          typeof left === 'number' && typeof right === 'number'
-            ? left - right
-            : String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-        return result || a.index - b.index
-      })
-      .map((x) => x.row)
-    return sortStatus.direction === 'desc' ? ordered.reverse() : ordered
-  }, [rows, sortStatus])
-  const records = sorted.slice((page - 1) * pageSize, page * pageSize)
+  /* The whole statement is loaded at once, so the engine filters, sorts, pages and totals it. Same-day
+     entries keep their ledger order, and the running balance still reads correctly when the date is
+     the sort. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'sales.customerStatement',
+    sort: [{ accessor: 'entryDate', direction: 'asc' }],
+  })
 
-  const money = (value: number) => (value === 0 ? '—' : formatNumber(value, 2))
+    const money = (value: number) => (value === 0 ? '—' : formatNumber(value, 2))
 
   const columns: DataTableColumn<Row>[] = [
-    rowNumberColumn<Row>(page, pageSize),
-    { accessor: 'entryDate', sortable: true, title: 'Date', width: 110, render: (row) => dateLabel(row.entryDate) },
-    { accessor: 'entryType', sortable: true, title: 'Type', width: 150, render: (row) => <Badge color={TYPE_COLOURS[row.entryType] ?? 'gray'} variant="light">{row.entryType}</Badge> },
-    { accessor: 'documentNumber', sortable: true, title: 'Document', render: (row) => <Text fz="sm" fw={500}>{row.documentNumber ?? '—'}</Text> },
+    rowNumberColumn<Row>(engine.page, engine.pageSize),
+    { accessor: 'entryDate', title: 'Date', width: 110, render: (row) => dateLabel(row.entryDate) },
+    { accessor: 'entryType', title: 'Type', width: 150, render: (row) => <Badge color={TYPE_COLOURS[row.entryType] ?? 'gray'} variant="light">{row.entryType}</Badge> },
+    { accessor: 'documentNumber', title: 'Document', render: (row) => <Text fz="sm" fw={500}>{row.documentNumber ?? '—'}</Text> },
     {
       accessor: 'docAmount',
-      sortable: true,
       title: 'Document amount',
       width: 190,
       textAlign: 'right',
       render: (row) => <span style={{ whiteSpace: 'nowrap' }}>{formatNumber(row.docAmount, row.decimalPlaces)} {row.currencyCode}</span>,
     },
-    { accessor: 'debit', sortable: true, title: `Debit (${base})`, width: 140, textAlign: 'right', render: (row) => money(row.debit) },
-    { accessor: 'credit', sortable: true, title: `Credit (${base})`, width: 140, textAlign: 'right', render: (row) => money(row.credit) },
-    { accessor: 'balance', sortable: true, title: `Balance (${base})`, width: 150, textAlign: 'right', render: (row) => <Text fz="sm" fw={600}>{formatNumber(row.balance, 2)}</Text> },
+    { accessor: 'debit', title: `Debit (${base})`, width: 140, textAlign: 'right', render: (row) => money(row.debit) },
+    { accessor: 'credit', title: `Credit (${base})`, width: 140, textAlign: 'right', render: (row) => money(row.credit) },
+    { accessor: 'balance', title: `Balance (${base})`, width: 150, textAlign: 'right', render: (row) => <Text fz="sm" fw={600}>{formatNumber(row.balance, 2)}</Text> },
   ]
 
   const print = () => {
@@ -166,22 +165,9 @@ export function CustomerStatementPage() {
         <DataTable
           storeKey="sales.customerStatement"
           idAccessor="rowKey"
-          records={records}
-          summaryRecords={rows}
+          engine={engine}
+          exportFileName="customer-statement"
           columns={columns}
-          totalRecords={rows.length}
-          page={page}
-          recordsPerPage={pageSize}
-          onPageChange={setPage}
-          onRecordsPerPageChange={(size) => {
-            setPageSize(size)
-            setPage(1)
-          }}
-          sortStatus={sortStatus}
-          onSortStatusChange={(next) => {
-            setSortStatus(next)
-            setPage(1)
-          }}
           fetching={loading}
           noRecordsText={clientId === null ? 'Choose a customer to see their statement.' : 'No entries in this period.'}
         />

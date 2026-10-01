@@ -6,11 +6,10 @@ import { ApiError } from '../../api/http'
 import { appliesToLabel, ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -28,26 +27,17 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', category: null, isActive: null }
 
-/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
-const STATUS_VALUES = ['Active', 'Inactive']
-
-/** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<AttachmentTypeDto>> = {
-  category: (r) => r.category,
-  subType: (r) => r.subType,
-  appliesTo: (r) => appliesToLabel(r.appliesTo),
-  sortOrder: (r) => formatNumber(r.sortOrder),
-  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
-}
-
-/** Sorts on whatever column was clicked: numbers numerically, flags with Inactive first. */
-function compareRows(a: AttachmentTypeDto, b: AttachmentTypeDto, key: keyof AttachmentTypeDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'number' && typeof right === 'number') return left - right
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number), what it
+ * shows, and whether the footer totals it. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<AttachmentTypeDto>[] = [
+  { accessor: 'category', summary: 'count' },
+  { accessor: 'subType' },
+  { accessor: 'appliesTo', kind: 'list', text: (r) => appliesToLabel(r.appliesTo) },
+  { accessor: 'sortOrder', kind: 'number', text: (r) => formatNumber(r.sortOrder) },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTypeDto } | null
 
@@ -85,34 +75,15 @@ export function AttachmentTypesPage() {
   const { filters, setFilter, data, loading, error } = grid
   const rows = useMemo(() => data?.items ?? [], [data])
 
-  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages and counts. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof AttachmentTypeDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick lists come from EVERY row, not from the ones surviving the filters. */
-  const values = useMemo(
-    () => ({
-      category: columnOptions(rows, 'category'),
-      subType: columnOptions(rows, 'subType'),
-      appliesTo: columnOptions(rows, 'appliesTo'),
-      sortOrder: columnOptions(rows, 'sortOrder'),
-    }),
-    [rows, columnOptions],
-  )
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: filter, multi-column sort, paging,
+     footer totals over all the filtered rows, CSV. The bar above the grid still narrows what is
+     loaded; the grid's own column filters narrow what is loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.attachmentTypes',
+    sort: [{ accessor: 'sortOrder', direction: 'asc' }],
+  })
   const load = grid.reload
 
   async function afterSave(message: string) {
@@ -158,44 +129,34 @@ export function AttachmentTypesPage() {
   }
 
   const columns: DataTableColumn<AttachmentTypeDto>[] = [
-    rowNumberColumn<AttachmentTypeDto>(grid.page, grid.pageSize),
+    rowNumberColumn<AttachmentTypeDto>(engine.page, engine.pageSize),
     {
       accessor: 'category',
       title: 'Category',
-      sortable: true,
       width: 180,
-      ...columnFilter({ ...columnFilters.bind('category'), label: 'Category', options: values.category }),
       render: (row) => <Text fw={600} fz="sm">{row.category}</Text>,
     },
     {
       accessor: 'subType',
       title: 'Sub Type',
-      sortable: true,
-      ...columnFilter({ ...columnFilters.bind('subType'), label: 'Sub Type', options: values.subType }),
     },
     {
       accessor: 'appliesTo',
       title: 'Used on',
-      sortable: true,
       width: 130,
-      ...columnFilter({ ...columnFilters.bind('appliesTo'), label: 'Used on', options: values.appliesTo }),
       render: (row) => appliesToLabel(row.appliesTo),
     },
     {
       accessor: 'sortOrder',
       title: 'Sort Order',
-      sortable: true,
       width: 120,
       textAlign: 'right',
-      ...columnFilter({ ...columnFilters.bind('sortOrder'), label: 'Sort Order', options: values.sortOrder }),
       render: (row) => formatNumber(row.sortOrder),
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 120,
-      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (row) => <StatusBadge active={row.isActive} />,
     },
     {
@@ -263,19 +224,9 @@ export function AttachmentTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<AttachmentTypeDto>
           storeKey="masterdata.attachmentTypes"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="attachment-types"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', attachmentType: record }) : undefined}
           noRecordsText={grid.isDefault ? 'No attachment types yet.' : 'No attachment types found. Try clearing the filters.'}

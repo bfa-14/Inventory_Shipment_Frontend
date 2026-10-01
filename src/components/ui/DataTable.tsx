@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { Button, Checkbox, Group, Menu, Modal, Stack, Text, UnstyledButton } from '@mantine/core'
-import { IconColumns3, IconFilterOff, IconRestore } from '@tabler/icons-react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { ActionIcon, Badge, Button, Checkbox, Group, Menu, Modal, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core'
+import { IconColumns3, IconDownload, IconFilter, IconFilterOff, IconRestore } from '@tabler/icons-react'
 import { formatNumber } from '../format'
+import { GridFilterCell } from './grid/GridFilterCell'
+import { GridFilterPopover } from './grid/GridFilterPopover'
+import type { DataGrid } from './grid/useDataGrid'
 import {
   DataTable as MantineDataTable,
   humanize,
@@ -99,14 +102,30 @@ function computeSummary<T>(rows: T[], accessor: string, kind: SummaryKind): numb
   }
 }
 
+/** The most distinct values a column's filter lists; past this the list is a copy of the grid. */
+const VALUE_LIST_LIMIT = 100
+
 /** Whole numbers read as whole numbers; an average or a money total keeps its two places. */
 function formatSummary(value: number): string {
   return formatNumber(value, Number.isInteger(value) ? 0 : 2)
 }
 
 interface DataTableProps<T> {
-  records: T[]
+  /** The rows to draw. Ignored when an {@link DataTableProps.engine} holds them. */
+  records?: T[]
   columns: DataTableColumn<T>[]
+  /**
+   * A {@link DataGrid} from `useDataGrid`: the page hands its rows to the engine and the grid does the
+   * rest in the browser - typed column filters (header dialog and an optional filter row), multi-column
+   * sort (Shift-click), paging, footer totals over the WHOLE filtered result, and CSV export.
+   *
+   * With an engine the page passes no records, paging or sort props, and no summaryRecords: all of
+   * that comes from the engine. Columns still say how a cell LOOKS; the engine's column meta says
+   * what the column IS.
+   */
+  engine?: DataGrid<T>
+  /** The file name an engine grid's Export gives its CSV. */
+  exportFileName?: string
   /** Total rows matching the filters, across every page (server-side paging). */
   totalRecords?: number
   /**
@@ -221,8 +240,10 @@ interface DataTableProps<T> {
  * With the grid focused, Up and Down move the mark and Enter runs {@link onRowActivate}.
  */
 export function DataTable<T>({
-  records,
+  records: recordsProp,
   columns,
+  engine,
+  exportFileName = 'export',
   totalRecords,
   page,
   recordsPerPage,
@@ -246,8 +267,21 @@ export function DataTable<T>({
   summaryRecords,
   summaryScope = 'filtered',
 }: DataTableProps<T>) {
-  const activeFilters = filters?.activeCount ?? 0
+  const activeFilters = engine ? engine.activeCount : (filters?.activeCount ?? 0)
+  const clearColumnFilters = engine ? engine.clearFilters : filters?.clearAll
   const idKey = idAccessor ?? 'id'
+
+  // The rows on screen, the paging and the sort: the engine's when there is one, the page's otherwise.
+  const records = engine ? engine.pageRows : (recordsProp ?? [])
+  const effPage = engine ? engine.page : page
+  const effPerPage = engine ? engine.pageSize : recordsPerPage
+  const effTotal = engine ? engine.total : totalRecords
+  const effOnPage = engine ? engine.setPage : onPageChange
+  const effOnPerPage = engine ? engine.setPageSize : onRecordsPerPageChange
+  const effPageSizes: number[] = engine ? engine.pageSizeOptions : [...PAGE_SIZE_OPTIONS]
+
+  /** Was Shift held when the header was pressed? mantine-datatable's sort callback does not say. */
+  const shiftHeld = useRef(false)
 
   /**
    * Every column a page did not fix or decide for itself becomes resizable, so a page opts in with
@@ -260,7 +294,7 @@ export function DataTable<T>({
    * reached through the menu below. Hiding does not depend on the flag - `effectiveColumns` takes
    * it from the stored toggle state either way - so leaving it off costs nothing.
    */
-  const adjustableColumns = useMemo(
+  const resizableColumns = useMemo(
     () =>
       storeKey === undefined
         ? columns
@@ -271,6 +305,66 @@ export function DataTable<T>({
           ),
     [columns, storeKey],
   )
+
+  /**
+   * With an engine, every column the engine knows becomes sortable and filterable, and its header
+   * grows what a desktop grid's header has: a sort-order badge when several keys are in play, a
+   * funnel with the typed filter dialog, and - when the filter row is on - an inline filter box.
+   */
+  const adjustableColumns = useMemo((): DataTableColumn<T>[] => {
+    if (!engine) return resizableColumns
+    return resizableColumns.map((column) => {
+      const accessor = String(column.accessor)
+      const meta = engine.meta.find((entry) => entry.accessor === accessor)
+      if (!meta || FIXED_ACCESSORS.has(accessor)) return column
+
+      const label = typeof column.title === 'string' ? column.title : humanize(accessor)
+      const kind = meta.kind ?? 'text'
+      const filterable = meta.filterable !== false
+      const sortable = meta.sortable !== false
+      const order = engine.sort.findIndex((spec) => spec.accessor === accessor)
+      const value = engine.filters[accessor]
+      // A value list earns its place on a column with a few values to pick from. On a date it would
+      // be one entry per instant, and past a hundred distinct values it is a copy of the grid.
+      const listed = kind === 'date' ? [] : engine.options(accessor)
+      const valueList = listed.length > VALUE_LIST_LIMIT ? [] : listed
+
+      const title: ReactNode =
+        engine.filterRow && filterable ? (
+          <Stack gap={4} py={2}>
+            <HeaderLabel label={label} order={engine.sort.length > 1 ? order : -1} direction={engine.sort[order]?.direction} />
+            <GridFilterCell label={label} kind={kind} value={value} options={valueList} onChange={(next) => engine.setFilter(accessor, next)} />
+          </Stack>
+        ) : engine.sort.length > 1 && order >= 0 ? (
+          <HeaderLabel label={label} order={order} direction={engine.sort[order]?.direction} />
+        ) : (
+          column.title
+        )
+
+      return {
+        ...column,
+        title,
+        sortable: sortable && column.sortable !== false,
+        ...(filterable
+          ? {
+              filter: ({ close }: { close: () => void }) => (
+                <GridFilterPopover
+                  label={label}
+                  kind={kind}
+                  value={value}
+                  options={valueList}
+                  onApply={(next) => engine.setFilter(accessor, next)}
+                  close={close}
+                />
+              ),
+              filtering: value !== undefined,
+            }
+          : {}),
+      }
+    })
+    // The engine is a new object every render; what matters is what it holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resizableColumns, engine?.meta, engine?.filters, engine?.sort, engine?.filterRow, engine?.rows])
 
   /**
    * Called unconditionally - hooks may not be skipped - and harmless without a key: every part of
@@ -303,7 +397,33 @@ export function DataTable<T>({
    * its own words, and a generic Sum must not overwrite them. "#" and Actions get none: a total of
    * row numbers is not a fact about anything.
    */
+  /** A column's caption from the page's own definition - the header may be a node by now (sort badge, filter box). */
+  const labelOf = (accessor: string): string => {
+    const original = resizableColumns.find((column) => String(column.accessor) === accessor)
+    return typeof original?.title === 'string' ? original.title : humanize(accessor)
+  }
+
   const columnsWithSummary = useMemo(() => {
+    if (engine) {
+      return effectiveColumns.map((column) => {
+        const accessor = String(column.accessor)
+        if (FIXED_ACCESSORS.has(accessor) || column.footer !== undefined) return column
+        if (!engine.meta.some((entry) => entry.accessor === accessor)) return column
+        return {
+          ...column,
+          footer: (
+            <SummaryCell
+              label={labelOf(accessor)}
+              kind={engine.summaryKind(accessor)}
+              value={engine.summaryFor(accessor)}
+              numeric={engine.isNumeric(accessor)}
+              scope="filtered"
+              onChange={(next) => engine.setSummaryKind(accessor, next)}
+            />
+          ),
+        }
+      })
+    }
     if (summaryRecords === undefined) return effectiveColumns
 
     return effectiveColumns.map((column) => {
@@ -325,17 +445,18 @@ export function DataTable<T>({
         ),
       }
     })
-  }, [effectiveColumns, summaryRecords, summaryScope, summaries])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveColumns, summaryRecords, summaryScope, summaries, engine?.rows, engine?.meta])
 
   const columnLabels = useMemo(
     () =>
       Object.fromEntries(
-        adjustableColumns.map((column) => [
+        resizableColumns.map((column) => [
           String(column.accessor),
           typeof column.title === 'string' ? column.title : humanize(String(column.accessor)),
         ]),
       ),
-    [adjustableColumns],
+    [resizableColumns],
   )
 
   /**
@@ -350,7 +471,7 @@ export function DataTable<T>({
   const [chooserOpen, setChooserOpen] = useState(false)
 
   const [selectedId, setSelectedId] = useState<RowId | null>(null)
-  const [lastPage, setLastPage] = useState(page)
+  const [lastPage, setLastPage] = useState(effPage)
   const gridRef = useRef<HTMLDivElement>(null)
 
   /**
@@ -369,8 +490,8 @@ export function DataTable<T>({
   // an effect would paint a mark on the wrong row for one frame before taking it away again.
 
   // A new page is a new set of rows; the mark does not survive it.
-  if (lastPage !== page) {
-    setLastPage(page)
+  if (lastPage !== effPage) {
+    setLastPage(effPage)
     if (selectedId !== null) setSelectedId(null)
   }
 
@@ -417,38 +538,92 @@ export function DataTable<T>({
   // Paging and sorting are each all-or-nothing unions in mantine-datatable's own props, so they
   // are built as those union types and spread in: an optional `sortStatus` would satisfy neither
   // half of the union and the grid would stop type-checking.
-  const sortProps: DataTableSortProps<T> = sortStatus ? { sortStatus, onSortStatusChange } : {}
+  const engineSort = engine?.sort[0]
+  const sortProps: DataTableSortProps<T> = engine
+    ? {
+        sortStatus: { columnAccessor: engineSort?.accessor ?? '', direction: engineSort?.direction ?? 'asc' } as DataTableSortStatus<T>,
+        onSortStatusChange: (status) => {
+          const accessor = String(status.columnAccessor)
+          const existing = engine.sort.find((spec) => spec.accessor === accessor)
+          // mantine-datatable always answers "ascending" for a column that is not the primary key, so
+          // a Shift-click on a secondary key flips the direction it already has instead.
+          const direction =
+            shiftHeld.current && existing && accessor !== engine.sort[0]?.accessor
+              ? existing.direction === 'asc' ? 'desc' : 'asc'
+              : status.direction
+          engine.setSort({ accessor, direction }, shiftHeld.current)
+        },
+      }
+    : sortStatus
+      ? { sortStatus, onSortStatusChange }
+      : {}
 
   const pagingProps: DataTablePaginationProps =
-    page === undefined
+    effPage === undefined
       ? {}
       : {
-          page,
-          onPageChange: onPageChange ?? noop,
-          totalRecords: totalRecords ?? records.length,
-          recordsPerPage: recordsPerPage ?? PAGE_SIZE_OPTIONS[0],
-          recordsPerPageOptions: [...PAGE_SIZE_OPTIONS],
-          onRecordsPerPageChange: onRecordsPerPageChange ?? noop,
+          page: effPage,
+          onPageChange: effOnPage ?? noop,
+          totalRecords: effTotal ?? records.length,
+          recordsPerPage: effPerPage ?? PAGE_SIZE_OPTIONS[0],
+          recordsPerPageOptions: effPageSizes,
+          onRecordsPerPageChange: effOnPerPage ?? noop,
           paginationText: ({ from, to, totalRecords: total }) => `Showing ${from} to ${to} of ${total} entries`,
         }
+
+  function exportToCsv() {
+    if (!engine) return
+    const shownColumns = effectiveColumns
+      .map((column) => String(column.accessor))
+      .filter((accessor) => !FIXED_ACCESSORS.has(accessor))
+      .map((accessor) => ({ accessor, title: columnLabels[accessor] ?? humanize(accessor) }))
+    engine.exportCsv(shownColumns, exportFileName)
+  }
 
   return (
     <>
       {/* A column hidden while its funnel is still set is exactly when this line is the only thing
           left on screen saying the result is narrowed. */}
-      {activeFilters > 0 ? (
-        <Group justify="space-between" mb="xs" gap="sm">
-          <Text fz="sm" c="dimmed">
-            {activeFilters === 1 ? '1 column filter' : `${activeFilters} column filters`} in effect
-          </Text>
-          <Button
-            size="compact-sm"
-            variant="subtle"
-            leftSection={<IconFilterOff size={15} />}
-            onClick={() => filters?.clearAll()}
-          >
-            Clear column filters
-          </Button>
+      {activeFilters > 0 || engine ? (
+        <Group justify="space-between" mb="xs" gap="sm" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap">
+            {activeFilters > 0 ? (
+              <>
+                <Text fz="sm" c="dimmed">
+                  {activeFilters === 1 ? '1 column filter' : `${activeFilters} column filters`} in effect
+                  {engine ? ` — ${engine.total} of ${engine.loaded} rows` : ''}
+                </Text>
+                <Button
+                  size="compact-sm"
+                  variant="subtle"
+                  leftSection={<IconFilterOff size={15} />}
+                  onClick={() => clearColumnFilters?.()}
+                >
+                  Clear column filters
+                </Button>
+              </>
+            ) : null}
+          </Group>
+
+          {engine ? (
+            <Group gap={4} wrap="nowrap">
+              <Tooltip label={engine.filterRow ? 'Hide the filter row' : 'Show a filter row under the headers'} withArrow>
+                <ActionIcon
+                  variant={engine.filterRow ? 'filled' : 'subtle'}
+                  aria-label="Toggle filter row"
+                  aria-pressed={engine.filterRow}
+                  onClick={() => engine.setFilterRow(!engine.filterRow)}
+                >
+                  <IconFilter size={16} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label={`Export ${engine.total} row${engine.total === 1 ? '' : 's'} to CSV`} withArrow>
+                <ActionIcon variant="subtle" aria-label="Export to CSV" onClick={exportToCsv} disabled={engine.total === 0}>
+                  <IconDownload size={16} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          ) : null}
         </Group>
       ) : null}
 
@@ -489,7 +664,17 @@ export function DataTable<T>({
       />
 
       {/* Focusable so the arrow keys have somewhere to land; clicking a row puts the focus here. */}
-      <div ref={gridRef} className="app-grid" tabIndex={0} onKeyDown={handleKeys} onContextMenu={handleContextMenu}>
+      <div
+        ref={gridRef}
+        className="app-grid"
+        tabIndex={0}
+        onKeyDown={handleKeys}
+        onContextMenu={handleContextMenu}
+        // Captured before the header's own click handler runs, which is what lets it ask "Shift?".
+        onMouseDownCapture={(event) => {
+          shiftHeld.current = event.shiftKey
+        }}
+      >
         <MantineDataTable<T>
           // Rows answer a click everywhere now, but only a grid whose rows LEAD somewhere says so
           // with a pointer: selecting is not navigating, and the cursor must not promise it is.
@@ -687,6 +872,20 @@ function ColumnChooser({
 function rowId<T>(record: T, key: string): RowId | null {
   const value = (record as Record<string, unknown>)[key]
   return typeof value === 'string' || typeof value === 'number' ? value : null
+}
+
+/** A header's caption with, when several sort keys are in play, which key this is and which way it runs. */
+function HeaderLabel({ label, order, direction }: { label: string; order: number; direction?: 'asc' | 'desc' }) {
+  return (
+    <Group gap={4} wrap="nowrap">
+      <span>{label}</span>
+      {order >= 0 ? (
+        <Badge size="xs" variant="light" circle title={`Sort key ${order + 1}, ${direction === 'desc' ? 'descending' : 'ascending'}`}>
+          {order + 1}
+        </Badge>
+      ) : null}
+    </Group>
+  )
 }
 
 function noop() {}

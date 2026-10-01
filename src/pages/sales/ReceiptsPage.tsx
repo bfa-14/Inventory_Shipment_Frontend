@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconArrowBackUp, IconEye, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
 import { receiptsApi, RECEIPT_PAYMENT_TYPES, type ReceiptListDto, type ReceiptStatus } from '../../api/sales/receipts'
@@ -15,6 +16,7 @@ import { formatNumber } from '../../components/format'
 import { partyLabel } from '../../components/sales/salesLines'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -37,14 +39,22 @@ const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, status
 const STATUSES: ReceiptStatus[] = ['Draft', 'Posted', 'Reversed']
 const ROUTE = '/sales/receipts'
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  receiptNumber: 'ReceiptNumber',
-  receiptDate: 'ReceiptDate',
-  clientName: 'ClientName',
-  status: 'Status',
-  amountBase: 'AmountBase',
-  createdAtUtc: 'CreatedAtUtc',
-}
+/**
+ * What each column IS, for the grid engine. A receipt's own amount is in its own currency, so the
+ * footer sums the BASE-currency columns and the document-currency one carries no total.
+ */
+const GRID_COLUMNS: GridColumnMeta<ReceiptListDto>[] = [
+  { accessor: 'receiptNumber', summary: 'count', text: (r) => r.receiptNumber ?? 'DRAFT' },
+  { accessor: 'receiptDate', kind: 'date' },
+  { accessor: 'clientName' },
+  { accessor: 'paymentTypeName', kind: 'list' },
+  { accessor: 'sourceInvoiceNumber', text: (r) => r.sourceInvoiceNumber ?? 'Manual' },
+  { accessor: 'branchName' },
+  { accessor: 'amount', kind: 'number', text: (r) => `${formatNumber(r.amount, r.decimalPlaces)} ${r.currencyCode}` },
+  { accessor: 'amountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.amountBase, 2) },
+  { accessor: 'unappliedBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.unappliedBase, 2) },
+  { accessor: 'status', kind: 'list' },
+]
 
 /**
  * Every customer receipt: filters that apply as they are typed, row actions gated by permission and
@@ -68,28 +78,32 @@ export function ReceiptsPage() {
   const [reversing, setReversing] = useState<ReceiptListDto | null>(null)
   const [reverseBusy, setReverseBusy] = useState(false)
 
-  const grid = useGridQuery<Filters, ReceiptListDto, Awaited<ReturnType<typeof receiptsApi.list>>>({
+  const grid = useGridQuery<Filters, ReceiptListDto, AllRows<ReceiptListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'receiptDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The receipts could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        receiptsApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            clientId: filters.clientId === null ? undefined : Number(filters.clientId),
-            status: (filters.status as ReceiptStatus | null) ?? undefined,
-            paymentType: filters.paymentType === null ? undefined : (Number(filters.paymentType) as 1 | 2),
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'ReceiptDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          receiptsApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              clientId: filters.clientId === null ? undefined : Number(filters.clientId),
+              status: (filters.status as ReceiptStatus | null) ?? undefined,
+              paymentType: filters.paymentType === null ? undefined : (Number(filters.paymentType) as 1 | 2),
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'ReceiptDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -97,6 +111,17 @@ export function ReceiptsPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED RECEIPTS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows
+     what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'sales.receipts',
+    sort: [{ accessor: 'receiptDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     branchesApi.lookup(false).then(setBranches).catch(() => {})
@@ -150,11 +175,10 @@ export function ReceiptsPage() {
   }
 
   const columns: DataTableColumn<ReceiptListDto>[] = [
-    rowNumberColumn<ReceiptListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ReceiptListDto>(engine.page, engine.pageSize),
     {
       accessor: 'receiptNumber',
       title: 'Receipt No.',
-      sortable: true,
       width: 160,
       render: (row) =>
         row.receiptNumber ? (
@@ -163,11 +187,10 @@ export function ReceiptsPage() {
           <Badge color="gray" variant="light">DRAFT</Badge>
         ),
     },
-    { accessor: 'receiptDate', title: 'Date', sortable: true, width: 110, render: (row) => dateLabel(row.receiptDate) },
+    { accessor: 'receiptDate', title: 'Date', width: 110, render: (row) => dateLabel(row.receiptDate) },
     {
       accessor: 'clientName',
       title: 'Customer',
-      sortable: true,
       render: (row) => (
         <div>
           <Text fz="sm" fw={500}>{row.clientName}</Text>
@@ -202,7 +225,6 @@ export function ReceiptsPage() {
     {
       accessor: 'amountBase',
       title: 'Amount (USD)',
-      sortable: true,
       width: 140,
       textAlign: 'right',
       render: (row) => formatNumber(row.amountBase, 2),
@@ -218,7 +240,6 @@ export function ReceiptsPage() {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 110,
       render: (row) => <Badge color={STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{row.status}</Badge>,
     },
@@ -285,22 +306,18 @@ export function ReceiptsPage() {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more receipts than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" withBorder>
         <DataTable
           storeKey="sales.receipts"
-          records={data?.items ?? []}
-          /* The grid pages on the SERVER, so the footer can only add up the rows it was sent; each
-             figure says so under itself rather than passing ten rows off as the whole list. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="receipts"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No receipts yet."
           onRowClick={({ record }) => void navigate(`${ROUTE}/${record.id}`)}

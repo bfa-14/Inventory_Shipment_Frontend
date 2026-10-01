@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFileExport, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import {
   CHARGE_STATUSES,
   chargeStatusColour,
   containerChargesApi,
   type ChargeStatusCode,
   type ContainerChargeListDto,
-  type ContainerChargePageDto,
   type ContainerChargeQuery,
 } from '../../api/logistics/containerCharges'
 import { containersApi } from '../../api/logistics/containers'
@@ -26,6 +26,7 @@ import { ChargeDrawer } from '../../components/logistics/ChargeDrawer'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -63,13 +64,22 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  chargeDate: 'ChargeDate',
-  containerRef: 'ContainerRef',
-  chargeName: 'ChargeName',
-  amountBase: 'AmountBase',
-  status: 'Status',
-}
+/** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
+const GRID_COLUMNS: GridColumnMeta<ContainerChargeListDto>[] = [
+  { accessor: 'chargeDate', kind: 'date' },
+  { accessor: 'containerRef', summary: 'count' },
+  { accessor: 'movementNo', text: (r) => r.movementNo ?? '' },
+  { accessor: 'chargeName' },
+  { accessor: 'description', text: (r) => r.description ?? '' },
+  { accessor: 'providerName', text: (r) => r.providerName ?? '' },
+  { accessor: 'reference', text: (r) => r.reference ?? '' },
+  { accessor: 'amount', kind: 'number', text: (r) => formatMoney(r.amount, r.currencyCode) },
+  { accessor: 'amountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.amountBase, 2) },
+  { accessor: 'allocationMethod', kind: 'list', text: (r) => allocationMethodLabel(r.allocationMethod) },
+  { accessor: 'includeInLandedCost', kind: 'boolean', text: (r) => (r.includeInLandedCost ? 'Yes' : 'No') },
+  { accessor: 'status', kind: 'list', text: (r) => r.statusName },
+  { accessor: 'attachmentCount', kind: 'number' },
+]
 
 type Option = { value: string; label: string }
 
@@ -89,8 +99,8 @@ function toQuery(filters: Filters): ContainerChargeQuery {
 
 /**
  * Every container charge — freight, clearing, insurance — across the containers. A charge typed for
- * several containers is one row per container. The total under the grid is the whole filter's, from
- * the server, not the sum of the page. Ticked drafts are posted together, all or nothing.
+ * several containers is one row per container. The total under the grid adds up every row the
+ * filters left, not just the page on screen. Ticked drafts are posted together, all or nothing.
  */
 export function ContainerChargesPage() {
   const { hasPermission } = useAuth()
@@ -108,28 +118,43 @@ export function ContainerChargesPage() {
 
   const selection = useBulkSelection<ContainerChargeListDto>()
 
-  const grid = useGridQuery<Filters, ContainerChargeListDto, ContainerChargePageDto>({
+  const grid = useGridQuery<Filters, ContainerChargeListDto, AllRows<ContainerChargeListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'chargeDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The container charges could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        containerChargesApi.list(
-          {
-            ...toQuery(filters),
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'ChargeDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          containerChargesApi.list(
+            {
+              ...toQuery(filters),
+              sortBy: 'ChargeDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED CHARGES AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows
+     what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'logistics.containerCharges',
+    sort: [{ accessor: 'chargeDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     containersApi
@@ -232,13 +257,12 @@ export function ContainerChargesPage() {
   }
 
   const columns: DataTableColumn<ContainerChargeListDto>[] = [
-      rowNumberColumn<ContainerChargeListDto>(grid.page, grid.pageSize),
-      { accessor: 'chargeDate', title: 'Date', width: 110, sortable: true, render: (row) => dateLabel(row.chargeDate) },
+      rowNumberColumn<ContainerChargeListDto>(engine.page, engine.pageSize),
+      { accessor: 'chargeDate', title: 'Date', width: 110, render: (row) => dateLabel(row.chargeDate) },
       {
         accessor: 'containerRef',
         title: 'Container',
         width: 160,
-        sortable: true,
         render: (row) => (
           <Anchor component={Link} to={`${CONTAINERS_ROUTE}/${row.containerId}`} fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
             {row.containerRef}
@@ -262,7 +286,6 @@ export function ContainerChargesPage() {
         accessor: 'chargeName',
         title: 'Charge type',
         width: 190,
-        sortable: true,
         render: (row) => (
           <div>
             <Text fz="sm" fw={500}>{row.chargeName}</Text>
@@ -288,7 +311,6 @@ export function ContainerChargesPage() {
         title: `Amount (${baseCode})`,
         width: 140,
         textAlign: 'right',
-        sortable: true,
         render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{formatNumber(row.amountBase, 2)}</Text>,
       },
       { accessor: 'allocationMethod', title: 'Method', width: 140, render: (row) => allocationMethodLabel(row.allocationMethod) },
@@ -297,7 +319,6 @@ export function ContainerChargesPage() {
         accessor: 'status',
         title: 'Status',
         width: 170,
-        sortable: true,
         render: (row) => (
           <Group gap={4} wrap="nowrap">
             <Badge variant="light" color={chargeStatusColour(row.status)}>{row.statusName}</Badge>
@@ -409,6 +430,12 @@ export function ContainerChargesPage() {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more charges than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <BulkActionsBar
         count={selection.ids.length}
         canPost={canPost}
@@ -422,12 +449,8 @@ export function ContainerChargesPage() {
       <Paper radius="lg" withBorder>
         <DataTable
           storeKey="logistics.containerCharges"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="container-charges"
           columns={columns}
           {...(canPost
             ? {
@@ -436,13 +459,6 @@ export function ContainerChargesPage() {
                 isRecordSelectable: (row: ContainerChargeListDto) => row.status === 1 && row.canPost,
               }
             : {})}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No container charges match the filters."
           onRowClick={({ record }) => setOpenId(record.id)}
@@ -450,7 +466,7 @@ export function ContainerChargesPage() {
         />
         <Group justify="flex-end" px="md" py="sm" style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}>
           <Text fz="sm">
-            Total (base) of the filter: <Text span fw={700}>{formatMoney(data?.totalAmountBase ?? 0, baseCode)}</Text>
+            Total (base) of the rows shown: <Text span fw={700}>{formatMoney(engine.rows.reduce((sum, row) => sum + row.amountBase, 0), baseCode)}</Text>
           </Text>
         </Group>
       </Paper>

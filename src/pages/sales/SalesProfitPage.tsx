@@ -26,10 +26,9 @@ import type {
 import { isoDate, money } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { partyLabel } from '../../components/sales/salesLines'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useGridQuery } from '../../hooks/useGridQuery'
@@ -120,29 +119,23 @@ const percent = (value: number | null) => (value === null ? '—' : `${formatNum
  * the cells format them ("1,250.00", "12.50 %"), so a filter narrows by what is read. No tick lists
  * on this grid: every column but the group is a figure, and its list would be one entry per row.
  */
-const COLUMN_TEXT: Record<string, ColumnText<SalesProfitRowDto>> = {
-  groupLabel: (r) => r.groupLabel,
-  invoiceCount: (r) => formatNumber(r.invoiceCount),
-  returnCount: (r) => formatNumber(r.returnCount),
-  quantityBase: (r) => formatNumber(r.quantityBase),
-  grossSalesBase: (r) => formatNumber(r.grossSalesBase, 2),
-  discountBase: (r) => formatNumber(r.discountBase, 2),
-  netSalesBase: (r) => formatNumber(r.netSalesBase, 2),
-  cogsBase: (r) => formatNumber(r.cogsBase, 2),
-  grossProfitBase: (r) => formatNumber(r.grossProfitBase, 2),
-  grossProfitPct: (r) => percent(r.grossProfitPct),
-  cogsAdjustmentsBase: (r) => formatNumber(r.cogsAdjustmentsBase, 2),
-}
-
-/** Sorts on whatever column was clicked: numbers numerically, the group label as text. */
-function compareRows(a: SalesProfitRowDto, b: SalesProfitRowDto, key: keyof SalesProfitRowDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'number' || typeof right === 'number') {
-    return (typeof left === 'number' ? left : 0) - (typeof right === 'number' ? right : 0)
-  }
-  return String(left ?? '').localeCompare(String(right ?? ''))
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<SalesProfitRowDto>[] = [
+  { accessor: 'groupLabel' },
+  { accessor: 'invoiceCount', kind: 'number', text: (r) => formatNumber(r.invoiceCount) },
+  { accessor: 'returnCount', kind: 'number', text: (r) => formatNumber(r.returnCount) },
+  { accessor: 'quantityBase', kind: 'number', text: (r) => formatNumber(r.quantityBase) },
+  { accessor: 'grossSalesBase', kind: 'number', text: (r) => formatNumber(r.grossSalesBase, 2) },
+  { accessor: 'discountBase', kind: 'number', text: (r) => formatNumber(r.discountBase, 2) },
+  { accessor: 'netSalesBase', kind: 'number', text: (r) => formatNumber(r.netSalesBase, 2) },
+  { accessor: 'cogsBase', kind: 'number', text: (r) => formatNumber(r.cogsBase, 2) },
+  { accessor: 'grossProfitBase', kind: 'number', text: (r) => formatNumber(r.grossProfitBase, 2) },
+  { accessor: 'grossProfitPct', text: (r) => percent(r.grossProfitPct) },
+  { accessor: 'cogsAdjustmentsBase', kind: 'number', text: (r) => formatNumber(r.cogsAdjustmentsBase, 2) },
+]
 
 /**
  * What selling the goods earned, grouped the way the reader asks for.
@@ -170,6 +163,16 @@ export function SalesProfitPage() {
   const { filters, setFilter, loading, error } = grid
   const rows = useMemo(() => grid.data ?? [], [grid.data])
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'sales.salesProfit',
+    sort: [{ accessor: 'netSalesBase', direction: 'desc' }],
+  })
+
   useEffect(() => {
     // Inactive records are offered too: a sale posted last quarter still points at the client or the
     // item that has since been retired, and a report that could not name them would hide those rows.
@@ -182,26 +185,9 @@ export function SalesProfitPage() {
   }, [])
 
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters } = columnFilters
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof SalesProfitRowDto
-  const sortDirection = grid.sortStatus.direction
-
-  /** What the funnels left of the report - the rows this page then sorts, pages and totals. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
   const totals = useMemo(
     () =>
-      narrowed.reduce<Totals>(
+      engine.rows.reduce<Totals>(
         (sum, row) => ({
           invoiceCount: sum.invoiceCount + row.invoiceCount,
           returnCount: sum.returnCount + row.returnCount,
@@ -215,7 +201,7 @@ export function SalesProfitPage() {
         }),
         ZERO,
       ),
-    [narrowed],
+    [engine.rows],
   )
 
   // Taken from the two totals rather than averaging the rows' percentages: an invoice worth ten
@@ -248,17 +234,15 @@ export function SalesProfitPage() {
     {
       accessor: 'groupLabel',
       title: 'Group',
-      sortable: true,
       width: 240,
       // The footer sums every row the funnels LEFT, not the page on screen: a total that changed as
       // the reader turned a page would answer no question at all, while one that ignored the funnels
       // would answer a question they had just narrowed away from.
       footer: (
         <Text fz="sm" fw={700}>
-          Total ({formatNumber(narrowed.length)} rows)
+          Total ({formatNumber(engine.rows.length)} rows)
         </Text>
       ),
-      ...columnFilter({ ...columnFilters.bind('groupLabel'), label: 'Group' }),
       render: (row) => (
         <Text fz="sm" fw={500}>
           {row.groupLabel}
@@ -268,61 +252,49 @@ export function SalesProfitPage() {
     {
       accessor: 'invoiceCount',
       title: 'Invoices',
-      sortable: true,
       width: 90,
       textAlign: 'right',
       footer: countFooter(totals.invoiceCount),
-      ...columnFilter({ ...columnFilters.bind('invoiceCount'), label: 'Invoices' }),
       render: (row) => formatNumber(row.invoiceCount),
     },
     {
       accessor: 'returnCount',
       title: 'Returns',
-      sortable: true,
       width: 90,
       textAlign: 'right',
       footer: countFooter(totals.returnCount),
-      ...columnFilter({ ...columnFilters.bind('returnCount'), label: 'Returns' }),
       render: (row) => formatNumber(row.returnCount),
     },
     {
       accessor: 'quantityBase',
       title: 'Qty',
-      sortable: true,
       width: 100,
       textAlign: 'right',
       footer: countFooter(totals.quantityBase),
-      ...columnFilter({ ...columnFilters.bind('quantityBase'), label: 'Qty' }),
       render: (row) => formatNumber(row.quantityBase),
     },
     {
       accessor: 'grossSalesBase',
       title: 'Gross Sales (USD)',
-      sortable: true,
       width: 140,
       textAlign: 'right',
       footer: amountFooter(totals.grossSalesBase),
-      ...columnFilter({ ...columnFilters.bind('grossSalesBase'), label: 'Gross Sales' }),
       render: (row) => formatNumber(row.grossSalesBase, 2),
     },
     {
       accessor: 'discountBase',
       title: 'Discount (USD)',
-      sortable: true,
       width: 130,
       textAlign: 'right',
       footer: amountFooter(totals.discountBase),
-      ...columnFilter({ ...columnFilters.bind('discountBase'), label: 'Discount' }),
       render: (row) => formatNumber(row.discountBase, 2),
     },
     {
       accessor: 'netSalesBase',
       title: 'Net Sales (USD)',
-      sortable: true,
       width: 140,
       textAlign: 'right',
       footer: amountFooter(totals.netSalesBase),
-      ...columnFilter({ ...columnFilters.bind('netSalesBase'), label: 'Net Sales' }),
       render: (row) => (
         <Text fz="sm" fw={500}>
           {formatNumber(row.netSalesBase, 2)}
@@ -332,21 +304,17 @@ export function SalesProfitPage() {
     {
       accessor: 'cogsBase',
       title: 'COGS (USD)',
-      sortable: true,
       width: 130,
       textAlign: 'right',
       footer: amountFooter(totals.cogsBase),
-      ...columnFilter({ ...columnFilters.bind('cogsBase'), label: 'COGS' }),
       render: (row) => formatNumber(row.cogsBase, 2),
     },
     {
       accessor: 'grossProfitBase',
       title: 'Gross Profit (USD)',
-      sortable: true,
       width: 150,
       textAlign: 'right',
       footer: amountFooter(totals.grossProfitBase),
-      ...columnFilter({ ...columnFilters.bind('grossProfitBase'), label: 'Gross Profit' }),
       render: (row) => (
         <Text fz="sm" fw={500} c={row.grossProfitBase < 0 ? 'red' : undefined}>
           {formatNumber(row.grossProfitBase, 2)}
@@ -356,7 +324,6 @@ export function SalesProfitPage() {
     {
       accessor: 'grossProfitPct',
       title: 'GP %',
-      sortable: true,
       width: 100,
       textAlign: 'right',
       footer: (
@@ -364,7 +331,6 @@ export function SalesProfitPage() {
           {percent(totalPct)}
         </Text>
       ),
-      ...columnFilter({ ...columnFilters.bind('grossProfitPct'), label: 'GP %' }),
       // Red is the point of the column: a group sold below its own cost is what a margin report is read for.
       render: (row) => (
         <Text fz="sm" c={row.grossProfitPct !== null && row.grossProfitPct < 0 ? 'red' : undefined}>
@@ -379,11 +345,9 @@ export function SalesProfitPage() {
           {
             accessor: 'cogsAdjustmentsBase',
             title: 'COGS adjustments (USD)',
-            sortable: true,
             width: 180,
             textAlign: 'right',
             footer: amountFooter(totals.cogsAdjustmentsBase),
-            ...columnFilter({ ...columnFilters.bind('cogsAdjustmentsBase'), label: 'COGS adjustments' }),
             render: (row: SalesProfitRowDto) => formatNumber(row.cogsAdjustmentsBase, 2),
           } satisfies DataTableColumn<SalesProfitRowDto>,
         ]
@@ -544,18 +508,10 @@ export function SalesProfitPage() {
       <Paper radius="lg" withBorder>
         <DataTable
           storeKey="sales.salesProfit"
-          records={records}
+          engine={engine}
+          exportFileName="sales-profit"
           columns={columns}
           idAccessor="groupKey"
-          // The count the footer reads from is what the funnels left, not what the report returned.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No sales were posted in this period."
         />

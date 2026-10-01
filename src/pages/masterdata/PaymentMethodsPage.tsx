@@ -6,11 +6,10 @@ import { ApiError } from '../../api/http'
 import { paymentMethodsApi, type PaymentMethodDto } from '../../api/masterdata/paymentMethods'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -27,27 +26,19 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', isActive: null }
 
-/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
-const STATUS_VALUES = ['Active', 'Inactive']
-
 /** An empty description reads as a dash, and its funnel has to match the dash the reader sees. */
 const DASH = '—'
 
-/** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<PaymentMethodDto>> = {
-  methodCode: (r) => r.methodCode,
-  methodName: (r) => r.methodName,
-  description: (r) => r.description ?? DASH,
-  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
-}
-
-/** Sorts on whatever column was clicked: flags with Inactive first, text naturally. */
-function compareRows(a: PaymentMethodDto, b: PaymentMethodDto, key: keyof PaymentMethodDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<PaymentMethodDto>[] = [
+  { accessor: 'methodCode', summary: 'count' },
+  { accessor: 'methodName' },
+  { accessor: 'description', text: (r) => r.description ?? DASH },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; paymentMethod: PaymentMethodDto } | null
 
@@ -88,32 +79,17 @@ export function PaymentMethodsPage() {
   const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.paymentMethods',
+    sort: [{ accessor: 'methodCode', direction: 'asc' }],
+  })
+
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages and counts. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof PaymentMethodDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick lists come from EVERY row, not from the ones surviving the filters. */
-  const values = useMemo(
-    () => ({
-      methodCode: columnOptions(rows, 'methodCode'),
-      methodName: columnOptions(rows, 'methodName'),
-    }),
-    [rows, columnOptions],
-  )
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -158,33 +134,26 @@ export function PaymentMethodsPage() {
   }
 
   const columns: DataTableColumn<PaymentMethodDto>[] = [
-    rowNumberColumn<PaymentMethodDto>(grid.page, grid.pageSize),
+    rowNumberColumn<PaymentMethodDto>(engine.page, engine.pageSize),
     {
       accessor: 'methodCode',
       title: 'Method Code',
-      sortable: true,
       width: 140,
-      ...columnFilter({ ...columnFilters.bind('methodCode'), label: 'Method Code', options: values.methodCode }),
       render: (row) => <Text fw={600} fz="sm">{row.methodCode}</Text>,
     },
     {
       accessor: 'methodName',
       title: 'Method Name',
-      sortable: true,
-      ...columnFilter({ ...columnFilters.bind('methodName'), label: 'Method Name', options: values.methodName }),
     },
     {
       accessor: 'description',
       title: 'Description',
-      ...columnFilter({ ...columnFilters.bind('description'), label: 'Description' }),
       render: (row) => (row.description ? <Text fz="sm">{row.description}</Text> : <Text c="dimmed">{DASH}</Text>),
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 120,
-      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (row) => <StatusBadge active={row.isActive} />,
     },
     {
@@ -254,19 +223,9 @@ export function PaymentMethodsPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PaymentMethodDto>
           storeKey="masterdata.paymentMethods"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="payment-methods"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', paymentMethod: record }) : undefined}
           noRecordsText={

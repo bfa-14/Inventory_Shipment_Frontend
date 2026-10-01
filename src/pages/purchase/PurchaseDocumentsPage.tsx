@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Progress, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconArrowBackUp, IconEye, IconFileInvoice, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
 import { purchaseDocumentsApi, type PurchaseDocumentListDto, type PurchaseDocumentStatus } from '../../api/purchase/documents'
@@ -26,6 +27,7 @@ import {
 } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -45,19 +47,29 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', branchId: null, supplierId: null, status: null, dateFrom: null, dateTo: null }
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  documentNumber: 'DocumentNumber',
-  documentDate: 'DocumentDate',
-  supplierName: 'SupplierName',
-  status: 'Status',
-  totalAmount: 'TotalAmount',
-  createdAtUtc: 'CreatedAtUtc',
-}
-
 /** "FC 750,000.00 CDF" — the symbol and the code, because a symbol alone is ambiguous across currencies. */
 function documentTotal(row: PurchaseDocumentListDto): string {
   return `${row.currencySymbol ? `${row.currencySymbol} ` : ''}${formatNumber(row.totalAmount, row.decimalPlaces)} ${row.currencyCode}`
 }
+
+/**
+ * What each column IS, for the grid engine. A total in the document's own currency cannot be added
+ * across a list that mixes currencies, so the footer sums the BASE-currency column instead.
+ */
+const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
+  { accessor: 'documentNumber', summary: 'count', text: (r) => r.documentNumber ?? 'DRAFT' },
+  { accessor: 'documentDate', kind: 'date' },
+  { accessor: 'supplierName' },
+  { accessor: 'exporterReference', text: (r) => r.exporterReference ?? '' },
+  { accessor: 'branchName' },
+  { accessor: 'warehouseName' },
+  { accessor: 'sourceDocumentNumber', text: (r) => r.sourceDocumentNumber ?? '' },
+  { accessor: 'totalItems', kind: 'number' },
+  { accessor: 'totalAmount', kind: 'number', text: documentTotal },
+  { accessor: 'totalAmountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalAmountBase, 2) },
+  { accessor: 'receivedPercent', kind: 'number', text: (r) => (r.receivedPercent === null ? '' : `${formatNumber(r.receivedPercent, 0)}%`) },
+  { accessor: 'status', kind: 'list' },
+]
 
 /** What the kind was made from: an invoice comes from an order, a return from an invoice, an order from nothing. */
 function sourceKindOf(kind: PurchaseKind): PurchaseKind | null {
@@ -97,28 +109,32 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
 
-  const grid = useGridQuery<Filters, PurchaseDocumentListDto, Awaited<ReturnType<typeof purchaseDocumentsApi.list>>>({
+  const grid = useGridQuery<Filters, PurchaseDocumentListDto, AllRows<PurchaseDocumentListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: `The ${kind.plural.toLowerCase()} could not be loaded.`,
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        purchaseDocumentsApi.list(
-          {
-            documentTypeCode: kind.code,
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
-            status: (filters.status as PurchaseDocumentStatus | null) ?? undefined,
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          purchaseDocumentsApi.list(
+            {
+              documentTypeCode: kind.code,
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
+              status: (filters.status as PurchaseDocumentStatus | null) ?? undefined,
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'DocumentDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [kind.code],
     ),
@@ -126,6 +142,17 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED DOCUMENTS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows
+     what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'purchase.purchaseDocuments',
+    sort: [{ accessor: 'documentDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     branchesApi.lookup(false).then(setBranches).catch(() => {})
@@ -237,11 +264,10 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   }
 
   const columns: DataTableColumn<PurchaseDocumentListDto>[] = [
-    rowNumberColumn<PurchaseDocumentListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<PurchaseDocumentListDto>(engine.page, engine.pageSize),
     {
       accessor: 'documentNumber',
       title: `${kind.title} No.`,
-      sortable: true,
       width: 190,
       render: (row) =>
         row.documentNumber ? (
@@ -250,11 +276,10 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
           <Badge color="gray" variant="light">DRAFT</Badge>
         ),
     },
-    { accessor: 'documentDate', title: 'Date', sortable: true, width: 110, render: (row) => dateLabel(row.documentDate) },
+    { accessor: 'documentDate', title: 'Date', width: 110, render: (row) => dateLabel(row.documentDate) },
     {
       accessor: 'supplierName',
       title: 'Supplier',
-      sortable: true,
       render: (row) => (
         <div>
           <Text fz="sm" fw={500}>{row.supplierName}</Text>
@@ -294,7 +319,8 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
         ]
       : []),
     { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
-    { accessor: 'totalAmount', title: 'Total', sortable: true, width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{documentTotal(row)}</Text> },
+    { accessor: 'totalAmount', title: 'Total', width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{documentTotal(row)}</Text> },
+    { accessor: 'totalAmountBase', title: 'Total (base)', width: 130, textAlign: 'right', render: (row) => formatNumber(row.totalAmountBase, 2) },
     ...(kind.code === 'PO'
       ? [
           {
@@ -318,7 +344,6 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 110,
       render: (row) => <Badge color={PURCHASE_STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{row.status}</Badge>,
     },
@@ -384,29 +409,24 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more documents than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <BulkActionsBar count={selection.ids.length} canPost={canPost} canDelete={canDelete} busy={bulkBusy} onPost={() => void bulkPost()} onDelete={() => void bulkDelete()} onClear={selection.clear} />
 
       <Paper radius="lg" withBorder>
         <DataTable
           storeKey="purchase.purchaseDocuments"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="purchase-documents"
           columns={columns}
           selectedRecords={selection.selected}
           onSelectedRecordsChange={selection.setSelected}
           isRecordSelectable={selectable}
           rowClassName={(row) => (highlight.includes(row.id) ? 'app-grid__row--highlight' : undefined)}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={`No ${kind.plural.toLowerCase()} yet.`}
           onRowClick={({ record }) => void navigate(`${kind.route}/${record.id}`)}

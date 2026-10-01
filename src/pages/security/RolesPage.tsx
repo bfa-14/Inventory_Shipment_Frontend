@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Alert, Badge, Button, Group, Paper, Switch, Text, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { IconPlus, IconShieldCheck } from '@tabler/icons-react'
@@ -7,17 +7,15 @@ import { ApiError } from '../../api/http'
 import { rolesApi } from '../../api/roles'
 import type { RoleDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
-import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FormModal } from '../../components/ui/FormModal'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { PAGE_SIZE_DEFAULT } from '../../config'
 import { PERMISSIONS } from '../../navigation'
 import { rolePermissionsRoute } from './rolePermissionsRoute'
 
@@ -29,19 +27,19 @@ import { rolePermissionsRoute } from './rolePermissionsRoute'
  * checkboxes - sat below a three-field form you had to scroll past to reach it.
  */
 
-/** What each column SHOWS for a role - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<RoleDto>> = {
-  name: (r) => r.name,
-  description: (r) => r.description ?? '',
-  userCount: (r) => String(r.userCount),
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<RoleDto>[] = [
+  { accessor: 'name', summary: 'count' },
+  { accessor: 'description', text: (r) => r.description ?? '' },
+  { accessor: 'userCount', kind: 'number', text: (r) => String(r.userCount) },
   // 'All' rather than the stored number, because that is what the cell shows for a system role -
   // the filter has to match what is read, not what is behind it.
-  permissionCount: (r) => (r.isSystem ? 'All' : String(r.permissionCount)),
-  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
-}
-
-/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
-const STATUS_VALUES = ['Active', 'Inactive']
+  { accessor: 'permissionCount', text: (r) => (r.isSystem ? 'All' : String(r.permissionCount)) },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; role: RoleDto } | null
 
@@ -55,15 +53,14 @@ export function RolesPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
 
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<RoleDto>>({
-    columnAccessor: 'name',
-    direction: 'asc',
+  /* THE ENGINE HOLDS THE WHOLE LIST AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. */
+  const engine = useDataGrid({
+    rows: roles,
+    columns: GRID_COLUMNS,
+    storeKey: 'security.roles',
+    sort: [{ accessor: 'name', direction: 'asc' }],
   })
-  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const grid = useGridFilters(COLUMN_TEXT, () => setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = grid
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,31 +78,6 @@ export function RolesPage() {
     // eslint-disable-next-line react/set-state-in-effect
     void load()
   }, [load])
-
-  /** The endpoint returns every role at once, so filtering, sorting and paging all happen here. */
-  const filtered = useMemo(() => {
-    const narrowed = applyColumnFilters(roles)
-    const key = sortStatus.columnAccessor as keyof RoleDto
-    const sorted = [...narrowed].sort((a, b) => {
-      const left = a[key]
-      const right = b[key]
-      // The count columns are numbers: compared as text, 10 would sort before 9.
-      if (typeof left === 'number' && typeof right === 'number') return left - right
-      return String(left ?? '').localeCompare(String(right ?? ''))
-    })
-    if (sortStatus.direction === 'desc') sorted.reverse()
-    return sorted
-  }, [roles, sortStatus, applyColumnFilters])
-
-  const records = filtered.slice((page - 1) * pageSize, page * pageSize)
-
-  /** The tick list comes from EVERY role, not from the rows surviving the filters. */
-  const nameOptions = useMemo(() => columnOptions(roles, 'name'), [roles, columnOptions])
-  const userCountOptions = useMemo(() => columnOptions(roles, 'userCount'), [roles, columnOptions])
-  const permissionCountOptions = useMemo(
-    () => columnOptions(roles, 'permissionCount'),
-    [roles, columnOptions],
-  )
 
   async function handleDelete(role: RoleDto) {
     const confirmed = await confirm({
@@ -140,13 +112,11 @@ export function RolesPage() {
   }
 
   const columns: DataTableColumn<RoleDto>[] = [
-    rowNumberColumn<RoleDto>(page, pageSize),
+    rowNumberColumn<RoleDto>(engine.page, engine.pageSize),
     {
       accessor: 'name',
       title: 'Role name',
-      sortable: true,
       width: 250,
-      ...columnFilter({ ...grid.bind('name'), label: 'Role name', options: nameOptions }),
       render: (role) => (
         <Group gap="xs" wrap="nowrap">
           <Text fz="sm" fw={600}>
@@ -163,30 +133,20 @@ export function RolesPage() {
     {
       accessor: 'description',
       title: 'Description',
-      sortable: true,
       // No tick list: a description is prose, one string per role, so the box is the control that helps.
-      ...columnFilter({ ...grid.bind('description'), label: 'Description' }),
       render: (role) => role.description ?? '-',
     },
     {
       accessor: 'userCount',
       title: 'Users',
-      sortable: true,
       width: 110,
       textAlign: 'right',
-      ...columnFilter({ ...grid.bind('userCount'), label: 'Users', options: userCountOptions }),
     },
     {
       accessor: 'permissionCount',
       title: 'Permissions',
-      sortable: true,
       width: 140,
       textAlign: 'right',
-      ...columnFilter({
-        ...grid.bind('permissionCount'),
-        label: 'Permissions',
-        options: permissionCountOptions,
-      }),
       // A system role's stored count says nothing: it holds everything by definition.
       render: (role) =>
         role.isSystem ? (
@@ -200,9 +160,7 @@ export function RolesPage() {
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({ ...grid.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (role) => <StatusBadge active={role.isActive} />,
     },
     {
@@ -260,27 +218,12 @@ export function RolesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<RoleDto>
           storeKey="security.roles"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={filtered}
+          engine={engine}
+          exportFileName="roles"
           columns={columns}
-          totalRecords={filtered.length}
-          page={page}
-          recordsPerPage={pageSize}
-          onPageChange={setPage}
-          onRecordsPerPageChange={(size) => {
-            setPageSize(size)
-            setPage(1)
-          }}
-          sortStatus={sortStatus}
-          onSortStatusChange={(status) => {
-            setSortStatus(status)
-            setPage(1)
-          }}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', role: record }) : undefined}
-          filters={grid}
           noRecordsText={roles.length === 0 ? 'No roles yet.' : 'No role matches your filters.'}
         />
       </Paper>

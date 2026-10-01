@@ -5,11 +5,10 @@ import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { PORT_KINDS, portsApi, type PortDto, type PortKind } from '../../api/masterdata/ports'
 import { useAuth } from '../../auth/useAuth'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -28,9 +27,6 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', kind: null, isActive: null }
 
-/** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
-const STATUS_VALUES = ['Active', 'Inactive']
-
 type Dialog = { kind: 'create' } | { kind: 'edit'; port: PortDto } | null
 
 const KIND_COLOURS: Record<PortKind, string> = { Sea: 'blue', Inland: 'teal', Border: 'orange', Air: 'grape' }
@@ -42,22 +38,16 @@ function countryText(row: PortDto): string {
   return country ? `${country.name} (${country.code})` : row.countryCode
 }
 
-/** What each column SHOWS for a port - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<PortDto>> = {
-  portCode: (r) => r.portCode,
-  portName: (r) => r.portName,
-  countryCode: countryText,
-  kind: (r) => r.kind,
-  isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
-}
-
-/** Sorts on whatever column was clicked: flags with Inactive first, the rest as text. */
-function compareRows(a: PortDto, b: PortDto, key: keyof PortDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<PortDto>[] = [
+  { accessor: 'portCode', summary: 'count' },
+  { accessor: 'portName' },
+  { accessor: 'kind' },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
 
 /** Sea ports, border posts and inland places: the stops of a container's route. */
 export function PortsPage() {
@@ -94,34 +84,17 @@ export function PortsPage() {
   const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.ports',
+    sort: [{ accessor: 'portCode', direction: 'asc' }],
+  })
+
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages and counts. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof PortDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick lists come from EVERY port, not from the rows surviving the filters. */
-  const values = useMemo(
-    () => ({
-      portCode: columnOptions(rows, 'portCode'),
-      portName: columnOptions(rows, 'portName'),
-      countryCode: columnOptions(rows, 'countryCode'),
-      kind: columnOptions(rows, 'kind'),
-    }),
-    [rows, columnOptions],
-  )
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -166,27 +139,21 @@ export function PortsPage() {
   }
 
   const columns: DataTableColumn<PortDto>[] = [
-    rowNumberColumn<PortDto>(grid.page, grid.pageSize),
+    rowNumberColumn<PortDto>(engine.page, engine.pageSize),
     {
       accessor: 'portCode',
       title: 'Port Code',
-      sortable: true,
       width: 120,
-      ...columnFilter({ ...columnFilters.bind('portCode'), label: 'Port Code', options: values.portCode }),
       render: (row) => <Text fw={600} fz="sm">{row.portCode}</Text>,
     },
     {
       accessor: 'portName',
       title: 'Port Name',
-      sortable: true,
-      ...columnFilter({ ...columnFilters.bind('portName'), label: 'Port Name', options: values.portName }),
     },
     {
       accessor: 'countryCode',
       title: 'Country',
-      sortable: true,
       width: 200,
-      ...columnFilter({ ...columnFilters.bind('countryCode'), label: 'Country', options: values.countryCode }),
       render: (row) => {
         const text = countryText(row)
         return text === '' ? <Text c="dimmed">—</Text> : text
@@ -195,17 +162,13 @@ export function PortsPage() {
     {
       accessor: 'kind',
       title: 'Kind',
-      sortable: true,
       width: 110,
-      ...columnFilter({ ...columnFilters.bind('kind'), label: 'Kind', options: values.kind, withText: false }),
       render: (row) => <Badge variant="light" color={KIND_COLOURS[row.kind] ?? 'gray'}>{row.kind}</Badge>,
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 120,
-      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (row) => <StatusBadge active={row.isActive} />,
     },
     {
@@ -273,19 +236,9 @@ export function PortsPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PortDto>
           storeKey="masterdata.ports"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="ports"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', port: record }) : undefined}
           noRecordsText={grid.isDefault ? 'No ports yet.' : 'No ports found. Try clearing the filters.'}

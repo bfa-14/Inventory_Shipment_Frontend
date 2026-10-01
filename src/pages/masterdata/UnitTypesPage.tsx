@@ -8,11 +8,10 @@ import type { UnitTypeDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { triStateFilter, triStateQuery, useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -31,20 +30,15 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', isActive: null }
 
-/** What each column SHOWS for a unit type - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<UnitTypeDto>> = {
-  unitTypeName: (u) => u.unitTypeName,
-  isActive: (u) => (u.isActive ? 'Active' : 'Inactive'),
-  createdAtUtc: (u) => formatDateTime(u.createdAtUtc),
-}
-
-/** Sorts on whatever column was clicked: flags with Inactive first, the rest as text. */
-function compareRows(a: UnitTypeDto, b: UnitTypeDto, key: keyof UnitTypeDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<UnitTypeDto>[] = [
+  { accessor: 'unitTypeName', summary: 'count' },
+  { accessor: 'isActive', kind: 'boolean', text: (u) => (u.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'createdAtUtc', kind: 'date', text: (u) => formatDateTime(u.createdAtUtc) },
+]
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; unitType: UnitTypeDto } | null
 
@@ -84,33 +78,22 @@ export function UnitTypesPage() {
   const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
-  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages, counts and exports. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof UnitTypeDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick list comes from EVERY unit type, not from the rows surviving the filters. */
-  const nameOptions = useMemo(() => columnOptions(rows, 'unitTypeName'), [rows, columnOptions])
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.unitTypes',
+    sort: [{ accessor: 'unitTypeName', direction: 'asc' }],
+  })
 
   function exportCsv() {
     downloadCsv(
       'unit-types.csv',
       ['Name', 'Status', 'Created'],
       // What the reader is looking at, funnels and all - not the whole table behind them.
-      sorted.map((u) => [
+      engine.rows.map((u) => [
         u.unitTypeName,
         u.isActive ? 'Active' : 'Inactive',
         formatDateTime(u.createdAtUtc),
@@ -177,34 +160,22 @@ export function UnitTypesPage() {
   }
 
   const columns: DataTableColumn<UnitTypeDto>[] = [
-    rowNumberColumn<UnitTypeDto>(grid.page, grid.pageSize),
+    rowNumberColumn<UnitTypeDto>(engine.page, engine.pageSize),
     {
       accessor: 'unitTypeName',
       title: 'Name',
-      sortable: true,
-      ...columnFilter({ ...columnFilters.bind('unitTypeName'), label: 'Name', options: nameOptions }),
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (u) => <StatusBadge active={u.isActive} />,
     },
     {
       accessor: 'createdAtUtc',
       title: 'Created',
-      sortable: true,
       width: 180,
       // No tick list: every row is a different instant, so the list would be one entry per row.
-      ...columnFilter({ ...columnFilters.bind('createdAtUtc'), label: 'Created' }),
       render: (u) => formatDateTime(u.createdAtUtc),
     },
     {
@@ -297,19 +268,9 @@ export function UnitTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<UnitTypeDto>
           storeKey="masterdata.unitTypes"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="unit-types"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', unitType: record }) : undefined}
@@ -339,7 +300,4 @@ const STATUS_OPTIONS = [
   { value: 'true', label: 'Active' },
   { value: 'false', label: 'Inactive' },
 ]
-
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
 

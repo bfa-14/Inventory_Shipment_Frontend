@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFileExport, IconFilterOff, IconPlus, IconSearch, IconSend, IconX } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import {
   landedCostAdjustmentsApi,
@@ -20,6 +21,7 @@ import { formatNumber } from '../../components/format'
 import { PURCHASE_INVOICE } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -39,6 +41,21 @@ interface Filters {
 }
 
 const NO_FILTERS: Filters = { search: '', branchId: null, status: null, dateFrom: null, dateTo: null }
+
+/** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
+const GRID_COLUMNS: GridColumnMeta<LandedCostAdjustmentListDto>[] = [
+  { accessor: 'documentNumber', summary: 'count' },
+  { accessor: 'documentDate', kind: 'date' },
+  { accessor: 'sourceInvoiceNumber', text: (r) => r.sourceInvoiceNumber ?? '' },
+  { accessor: 'supplierName' },
+  { accessor: 'branchName' },
+  { accessor: 'totalChargesBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalChargesBase, 2) },
+  { accessor: 'inventoryPortionBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.inventoryPortionBase, 2) },
+  { accessor: 'cogsPortionBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.cogsPortionBase, 2) },
+  { accessor: 'status', kind: 'list' },
+  { accessor: 'postedByName', text: (r) => r.postedByName ?? '' },
+  { accessor: 'postedAtUtc', kind: 'date', text: (r) => stamp(r.postedAtUtc) },
+]
 
 /**
  * Every landed cost adjustment: the charges that arrived after the goods.
@@ -60,30 +77,45 @@ export function LandedCostAdjustmentsPage() {
   const [cancelling, setCancelling] = useState<LandedCostAdjustmentListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
 
-  const grid = useGridQuery<Filters, LandedCostAdjustmentListDto, Awaited<ReturnType<typeof landedCostAdjustmentsApi.list>>>({
+  const grid = useGridQuery<Filters, LandedCostAdjustmentListDto, AllRows<LandedCostAdjustmentListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The landed cost adjustments could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, signal }) =>
-        landedCostAdjustmentsApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            status: (filters.status as LandedCostAdjustmentStatus | null) ?? undefined,
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          landedCostAdjustmentsApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              status: (filters.status as LandedCostAdjustmentStatus | null) ?? undefined,
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED ADJUSTMENTS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The filters above the grid still
+     narrow what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'purchase.landedCostAdjustments',
+    sort: [{ accessor: 'documentDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     branchesApi.lookup(false).then(setBranches).catch(() => {})
@@ -151,7 +183,7 @@ export function LandedCostAdjustmentsPage() {
   }
 
   const columns: DataTableColumn<LandedCostAdjustmentListDto>[] = [
-    rowNumberColumn<LandedCostAdjustmentListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<LandedCostAdjustmentListDto>(engine.page, engine.pageSize),
     {
       accessor: 'documentNumber',
       title: 'Number',
@@ -314,21 +346,18 @@ export function LandedCostAdjustmentsPage() {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more adjustments than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" withBorder>
         <DataTable
           storeKey="purchase.landedCostAdjustments"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="landed-cost-adjustments"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
           fetching={loading}
           noRecordsText="No landed cost adjustments yet."
           onRowClick={({ record }) => open(record)}

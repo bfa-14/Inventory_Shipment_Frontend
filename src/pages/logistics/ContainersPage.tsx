@@ -33,6 +33,7 @@ import {
   IconTruckDelivery,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { itemsApi } from '../../api/inventory/items'
 import {
   CONTAINER_STATUSES,
@@ -54,6 +55,7 @@ import { downloadCsv } from '../../components/masterdata/csv'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -99,14 +101,29 @@ const NO_FILTERS: Filters = {
 
 const ADVANCED: (keyof Filters)[] = ['purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  containerRef: 'ContainerRef',
-  containerNo: 'ContainerNo',
-  orderMonth: 'OrderDate',
-  dispatchDate: 'DispatchDate',
-  eta: 'Eta',
-  status: 'Status',
-}
+/**
+ * What each column IS, for the grid engine. The order month reads "Sep-2026" but SORTS and filters by
+ * the order date behind it, so the months run in time and not in the alphabet.
+ */
+const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
+  { accessor: 'containerRef', summary: 'count' },
+  { accessor: 'containerNo', text: (r) => r.containerNo ?? '' },
+  { accessor: 'orderMonth', kind: 'date', value: (r) => r.orderDate, text: (r) => r.orderMonth },
+  { accessor: 'orderNumbers', text: (r) => r.orderNumbers ?? '' },
+  { accessor: 'supplierNames', text: (r) => r.supplierNames ?? '' },
+  { accessor: 'invoiceNumbers', text: (r) => r.invoiceNumbers ?? '' },
+  { accessor: 'commercialInvoiceNos', text: (r) => r.commercialInvoiceNos ?? '' },
+  { accessor: 'invoicingStatus', kind: 'list', text: (r) => INVOICING_STATUSES[r.invoicingStatus]?.label ?? '' },
+  { accessor: 'itemSummary', text: (r) => r.itemSummary ?? '' },
+  { accessor: 'totalQtyBase', kind: 'number', summary: 'sum' },
+  { accessor: 'chargesPostedBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.chargesPostedBase, 2) },
+  { accessor: 'currentMovementNo', text: (r) => r.currentMovementNo ?? '' },
+  { accessor: 'blNo', text: (r) => r.blNo ?? '' },
+  { accessor: 'dispatchDate', kind: 'date' },
+  { accessor: 'eta', kind: 'date' },
+  { accessor: 'currentLocation', text: (r) => r.currentLocation ?? '' },
+  { accessor: 'status', kind: 'list', text: (r) => r.statusName },
+]
 
 /** 'YYYY-MM-..' -> 202609 */
 function monthKey(value: string | null): number | undefined {
@@ -141,34 +158,38 @@ export function ContainersPage() {
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
 
-  const grid = useGridQuery<Filters, ContainerListDto, Awaited<ReturnType<typeof containersApi.list>>>({
+  const grid = useGridQuery<Filters, ContainerListDto, AllRows<ContainerListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['containerNo', 'containerRef', 'commercialInvoiceNo', 'blNo'],
     initialSort: { columnAccessor: 'orderMonth', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The containers could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        containersApi.list(
-          {
-            containerNo: filters.containerNo.trim() || undefined,
-            containerRef: filters.containerRef.trim() || undefined,
-            supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
-            status: filters.status === null ? undefined : (Number(filters.status) as ContainerStatusCode),
-            orderMonthKey: monthKey(filters.orderMonth),
-            purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
-            purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
-            commercialInvoiceNo: filters.commercialInvoiceNo.trim() || undefined,
-            itemId: filters.itemId === null ? undefined : Number(filters.itemId),
-            blNo: filters.blNo.trim() || undefined,
-            portId: filters.portId === null ? undefined : Number(filters.portId),
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'OrderDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          containersApi.list(
+            {
+              containerNo: filters.containerNo.trim() || undefined,
+              containerRef: filters.containerRef.trim() || undefined,
+              supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
+              status: filters.status === null ? undefined : (Number(filters.status) as ContainerStatusCode),
+              orderMonthKey: monthKey(filters.orderMonth),
+              purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
+              purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
+              commercialInvoiceNo: filters.commercialInvoiceNo.trim() || undefined,
+              itemId: filters.itemId === null ? undefined : Number(filters.itemId),
+              blNo: filters.blNo.trim() || undefined,
+              portId: filters.portId === null ? undefined : Number(filters.portId),
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'OrderDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -176,6 +197,17 @@ export function ContainersPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED CONTAINERS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The filters above the grid still
+     narrow what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'logistics.containers',
+    sort: [{ accessor: 'orderMonth', direction: 'desc' }],
+  })
 
   useEffect(() => {
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
@@ -276,7 +308,7 @@ export function ContainersPage() {
       'containers.csv',
       ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
         'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status'],
-      (data?.items ?? []).map((r) => [
+      engine.rows.map((r) => [
         r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
         r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
         formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
@@ -289,11 +321,10 @@ export function ContainersPage() {
   const text = (value: string | null) => (value ? <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{value}</Text> : dash)
 
   const columns: DataTableColumn<ContainerListDto>[] = [
-    rowNumberColumn<ContainerListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ContainerListDto>(engine.page, engine.pageSize),
     {
       accessor: 'containerRef',
       title: 'Container Ref.',
-      sortable: true,
       width: 140,
       render: (row) => (
         <Anchor component={Link} to={`${CONTAINERS_ROUTE}/${row.id}`} fz="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>
@@ -301,8 +332,8 @@ export function ContainersPage() {
         </Anchor>
       ),
     },
-    { accessor: 'containerNo', title: 'Container No.', sortable: true, width: 135, render: (row) => text(row.containerNo) },
-    { accessor: 'orderMonth', title: 'Order Month', sortable: true, width: 130, render: (row) => text(row.orderMonth) },
+    { accessor: 'containerNo', title: 'Container No.', width: 135, render: (row) => text(row.containerNo) },
+    { accessor: 'orderMonth', title: 'Order Month', width: 130, render: (row) => text(row.orderMonth) },
     {
       accessor: 'orderNumbers',
       title: 'Order No.',
@@ -363,8 +394,8 @@ export function ContainersPage() {
         ),
     },
     { accessor: 'blNo', title: 'B/L No.', width: 110, render: (row) => text(row.blNo) },
-    { accessor: 'dispatchDate', title: 'Dispatch Date', sortable: true, width: 140, render: (row) => dateLabel(row.dispatchDate) },
-    { accessor: 'eta', title: 'ETA', sortable: true, width: 105, render: (row) => dateLabel(row.eta) },
+    { accessor: 'dispatchDate', title: 'Dispatch Date', width: 140, render: (row) => dateLabel(row.dispatchDate) },
+    { accessor: 'eta', title: 'ETA', width: 105, render: (row) => dateLabel(row.eta) },
     {
       accessor: 'currentLocation',
       title: 'Current Location',
@@ -388,7 +419,6 @@ export function ContainersPage() {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 120,
       render: (row) => (
         <Badge color={containerStatusColour(row.status)} variant={row.status === 7 ? 'filled' : 'light'} style={{ whiteSpace: 'nowrap' }}>
@@ -548,23 +578,18 @@ export function ContainersPage() {
         </Alert>
       ) : null}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more containers than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" withBorder>
         <DataTable<ContainerListDto>
           storeKey="logistics.containers"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="containers"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={grid.isDefault ? 'No containers yet.' : 'No containers match these filters.'}
           pinLastColumn

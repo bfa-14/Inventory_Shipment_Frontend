@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
 import { SALES_PAYMENT_TYPES, salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus, type SalesPaymentStatus, type SalesPaymentType } from '../../api/sales/invoices'
@@ -19,6 +20,7 @@ import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from 
 import { partyLabel } from '../../components/sales/salesLines'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -44,19 +46,32 @@ const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesm
 const STATUSES = ['Draft', 'Posted', 'Cancelled']
 const ROUTE = '/sales/invoices'
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  documentNumber: 'DocumentNumber',
-  documentDate: 'DocumentDate',
-  clientName: 'ClientName',
-  status: 'Status',
-  totalAmount: 'TotalAmount',
-  createdAtUtc: 'CreatedAtUtc',
-}
-
 /** "$ 5,000.00 USD" — the symbol and the code, because a symbol alone is ambiguous across currencies. */
 function invoiceTotal(row: SalesInvoiceListDto): string {
   return `${row.currencySymbol ? `${row.currencySymbol} ` : ''}${formatNumber(row.totalAmount, row.decimalPlaces)} ${row.currencyCode}`
 }
+
+/**
+ * What each column IS, for the grid engine. A total in the invoice's own currency cannot be added up
+ * across a list that mixes USD and CDF, so the footer sums the BASE-currency column instead and the
+ * document-currency columns carry no total.
+ */
+const GRID_COLUMNS: GridColumnMeta<SalesInvoiceListDto>[] = [
+  { accessor: 'documentNumber', summary: 'count', value: (r) => r.documentNumber ?? 'DRAFT', text: (r) => r.documentNumber ?? 'DRAFT' },
+  { accessor: 'documentDate', kind: 'date' },
+  { accessor: 'clientName' },
+  { accessor: 'salesmanName', text: (r) => r.salesmanName ?? '' },
+  { accessor: 'branchName' },
+  { accessor: 'warehouseName' },
+  { accessor: 'totalItems', kind: 'number' },
+  { accessor: 'totalAmount', kind: 'number', text: invoiceTotal },
+  { accessor: 'totalAmountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalAmountBase, 2) },
+  { accessor: 'paymentTypeName', kind: 'list', text: (r) => r.paymentTypeName ?? 'Not chosen' },
+  { accessor: 'outstandingAmount', kind: 'number', text: (r) => (r.outstandingAmount === null ? '' : `${formatNumber(r.outstandingAmount, r.decimalPlaces)} ${r.currencyCode}`) },
+  { accessor: 'paymentStatus', kind: 'list', text: (r) => (r.paymentStatus ? paymentStatusLabel(r.paymentStatus) : '') },
+  { accessor: 'receiptNumber', text: (r) => r.receiptNumber ?? '' },
+  { accessor: 'status', kind: 'list' },
+]
 
 /**
  * Every sales invoice: the same list the stock documents have — filters that apply as they are
@@ -86,30 +101,34 @@ export function SalesInvoicesPage() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
 
-  const grid = useGridQuery<Filters, SalesInvoiceListDto, Awaited<ReturnType<typeof salesInvoicesApi.list>>>({
+  const grid = useGridQuery<Filters, SalesInvoiceListDto, AllRows<SalesInvoiceListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The invoices could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        salesInvoicesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            clientId: filters.clientId === null ? undefined : Number(filters.clientId),
-            salesmanId: filters.salesmanId === null ? undefined : Number(filters.salesmanId),
-            status: (filters.status as SalesInvoiceStatus | null) ?? undefined,
-            paymentStatus: (filters.paymentStatus as SalesPaymentStatus | null) ?? undefined,
-            paymentType: filters.paymentType === null ? undefined : (Number(filters.paymentType) as SalesPaymentType),
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          salesInvoicesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              clientId: filters.clientId === null ? undefined : Number(filters.clientId),
+              salesmanId: filters.salesmanId === null ? undefined : Number(filters.salesmanId),
+              status: (filters.status as SalesInvoiceStatus | null) ?? undefined,
+              paymentStatus: (filters.paymentStatus as SalesPaymentStatus | null) ?? undefined,
+              paymentType: filters.paymentType === null ? undefined : (Number(filters.paymentType) as SalesPaymentType),
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'DocumentDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -117,6 +136,17 @@ export function SalesInvoicesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED INVOICES AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows
+     what is loaded from the server (dates, status, client...); the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'sales.salesInvoices',
+    sort: [{ accessor: 'documentDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     branchesApi.lookup(false).then(setBranches).catch(() => {})
@@ -213,11 +243,10 @@ export function SalesInvoicesPage() {
   }
 
   const columns: DataTableColumn<SalesInvoiceListDto>[] = [
-    rowNumberColumn<SalesInvoiceListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<SalesInvoiceListDto>(engine.page, engine.pageSize),
     {
       accessor: 'documentNumber',
       title: 'Invoice No.',
-      sortable: true,
       width: 190,
       render: (row) =>
         row.documentNumber ? (
@@ -226,11 +255,10 @@ export function SalesInvoicesPage() {
           <Badge color="gray" variant="light">DRAFT</Badge>
         ),
     },
-    { accessor: 'documentDate', title: 'Date', sortable: true, width: 110, render: (row) => dateLabel(row.documentDate) },
+    { accessor: 'documentDate', title: 'Date', width: 110, render: (row) => dateLabel(row.documentDate) },
     {
       accessor: 'clientName',
       title: 'Client',
-      sortable: true,
       render: (row) => (
         <div>
           <Text fz="sm" fw={500}>{row.clientName}</Text>
@@ -242,7 +270,8 @@ export function SalesInvoicesPage() {
     { accessor: 'branchName', title: 'Branch' },
     { accessor: 'warehouseName', title: 'Warehouse' },
     { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
-    { accessor: 'totalAmount', title: 'Total', sortable: true, width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{invoiceTotal(row)}</Text> },
+    { accessor: 'totalAmount', title: 'Total', width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{invoiceTotal(row)}</Text> },
+    { accessor: 'totalAmountBase', title: 'Total (base)', width: 130, textAlign: 'right', render: (row) => formatNumber(row.totalAmountBase, 2) },
     {
       accessor: 'paymentTypeName',
       title: 'Payment Type',
@@ -284,7 +313,6 @@ export function SalesInvoicesPage() {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 110,
       render: (row) => <Badge color={STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{row.status}</Badge>,
     },
@@ -357,29 +385,24 @@ export function SalesInvoicesPage() {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more invoices than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <BulkActionsBar count={selection.ids.length} canPost={canPost} canDelete={canDelete} busy={bulkBusy} onPost={() => void bulkPost()} onDelete={() => void bulkDelete()} onClear={selection.clear} />
 
       <Paper radius="lg" withBorder>
         <DataTable
           storeKey="sales.salesInvoices"
-          records={data?.items ?? []}
-          /* This grid pages on the SERVER, so the footer can only add up the rows it was
-             sent. Each figure says so under itself, rather than passing a total of ten
-             off as a total of five hundred. */
-          summaryRecords={data?.items ?? []}
-          summaryScope="page"
+          engine={engine}
+          exportFileName="sales-invoices"
           columns={columns}
           selectedRecords={selection.selected}
           onSelectedRecordsChange={selection.setSelected}
           isRecordSelectable={selectable}
           rowClassName={(row) => (highlight.includes(row.id) ? 'app-grid__row--highlight' : undefined)}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No invoices yet."
           onRowClick={({ record }) => void navigate(`${ROUTE}/${record.id}`)}

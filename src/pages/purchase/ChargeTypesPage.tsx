@@ -11,11 +11,10 @@ import {
 } from '../../api/purchase/chargeTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -80,33 +79,17 @@ export function ChargeTypesPage() {
   const { filters, setFilter, data, loading, error } = grid
   const rows = useMemo(() => data?.items ?? [], [data])
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'purchase.chargeTypes',
+    sort: [{ accessor: 'chargeCode', direction: 'asc' }],
+  })
+
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const columnFilters = useGridFilters(COLUMN_TEXT, () => grid.setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = columnFilters
-
-  /** What the funnels left - the rows this page then sorts, pages and counts. */
-  const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof ChargeTypeDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...narrowed].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [narrowed, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
-
-  /** The tick lists come from EVERY charge type, not from the rows surviving the filters. */
-  const values = useMemo(
-    () => ({
-      chargeCode: columnOptions(rows, 'chargeCode'),
-      chargeName: columnOptions(rows, 'chargeName'),
-      allocationMethod: columnOptions(rows, 'allocationMethod'),
-    }),
-    [rows, columnOptions],
-  )
   const load = grid.reload
 
   async function afterSave(message: string) {
@@ -171,7 +154,7 @@ export function ChargeTypesPage() {
   }
 
   const columns: DataTableColumn<ChargeTypeDto>[] = [
-    rowNumberColumn<ChargeTypeDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ChargeTypeDto>(engine.page, engine.pageSize),
     /* No header funnels on this grid: it pages on the server, and the endpoint takes one free-text
        parameter matching code OR name, so a box on the Charge Code header could only narrow by
        something other than the column it sits on. Every parameter the API does take is in the
@@ -179,9 +162,7 @@ export function ChargeTypesPage() {
     {
       accessor: 'chargeCode',
       title: 'Charge Code',
-      sortable: true,
       width: 130,
-      ...columnFilter({ ...columnFilters.bind('chargeCode'), label: 'Charge Code', options: values.chargeCode }),
       render: (c) => (
         <Text fw={600} fz="sm">
           {c.chargeCode}
@@ -191,63 +172,36 @@ export function ChargeTypesPage() {
     {
       accessor: 'chargeName',
       title: 'Charge Name',
-      sortable: true,
       width: 200,
-      ...columnFilter({ ...columnFilters.bind('chargeName'), label: 'Charge Name', options: values.chargeName }),
     },
     {
       accessor: 'allocationMethod',
       title: 'Allocation Method',
-      sortable: true,
       width: 170,
-      ...columnFilter({
-        ...columnFilters.bind('allocationMethod'),
-        label: 'Allocation Method',
-        options: values.allocationMethod,
-        withText: false,
-      }),
       render: (c) => allocationMethodLabel(c.allocationMethod),
     },
     {
       accessor: 'includeInLandedCost',
       title: 'Include in Landed Cost',
-      sortable: true,
       width: 180,
-      ...columnFilter({
-        ...columnFilters.bind('includeInLandedCost'),
-        label: 'Include in Landed Cost',
-        options: YES_NO_VALUES,
-        withText: false,
-      }),
       render: (c) => <YesNo value={c.includeInLandedCost} />,
     },
     {
       accessor: 'isRecoverableTax',
       title: 'Recoverable Tax',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        ...columnFilters.bind('isRecoverableTax'),
-        label: 'Recoverable Tax',
-        options: YES_NO_VALUES,
-        withText: false,
-      }),
       render: (c) => <YesNo value={c.isRecoverableTax} />,
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 120,
-      ...columnFilter({ ...columnFilters.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (c) => <StatusBadge active={c.isActive} />,
     },
     {
       accessor: 'description',
       title: 'Description',
-      sortable: true,
       // No tick list: a description is prose, so the list would be one entry per row.
-      ...columnFilter({ ...columnFilters.bind('description'), label: 'Description' }),
       // No width: it takes whatever the fixed columns leave, so the grid fits a laptop.
       render: (c) =>
         c.description ? (
@@ -375,19 +329,9 @@ export function ChargeTypesPage() {
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ChargeTypeDto>
           storeKey="purchase.chargeTypes"
-          records={records}
-          // The footer totals what the filters left, never just the page on screen.
-          summaryRecords={narrowed}
+          engine={engine}
+          exportFileName="charge-types"
           columns={columns}
-          // What the funnels left, which is what the footer must count.
-          totalRecords={narrowed.length}
-          filters={{ activeCount: columnFilters.activeCount, clearAll: columnFilters.clearAll }}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', chargeType: record }) : undefined}
@@ -440,26 +384,17 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** Grid accessor -> the name the search procedure sorts by. */
-/** The closed sets the funnels offer, whatever the loaded rows happen to contain. */
-const STATUS_VALUES = ['Active', 'Inactive']
-const YES_NO_VALUES = ['Yes', 'No']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<ChargeTypeDto>[] = [
+  { accessor: 'chargeCode', summary: 'count' },
+  { accessor: 'chargeName' },
+  { accessor: 'allocationMethod', text: (c) => allocationMethodLabel(c.allocationMethod) },
+  { accessor: 'includeInLandedCost', kind: 'boolean', text: (c) => (c.includeInLandedCost ? 'Yes' : 'No') },
+  { accessor: 'isRecoverableTax', kind: 'boolean', text: (c) => (c.isRecoverableTax ? 'Yes' : 'No') },
+  { accessor: 'isActive', kind: 'boolean', text: (c) => (c.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'description', text: (c) => c.description ?? '' },
+]
 
-/** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<ChargeTypeDto>> = {
-  chargeCode: (c) => c.chargeCode,
-  chargeName: (c) => c.chargeName,
-  allocationMethod: (c) => allocationMethodLabel(c.allocationMethod),
-  includeInLandedCost: (c) => (c.includeInLandedCost ? 'Yes' : 'No'),
-  isRecoverableTax: (c) => (c.isRecoverableTax ? 'Yes' : 'No'),
-  isActive: (c) => (c.isActive ? 'Active' : 'Inactive'),
-  description: (c) => c.description ?? '',
-}
-
-/** Sorts on whatever column was clicked: flags with the false side first, the rest as text. */
-function compareRows(a: ChargeTypeDto, b: ChargeTypeDto, key: keyof ChargeTypeDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
-  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
-}
