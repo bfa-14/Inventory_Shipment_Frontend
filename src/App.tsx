@@ -21,6 +21,7 @@ import { LoginPage } from './pages/LoginPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
 import { BrandsPage } from './pages/masterdata/BrandsPage'
 import { CurrenciesPage } from './pages/masterdata/CurrenciesPage'
+import { ExchangeRatesPage } from './pages/masterdata/ExchangeRatesPage'
 import { ItemFamiliesPage } from './pages/masterdata/ItemFamiliesPage'
 import { PartiesPage } from './pages/masterdata/PartiesPage'
 import { PriceListsPage } from './pages/masterdata/PriceListsPage'
@@ -91,6 +92,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.currenciesView} />}>
                 <Route path="/setup/master-data/currencies" element={<CurrenciesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.exchangeRatesView} />}>
+                <Route path="/setup/master-data/exchange-rates" element={<ExchangeRatesPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.itemFamiliesView} />}>
                 <Route path="/setup/master-data/item-families" element={<ItemFamiliesPage />} />

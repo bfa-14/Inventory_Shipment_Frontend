@@ -255,6 +255,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Branches / Sites', to: '/setup/master-data/branches', permission: PERMISSIONS.branchesView },
           { label: 'Warehouses', to: '/setup/master-data/warehouses', permission: PERMISSIONS.warehousesView },
           { label: 'Currencies', to: '/setup/master-data/currencies', permission: PERMISSIONS.currenciesView },
+          { label: 'Exchange Rates', to: '/setup/master-data/exchange-rates', permission: PERMISSIONS.exchangeRatesView },
           { label: 'Item Families', to: '/setup/master-data/item-families', permission: PERMISSIONS.itemFamiliesView },
           { label: 'Brands', to: '/setup/master-data/brands', permission: PERMISSIONS.brandsView },
           { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
