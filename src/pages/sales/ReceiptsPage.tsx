@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
+import { Link, useNavigate } from 'react-router'
+import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconArrowBackUp, IconEye, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -176,6 +176,21 @@ export function ReceiptsPage() {
       ),
     },
     { accessor: 'paymentTypeName', title: 'Payment Type', width: 150 },
+    {
+      accessor: 'sourceInvoiceNumber',
+      title: 'Created by',
+      width: 170,
+      // A receipt a Cash invoice made says so, and points at the invoice; an ordinary one is typed by a person.
+      render: (row) =>
+        row.sourceSalesDocumentId !== null ? (
+          <Group gap={6} wrap="nowrap">
+            <Badge size="xs" color="teal" variant="light">Auto</Badge>
+            <Anchor component={Link} to={`/sales/invoices/${row.sourceSalesDocumentId}`} fz="sm" onClick={(event) => event.stopPropagation()}>{row.sourceInvoiceNumber}</Anchor>
+          </Group>
+        ) : (
+          <Text fz="sm" c="dimmed">Manual</Text>
+        ),
+    },
     { accessor: 'branchName', title: 'Branch' },
     {
       accessor: 'amount',
@@ -219,7 +234,7 @@ export function ReceiptsPage() {
           custom={[
             { icon: <IconEye size={16} />, tooltip: 'View', onClick: () => void navigate(`${ROUTE}/${row.id}`) },
             { icon: <IconSend size={16} />, tooltip: 'Post', visible: canPost && row.status === 'Draft', onClick: () => void post(row) },
-            { icon: <IconArrowBackUp size={16} />, tooltip: 'Reverse receipt', color: 'orange', visible: canReverse && row.status === 'Posted', onClick: () => setReversing(row) },
+            { icon: <IconArrowBackUp size={16} />, tooltip: 'Reverse receipt', color: 'orange', visible: canReverse && row.status === 'Posted' && row.sourceSalesDocumentId === null, onClick: () => setReversing(row) },
           ]}
           remove={{ visible: canDelete && row.status === 'Draft', onClick: () => void remove(row) }}
         />

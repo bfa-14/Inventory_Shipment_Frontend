@@ -40,6 +40,9 @@ export interface ReceiptListDto {
   exchangeRate: number
   amountBase: number
   status: ReceiptStatus
+  /** The invoice that made this receipt automatically (a Cash sale); null for an ordinary receipt. */
+  sourceSalesDocumentId: number | null
+  sourceInvoiceNumber: string | null
   allocatedBase: number
   unappliedBase: number
   postedAtUtc: string | null
@@ -134,6 +137,9 @@ export interface ReceiptDto {
   baseCurrencyCode: string | null
   notes: string | null
   status: ReceiptStatus
+  /** The invoice that made this receipt automatically. Such a receipt is reversed by cancelling that invoice. */
+  sourceSalesDocumentId: number | null
+  sourceInvoiceNumber: string | null
   linesBase: number
   allocatedBase: number
   unappliedBase: number

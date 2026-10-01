@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Group, Loader, Stack } from '@mantine/core'
+import { Link, useNavigate, useParams } from 'react-router'
+import { Alert, Anchor, Button, Group, Loader, Stack } from '@mantine/core'
 import { IconPrinter } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { attachmentTypesApi, type AttachmentTypeLookupDto } from '../../api/masterdata/attachmentTypes'
@@ -632,7 +632,17 @@ export function ReceiptPage() {
     : [
         print,
         addAttachment,
-        { key: 'reverse', label: 'Reverse Receipt', icon: DocumentIcons.cancel, colour: 'red', visible: canReverse && status === 'Posted', onClick: () => setReverseOpen(true) },
+        {
+          key: 'reverse',
+          label: 'Reverse Receipt',
+          icon: DocumentIcons.cancel,
+          colour: 'red',
+          visible: canReverse && status === 'Posted',
+          // A Cash invoice's receipt is part of the invoice: it is undone by cancelling the invoice.
+          disabled: receipt?.sourceSalesDocumentId != null,
+          disabledReason: receipt?.sourceInvoiceNumber ? `Created by invoice ${receipt.sourceInvoiceNumber}: cancel that invoice to reverse it` : undefined,
+          onClick: () => setReverseOpen(true),
+        },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(ROUTE) },
       ]
 
@@ -647,10 +657,17 @@ export function ReceiptPage() {
 
       {receipt && status === 'Posted' && (
         <Alert color="green" title={`Posted — ${receipt.receiptNumber}`}>
-          Posted by {receipt.postedByName ?? 'unknown'} on {stamp(receipt.postedAtUtc)}. It can no longer be edited or deleted; it can be reversed.
+          Posted by {receipt.postedByName ?? 'unknown'} on {stamp(receipt.postedAtUtc)}. It can no longer be edited or deleted{receipt.sourceSalesDocumentId === null ? '; it can be reversed' : ''}.
           {receipt.paymentType === 1 && receipt.unappliedBase > 0.005
             ? ` ${formatNumber(receipt.unappliedBase, 2)} ${baseCurrencyCode} of this receipt is not yet applied to any invoice.`
             : ''}
+        </Alert>
+      )}
+      {receipt && receipt.sourceSalesDocumentId !== null && (
+        <Alert color="teal" variant="light" title="Created automatically by a Cash invoice">
+          This receipt was made when invoice{' '}
+          <Anchor component={Link} to={`/sales/invoices/${receipt.sourceSalesDocumentId}`} fw={600}>{receipt.sourceInvoiceNumber}</Anchor>{' '}
+          was posted. It cannot be edited or reversed on its own; cancelling that invoice reverses it.
         </Alert>
       )}
       {receipt && status === 'Reversed' && (

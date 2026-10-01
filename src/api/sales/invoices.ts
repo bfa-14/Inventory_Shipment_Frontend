@@ -28,6 +28,14 @@ export function salesRateTypeLabel(type: SalesRateType): string {
   return SALES_RATE_TYPES.find((t) => t.value === type)?.label ?? String(type)
 }
 
+/** 1 Cash (a receipt is made and posted with the invoice), 2 On Account (paid later by receipts). */
+export type SalesPaymentType = 1 | 2
+
+export const SALES_PAYMENT_TYPES: readonly { value: SalesPaymentType; label: string }[] = [
+  { value: 1, label: 'Cash' },
+  { value: 2, label: 'On Account' },
+]
+
 /** What GET rate answers: the price list's currency and the rate in force on a date. */
 export interface RateResolutionDto {
   priceListId: number
@@ -108,6 +116,14 @@ export interface SaveSalesInvoiceRequest {
   lines: SaveSalesInvoiceLine[]
   /** The import wizard's reference, so its audit rows are stamped with the invoice's id. */
   draftReference?: string | null
+  /**
+   * How the customer pays. May be empty on a draft; posting needs it. The method, account and
+   * reference only matter for Cash, and saving never creates a receipt.
+   */
+  paymentType?: SalesPaymentType | null
+  receiptMethodId?: number | null
+  receiptAccountId?: number | null
+  paymentReference?: string | null
   rowVersion?: string | null
 }
 
@@ -152,6 +168,11 @@ export interface SalesInvoiceListDto {
   paidAmount: number | null
   outstandingAmount: number | null
   paymentStatus: SalesPaymentStatus | null
+  paymentType: SalesPaymentType | null
+  paymentTypeName: string | null
+  /** The receipt a Cash invoice made when it was posted. */
+  receiptId: number | null
+  receiptNumber: string | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -168,6 +189,7 @@ export interface SalesInvoiceQuery {
   salesmanId?: number
   status?: SalesInvoiceStatus
   paymentStatus?: SalesPaymentStatus
+  paymentType?: SalesPaymentType
   dateFrom?: string
   dateTo?: string
   sortBy?: string
@@ -191,6 +213,10 @@ export interface ImportCreateSalesInvoicesRequest {
   draftReference?: string | null
   lines: ImportCreateLine[]
   postImmediately: boolean
+  paymentType?: SalesPaymentType | null
+  receiptMethodId?: number | null
+  receiptAccountId?: number | null
+  paymentReference?: string | null
 }
 
 export interface SalesInvoiceLineDto {
@@ -306,6 +332,18 @@ export interface SalesInvoiceDto {
   paidAmount: number | null
   outstandingAmount: number | null
   paymentStatus: SalesPaymentStatus | null
+  paymentType: SalesPaymentType | null
+  paymentTypeName: string | null
+  receiptMethodId: number | null
+  receiptMethodName: string | null
+  receiptAccountId: number | null
+  receiptAccountCode: string | null
+  receiptAccountName: string | null
+  paymentReference: string | null
+  /** The receipt this invoice made when it was posted (Cash only), and its status. */
+  receiptId: number | null
+  receiptNumber: string | null
+  receiptStatus: 'Draft' | 'Posted' | 'Reversed' | null
   /** Cost of the goods that left. Null on a draft and for a reader without sales.profit.view. */
   totalCostBase: number | null
   totalGrossProfitBase: number | null
@@ -358,6 +396,7 @@ export const salesInvoicesApi = {
     if (query.salesmanId !== undefined) params.set('salesmanId', String(query.salesmanId))
     if (query.status) params.set('status', query.status)
     if (query.paymentStatus) params.set('paymentStatus', query.paymentStatus)
+    if (query.paymentType !== undefined) params.set('paymentType', String(query.paymentType))
     if (query.dateFrom) params.set('dateFrom', query.dateFrom)
     if (query.dateTo) params.set('dateTo', query.dateTo)
     if (query.sortBy) params.set('sortBy', query.sortBy)

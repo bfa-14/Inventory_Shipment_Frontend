@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router'
-import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
-import { salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus, type SalesPaymentStatus } from '../../api/sales/invoices'
+import { SALES_PAYMENT_TYPES, salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus, type SalesPaymentStatus, type SalesPaymentType } from '../../api/sales/invoices'
 import type { BranchLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
@@ -15,6 +15,7 @@ import { BulkResultsModal } from '../../components/documents/BulkResultsModal'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { dateLabel, isoDate, STATUS_COLOURS } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
+import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { partyLabel } from '../../components/sales/salesLines'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
@@ -34,15 +35,13 @@ interface Filters {
   salesmanId: string | null
   status: string | null
   paymentStatus: string | null
+  paymentType: string | null
   dateFrom: string | null
   dateTo: string | null
 }
 
-const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesmanId: null, status: null, paymentStatus: null, dateFrom: null, dateTo: null }
+const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesmanId: null, status: null, paymentStatus: null, paymentType: null, dateFrom: null, dateTo: null }
 const STATUSES = ['Draft', 'Posted', 'Cancelled']
-const PAYMENT_STATUSES: SalesPaymentStatus[] = ['Unpaid', 'Partial', 'Paid']
-/** Unpaid is grey (nothing has happened yet), Partial orange (somebody is owed), Paid green. */
-const PAYMENT_COLOURS: Record<string, string> = { Unpaid: 'gray', Partial: 'orange', Paid: 'green' }
 const ROUTE = '/sales/invoices'
 
 const ACCESSOR_TO_SORT: Record<string, string> = {
@@ -102,6 +101,7 @@ export function SalesInvoicesPage() {
             salesmanId: filters.salesmanId === null ? undefined : Number(filters.salesmanId),
             status: (filters.status as SalesInvoiceStatus | null) ?? undefined,
             paymentStatus: (filters.paymentStatus as SalesPaymentStatus | null) ?? undefined,
+            paymentType: filters.paymentType === null ? undefined : (Number(filters.paymentType) as SalesPaymentType),
             dateFrom: filters.dateFrom ?? undefined,
             dateTo: filters.dateTo ?? undefined,
             sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
@@ -130,8 +130,11 @@ export function SalesInvoicesPage() {
   async function post(row: SalesInvoiceListDto) {
     const go = await confirm({
       title: `Post ${label(row)}`,
-      message: `Post this invoice? Stock will be removed from ${row.warehouseName} and the number assigned.`,
-      confirmLabel: 'Post',
+      message:
+        row.paymentType === 1
+          ? `Post this invoice? Stock will be removed from ${row.warehouseName}, the number assigned, and a receipt for the full total created and posted. The invoice will be Fully Paid.`
+          : `Post this invoice? Stock will be removed from ${row.warehouseName} and the number assigned.`,
+      confirmLabel: row.paymentType === 1 ? 'Post and receive' : 'Post',
     })
     if (!go) return
     try {
@@ -241,6 +244,12 @@ export function SalesInvoicesPage() {
     { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
     { accessor: 'totalAmount', title: 'Total', sortable: true, width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{invoiceTotal(row)}</Text> },
     {
+      accessor: 'paymentTypeName',
+      title: 'Payment Type',
+      width: 120,
+      render: (row) => (row.paymentTypeName ? <Badge color={row.paymentType === 1 ? 'teal' : 'blue'} variant="light">{row.paymentTypeName}</Badge> : <Text fz="xs" c="dimmed">Not chosen</Text>),
+    },
+    {
       accessor: 'outstandingAmount',
       title: 'Outstanding',
       width: 160,
@@ -259,7 +268,18 @@ export function SalesInvoicesPage() {
       accessor: 'paymentStatus',
       title: 'Payment',
       width: 110,
-      render: (row) => (row.paymentStatus ? <Badge color={PAYMENT_COLOURS[row.paymentStatus] ?? 'gray'} variant="light">{row.paymentStatus}</Badge> : '—'),
+      render: (row) => (row.paymentStatus ? <Badge color={paymentStatusColour(row.paymentStatus)} variant="light">{paymentStatusLabel(row.paymentStatus)}</Badge> : '—'),
+    },
+    {
+      accessor: 'receiptNumber',
+      title: 'Receipt No.',
+      width: 150,
+      render: (row) =>
+        row.receiptId !== null ? (
+          <Anchor component={Link} to={`/sales/receipts/${row.receiptId}`} fz="sm" onClick={(event) => event.stopPropagation()}>{row.receiptNumber}</Anchor>
+        ) : (
+          '—'
+        ),
     },
     {
       accessor: 'status',
@@ -311,14 +331,17 @@ export function SalesInvoicesPage() {
         <FilterBar.Col span={2}>
           <Select label="Client" placeholder="All clients" data={clients.map((c) => ({ value: String(c.id), label: partyLabel(c) }))} value={filters.clientId} onChange={(next) => setFilter('clientId', next)} clearable searchable />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
+        <FilterBar.Col span={1}>
           <Select label="Salesman" placeholder="All" data={salesmen.map((s) => ({ value: String(s.id), label: partyLabel(s) }))} value={filters.salesmanId} onChange={(next) => setFilter('salesmanId', next)} clearable searchable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <Select label="Status" placeholder="All" data={STATUSES} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
-          <Select label="Payment" placeholder="All" data={PAYMENT_STATUSES} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next)} clearable />
+          <Select label="Pay type" placeholder="All" data={SALES_PAYMENT_TYPES.map((t) => ({ value: String(t.value), label: t.label }))} value={filters.paymentType} onChange={(next) => setFilter('paymentType', next)} clearable />
+        </FilterBar.Col>
+        <FilterBar.Col span={1}>
+          <Select label="Payment" placeholder="All" data={PAYMENT_STATUS_OPTIONS} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom ? new Date(filters.dateFrom) : null} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
@@ -365,7 +388,18 @@ export function SalesInvoicesPage() {
 
       <BulkResultsModal opened={bulkResult !== null} title={bulkResult?.title ?? ''} successLabel={bulkResult?.successLabel ?? ''} result={bulkResult?.result ?? null} labelOf={(item) => `draft #${item.id}`} onClose={() => setBulkResult(null)} />
 
-      <CancelReasonModal opened={cancelling !== null} onClose={() => setCancelling(null)} documentLabel={cancelling ? label(cancelling) : ''} busy={cancelBusy} onConfirm={(reason) => void cancelInvoice(reason)} />
+      <CancelReasonModal
+        opened={cancelling !== null}
+        onClose={() => setCancelling(null)}
+        documentLabel={cancelling ? label(cancelling) : ''}
+        busy={cancelBusy}
+        onConfirm={(reason) => void cancelInvoice(reason)}
+        description={
+          cancelling?.receiptNumber
+            ? `Cancelling writes the opposite stock movements AND reverses this cash sale's receipt ${cancelling.receiptNumber}, with the same reason. The invoice and the receipt stay in place as a record. It cannot be undone.`
+            : undefined
+        }
+      />
     </div>
   )
 }

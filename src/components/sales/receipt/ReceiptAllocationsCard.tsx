@@ -3,6 +3,7 @@ import { IconWand } from '@tabler/icons-react'
 import type { OpenInvoiceDto } from '../../../api/sales/receipts'
 import { dateLabel } from '../../documents/documentKind'
 import { formatNumber, numberInputValue } from '../../format'
+import { paymentStatusColour, paymentStatusLabel } from '../paymentStatus'
 import { allocationBase, fillOldestFirst, isBalanced } from './receiptModel'
 
 interface ReceiptAllocationsCardProps {
@@ -102,7 +103,7 @@ export function ReceiptAllocationsCard({
                     <Table.Td>
                       <Group gap="xs" wrap="nowrap">
                         <Text size="sm" fw={500}>{invoice.documentNumber}</Text>
-                        <Badge size="xs" variant="light" color={invoice.paymentStatus === 'Partial' ? 'orange' : 'gray'}>{invoice.paymentStatus}</Badge>
+                        <Badge size="xs" variant="light" color={paymentStatusColour(invoice.paymentStatus)}>{paymentStatusLabel(invoice.paymentStatus)}</Badge>
                       </Group>
                     </Table.Td>
                     <Table.Td>{dateLabel(invoice.documentDate)}</Table.Td>

@@ -9,6 +9,8 @@ import { branchesApi } from '../../api/masterdata/branches'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
 import { priceListsApi } from '../../api/masterdata/priceLists'
+import { cashBankAccountsApi, type CashBankAccountLookupDto } from '../../api/masterdata/cashBankAccounts'
+import { paymentMethodsApi, type PaymentMethodLookupDto } from '../../api/masterdata/paymentMethods'
 import { unitPricesApi } from '../../api/masterdata/unitPrices'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import {
@@ -30,6 +32,8 @@ import { formatNumber } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
 import { SalesInvoiceHeaderCard, type SalesInvoiceHeader, type SalesInvoiceHeaderErrors } from '../../components/sales/SalesInvoiceHeaderCard'
 import { SalesInvoiceLinesGrid, type InvoiceLine } from '../../components/sales/SalesInvoiceLinesGrid'
+import { SalesPaymentCard } from '../../components/sales/SalesPaymentCard'
+import { EMPTY_PAYMENT, type SalesPaymentErrors, type SalesPaymentForm } from '../../components/sales/salesPayment'
 import { SalesInvoiceProfitCard } from '../../components/sales/SalesInvoiceProfitCard'
 import { SalesTotals } from '../../components/sales/SalesTotals'
 import { confirm } from '../../components/ui/confirm'
@@ -128,6 +132,12 @@ export function SalesInvoicePage() {
     priceListId: null, currencyId: null, rateType: 1, exchangeRate: null, referenceNo: '', notes: '',
   })
   const [errors, setErrors] = useState<SalesInvoiceHeaderErrors>({})
+  /* HOW THE CUSTOMER PAYS lives beside the header, not in it: it is its own card and its own rule
+     (Cash makes a receipt when posted), and the header card is shared with nothing that has one. */
+  const [payment, setPayment] = useState<SalesPaymentForm>(EMPTY_PAYMENT)
+  const [paymentErrors, setPaymentErrors] = useState<SalesPaymentErrors>({})
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodLookupDto[]>([])
+  const [cashAccounts, setCashAccounts] = useState<CashBankAccountLookupDto[]>([])
   const [lines, setLines] = useState<InvoiceLine[]>([])
 
   const [rate, setRate] = useState<RateResolutionDto | null>(null)
@@ -190,6 +200,8 @@ export function SalesInvoicePage() {
     // SALES UNITS ONLY: an item with nothing sellable cannot be put on an invoice.
     itemsApi.lookup(true, undefined, undefined, true).then(setItems).catch(() => {})
     currenciesApi.lookup().then(setCurrencies).catch(() => notify.error('Currencies could not be loaded.'))
+    paymentMethodsApi.lookup(false).then(setPaymentMethods).catch(() => notify.error('Payment methods could not be loaded.'))
+    cashBankAccountsApi.lookup({ activeOnly: false }).then(setCashAccounts).catch(() => notify.error('Cash and bank accounts could not be loaded.'))
     // isNew comes from the route and the user from the session; neither changes without a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -236,6 +248,12 @@ export function SalesInvoicePage() {
         importRowNumber: line.importRowNumber,
       })),
     )
+    setPayment({
+      paymentType: doc.paymentType,
+      receiptMethodId: doc.receiptMethodId === null ? null : String(doc.receiptMethodId),
+      receiptAccountId: doc.receiptAccountId === null ? null : String(doc.receiptAccountId),
+      paymentReference: doc.paymentReference ?? '',
+    })
     priceListTouched.current = true
     rateDirty.current = false
     dirty.current = false
@@ -325,6 +343,29 @@ export function SalesInvoicePage() {
   const currencyCode = invoice?.currencyCode ?? rate?.currencyCode ?? priceList?.currencyCode ?? 'USD'
   const decimalPlaces = invoice?.decimalPlaces ?? rate?.decimalPlaces ?? priceList?.decimalPlaces ?? 2
   const isBaseCurrency = invoice ? invoice.isBaseCurrency : (rate?.isBaseCurrency ?? true)
+  /** The currency the invoice is billed in, as an id: what a cash account has to hold. */
+  const invoiceCurrencyId = invoice?.currencyId ?? rate?.currencyId ?? null
+
+  function changePayment(patch: Partial<SalesPaymentForm>) {
+    markDirty()
+    setPaymentErrors({})
+    setPayment((current) => {
+      const next = { ...current, ...patch }
+      // On Account carries no method, account or reference: they would only be dropped on save anyway.
+      if (patch.paymentType === 2) return { ...next, receiptMethodId: null, receiptAccountId: null, paymentReference: '' }
+      return next
+    })
+  }
+
+  // An account that no longer fits the invoice's currency or branch is cleared, not left for the server to refuse.
+  useEffect(() => {
+    if (payment.receiptAccountId === null || !editable || invoiceCurrencyId === null) return
+    const account = cashAccounts.find((a) => String(a.id) === payment.receiptAccountId)
+    const branch = header.branchId === null ? null : Number(header.branchId)
+    if (account && (account.currencyId !== invoiceCurrencyId || (account.branchId !== null && branch !== null && account.branchId !== branch))) {
+      setPayment((current) => ({ ...current, receiptAccountId: null }))
+    }
+  }, [invoiceCurrencyId, header.branchId, payment.receiptAccountId, cashAccounts, editable])
 
   /* ── header ───────────────────────────────────────────────────────────────────────────────── */
 
@@ -627,6 +668,22 @@ export function SalesInvoicePage() {
     return true
   }
 
+  /** What posting needs beyond a savable draft: a Payment Type, and for Cash the method and account. */
+  function validatePaymentForPosting(): boolean {
+    const next: SalesPaymentErrors = {}
+    if (payment.paymentType === null) next.paymentType = 'Choose Cash or On Account.'
+    if (payment.paymentType === 1) {
+      if (!payment.receiptMethodId) next.receiptMethodId = 'Choose how the money is received.'
+      if (!payment.receiptAccountId) next.receiptAccountId = 'Choose the cash / bank account.'
+    }
+    setPaymentErrors(next)
+    if (Object.keys(next).length > 0) {
+      notify.error('Complete the Payment section before posting.')
+      return false
+    }
+    return true
+  }
+
   function toRequest(): SaveSalesInvoiceRequest {
     return {
       documentDate: header.documentDate,
@@ -643,6 +700,10 @@ export function SalesInvoicePage() {
       exchangeRate: isBaseCurrency ? null : header.exchangeRate,
       referenceNo: header.referenceNo.trim() || null,
       notes: header.notes.trim() || null,
+      paymentType: payment.paymentType,
+      receiptMethodId: payment.paymentType === 1 && payment.receiptMethodId ? Number(payment.receiptMethodId) : null,
+      receiptAccountId: payment.paymentType === 1 && payment.receiptAccountId ? Number(payment.receiptAccountId) : null,
+      paymentReference: payment.paymentType === 1 ? payment.paymentReference.trim() || null : null,
       draftReference: isNew ? draftReference.current : null,
       rowVersion: invoice?.rowVersion ?? null,
       lines: lines.map((line, index) => ({
@@ -701,12 +762,17 @@ export function SalesInvoicePage() {
   }
 
   async function saveAndPost() {
+    // Asked for BEFORE saving: a draft can be saved half-filled, but nobody should reach the post question without a type.
+    if (!validatePaymentForPosting()) return
     const saved = await saveDraft()
     if (!saved) return
+    const cash = saved.paymentType === 1
     const go = await confirm({
-      title: 'Post this invoice?',
-      message: `Post this invoice? Stock will be removed from ${saved.warehouseName} and the number assigned.`,
-      confirmLabel: 'Post',
+      title: cash ? 'Post this invoice and take the payment?' : 'Post this invoice?',
+      message: cash
+        ? `Post this invoice? Stock will be removed from ${saved.warehouseName}, the number assigned, and a receipt for ${formatNumber(saved.totalAmount, saved.decimalPlaces)} ${saved.currencyCode} created and posted into ${saved.receiptAccountCode ?? 'the chosen account'}. The invoice will be Fully Paid.`
+        : `Post this invoice? Stock will be removed from ${saved.warehouseName} and the number assigned. It stays unpaid until receipts are allocated to it.`,
+      confirmLabel: cash ? 'Post and receive' : 'Post',
     })
     if (!go) return
     setSaving(true)
@@ -839,13 +905,6 @@ export function SalesInvoicePage() {
           Posted by {invoice.postedByName ?? 'unknown'} on {stamp(invoice.postedAtUtc)}. Stock has been removed and this invoice can no longer be edited.
         </Alert>
       )}
-      {/* Paid / outstanding come from live allocations on posted receipts, never from a column on the invoice. */}
-      {invoice && status === 'Posted' && invoice.paymentStatus && (
-        <Alert color={invoice.paymentStatus === 'Paid' ? 'green' : invoice.paymentStatus === 'Partial' ? 'orange' : 'gray'} variant="light" title={`Payment — ${invoice.paymentStatus}`}>
-          Paid {formatNumber(invoice.paidAmount ?? 0, decimalPlaces)} of {formatNumber(invoice.totalAmount, decimalPlaces)} {currencyCode}
-          {(invoice.outstandingAmount ?? 0) > 0 ? `; ${formatNumber(invoice.outstandingAmount ?? 0, decimalPlaces)} ${currencyCode} still outstanding.` : '. Nothing outstanding.'}
-        </Alert>
-      )}
       {invoice && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${invoice.documentNumber ?? 'draft'}`}>
           Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{invoice.cancelReason ? ` Reason: ${invoice.cancelReason}` : ''}
@@ -867,6 +926,30 @@ export function SalesInvoicePage() {
         readOnly={!editable}
         errors={errors}
         disabled={saving}
+      />
+
+      {/* Paid / outstanding come from live allocations on posted receipts, never from a column on the invoice. */}
+      <SalesPaymentCard
+        value={payment}
+        onChange={changePayment}
+        methods={paymentMethods}
+        accounts={cashAccounts}
+        currencyId={invoiceCurrencyId}
+        currencyCode={currencyCode}
+        branchId={header.branchId === null ? null : Number(header.branchId)}
+        readOnly={!editable}
+        disabled={saving}
+        errors={paymentErrors}
+        paymentStatus={invoice?.paymentStatus ?? null}
+        paidAmount={invoice?.paidAmount ?? null}
+        outstandingAmount={invoice?.outstandingAmount ?? null}
+        totalAmount={invoice?.totalAmount ?? null}
+        decimalPlaces={decimalPlaces}
+        receiptId={invoice?.receiptId ?? null}
+        receiptNumber={invoice?.receiptNumber ?? null}
+        receiptStatus={invoice?.receiptStatus ?? null}
+        methodName={invoice?.receiptMethodName ?? null}
+        accountLabel={invoice?.receiptAccountCode ? `${invoice.receiptAccountCode} - ${invoice.receiptAccountName ?? ''}` : null}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -957,7 +1040,18 @@ export function SalesInvoicePage() {
         api={salesInvoicesApi}
       />
 
-      <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={invoice?.documentNumber ?? `draft #${invoice?.id}`} busy={cancelBusy} onConfirm={(reason) => void cancelInvoice(reason)} />
+      <CancelReasonModal
+        opened={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        documentLabel={invoice?.documentNumber ?? `draft #${invoice?.id}`}
+        busy={cancelBusy}
+        onConfirm={(reason) => void cancelInvoice(reason)}
+        description={
+          invoice?.receiptStatus === 'Posted'
+            ? `Cancelling writes the opposite stock movements AND reverses this cash sale's receipt ${invoice.receiptNumber ?? ''}, with the same reason. The invoice and the receipt stay in place as a record. It cannot be undone.`
+            : undefined
+        }
+      />
 
       {canImportHere && (
         <ImportInvoiceItemsWizard
@@ -990,6 +1084,10 @@ export function SalesInvoicePage() {
               notes: header.notes.trim() || null,
               draftReference: draftReference.current,
               postImmediately,
+              paymentType: payment.paymentType,
+              receiptMethodId: payment.paymentType === 1 && payment.receiptMethodId ? Number(payment.receiptMethodId) : null,
+              receiptAccountId: payment.paymentType === 1 && payment.receiptAccountId ? Number(payment.receiptAccountId) : null,
+              paymentReference: payment.paymentType === 1 ? payment.paymentReference.trim() || null : null,
               lines: imported.map((line) => ({
                 warehouseId: line.warehouseId,
                 itemId: line.itemId,
