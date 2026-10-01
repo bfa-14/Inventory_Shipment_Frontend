@@ -92,6 +92,7 @@ export const PERMISSIONS = {
   purchaseReturnsDelete: 'purchase.returns.delete',
   chargeTypesManage: 'purchase.chargetypes.manage',
   settingsManage: 'configuration.settings.manage',
+  outOfStockAuditView: 'sales.outofstockaudit.view',
   landedCostsView: 'purchase.landedcosts.view',
   landedCostsCreate: 'purchase.landedcosts.create',
   landedCostsPost: 'purchase.landedcosts.post',
@@ -236,6 +237,8 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       { label: 'Receipts', to: '/sales/receipts', permission: PERMISSIONS.receiptsView, icon: 'wallet' },
       { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.receiptsView, icon: 'reports' },
+      // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
+      { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },
       {
         label: 'Import Sales from Excel',
         to: '/sales/import-preview',

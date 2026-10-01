@@ -51,6 +51,7 @@ import { CustomerStatementPage } from './pages/sales/CustomerStatementPage'
 import { CustomerStatementPrintPage } from './pages/sales/CustomerStatementPrintPage'
 import { ReceiptPage } from './pages/sales/ReceiptPage'
 import { ReceiptPrintPage } from './pages/sales/ReceiptPrintPage'
+import { OutOfStockAuditPage } from './pages/sales/OutOfStockAuditPage'
 import { ReceiptsPage } from './pages/sales/ReceiptsPage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
@@ -222,6 +223,10 @@ export default function App() {
               {/* Net sales less the cost frozen on each line, behind its own permission. */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.salesProfitView} />}>
                 <Route path="/sales/profit" element={<SalesProfitPage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
+                <Route path="/sales/out-of-stock-audit" element={<OutOfStockAuditPage />} />
               </Route>
 
               {/* Import Sales from Excel: validate a file against the stock and post it as an invoice.
