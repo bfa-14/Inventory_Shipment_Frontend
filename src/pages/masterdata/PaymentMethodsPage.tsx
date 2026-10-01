@@ -3,7 +3,7 @@ import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
-import { appliesToLabel, ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
+import { paymentMethodsApi, type PaymentMethodDto } from '../../api/masterdata/paymentMethods'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
 import { columnFilter } from '../../components/ui/columnFilter'
@@ -18,59 +18,61 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
-import { AttachmentTypeFormModal } from './AttachmentTypeFormModal'
+import { PaymentMethodFormModal } from './PaymentMethodFormModal'
 
 interface Filters {
   search: string
-  category: string | null
   isActive: string | null
 }
 
-const NO_FILTERS: Filters = { search: '', category: null, isActive: null }
+const NO_FILTERS: Filters = { search: '', isActive: null }
 
 /** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
 const STATUS_VALUES = ['Active', 'Inactive']
 
+/** An empty description reads as a dash, and its funnel has to match the dash the reader sees. */
+const DASH = '—'
+
 /** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<AttachmentTypeDto>> = {
-  category: (r) => r.category,
-  subType: (r) => r.subType,
-  appliesTo: (r) => appliesToLabel(r.appliesTo),
-  sortOrder: (r) => formatNumber(r.sortOrder),
+const COLUMN_TEXT: Record<string, ColumnText<PaymentMethodDto>> = {
+  methodCode: (r) => r.methodCode,
+  methodName: (r) => r.methodName,
+  description: (r) => r.description ?? DASH,
   isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
 }
 
-/** Sorts on whatever column was clicked: numbers numerically, flags with Inactive first. */
-function compareRows(a: AttachmentTypeDto, b: AttachmentTypeDto, key: keyof AttachmentTypeDto): number {
+/** Sorts on whatever column was clicked: flags with Inactive first, text naturally. */
+function compareRows(a: PaymentMethodDto, b: PaymentMethodDto, key: keyof PaymentMethodDto): number {
   const left = a[key]
   const right = b[key]
-  if (typeof left === 'number' && typeof right === 'number') return left - right
   if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
   return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
 }
 
-type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTypeDto } | null
+type Dialog = { kind: 'create' } | { kind: 'edit'; paymentMethod: PaymentMethodDto } | null
 
-/** What a container file is - "Shipping / Bill of Lading" - so the paperwork can be sorted and found. */
-export function AttachmentTypesPage() {
+/**
+ * The payment methods a customer receipt line is paid by. They are rows like any other: Cash, Bank
+ * Transfer and Cheque are only what the system starts with.
+ */
+export function PaymentMethodsPage() {
   const { hasPermission } = useAuth()
   const [dialog, setDialog] = useState<Dialog>(null)
-  const canManage = hasPermission(PERMISSIONS.attachmentTypesManage)
+  const canManage = hasPermission(PERMISSIONS.paymentMethodsManage)
 
-  const grid = useGridQuery<Filters, AttachmentTypeDto, AllRows<AttachmentTypeDto>>({
+  const grid = useGridQuery<Filters, PaymentMethodDto, AllRows<PaymentMethodDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
-    initialSort: { columnAccessor: 'sortOrder', direction: 'asc' },
+    initialSort: { columnAccessor: 'methodCode', direction: 'asc' },
     // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
     paging: 'client',
-    errorMessage: 'The attachment types could not be loaded.',
+    errorMessage: 'The payment methods could not be loaded.',
     fetcher: useCallback(
       ({ filters, signal }) =>
         fetchAllPages((page, pageSize) =>
-          attachmentTypesApi.list(
+          paymentMethodsApi.list(
             {
               search: filters.search.trim() || undefined,
-              category: filters.category ?? undefined,
               isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
               page,
               pageSize,
@@ -83,6 +85,7 @@ export function AttachmentTypesPage() {
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
@@ -92,7 +95,7 @@ export function AttachmentTypesPage() {
   /** What the funnels left - the rows this page then sorts, pages and counts. */
   const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
 
-  const sortKey = grid.sortStatus.columnAccessor as keyof AttachmentTypeDto
+  const sortKey = grid.sortStatus.columnAccessor as keyof PaymentMethodDto
   const sortDirection = grid.sortStatus.direction
 
   const sorted = useMemo(() => {
@@ -106,14 +109,11 @@ export function AttachmentTypesPage() {
   /** The tick lists come from EVERY row, not from the ones surviving the filters. */
   const values = useMemo(
     () => ({
-      category: columnOptions(rows, 'category'),
-      subType: columnOptions(rows, 'subType'),
-      appliesTo: columnOptions(rows, 'appliesTo'),
-      sortOrder: columnOptions(rows, 'sortOrder'),
+      methodCode: columnOptions(rows, 'methodCode'),
+      methodName: columnOptions(rows, 'methodName'),
     }),
     [rows, columnOptions],
   )
-  const load = grid.reload
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -121,74 +121,63 @@ export function AttachmentTypesPage() {
     await load()
   }
 
-  const label = (row: AttachmentTypeDto) => `${row.category} / ${row.subType}`
-
-  async function handleToggleStatus(row: AttachmentTypeDto) {
+  async function handleToggleStatus(row: PaymentMethodDto) {
     const activating = !row.isActive
     const go = await confirm({
-      title: activating ? 'Activate attachment type' : 'Deactivate attachment type',
-      message: activating ? `Activate ${label(row)}?` : `Deactivate ${label(row)}? It will no longer be offered when a file is attached.`,
+      title: activating ? 'Activate payment method' : 'Deactivate payment method',
+      message: activating
+        ? `Activate ${row.methodCode} - ${row.methodName}?`
+        : `Deactivate ${row.methodCode} - ${row.methodName}? It will no longer be offered on a new receipt line.`,
       confirmLabel: activating ? 'Activate' : 'Deactivate',
     })
     if (!go) return
     try {
-      await attachmentTypesApi.setActive(row.id, activating, row.rowVersion)
-      await afterSave(activating ? 'Attachment type activated.' : 'Attachment type deactivated.')
+      await paymentMethodsApi.setActive(row.id, activating, row.rowVersion)
+      await afterSave(activating ? 'Payment method activated.' : 'Payment method deactivated.')
     } catch (err) {
-      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The attachment type could not be updated.')
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The payment method could not be updated.')
       if (err instanceof ApiError && err.code === 'CONCURRENCY') await load()
     }
   }
 
-  async function handleDelete(row: AttachmentTypeDto) {
+  async function handleDelete(row: PaymentMethodDto) {
     const go = await confirm({
-      title: 'Delete attachment type',
-      message: `Delete ${label(row)}? This cannot be undone.`,
+      title: 'Delete payment method',
+      message: `Delete payment method ${row.methodCode} - ${row.methodName}? This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
     if (!go) return
     try {
-      await attachmentTypesApi.remove(row.id)
-      await afterSave('Attachment type deleted successfully.')
+      await paymentMethodsApi.remove(row.id)
+      await afterSave('Payment method deleted successfully.')
     } catch (err) {
-      // IN_USE: files are filed under it; the server's sentence says to deactivate it instead.
-      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The attachment type could not be deleted.')
+      // IN_USE included: the server's sentence already says to deactivate it instead.
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The payment method could not be deleted.')
     }
   }
 
-  const columns: DataTableColumn<AttachmentTypeDto>[] = [
-    rowNumberColumn<AttachmentTypeDto>(grid.page, grid.pageSize),
+  const columns: DataTableColumn<PaymentMethodDto>[] = [
+    rowNumberColumn<PaymentMethodDto>(grid.page, grid.pageSize),
     {
-      accessor: 'category',
-      title: 'Category',
+      accessor: 'methodCode',
+      title: 'Method Code',
       sortable: true,
-      width: 180,
-      ...columnFilter({ ...columnFilters.bind('category'), label: 'Category', options: values.category }),
-      render: (row) => <Text fw={600} fz="sm">{row.category}</Text>,
+      width: 140,
+      ...columnFilter({ ...columnFilters.bind('methodCode'), label: 'Method Code', options: values.methodCode }),
+      render: (row) => <Text fw={600} fz="sm">{row.methodCode}</Text>,
     },
     {
-      accessor: 'subType',
-      title: 'Sub Type',
+      accessor: 'methodName',
+      title: 'Method Name',
       sortable: true,
-      ...columnFilter({ ...columnFilters.bind('subType'), label: 'Sub Type', options: values.subType }),
+      ...columnFilter({ ...columnFilters.bind('methodName'), label: 'Method Name', options: values.methodName }),
     },
     {
-      accessor: 'appliesTo',
-      title: 'Used on',
-      sortable: true,
-      width: 130,
-      ...columnFilter({ ...columnFilters.bind('appliesTo'), label: 'Used on', options: values.appliesTo }),
-      render: (row) => appliesToLabel(row.appliesTo),
-    },
-    {
-      accessor: 'sortOrder',
-      title: 'Sort Order',
-      sortable: true,
-      width: 120,
-      textAlign: 'right',
-      ...columnFilter({ ...columnFilters.bind('sortOrder'), label: 'Sort Order', options: values.sortOrder }),
-      render: (row) => formatNumber(row.sortOrder),
+      accessor: 'description',
+      title: 'Description',
+      ...columnFilter({ ...columnFilters.bind('description'), label: 'Description' }),
+      render: (row) => (row.description ? <Text fz="sm">{row.description}</Text> : <Text c="dimmed">{DASH}</Text>),
     },
     {
       accessor: 'isActive',
@@ -205,10 +194,15 @@ export function AttachmentTypesPage() {
       textAlign: 'right',
       render: (row) => (
         <RowActions
-          label={label(row)}
-          edit={{ visible: canManage, onClick: () => setDialog({ kind: 'edit', attachmentType: row }) }}
+          label={row.methodCode}
+          edit={{ visible: canManage, onClick: () => setDialog({ kind: 'edit', paymentMethod: row }) }}
           toggleStatus={{ visible: canManage, active: row.isActive, onClick: () => void handleToggleStatus(row) }}
-          remove={{ visible: canManage, onClick: () => void handleDelete(row) }}
+          remove={{
+            visible: canManage,
+            disabled: row.usedCount > 0,
+            disabledReason: `Used by ${formatNumber(row.usedCount)} receipt line(s) - deactivate instead`,
+            onClick: () => void handleDelete(row),
+          }}
         />
       ),
     },
@@ -217,21 +211,21 @@ export function AttachmentTypesPage() {
   return (
     <>
       <PageHeader
-        title="Attachment Types"
-        subtitle="The kinds of document a container file or a customer receipt can be filed as."
+        title="Payment Methods"
+        subtitle="The ways a customer pays: cash, transfer, cheque and so on."
         actions={
           canManage ? (
             <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
-              New Attachment Type
+              New Payment Method
             </Button>
           ) : null
         }
       />
 
       <FilterBar>
-        <FilterBar.Col span={5}>
+        <FilterBar.Col span={6}>
           <TextInput
-            placeholder="Category or sub type"
+            placeholder="Method code or name"
             leftSection={<IconSearch size={16} />}
             label="Search"
             value={filters.search}
@@ -241,10 +235,7 @@ export function AttachmentTypesPage() {
             }}
           />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
-          <Select label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
-        </FilterBar.Col>
-        <FilterBar.Col span={2}>
+        <FilterBar.Col span={3}>
           <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
@@ -255,14 +246,14 @@ export function AttachmentTypesPage() {
       </FilterBar>
 
       {error ? (
-        <Alert color="red" mb="md" title="Could not load attachment types">
+        <Alert color="red" mb="md" title="Could not load payment methods">
           {error}
         </Alert>
       ) : null}
 
       <Paper radius="lg" p="md" withBorder>
-        <DataTable<AttachmentTypeDto>
-          storeKey="masterdata.attachmentTypes"
+        <DataTable<PaymentMethodDto>
+          storeKey="masterdata.paymentMethods"
           records={records}
           // The footer totals what the filters left, never just the page on screen.
           summaryRecords={narrowed}
@@ -277,18 +268,20 @@ export function AttachmentTypesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
-          onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', attachmentType: record }) : undefined}
-          noRecordsText={grid.isDefault ? 'No attachment types yet.' : 'No attachment types found. Try clearing the filters.'}
+          onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', paymentMethod: record }) : undefined}
+          noRecordsText={
+            grid.isDefault ? 'No payment methods yet.' : 'No payment methods found. Try clearing the filters.'
+          }
         />
       </Paper>
 
       {dialog ? (
-        <AttachmentTypeFormModal
+        <PaymentMethodFormModal
           mode={dialog.kind}
-          attachmentType={dialog.kind === 'edit' ? dialog.attachmentType : undefined}
+          paymentMethod={dialog.kind === 'edit' ? dialog.paymentMethod : undefined}
           onClose={() => setDialog(null)}
           onSaved={() =>
-            void afterSave(dialog.kind === 'create' ? 'Attachment type created successfully.' : 'Attachment type updated successfully.')
+            void afterSave(dialog.kind === 'create' ? 'Payment method created successfully.' : 'Payment method updated successfully.')
           }
         />
       ) : null}
@@ -300,4 +293,3 @@ const STATUS_OPTIONS = [
   { value: 'true', label: 'Active' },
   { value: 'false', label: 'Inactive' },
 ]
-

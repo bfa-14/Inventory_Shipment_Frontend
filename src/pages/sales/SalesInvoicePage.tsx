@@ -839,6 +839,13 @@ export function SalesInvoicePage() {
           Posted by {invoice.postedByName ?? 'unknown'} on {stamp(invoice.postedAtUtc)}. Stock has been removed and this invoice can no longer be edited.
         </Alert>
       )}
+      {/* Paid / outstanding come from live allocations on posted receipts, never from a column on the invoice. */}
+      {invoice && status === 'Posted' && invoice.paymentStatus && (
+        <Alert color={invoice.paymentStatus === 'Paid' ? 'green' : invoice.paymentStatus === 'Partial' ? 'orange' : 'gray'} variant="light" title={`Payment — ${invoice.paymentStatus}`}>
+          Paid {formatNumber(invoice.paidAmount ?? 0, decimalPlaces)} of {formatNumber(invoice.totalAmount, decimalPlaces)} {currencyCode}
+          {(invoice.outstandingAmount ?? 0) > 0 ? `; ${formatNumber(invoice.outstandingAmount ?? 0, decimalPlaces)} ${currencyCode} still outstanding.` : '. Nothing outstanding.'}
+        </Alert>
+      )}
       {invoice && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${invoice.documentNumber ?? 'draft'}`}>
           Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{invoice.cancelReason ? ` Reason: ${invoice.cancelReason}` : ''}

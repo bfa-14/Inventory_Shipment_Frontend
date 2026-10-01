@@ -1,9 +1,13 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
+import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
-import { appliesToLabel, ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
+import {
+  CASH_BANK_ACCOUNT_TYPES,
+  cashBankAccountsApi,
+  type CashBankAccountDto,
+} from '../../api/masterdata/cashBankAccounts'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
 import { columnFilter } from '../../components/ui/columnFilter'
@@ -18,59 +22,67 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
-import { AttachmentTypeFormModal } from './AttachmentTypeFormModal'
+import { CashBankAccountFormModal } from './CashBankAccountFormModal'
 
 interface Filters {
   search: string
-  category: string | null
+  accountType: string | null
   isActive: string | null
 }
 
-const NO_FILTERS: Filters = { search: '', category: null, isActive: null }
+const NO_FILTERS: Filters = { search: '', accountType: null, isActive: null }
 
 /** The closed set the Status funnel offers, whatever the loaded rows happen to contain. */
 const STATUS_VALUES = ['Active', 'Inactive']
+const TYPE_VALUES = CASH_BANK_ACCOUNT_TYPES.map((t) => t.label)
+
+/** An account with no branch is usable everywhere, and the funnel has to match the words the reader sees. */
+const ALL_BRANCHES = 'All branches'
 
 /** What each column SHOWS - the text its header filter matches and its funnel lists. */
-const COLUMN_TEXT: Record<string, ColumnText<AttachmentTypeDto>> = {
-  category: (r) => r.category,
-  subType: (r) => r.subType,
-  appliesTo: (r) => appliesToLabel(r.appliesTo),
-  sortOrder: (r) => formatNumber(r.sortOrder),
+const COLUMN_TEXT: Record<string, ColumnText<CashBankAccountDto>> = {
+  accountCode: (r) => r.accountCode,
+  accountName: (r) => r.accountName,
+  accountType: (r) => r.accountType,
+  currencyCode: (r) => r.currencyCode,
+  branchName: (r) => r.branchName ?? ALL_BRANCHES,
   isActive: (r) => (r.isActive ? 'Active' : 'Inactive'),
 }
 
-/** Sorts on whatever column was clicked: numbers numerically, flags with Inactive first. */
-function compareRows(a: AttachmentTypeDto, b: AttachmentTypeDto, key: keyof AttachmentTypeDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'number' && typeof right === 'number') return left - right
+/** Sorts on whatever column was clicked: flags with Inactive first, text naturally. */
+function compareRows(a: CashBankAccountDto, b: CashBankAccountDto, key: keyof CashBankAccountDto): number {
+  const left = key === 'branchName' ? (a.branchName ?? ALL_BRANCHES) : a[key]
+  const right = key === 'branchName' ? (b.branchName ?? ALL_BRANCHES) : b[key]
   if (typeof left === 'boolean' && typeof right === 'boolean') return Number(left) - Number(right)
   return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true })
 }
 
-type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTypeDto } | null
+type Dialog = { kind: 'create' } | { kind: 'edit'; account: CashBankAccountDto } | null
 
-/** What a container file is - "Shipping / Bill of Lading" - so the paperwork can be sorted and found. */
-export function AttachmentTypesPage() {
+/**
+ * The cash boxes and bank accounts a customer receipt is paid into. An account holds ONE currency,
+ * and that is what lets a receipt line be checked: the money it records must have gone into an
+ * account of the same currency.
+ */
+export function CashBankAccountsPage() {
   const { hasPermission } = useAuth()
   const [dialog, setDialog] = useState<Dialog>(null)
-  const canManage = hasPermission(PERMISSIONS.attachmentTypesManage)
+  const canManage = hasPermission(PERMISSIONS.cashBankAccountsManage)
 
-  const grid = useGridQuery<Filters, AttachmentTypeDto, AllRows<AttachmentTypeDto>>({
+  const grid = useGridQuery<Filters, CashBankAccountDto, AllRows<CashBankAccountDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
-    initialSort: { columnAccessor: 'sortOrder', direction: 'asc' },
+    initialSort: { columnAccessor: 'accountCode', direction: 'asc' },
     // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
     paging: 'client',
-    errorMessage: 'The attachment types could not be loaded.',
+    errorMessage: 'The cash / bank accounts could not be loaded.',
     fetcher: useCallback(
       ({ filters, signal }) =>
         fetchAllPages((page, pageSize) =>
-          attachmentTypesApi.list(
+          cashBankAccountsApi.list(
             {
               search: filters.search.trim() || undefined,
-              category: filters.category ?? undefined,
+              accountType: filters.accountType === null ? undefined : (filters.accountType as 'Cash' | 'Bank'),
               isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
               page,
               pageSize,
@@ -83,6 +95,7 @@ export function AttachmentTypesPage() {
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const load = grid.reload
   const rows = useMemo(() => data?.items ?? [], [data])
 
   // A filter that leaves three rows must not strand the reader on page 4 of the old result.
@@ -92,7 +105,7 @@ export function AttachmentTypesPage() {
   /** What the funnels left - the rows this page then sorts, pages and counts. */
   const narrowed = useMemo(() => applyColumnFilters(rows), [rows, applyColumnFilters])
 
-  const sortKey = grid.sortStatus.columnAccessor as keyof AttachmentTypeDto
+  const sortKey = grid.sortStatus.columnAccessor as keyof CashBankAccountDto
   const sortDirection = grid.sortStatus.direction
 
   const sorted = useMemo(() => {
@@ -106,14 +119,13 @@ export function AttachmentTypesPage() {
   /** The tick lists come from EVERY row, not from the ones surviving the filters. */
   const values = useMemo(
     () => ({
-      category: columnOptions(rows, 'category'),
-      subType: columnOptions(rows, 'subType'),
-      appliesTo: columnOptions(rows, 'appliesTo'),
-      sortOrder: columnOptions(rows, 'sortOrder'),
+      accountCode: columnOptions(rows, 'accountCode'),
+      accountName: columnOptions(rows, 'accountName'),
+      currencyCode: columnOptions(rows, 'currencyCode'),
+      branchName: columnOptions(rows, 'branchName'),
     }),
     [rows, columnOptions],
   )
-  const load = grid.reload
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -121,74 +133,84 @@ export function AttachmentTypesPage() {
     await load()
   }
 
-  const label = (row: AttachmentTypeDto) => `${row.category} / ${row.subType}`
-
-  async function handleToggleStatus(row: AttachmentTypeDto) {
+  async function handleToggleStatus(row: CashBankAccountDto) {
     const activating = !row.isActive
     const go = await confirm({
-      title: activating ? 'Activate attachment type' : 'Deactivate attachment type',
-      message: activating ? `Activate ${label(row)}?` : `Deactivate ${label(row)}? It will no longer be offered when a file is attached.`,
+      title: activating ? 'Activate account' : 'Deactivate account',
+      message: activating
+        ? `Activate ${row.accountCode} - ${row.accountName}?`
+        : `Deactivate ${row.accountCode} - ${row.accountName}? It will no longer be offered on a new receipt line.`,
       confirmLabel: activating ? 'Activate' : 'Deactivate',
     })
     if (!go) return
     try {
-      await attachmentTypesApi.setActive(row.id, activating, row.rowVersion)
-      await afterSave(activating ? 'Attachment type activated.' : 'Attachment type deactivated.')
+      await cashBankAccountsApi.setActive(row.id, activating, row.rowVersion)
+      await afterSave(activating ? 'Account activated.' : 'Account deactivated.')
     } catch (err) {
-      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The attachment type could not be updated.')
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The account could not be updated.')
       if (err instanceof ApiError && err.code === 'CONCURRENCY') await load()
     }
   }
 
-  async function handleDelete(row: AttachmentTypeDto) {
+  async function handleDelete(row: CashBankAccountDto) {
     const go = await confirm({
-      title: 'Delete attachment type',
-      message: `Delete ${label(row)}? This cannot be undone.`,
+      title: 'Delete account',
+      message: `Delete account ${row.accountCode} - ${row.accountName}? This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
     if (!go) return
     try {
-      await attachmentTypesApi.remove(row.id)
-      await afterSave('Attachment type deleted successfully.')
+      await cashBankAccountsApi.remove(row.id)
+      await afterSave('Account deleted successfully.')
     } catch (err) {
-      // IN_USE: files are filed under it; the server's sentence says to deactivate it instead.
-      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The attachment type could not be deleted.')
+      // IN_USE included: the server's sentence already says to deactivate it instead.
+      notify.error(err instanceof ApiError ? (err.messages[0] as string) : 'The account could not be deleted.')
     }
   }
 
-  const columns: DataTableColumn<AttachmentTypeDto>[] = [
-    rowNumberColumn<AttachmentTypeDto>(grid.page, grid.pageSize),
+  const columns: DataTableColumn<CashBankAccountDto>[] = [
+    rowNumberColumn<CashBankAccountDto>(grid.page, grid.pageSize),
     {
-      accessor: 'category',
-      title: 'Category',
+      accessor: 'accountCode',
+      title: 'Account Code',
+      sortable: true,
+      width: 150,
+      ...columnFilter({ ...columnFilters.bind('accountCode'), label: 'Account Code', options: values.accountCode }),
+      render: (row) => <Text fw={600} fz="sm">{row.accountCode}</Text>,
+    },
+    {
+      accessor: 'accountName',
+      title: 'Account Name',
+      sortable: true,
+      ...columnFilter({ ...columnFilters.bind('accountName'), label: 'Account Name', options: values.accountName }),
+    },
+    {
+      accessor: 'accountType',
+      title: 'Type',
+      sortable: true,
+      width: 110,
+      ...columnFilter({ ...columnFilters.bind('accountType'), label: 'Type', options: TYPE_VALUES, withText: false }),
+      render: (row) => (
+        <Badge variant="light" color={row.accountType === 'Bank' ? 'blue' : 'gray'}>
+          {row.accountType}
+        </Badge>
+      ),
+    },
+    {
+      accessor: 'currencyCode',
+      title: 'Currency',
+      sortable: true,
+      width: 110,
+      ...columnFilter({ ...columnFilters.bind('currencyCode'), label: 'Currency', options: values.currencyCode, withText: false }),
+    },
+    {
+      accessor: 'branchName',
+      title: 'Branch',
       sortable: true,
       width: 180,
-      ...columnFilter({ ...columnFilters.bind('category'), label: 'Category', options: values.category }),
-      render: (row) => <Text fw={600} fz="sm">{row.category}</Text>,
-    },
-    {
-      accessor: 'subType',
-      title: 'Sub Type',
-      sortable: true,
-      ...columnFilter({ ...columnFilters.bind('subType'), label: 'Sub Type', options: values.subType }),
-    },
-    {
-      accessor: 'appliesTo',
-      title: 'Used on',
-      sortable: true,
-      width: 130,
-      ...columnFilter({ ...columnFilters.bind('appliesTo'), label: 'Used on', options: values.appliesTo }),
-      render: (row) => appliesToLabel(row.appliesTo),
-    },
-    {
-      accessor: 'sortOrder',
-      title: 'Sort Order',
-      sortable: true,
-      width: 120,
-      textAlign: 'right',
-      ...columnFilter({ ...columnFilters.bind('sortOrder'), label: 'Sort Order', options: values.sortOrder }),
-      render: (row) => formatNumber(row.sortOrder),
+      ...columnFilter({ ...columnFilters.bind('branchName'), label: 'Branch', options: values.branchName, withText: false }),
+      render: (row) => (row.branchName ? <Text fz="sm">{row.branchName}</Text> : <Text c="dimmed" fz="sm">{ALL_BRANCHES}</Text>),
     },
     {
       accessor: 'isActive',
@@ -205,10 +227,15 @@ export function AttachmentTypesPage() {
       textAlign: 'right',
       render: (row) => (
         <RowActions
-          label={label(row)}
-          edit={{ visible: canManage, onClick: () => setDialog({ kind: 'edit', attachmentType: row }) }}
+          label={row.accountCode}
+          edit={{ visible: canManage, onClick: () => setDialog({ kind: 'edit', account: row }) }}
           toggleStatus={{ visible: canManage, active: row.isActive, onClick: () => void handleToggleStatus(row) }}
-          remove={{ visible: canManage, onClick: () => void handleDelete(row) }}
+          remove={{
+            visible: canManage,
+            disabled: row.usedCount > 0,
+            disabledReason: `Used by ${formatNumber(row.usedCount)} receipt line(s) - deactivate instead`,
+            onClick: () => void handleDelete(row),
+          }}
         />
       ),
     },
@@ -217,21 +244,21 @@ export function AttachmentTypesPage() {
   return (
     <>
       <PageHeader
-        title="Attachment Types"
-        subtitle="The kinds of document a container file or a customer receipt can be filed as."
+        title="Cash / Bank Accounts"
+        subtitle="Where received money goes. Each account holds one currency."
         actions={
           canManage ? (
             <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
-              New Attachment Type
+              New Account
             </Button>
           ) : null
         }
       />
 
       <FilterBar>
-        <FilterBar.Col span={5}>
+        <FilterBar.Col span={4}>
           <TextInput
-            placeholder="Category or sub type"
+            placeholder="Account code or name"
             leftSection={<IconSearch size={16} />}
             label="Search"
             value={filters.search}
@@ -242,9 +269,9 @@ export function AttachmentTypesPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
+          <Select label="Type" placeholder="All" data={CASH_BANK_ACCOUNT_TYPES} value={filters.accountType} onChange={(value) => setFilter('accountType', value)} clearable />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
+        <FilterBar.Col span={3}>
           <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
@@ -255,14 +282,14 @@ export function AttachmentTypesPage() {
       </FilterBar>
 
       {error ? (
-        <Alert color="red" mb="md" title="Could not load attachment types">
+        <Alert color="red" mb="md" title="Could not load accounts">
           {error}
         </Alert>
       ) : null}
 
       <Paper radius="lg" p="md" withBorder>
-        <DataTable<AttachmentTypeDto>
-          storeKey="masterdata.attachmentTypes"
+        <DataTable<CashBankAccountDto>
+          storeKey="masterdata.cashBankAccounts"
           records={records}
           // The footer totals what the filters left, never just the page on screen.
           summaryRecords={narrowed}
@@ -277,18 +304,20 @@ export function AttachmentTypesPage() {
           sortStatus={grid.sortStatus}
           onSortStatusChange={grid.setSortStatus}
           fetching={loading}
-          onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', attachmentType: record }) : undefined}
-          noRecordsText={grid.isDefault ? 'No attachment types yet.' : 'No attachment types found. Try clearing the filters.'}
+          onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', account: record }) : undefined}
+          noRecordsText={
+            grid.isDefault ? 'No cash / bank accounts yet.' : 'No accounts found. Try clearing the filters.'
+          }
         />
       </Paper>
 
       {dialog ? (
-        <AttachmentTypeFormModal
+        <CashBankAccountFormModal
           mode={dialog.kind}
-          attachmentType={dialog.kind === 'edit' ? dialog.attachmentType : undefined}
+          account={dialog.kind === 'edit' ? dialog.account : undefined}
           onClose={() => setDialog(null)}
           onSaved={() =>
-            void afterSave(dialog.kind === 'create' ? 'Attachment type created successfully.' : 'Attachment type updated successfully.')
+            void afterSave(dialog.kind === 'create' ? 'Account created successfully.' : 'Account updated successfully.')
           }
         />
       ) : null}
@@ -300,4 +329,3 @@ const STATUS_OPTIONS = [
   { value: 'true', label: 'Active' },
   { value: 'false', label: 'Inactive' },
 ]
-

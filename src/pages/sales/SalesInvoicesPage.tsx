@@ -7,7 +7,7 @@ import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
-import { salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus } from '../../api/sales/invoices'
+import { salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus, type SalesPaymentStatus } from '../../api/sales/invoices'
 import type { BranchLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
@@ -33,12 +33,16 @@ interface Filters {
   clientId: string | null
   salesmanId: string | null
   status: string | null
+  paymentStatus: string | null
   dateFrom: string | null
   dateTo: string | null
 }
 
-const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesmanId: null, status: null, dateFrom: null, dateTo: null }
+const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesmanId: null, status: null, paymentStatus: null, dateFrom: null, dateTo: null }
 const STATUSES = ['Draft', 'Posted', 'Cancelled']
+const PAYMENT_STATUSES: SalesPaymentStatus[] = ['Unpaid', 'Partial', 'Paid']
+/** Unpaid is grey (nothing has happened yet), Partial orange (somebody is owed), Paid green. */
+const PAYMENT_COLOURS: Record<string, string> = { Unpaid: 'gray', Partial: 'orange', Paid: 'green' }
 const ROUTE = '/sales/invoices'
 
 const ACCESSOR_TO_SORT: Record<string, string> = {
@@ -97,6 +101,7 @@ export function SalesInvoicesPage() {
             clientId: filters.clientId === null ? undefined : Number(filters.clientId),
             salesmanId: filters.salesmanId === null ? undefined : Number(filters.salesmanId),
             status: (filters.status as SalesInvoiceStatus | null) ?? undefined,
+            paymentStatus: (filters.paymentStatus as SalesPaymentStatus | null) ?? undefined,
             dateFrom: filters.dateFrom ?? undefined,
             dateTo: filters.dateTo ?? undefined,
             sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
@@ -236,6 +241,27 @@ export function SalesInvoicesPage() {
     { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
     { accessor: 'totalAmount', title: 'Total', sortable: true, width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{invoiceTotal(row)}</Text> },
     {
+      accessor: 'outstandingAmount',
+      title: 'Outstanding',
+      width: 160,
+      textAlign: 'right',
+      // Only a posted invoice owes anything; a draft or cancelled one shows a dash, not a misleading zero.
+      render: (row) =>
+        row.outstandingAmount === null ? (
+          '—'
+        ) : (
+          <Text fz="sm" fw={row.outstandingAmount > 0 ? 500 : undefined} c={row.outstandingAmount > 0 ? undefined : 'dimmed'} style={{ whiteSpace: 'nowrap' }}>
+            {formatNumber(row.outstandingAmount, row.decimalPlaces)} {row.currencyCode}
+          </Text>
+        ),
+    },
+    {
+      accessor: 'paymentStatus',
+      title: 'Payment',
+      width: 110,
+      render: (row) => (row.paymentStatus ? <Badge color={PAYMENT_COLOURS[row.paymentStatus] ?? 'gray'} variant="light">{row.paymentStatus}</Badge> : '—'),
+    },
+    {
       accessor: 'status',
       title: 'Status',
       sortable: true,
@@ -276,7 +302,7 @@ export function SalesInvoicesPage() {
       />
 
       <FilterBar>
-        <FilterBar.Col span={3}>
+        <FilterBar.Col span={2}>
           <TextInput label="Search" placeholder="Number, reference or client" leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
@@ -290,6 +316,9 @@ export function SalesInvoicesPage() {
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <Select label="Status" placeholder="All" data={STATUSES} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+        </FilterBar.Col>
+        <FilterBar.Col span={1}>
+          <Select label="Payment" placeholder="All" data={PAYMENT_STATUSES} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom ? new Date(filters.dateFrom) : null} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />

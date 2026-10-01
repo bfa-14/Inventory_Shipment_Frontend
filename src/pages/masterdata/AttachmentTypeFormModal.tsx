@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Alert, Anchor, Autocomplete, Group, NumberInput, Switch, TextInput } from '@mantine/core'
+import { Alert, Anchor, Autocomplete, Group, NumberInput, Select, Switch, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { ApiError } from '../../api/http'
 import {
+  ATTACHMENT_APPLIES_TO,
   ATTACHMENT_CATEGORIES,
   attachmentTypesApi,
+  type AttachmentAppliesTo,
   type AttachmentTypeDto,
   type SaveAttachmentTypeRequest,
 } from '../../api/masterdata/attachmentTypes'
@@ -20,6 +22,7 @@ interface AttachmentTypeFormModalProps {
 interface FormValues {
   category: string
   subType: string
+  appliesTo: AttachmentAppliesTo
   sortOrder: number | string
   isActive: boolean
 }
@@ -48,6 +51,7 @@ export function AttachmentTypeFormModal({ mode, attachmentType, onClose, onSaved
     const payload: SaveAttachmentTypeRequest = {
       category: values.category.trim(),
       subType: values.subType.trim(),
+      appliesTo: values.appliesTo,
       sortOrder: values.sortOrder === '' ? 0 : Number(values.sortOrder),
       isActive: values.isActive,
       ...(mode === 'edit' ? { rowVersion } : {}),
@@ -109,6 +113,14 @@ export function AttachmentTypeFormModal({ mode, attachmentType, onClose, onSaved
         <TextInput label="Sub Type" placeholder="Bill of Lading" withAsterisk maxLength={MAX_SUBTYPE} {...form.getInputProps('subType')} />
       </Group>
 
+      <Select
+        label="Used on"
+        description="Container types are offered when a container file is attached; receipt types on the customer receipt page. The two lists never mix."
+        allowDeselect={false}
+        data={ATTACHMENT_APPLIES_TO}
+        {...form.getInputProps('appliesTo')}
+      />
+
       <NumberInput
         label="Sort Order"
         description="Where it sits in the attachment type list: lower comes first."
@@ -144,6 +156,7 @@ function toValues(attachmentType?: AttachmentTypeDto): FormValues {
   return {
     category: attachmentType?.category ?? '',
     subType: attachmentType?.subType ?? '',
+    appliesTo: attachmentType?.appliesTo ?? 'Logistics',
     sortOrder: attachmentType?.sortOrder ?? 0,
     isActive: attachmentType?.isActive ?? true,
   }

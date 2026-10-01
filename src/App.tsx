@@ -36,6 +36,8 @@ import { MovementPage } from './pages/logistics/MovementPage'
 import { MovementsPage } from './pages/logistics/MovementsPage'
 import { TrackingPage } from './pages/logistics/TrackingPage'
 import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
+import { PaymentMethodsPage } from './pages/masterdata/PaymentMethodsPage'
+import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
 import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
 import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
@@ -43,6 +45,11 @@ import { PurchaseDocumentPage } from './pages/purchase/PurchaseDocumentPage'
 import { PurchaseDocumentsPage } from './pages/purchase/PurchaseDocumentsPage'
 import { ImportSalesPage } from './pages/sales/ImportSalesPage'
 import { SalesInvoicePage } from './pages/sales/SalesInvoicePage'
+import { CustomerStatementPage } from './pages/sales/CustomerStatementPage'
+import { CustomerStatementPrintPage } from './pages/sales/CustomerStatementPrintPage'
+import { ReceiptPage } from './pages/sales/ReceiptPage'
+import { ReceiptPrintPage } from './pages/sales/ReceiptPrintPage'
+import { ReceiptsPage } from './pages/sales/ReceiptsPage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
@@ -63,6 +70,12 @@ export default function App() {
             {/* The plan on paper: outside the shell, so nothing but the document reaches the printer. */}
             <Route element={<ProtectedRoute permission={PERMISSIONS.shortagesView} />}>
               <Route path="/inventory/shortages/:id/print" element={<ShortagePrintPage />} />
+            </Route>
+
+            {/* Receipts and statements on paper: outside the shell, like the shortage plan. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
+              <Route path="/sales/receipts/:id/print" element={<ReceiptPrintPage />} />
+              <Route path="/sales/receipts/statement/print" element={<CustomerStatementPrintPage />} />
             </Route>
 
             <Route element={<AppShell />}>
@@ -102,6 +115,12 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementTypesManage} />}>
                 <Route path="/setup/master-data/movement-types" element={<MovementTypesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.paymentMethodsManage} />}>
+                <Route path="/setup/master-data/payment-methods" element={<PaymentMethodsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.cashBankAccountsManage} />}>
+                <Route path="/setup/master-data/cash-bank-accounts" element={<CashBankAccountsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.containersCreate} />}>
@@ -211,6 +230,14 @@ export default function App() {
                 <Route path="/sales/invoices" element={<SalesInvoicesPage />} />
                 <Route path="/sales/invoices/new" element={<SalesInvoicePage />} />
                 <Route path="/sales/invoices/:id" element={<SalesInvoicePage />} />
+              </Route>
+              {/* Customer receipts: list and document behind the view permission; saving, posting,
+                  reversing and allocating are checked on the page (and by the API). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
+                <Route path="/sales/receipts" element={<ReceiptsPage />} />
+                <Route path="/sales/receipts/statement" element={<CustomerStatementPage />} />
+                <Route path="/sales/receipts/new" element={<ReceiptPage />} />
+                <Route path="/sales/receipts/:id" element={<ReceiptPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.documentTypesManage} />}>

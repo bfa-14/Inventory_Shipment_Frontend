@@ -113,6 +113,9 @@ export interface SaveSalesInvoiceRequest {
 
 export type SalesInvoiceStatus = 'Draft' | 'Posted' | 'Cancelled'
 
+/** Unpaid / Partial / Paid. The server sends null for a draft or cancelled invoice: only a posted one has a payment status. */
+export type SalesPaymentStatus = 'Unpaid' | 'Partial' | 'Paid'
+
 /** One row of the invoice list. */
 export interface SalesInvoiceListDto {
   id: number
@@ -145,6 +148,10 @@ export interface SalesInvoiceListDto {
   totalDiscount: number
   totalAmount: number
   totalAmountBase: number
+  /** In the invoice currency; derived from live allocations on posted receipts. Null unless posted. */
+  paidAmount: number | null
+  outstandingAmount: number | null
+  paymentStatus: SalesPaymentStatus | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -160,6 +167,7 @@ export interface SalesInvoiceQuery {
   clientId?: number
   salesmanId?: number
   status?: SalesInvoiceStatus
+  paymentStatus?: SalesPaymentStatus
   dateFrom?: string
   dateTo?: string
   sortBy?: string
@@ -294,6 +302,10 @@ export interface SalesInvoiceDto {
   totalDiscount: number
   totalAmount: number
   totalAmountBase: number
+  /** Null unless the invoice is posted. In the invoice currency. */
+  paidAmount: number | null
+  outstandingAmount: number | null
+  paymentStatus: SalesPaymentStatus | null
   /** Cost of the goods that left. Null on a draft and for a reader without sales.profit.view. */
   totalCostBase: number | null
   totalGrossProfitBase: number | null
@@ -345,6 +357,7 @@ export const salesInvoicesApi = {
     if (query.clientId !== undefined) params.set('clientId', String(query.clientId))
     if (query.salesmanId !== undefined) params.set('salesmanId', String(query.salesmanId))
     if (query.status) params.set('status', query.status)
+    if (query.paymentStatus) params.set('paymentStatus', query.paymentStatus)
     if (query.dateFrom) params.set('dateFrom', query.dateFrom)
     if (query.dateTo) params.set('dateTo', query.dateTo)
     if (query.sortBy) params.set('sortBy', query.sortBy)
