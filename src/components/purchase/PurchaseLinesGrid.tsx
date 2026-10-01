@@ -32,7 +32,9 @@ export interface PurchaseLine {
   discountPercent: number
   expiryDate: string | null
   notes: string
-  /** Stock in the document's warehouse, or null while unknown. */
+  /** The warehouse this line receives into. The warehouse is a LINE's now, not the document's. */
+  warehouseId: number | null
+  /** Stock in THIS line's warehouse, or null while unknown. */
   onHandBase: number | null
   importRowNumber: number | null
   /** The order line an invoice line receives, or the invoice line a return line gives back. */
@@ -95,6 +97,8 @@ interface PurchaseLinesGridProps {
   /** False on an invoice from containers: its lines are the container lines, none can be added. */
   allowAdd?: boolean
   readOnly: boolean
+  /** The warehouses of the document's branch, for the per-line Warehouse select. */
+  warehouses: { value: string; label: string }[]
 }
 
 /**
@@ -127,13 +131,14 @@ export function PurchaseLinesGrid({
   showEstimatedLanded = false,
   allowAdd = true,
   readOnly,
+  warehouses,
 }: PurchaseLinesGridProps) {
-  const columnCount = 11 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
+  const columnCount = 12 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
 
   const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
 
   return (
-    <Table.ScrollContainer minWidth={1150 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
+    <Table.ScrollContainer minWidth={1340 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -141,6 +146,7 @@ export function PurchaseLinesGrid({
             <Table.Th w={240}>Item Code</Table.Th>
             <Table.Th w={200}>Item Name</Table.Th>
             <Table.Th w={150}>Unit</Table.Th>
+            <Table.Th w={190}>Warehouse</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={110} ta="right">Qty</Table.Th>
             {showTransit && <Table.Th w={100} ta="right">In transit</Table.Th>}
@@ -249,6 +255,30 @@ export function PurchaseLinesGrid({
                         const unit = line.units.find((u) => String(u.id) === next)
                         if (unit) onUnitChosen(line.key, unit)
                       }}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                  )}
+                </Table.Td>
+
+                <Table.Td>
+                  {readOnly ? (
+                    <Text fz="sm">
+                      {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
+                    </Text>
+                  ) : (
+                    <Select
+                      data={warehouses}
+                      value={line.warehouseId === null ? null : String(line.warehouseId)}
+                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      disabled={warehouses.length === 0}
+                      searchable
+                      /* On Hand is this item IN THIS WAREHOUSE, so the figure beside it goes stale
+                         the moment this changes. Null shows a dash until the new one arrives. */
+                      onChange={(next) => {
+                        if (!next) return
+                        onChange(line.key, { warehouseId: Number(next), onHandBase: null })
+                      }}
+                      error={Boolean(line.error) && line.warehouseId === null}
                       comboboxProps={{ withinPortal: true }}
                     />
                   )}

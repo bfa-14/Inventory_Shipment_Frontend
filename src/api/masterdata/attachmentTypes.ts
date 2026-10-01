@@ -8,12 +8,25 @@ import type { PagedResult } from '../types'
 const BASE = '/api/masterdata/attachment-types'
 
 /** The categories the seed data uses. The column is free text; these are offered, not enforced. */
-export const ATTACHMENT_CATEGORIES = ['Container', 'Purchase', 'Shipping', 'Customs', 'Transport', 'Delivery', 'Other']
+export const ATTACHMENT_CATEGORIES = ['Container', 'Purchase', 'Shipping', 'Customs', 'Transport', 'Delivery', 'Bank', 'Cheque', 'Other']
+
+/** Which screens offer the type: the container pages (Logistics) or the customer receipt page (Receipt). */
+export type AttachmentAppliesTo = 'Logistics' | 'Receipt'
+
+export const ATTACHMENT_APPLIES_TO: { value: AttachmentAppliesTo; label: string }[] = [
+  { value: 'Logistics', label: 'Containers' },
+  { value: 'Receipt', label: 'Receipts' },
+]
+
+export function appliesToLabel(value: AttachmentAppliesTo): string {
+  return ATTACHMENT_APPLIES_TO.find((a) => a.value === value)?.label ?? value
+}
 
 export interface AttachmentTypeDto {
   id: number
   category: string
   subType: string
+  appliesTo: AttachmentAppliesTo
   sortOrder: number
   isActive: boolean
   createdAtUtc: string
@@ -44,6 +57,7 @@ export interface AttachmentTypeQuery {
 export interface SaveAttachmentTypeRequest {
   category: string
   subType: string
+  appliesTo: AttachmentAppliesTo
   sortOrder: number
   isActive: boolean
   rowVersion?: string | null
@@ -62,9 +76,11 @@ export const attachmentTypesApi = {
     return request<PagedResult<AttachmentTypeDto>>(`${BASE}?${params.toString()}`, { signal })
   },
 
-  lookup: (activeOnly = true, includeId?: number) => {
+  /** `appliesTo` keeps the two worlds apart: 'Logistics' for container files, 'Receipt' for receipts. */
+  lookup: (activeOnly = true, includeId?: number, appliesTo?: AttachmentAppliesTo) => {
     const params = new URLSearchParams({ activeOnly: String(activeOnly) })
     if (includeId !== undefined) params.set('includeId', String(includeId))
+    if (appliesTo) params.set('appliesTo', appliesTo)
     return request<AttachmentTypeLookupDto[]>(`${BASE}/lookup?${params.toString()}`)
   },
 

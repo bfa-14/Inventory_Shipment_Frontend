@@ -87,9 +87,10 @@ export interface ImportInvoiceItemsWizardProps {
   checkStock?: boolean
   onImported: (lines: ImportedLine[]) => void
   /**
-   * The family's import-create: one document per warehouse found in the file. When it is given and
-   * the validated rows span several warehouses, the wizard offers to create them instead of
-   * appending; without it a multi-warehouse file is appended to the open document as before.
+   * The family's import-create: ONE new document holding every row, each keeping the warehouse the
+   * file named. When it is given and the validated rows span several warehouses, the wizard offers
+   * to create it instead of appending; without it the rows are appended to the open document, which
+   * can hold several warehouses just as well.
    */
   importCreate?: (lines: ImportedLine[], postImmediately: boolean) => Promise<ImportCreateResult>
   /** Where a created document lives, for the links in the result panel. */
@@ -112,7 +113,7 @@ const STATUS_COLOURS: Record<ImportRowStatus, string> = {
   Merged: 'gray',
 }
 
-/** Where step 3 is: appending to the open document, or making one document per warehouse. */
+/** Where step 3 is: appending to the open document, or making one new document from the file. */
 type Phase = 'appending' | 'groups' | 'creating' | 'created'
 
 /**
@@ -125,9 +126,9 @@ type Phase = 'appending' | 'groups' | 'creating' | 'created'
  * left behind. A wizard that quietly dropped four rows out of forty would be worse than one that
  * refused the file outright, because nobody would find out until the stock count disagreed.
  *
- * ONE DOCUMENT = ONE WAREHOUSE. A file naming several warehouses cannot become the open document,
- * so step 3 shows the warehouse groups and offers to create one document per warehouse through the
- * family's import-create endpoint. A file for one other warehouse asks to switch the document to it.
+ * THE WAREHOUSE IS A LINE'S. A file naming several warehouses can be appended to the open document
+ * as it is; when the host passed import-create, step 3 lists the warehouses and offers to make ONE
+ * new document from the file instead. A file for one other warehouse asks to switch the lines to it.
  *
  * THE HOST OWNS THE LINES. This component returns them through onImported and writes only the audit
  * row; whichever screen opened it adds them to its own draft and saves them with everything else.
@@ -363,8 +364,8 @@ function ImportWizardBody({
     setImported(true)
   }
 
-  /** One document per warehouse, through the host's import-create. */
-  async function createPerWarehouse() {
+  /** ONE new document holding every row, each in its own warehouse, through the host's import-create. */
+  async function createMixedDocument() {
     if (!importCreate) return
     setPhase('creating')
     try {
@@ -375,7 +376,7 @@ function ImportWizardBody({
       // the draft reference only.
       await logImport(isStock ? undefined : answer.documents[0]?.id)
       if (answer.failed.length === 0) notify.success(`${answer.created} document(s) created${answer.posted > 0 ? `, ${answer.posted} posted` : ''}.`)
-      else notify.error(`${answer.failed.length} warehouse(s) could not be ${postImmediately ? 'posted' : 'created'} — see the list.`)
+      else notify.error(`The document could not be ${postImmediately ? 'posted' : 'created'} — see the reason below.`)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The documents could not be created.')
       setPhase('groups')
@@ -433,7 +434,7 @@ function ImportWizardBody({
             <Group justify="space-between" align="center" wrap="wrap" gap="sm">
               <Text size="sm">
                 One template for every document type. Rows may name a warehouse; a file naming several
-                warehouses becomes one document per warehouse.
+                warehouses becomes one document whose lines each keep their own.
               </Text>
               <Button variant="light" size="xs" onClick={() => void downloadTemplate()}>
                 Download Template
@@ -531,7 +532,7 @@ function ImportWizardBody({
             <Alert color="blue" title={`${warehouseGroups.length} warehouses in this file`}>
               {warehouseGroups.map((g) => `${g.warehouseCode} - ${g.rows} line(s)`).join(', ')}.{' '}
               {importCreate
-                ? 'One document is created per warehouse on the next step.'
+                ? 'They become one new document on the next step; each line keeps its own warehouse.'
                 : 'The lines are appended to this document; each keeps the warehouse the file named.'}
             </Alert>
           )}
@@ -682,9 +683,9 @@ function ImportWizardBody({
 
       {step === 2 && result && (phase === 'groups' || phase === 'creating') && (
         <Stack>
-          <Alert color="blue" title="One document per warehouse">
-            The file names {warehouseGroups.length} warehouses, and a document holds one. The lines are
-            created as {warehouseGroups.length} separate documents; the open document is left as it is.
+          <Alert color="blue" title="One document, several warehouses">
+            The file names {warehouseGroups.length} warehouses. They become ONE new document whose
+            lines each keep the warehouse the file gave them; the open document is left as it is.
           </Alert>
 
           <Table withTableBorder withColumnBorders>
@@ -706,7 +707,7 @@ function ImportWizardBody({
 
           <Checkbox
             label="Post immediately"
-            description="Each document is posted right after it is created; a refused posting leaves that one as a draft."
+            description="The document is posted right after it is created; a refused posting leaves it as a draft."
             checked={postImmediately}
             onChange={(event) => setPostImmediately(event.currentTarget.checked)}
             disabled={phase === 'creating'}
@@ -716,8 +717,8 @@ function ImportWizardBody({
             <Button variant="default" onClick={() => void requestClose()} disabled={phase === 'creating'}>
               Cancel
             </Button>
-            <Button loading={phase === 'creating'} onClick={() => void createPerWarehouse()}>
-              Create one document per warehouse
+            <Button loading={phase === 'creating'} onClick={() => void createMixedDocument()}>
+              Create one document
             </Button>
           </Group>
         </Stack>
@@ -727,8 +728,8 @@ function ImportWizardBody({
         <Stack>
           <Alert color={created.failed.length === 0 ? 'green' : 'orange'} title={`${created.created} document(s) created${created.posted > 0 ? `, ${created.posted} posted` : ''}`}>
             {created.failed.length === 0
-              ? 'Every warehouse in the file has its document.'
-              : `${created.failed.length} warehouse(s) were refused — their reason is listed below.`}
+              ? 'Every row in the file is on the document, each in the warehouse the file named.'
+              : 'The reason is listed below.'}
           </Alert>
 
           <Table withTableBorder withColumnBorders>
@@ -752,7 +753,11 @@ function ImportWizardBody({
                       <Text fz="sm" fw={500}>{d.documentNumber ?? `draft #${d.id}`}</Text>
                     )}
                   </Table.Td>
-                  <Table.Td>{d.warehouseName}</Table.Td>
+                  {/* A MIXED DOCUMENT HAS NO SINGLE WAREHOUSE to name, so it says how many it spans
+                      rather than naming the header's and implying the rest are in it. */}
+                  <Table.Td>
+                    {d.warehouseCount > 1 ? `${formatNumber(d.warehouseCount)} warehouses` : d.warehouseName}
+                  </Table.Td>
                   <Table.Td ta="right">{formatNumber(d.lineCount)}</Table.Td>
                   <Table.Td>
                     <Badge color={d.status === 'Posted' ? 'green' : 'gray'} variant="light">
@@ -761,11 +766,16 @@ function ImportWizardBody({
                   </Table.Td>
                 </Table.Tr>
               ))}
-              {created.failed.map((f) => (
-                <Table.Tr key={`failed-${f.warehouseId}`}>
+              {created.failed.map((f, index) => (
+                /* KEYED BY POSITION: a create that never got as far as a document has no warehouse
+                   to be keyed by, and a mixed document has no one warehouse to name either. The
+                   warehouse is named only when there is one to name. */
+                <Table.Tr key={`failed-${index}`}>
                   <Table.Td colSpan={4}>
                     <Text fz="sm" c="red">
-                      {f.warehouseName ?? `warehouse #${f.warehouseId}`}: {f.message} ({f.code})
+                      {f.warehouseName ?? (f.warehouseId === null ? null : `warehouse #${f.warehouseId}`)}
+                      {f.warehouseName || f.warehouseId !== null ? ': ' : ''}
+                      {f.message} ({f.code})
                     </Text>
                   </Table.Td>
                 </Table.Tr>

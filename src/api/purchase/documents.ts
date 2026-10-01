@@ -54,7 +54,11 @@ export interface SavePurchaseDocumentRequest {
   documentDate: string
   expectedDate?: string | null
   branchId: number
-  warehouseId: number
+  /**
+   * The document's warehouse, which is now only a label: the warehouse lives on each LINE. Null
+   * lets the server keep the first line's, which is what the editor sends.
+   */
+  warehouseId?: number | null
   supplierId: number
   /** Null = the supplier's default currency, else the base currency. */
   currencyId: number | null

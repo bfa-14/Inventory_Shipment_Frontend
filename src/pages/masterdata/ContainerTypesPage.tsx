@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { containerTypesApi, type ContainerTypeDto } from '../../api/masterdata/containerTypes'
 import { useAuth } from '../../auth/useAuth'
@@ -8,6 +9,7 @@ import { formatNumber } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -24,6 +26,22 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', isActive: null }
 
+/** An unset capacity reads as a dash, and its funnel has to match the dash the reader sees. */
+const DASH = '—'
+
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<ContainerTypeDto>[] = [
+  { accessor: 'typeCode', summary: 'count' },
+  { accessor: 'typeName' },
+  { accessor: 'maxUnits', kind: 'number', text: (r) => (r.maxUnits === null ? DASH : formatNumber(r.maxUnits)) },
+  { accessor: 'maxWeightKg', kind: 'number', text: (r) => (r.maxWeightKg === null ? DASH : formatNumber(r.maxWeightKg, 0)) },
+  { accessor: 'maxVolumeCbm', kind: 'number', text: (r) => (r.maxVolumeCbm === null ? DASH : formatNumber(r.maxVolumeCbm, 1)) },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
+
 type Dialog = { kind: 'create' } | { kind: 'edit'; containerType: ContainerTypeDto } | null
 
 /**
@@ -35,24 +53,25 @@ export function ContainerTypesPage() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const canManage = hasPermission(PERMISSIONS.containerTypesManage)
 
-  const grid = useGridQuery<Filters, ContainerTypeDto, Awaited<ReturnType<typeof containerTypesApi.list>>>({
+  const grid = useGridQuery<Filters, ContainerTypeDto, AllRows<ContainerTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'typeCode', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The container types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        containerTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'TypeCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          containerTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -60,6 +79,19 @@ export function ContainerTypesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.containerTypes',
+    sort: [{ accessor: 'typeCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -104,38 +136,44 @@ export function ContainerTypesPage() {
   }
 
   const columns: DataTableColumn<ContainerTypeDto>[] = [
-    rowNumberColumn<ContainerTypeDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ContainerTypeDto>(engine.page, engine.pageSize),
     {
       accessor: 'typeCode',
       title: 'Type Code',
-      sortable: true,
       width: 120,
       render: (row) => <Text fw={600} fz="sm">{row.typeCode}</Text>,
     },
-    { accessor: 'typeName', title: 'Type Name', sortable: true },
+    {
+      accessor: 'typeName',
+      title: 'Type Name',
+    },
     {
       accessor: 'maxUnits',
       title: 'Max Units',
-      sortable: true,
       width: 120,
       textAlign: 'right',
-      render: (row) => (row.maxUnits === null ? <Text c="dimmed">—</Text> : formatNumber(row.maxUnits)),
+      render: (row) => (row.maxUnits === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxUnits)),
     },
     {
       accessor: 'maxWeightKg',
       title: 'Max Weight (kg)',
       width: 150,
       textAlign: 'right',
-      render: (row) => (row.maxWeightKg === null ? <Text c="dimmed">—</Text> : formatNumber(row.maxWeightKg, 0)),
+      render: (row) => (row.maxWeightKg === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxWeightKg, 0)),
     },
     {
       accessor: 'maxVolumeCbm',
       title: 'Max Volume (CBM)',
       width: 160,
       textAlign: 'right',
-      render: (row) => (row.maxVolumeCbm === null ? <Text c="dimmed">—</Text> : formatNumber(row.maxVolumeCbm, 1)),
+      render: (row) => (row.maxVolumeCbm === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxVolumeCbm, 1)),
     },
-    { accessor: 'isActive', title: 'Status', sortable: true, width: 120, render: (row) => <StatusBadge active={row.isActive} /> },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      width: 120,
+      render: (row) => <StatusBadge active={row.isActive} />,
+    },
     {
       accessor: 'actions',
       title: 'Actions',
@@ -176,7 +214,7 @@ export function ContainerTypesPage() {
           <TextInput
             placeholder="Type code or name"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -185,7 +223,7 @@ export function ContainerTypesPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
-          <Select aria-label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
+          <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
           <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={grid.clearFilters} disabled={grid.isDefault}>
@@ -202,15 +240,10 @@ export function ContainerTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ContainerTypeDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.containerTypes"
+          engine={engine}
+          exportFileName="container-types"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', containerType: record }) : undefined}
           noRecordsText={
@@ -238,9 +271,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  typeCode: 'TypeCode',
-  typeName: 'TypeName',
-  maxUnits: 'MaxUnits',
-  isActive: 'IsActive',
-}

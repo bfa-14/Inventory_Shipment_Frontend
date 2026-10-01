@@ -1,4 +1,4 @@
-import { ActionIcon, Anchor, Badge, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
+import { ActionIcon, Anchor, Autocomplete, Badge, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
@@ -33,7 +33,13 @@ export interface InvoiceLine {
   discountPercent: number
   expiryDate: string | null
   notes: string
-  /** Stock in the document's warehouse, or null while unknown. */
+  /** The warehouse this line ships from. The warehouse is a LINE's now, not the document's. */
+  warehouseId: number | null
+  /** The specification this line is sold as, chosen from those the item offers. */
+  specification: string | null
+  /** What OTHER invoices called this item — the dropdown's suggestions, not a constraint. */
+  specifications: string[]
+  /** Stock in THIS line's warehouse, or null while unknown. */
   onHandBase: number | null
   importRowNumber: number | null
   /** A message about the row: the server's "Line N: …", or the page's own "No price in …". */
@@ -59,6 +65,8 @@ interface SalesInvoiceLinesGridProps {
   priceListName: string
   /** Only a holder of the price override may type a price; with PriceList pricing it is otherwise read-only. */
   priceEditable: boolean
+  /** The warehouses of the invoice's branch, for the per-line Warehouse select. */
+  warehouses: { value: string; label: string }[]
   readOnly: boolean
 }
 
@@ -87,12 +95,40 @@ export function SalesInvoiceLinesGrid({
   decimalPlaces,
   priceListName,
   priceEditable,
+  warehouses,
   readOnly,
 }: SalesInvoiceLinesGridProps) {
   const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
 
+  /**
+   * What one line's Specification box offers: what THIS invoice already says for the same item,
+   * then what past invoices said.
+   *
+   * THE INVOICE IN FRONT OF THE READER COMES FIRST, and it comes from the rows rather than from the
+   * server, so a specification typed a moment ago on another line can be picked here immediately —
+   * without saving first, which is the only way the server would ever hear about it.
+   *
+   * The line's own text is left out: the box already holds it, and offering it back is noise.
+   */
+  function suggestionsFor(line: InvoiceLine) {
+    const seen: string[] = []
+    const add = (value?: string | null) => {
+      const text = value?.trim()
+      if (text && !seen.includes(text)) seen.push(text)
+    }
+
+    if (line.itemId !== null) {
+      for (const other of lines) {
+        if (other.key !== line.key && other.itemId === line.itemId) add(other.specification)
+      }
+    }
+    for (const past of line.specifications) add(past)
+
+    return seen
+  }
+
   return (
-    <Table.ScrollContainer minWidth={1150}>
+    <Table.ScrollContainer minWidth={1510}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -100,6 +136,8 @@ export function SalesInvoiceLinesGrid({
             <Table.Th w={240}>Item Code</Table.Th>
             <Table.Th w={200}>Item Name</Table.Th>
             <Table.Th w={150}>Unit</Table.Th>
+            <Table.Th w={170}>Specification</Table.Th>
+            <Table.Th w={190}>Warehouse</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
             <Table.Th w={150} ta="right">Unit Price</Table.Th>
@@ -174,6 +212,54 @@ export function SalesInvoiceLinesGrid({
                         const unit = line.units.find((u) => String(u.id) === next)
                         if (unit) onUnitChosen(line.key, unit)
                       }}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                  )}
+                </Table.Td>
+
+                {/* A NOTE THAT REMEMBERS WHAT THE LAST ONE SAID. The cell is free text, like Notes:
+                    anything may be typed. Under it sits the text already used for this ITEM — on
+                    the other lines of this invoice first, then on invoices already saved — so the
+                    second sale of a thing can pick what the first one called it without anybody
+                    maintaining a list of specifications.
+
+                    Suggestions, never a constraint — nothing validates the text against them, and an
+                    item nobody has sold yet simply has none to offer until somebody types one. */}
+                <Table.Td>
+                  {readOnly ? (
+                    <Text fz="sm">{line.specification || '—'}</Text>
+                  ) : (
+                    <Autocomplete
+                      data={suggestionsFor(line)}
+                      value={line.specification ?? ''}
+                      placeholder={line.itemId === null ? '—' : 'Specification'}
+                      disabled={line.itemId === null}
+                      maxLength={100}
+                      onChange={(next) => onChange(line.key, { specification: next.trim() ? next : null })}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                  )}
+                </Table.Td>
+
+                <Table.Td>
+                  {readOnly ? (
+                    <Text fz="sm">
+                      {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
+                    </Text>
+                  ) : (
+                    <Select
+                      data={warehouses}
+                      value={line.warehouseId === null ? null : String(line.warehouseId)}
+                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      disabled={warehouses.length === 0}
+                      searchable
+                      /* On Hand is this item IN THIS WAREHOUSE, so the figure beside it goes stale
+                         the moment this changes. Null shows a dash until the new one arrives. */
+                      onChange={(next) => {
+                        if (!next) return
+                        onChange(line.key, { warehouseId: Number(next), onHandBase: null })
+                      }}
+                      error={Boolean(line.error) && line.warehouseId === null}
                       comboboxProps={{ withinPortal: true }}
                     />
                   )}
@@ -325,7 +411,7 @@ export function SalesInvoiceLinesGrid({
 
           {lines.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={13}>
                 <Text ta="center" c="dimmed" py="lg">
                   No lines yet. Scan an item above, add one below, or import a file.
                 </Text>
@@ -335,7 +421,7 @@ export function SalesInvoiceLinesGrid({
 
           {!readOnly && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={13}>
                 <Text c="dimmed" fz="sm">
                   + Click to add an item…
                 </Text>

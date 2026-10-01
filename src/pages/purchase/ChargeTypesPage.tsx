@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import {
   allocationMethodLabel,
@@ -13,6 +14,7 @@ import { formatNumber } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -47,33 +49,47 @@ export function ChargeTypesPage() {
    * every other control lands at once, and the hook guarantees one request per settled state with
    * the newest one winning.
    */
-  const grid = useGridQuery<Filters, ChargeTypeDto, Awaited<ReturnType<typeof chargeTypesApi.list>>>({
+  const grid = useGridQuery<Filters, ChargeTypeDto, AllRows<ChargeTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'chargeCode', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The charge types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        chargeTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            allocationMethod: filters.allocationMethod ?? undefined,
-            includeInLandedCost:
-              filters.includeInLandedCost === null ? undefined : filters.includeInLandedCost === 'true',
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'ChargeCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          chargeTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              allocationMethod: filters.allocationMethod ?? undefined,
+              includeInLandedCost:
+                filters.includeInLandedCost === null ? undefined : filters.includeInLandedCost === 'true',
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'purchase.chargeTypes',
+    sort: [{ accessor: 'chargeCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
   const load = grid.reload
 
   async function afterSave(message: string) {
@@ -138,7 +154,7 @@ export function ChargeTypesPage() {
   }
 
   const columns: DataTableColumn<ChargeTypeDto>[] = [
-    rowNumberColumn<ChargeTypeDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ChargeTypeDto>(engine.page, engine.pageSize),
     /* No header funnels on this grid: it pages on the server, and the endpoint takes one free-text
        parameter matching code OR name, so a box on the Charge Code header could only narrow by
        something other than the column it sits on. Every parameter the API does take is in the
@@ -146,7 +162,6 @@ export function ChargeTypesPage() {
     {
       accessor: 'chargeCode',
       title: 'Charge Code',
-      sortable: true,
       width: 130,
       render: (c) => (
         <Text fw={600} fz="sm">
@@ -154,11 +169,14 @@ export function ChargeTypesPage() {
         </Text>
       ),
     },
-    { accessor: 'chargeName', title: 'Charge Name', sortable: true, width: 200 },
+    {
+      accessor: 'chargeName',
+      title: 'Charge Name',
+      width: 200,
+    },
     {
       accessor: 'allocationMethod',
       title: 'Allocation Method',
-      sortable: true,
       width: 170,
       render: (c) => allocationMethodLabel(c.allocationMethod),
     },
@@ -177,13 +195,13 @@ export function ChargeTypesPage() {
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 120,
       render: (c) => <StatusBadge active={c.isActive} />,
     },
     {
       accessor: 'description',
       title: 'Description',
+      // No tick list: a description is prose, so the list would be one entry per row.
       // No width: it takes whatever the fixed columns leave, so the grid fits a laptop.
       render: (c) =>
         c.description ? (
@@ -245,7 +263,7 @@ export function ChargeTypesPage() {
           <TextInput
             placeholder="Charge code or name"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -259,7 +277,7 @@ export function ChargeTypesPage() {
             being off, which is the same thing and one fewer row in each list. */}
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Allocation method"
+            label="Allocation method"
             placeholder="All"
             data={ALLOCATION_OPTIONS}
             value={filters.allocationMethod}
@@ -270,7 +288,7 @@ export function ChargeTypesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Cost impact"
+            label="Cost impact"
             placeholder="All"
             data={COST_IMPACT_OPTIONS}
             value={filters.includeInLandedCost}
@@ -281,7 +299,7 @@ export function ChargeTypesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -310,15 +328,10 @@ export function ChargeTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<ChargeTypeDto>
-          records={data?.items ?? []}
+          storeKey="purchase.chargeTypes"
+          engine={engine}
+          exportFileName="charge-types"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', chargeType: record }) : undefined}
@@ -371,11 +384,17 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** Grid accessor -> the name the search procedure sorts by. */
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  chargeCode: 'ChargeCode',
-  chargeName: 'ChargeName',
-  allocationMethod: 'AllocationMethod',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<ChargeTypeDto>[] = [
+  { accessor: 'chargeCode', summary: 'count' },
+  { accessor: 'chargeName' },
+  { accessor: 'allocationMethod', text: (c) => allocationMethodLabel(c.allocationMethod) },
+  { accessor: 'includeInLandedCost', kind: 'boolean', text: (c) => (c.includeInLandedCost ? 'Yes' : 'No') },
+  { accessor: 'isRecoverableTax', kind: 'boolean', text: (c) => (c.isRecoverableTax ? 'Yes' : 'No') },
+  { accessor: 'isActive', kind: 'boolean', text: (c) => (c.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'description', text: (c) => c.description ?? '' },
+]
+

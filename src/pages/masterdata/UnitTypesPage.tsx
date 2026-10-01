@@ -1,17 +1,17 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { unitTypesApi } from '../../api/masterdata/unitTypes'
-import type { UnitTypeDto, UnitTypeSortBy } from '../../api/types'
+import type { UnitTypeDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -30,6 +30,16 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', isActive: null }
 
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<UnitTypeDto>[] = [
+  { accessor: 'unitTypeName', summary: 'count' },
+  { accessor: 'isActive', kind: 'boolean', text: (u) => (u.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'createdAtUtc', kind: 'date', text: (u) => formatDateTime(u.createdAtUtc) },
+]
+
 type Dialog = { kind: 'create' } | { kind: 'edit'; unitType: UnitTypeDto } | null
 
 export function UnitTypesPage() {
@@ -40,23 +50,25 @@ export function UnitTypesPage() {
   const canEdit = hasPermission(PERMISSIONS.unitTypesEdit)
   const canDelete = hasPermission(PERMISSIONS.unitTypesDelete)
 
-  const grid = useGridQuery<Filters, UnitTypeDto, Awaited<ReturnType<typeof unitTypesApi.search>>>({
+  const grid = useGridQuery<Filters, UnitTypeDto, AllRows<UnitTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'unitTypeName', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The unit types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        unitTypesApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'UnitTypeName',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          unitTypesApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -64,12 +76,24 @@ export function UnitTypesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.unitTypes',
+    sort: [{ accessor: 'unitTypeName', direction: 'asc' }],
+  })
 
   function exportCsv() {
     downloadCsv(
       'unit-types.csv',
       ['Name', 'Status', 'Created'],
-      (data?.items ?? []).map((u) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      engine.rows.map((u) => [
         u.unitTypeName,
         u.isActive ? 'Active' : 'Inactive',
         formatDateTime(u.createdAtUtc),
@@ -136,29 +160,22 @@ export function UnitTypesPage() {
   }
 
   const columns: DataTableColumn<UnitTypeDto>[] = [
-    rowNumberColumn<UnitTypeDto>(grid.page, grid.pageSize),
-    /* Name carries no header funnel: this grid pages on the server and the search endpoint takes one
-       free-text parameter, which the filter bar's search box already is. */
-    { accessor: 'unitTypeName', title: 'Name', sortable: true },
+    rowNumberColumn<UnitTypeDto>(engine.page, engine.pageSize),
+    {
+      accessor: 'unitTypeName',
+      title: 'Name',
+    },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (u) => <StatusBadge active={u.isActive} />,
     },
     {
       accessor: 'createdAtUtc',
       title: 'Created',
-      sortable: true,
       width: 180,
+      // No tick list: every row is a different instant, so the list would be one entry per row.
       render: (u) => formatDateTime(u.createdAtUtc),
     },
     {
@@ -210,7 +227,7 @@ export function UnitTypesPage() {
           <TextInput
             placeholder="Search by name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search unit types"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -221,7 +238,7 @@ export function UnitTypesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -250,15 +267,10 @@ export function UnitTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<UnitTypeDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.unitTypes"
+          engine={engine}
+          exportFileName="unit-types"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', unitType: record }) : undefined}
@@ -289,11 +301,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
-
-const ACCESSOR_TO_SORT: Record<string, UnitTypeSortBy> = {
-  unitTypeName: 'UnitTypeName',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
-}

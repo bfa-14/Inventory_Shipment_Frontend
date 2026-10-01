@@ -108,6 +108,19 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
     </Badge>
   )
 
+  /**
+   * Is this entry the one the reader is on? A route belongs to the LONGEST menu entry that prefixes it,
+   * so Customer Statement (/sales/receipts/statement) does not also light Receipts (/sales/receipts).
+   */
+  const leafPaths = navLeaves(allSections).map((leaf) => leaf.item.to as string)
+  function isActive(to: string): boolean {
+    const path = location.pathname
+    if (to === '/') return path === '/'
+    const matches = (candidate: string) => path === candidate || path.startsWith(candidate + '/')
+    if (!matches(to)) return false
+    return !leafPaths.some((other) => other.length > to.length && matches(other))
+  }
+
   function renderChild(child: NavItem) {
     if (child.comingSoon || !child.to) {
       return (
@@ -126,9 +139,12 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         key={child.label}
         component={RouterNavLink}
         to={child.to}
+        // Exact, so the router does not mark a parent route current as well (it sets aria-current, which
+        // Mantine styles as active); isActive below decides which entry is lit.
+        end
         label={label(child)}
         onClick={onNavigate}
-        active={location.pathname.startsWith(child.to)}
+        active={isActive(child.to)}
         styles={{
           root: { borderRadius: 'var(--mantine-radius-md)' },
           label: { fontSize: 'var(--mantine-font-size-sm)', ...NO_WRAP },
@@ -179,11 +195,11 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         key={item.label}
         component={RouterNavLink}
         to={item.to as string}
-        end={item.to === '/'}
+        end
         label={label(item)}
         leftSection={icon}
         onClick={onNavigate}
-        active={item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to as string)}
+        active={isActive(item.to as string)}
         title={item.label}
         styles={{ root: { borderRadius: 'var(--mantine-radius-md)' }, label: NO_WRAP }}
       />

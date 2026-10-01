@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router'
-import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
-import { salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus } from '../../api/sales/invoices'
+import { SALES_PAYMENT_TYPES, salesInvoicesApi, type SalesInvoiceListDto, type SalesInvoiceStatus, type SalesPaymentStatus, type SalesPaymentType } from '../../api/sales/invoices'
 import type { BranchLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
@@ -15,9 +16,12 @@ import { BulkResultsModal } from '../../components/documents/BulkResultsModal'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { dateLabel, isoDate, STATUS_COLOURS } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
+import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { partyLabel } from '../../components/sales/salesLines'
+import { decideOutOfStock } from '../../components/sales/outOfStock'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -33,27 +37,42 @@ interface Filters {
   clientId: string | null
   salesmanId: string | null
   status: string | null
+  paymentStatus: string | null
+  paymentType: string | null
   dateFrom: string | null
   dateTo: string | null
 }
 
-const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesmanId: null, status: null, dateFrom: null, dateTo: null }
+const NO_FILTERS: Filters = { search: '', branchId: null, clientId: null, salesmanId: null, status: null, paymentStatus: null, paymentType: null, dateFrom: null, dateTo: null }
 const STATUSES = ['Draft', 'Posted', 'Cancelled']
 const ROUTE = '/sales/invoices'
-
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  documentNumber: 'DocumentNumber',
-  documentDate: 'DocumentDate',
-  clientName: 'ClientName',
-  status: 'Status',
-  totalAmount: 'TotalAmount',
-  createdAtUtc: 'CreatedAtUtc',
-}
 
 /** "$ 5,000.00 USD" — the symbol and the code, because a symbol alone is ambiguous across currencies. */
 function invoiceTotal(row: SalesInvoiceListDto): string {
   return `${row.currencySymbol ? `${row.currencySymbol} ` : ''}${formatNumber(row.totalAmount, row.decimalPlaces)} ${row.currencyCode}`
 }
+
+/**
+ * What each column IS, for the grid engine. A total in the invoice's own currency cannot be added up
+ * across a list that mixes USD and CDF, so the footer sums the BASE-currency column instead and the
+ * document-currency columns carry no total.
+ */
+const GRID_COLUMNS: GridColumnMeta<SalesInvoiceListDto>[] = [
+  { accessor: 'documentNumber', summary: 'count', value: (r) => r.documentNumber ?? 'DRAFT', text: (r) => r.documentNumber ?? 'DRAFT' },
+  { accessor: 'documentDate', kind: 'date' },
+  { accessor: 'clientName' },
+  { accessor: 'salesmanName', text: (r) => r.salesmanName ?? '' },
+  { accessor: 'branchName' },
+  { accessor: 'warehouseName' },
+  { accessor: 'totalItems', kind: 'number' },
+  { accessor: 'totalAmount', kind: 'number', text: invoiceTotal },
+  { accessor: 'totalAmountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalAmountBase, 2) },
+  { accessor: 'paymentTypeName', kind: 'list', text: (r) => r.paymentTypeName ?? 'Not chosen' },
+  { accessor: 'outstandingAmount', kind: 'number', text: (r) => (r.outstandingAmount === null ? '' : `${formatNumber(r.outstandingAmount, r.decimalPlaces)} ${r.currencyCode}`) },
+  { accessor: 'paymentStatus', kind: 'list', text: (r) => (r.paymentStatus ? paymentStatusLabel(r.paymentStatus) : '') },
+  { accessor: 'receiptNumber', text: (r) => r.receiptNumber ?? '' },
+  { accessor: 'status', kind: 'list' },
+]
 
 /**
  * Every sales invoice: the same list the stock documents have — filters that apply as they are
@@ -83,28 +102,34 @@ export function SalesInvoicesPage() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
 
-  const grid = useGridQuery<Filters, SalesInvoiceListDto, Awaited<ReturnType<typeof salesInvoicesApi.list>>>({
+  const grid = useGridQuery<Filters, SalesInvoiceListDto, AllRows<SalesInvoiceListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The invoices could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        salesInvoicesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            clientId: filters.clientId === null ? undefined : Number(filters.clientId),
-            salesmanId: filters.salesmanId === null ? undefined : Number(filters.salesmanId),
-            status: (filters.status as SalesInvoiceStatus | null) ?? undefined,
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          salesInvoicesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              clientId: filters.clientId === null ? undefined : Number(filters.clientId),
+              salesmanId: filters.salesmanId === null ? undefined : Number(filters.salesmanId),
+              status: (filters.status as SalesInvoiceStatus | null) ?? undefined,
+              paymentStatus: (filters.paymentStatus as SalesPaymentStatus | null) ?? undefined,
+              paymentType: filters.paymentType === null ? undefined : (Number(filters.paymentType) as SalesPaymentType),
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'DocumentDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -112,6 +137,17 @@ export function SalesInvoicesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED INVOICES AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows
+     what is loaded from the server (dates, status, client...); the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'sales.salesInvoices',
+    sort: [{ accessor: 'documentDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     branchesApi.lookup(false).then(setBranches).catch(() => {})
@@ -125,12 +161,18 @@ export function SalesInvoicesPage() {
   async function post(row: SalesInvoiceListDto) {
     const go = await confirm({
       title: `Post ${label(row)}`,
-      message: `Post this invoice? Stock will be removed from ${row.warehouseName} and the number assigned.`,
-      confirmLabel: 'Post',
+      message:
+        row.paymentType === 1
+          ? `Post this invoice? Stock will be removed from ${row.warehouseName}, the number assigned, and a receipt for the full total created and posted. The invoice will be Fully Paid.`
+          : `Post this invoice? Stock will be removed from ${row.warehouseName} and the number assigned.`,
+      confirmLabel: row.paymentType === 1 ? 'Post and receive' : 'Post',
     })
     if (!go) return
     try {
-      await salesInvoicesApi.post(row.id, row.rowVersion)
+      // Out of stock: warned here, before posting, with the real figures; a refusal is explained instead of attempted.
+      const decision = await decideOutOfStock(row.id)
+      if (!decision.proceed) return
+      await salesInvoicesApi.post(row.id, row.rowVersion, decision.acknowledge)
       notify.success('Invoice posted.')
       await load()
     } catch (err) {
@@ -205,11 +247,10 @@ export function SalesInvoicesPage() {
   }
 
   const columns: DataTableColumn<SalesInvoiceListDto>[] = [
-    rowNumberColumn<SalesInvoiceListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<SalesInvoiceListDto>(engine.page, engine.pageSize),
     {
       accessor: 'documentNumber',
       title: 'Invoice No.',
-      sortable: true,
       width: 190,
       render: (row) =>
         row.documentNumber ? (
@@ -218,11 +259,10 @@ export function SalesInvoicesPage() {
           <Badge color="gray" variant="light">DRAFT</Badge>
         ),
     },
-    { accessor: 'documentDate', title: 'Date', sortable: true, width: 110, render: (row) => dateLabel(row.documentDate) },
+    { accessor: 'documentDate', title: 'Date', width: 110, render: (row) => dateLabel(row.documentDate) },
     {
       accessor: 'clientName',
       title: 'Client',
-      sortable: true,
       render: (row) => (
         <div>
           <Text fz="sm" fw={500}>{row.clientName}</Text>
@@ -234,11 +274,49 @@ export function SalesInvoicesPage() {
     { accessor: 'branchName', title: 'Branch' },
     { accessor: 'warehouseName', title: 'Warehouse' },
     { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
-    { accessor: 'totalAmount', title: 'Total', sortable: true, width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{invoiceTotal(row)}</Text> },
+    { accessor: 'totalAmount', title: 'Total', width: 170, textAlign: 'right', render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{invoiceTotal(row)}</Text> },
+    { accessor: 'totalAmountBase', title: 'Total (base)', width: 130, textAlign: 'right', render: (row) => formatNumber(row.totalAmountBase, 2) },
+    {
+      accessor: 'paymentTypeName',
+      title: 'Payment Type',
+      width: 120,
+      render: (row) => (row.paymentTypeName ? <Badge color={row.paymentType === 1 ? 'teal' : 'blue'} variant="light">{row.paymentTypeName}</Badge> : <Text fz="xs" c="dimmed">Not chosen</Text>),
+    },
+    {
+      accessor: 'outstandingAmount',
+      title: 'Outstanding',
+      width: 160,
+      textAlign: 'right',
+      // Only a posted invoice owes anything; a draft or cancelled one shows a dash, not a misleading zero.
+      render: (row) =>
+        row.outstandingAmount === null ? (
+          '—'
+        ) : (
+          <Text fz="sm" fw={row.outstandingAmount > 0 ? 500 : undefined} c={row.outstandingAmount > 0 ? undefined : 'dimmed'} style={{ whiteSpace: 'nowrap' }}>
+            {formatNumber(row.outstandingAmount, row.decimalPlaces)} {row.currencyCode}
+          </Text>
+        ),
+    },
+    {
+      accessor: 'paymentStatus',
+      title: 'Payment',
+      width: 110,
+      render: (row) => (row.paymentStatus ? <Badge color={paymentStatusColour(row.paymentStatus)} variant="light">{paymentStatusLabel(row.paymentStatus)}</Badge> : '—'),
+    },
+    {
+      accessor: 'receiptNumber',
+      title: 'Receipt No.',
+      width: 150,
+      render: (row) =>
+        row.receiptId !== null ? (
+          <Anchor component={Link} to={`/sales/receipts/${row.receiptId}`} fz="sm" onClick={(event) => event.stopPropagation()}>{row.receiptNumber}</Anchor>
+        ) : (
+          '—'
+        ),
+    },
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 110,
       render: (row) => <Badge color={STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{row.status}</Badge>,
     },
@@ -276,7 +354,7 @@ export function SalesInvoicesPage() {
       />
 
       <FilterBar>
-        <FilterBar.Col span={3}>
+        <FilterBar.Col span={2}>
           <TextInput label="Search" placeholder="Number, reference or client" leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
@@ -285,11 +363,17 @@ export function SalesInvoicesPage() {
         <FilterBar.Col span={2}>
           <Select label="Client" placeholder="All clients" data={clients.map((c) => ({ value: String(c.id), label: partyLabel(c) }))} value={filters.clientId} onChange={(next) => setFilter('clientId', next)} clearable searchable />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
+        <FilterBar.Col span={1}>
           <Select label="Salesman" placeholder="All" data={salesmen.map((s) => ({ value: String(s.id), label: partyLabel(s) }))} value={filters.salesmanId} onChange={(next) => setFilter('salesmanId', next)} clearable searchable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <Select label="Status" placeholder="All" data={STATUSES} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+        </FilterBar.Col>
+        <FilterBar.Col span={1}>
+          <Select label="Pay type" placeholder="All" data={SALES_PAYMENT_TYPES.map((t) => ({ value: String(t.value), label: t.label }))} value={filters.paymentType} onChange={(next) => setFilter('paymentType', next)} clearable />
+        </FilterBar.Col>
+        <FilterBar.Col span={1}>
+          <Select label="Payment" placeholder="All" data={PAYMENT_STATUS_OPTIONS} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom ? new Date(filters.dateFrom) : null} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
@@ -305,23 +389,24 @@ export function SalesInvoicesPage() {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more invoices than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <BulkActionsBar count={selection.ids.length} canPost={canPost} canDelete={canDelete} busy={bulkBusy} onPost={() => void bulkPost()} onDelete={() => void bulkDelete()} onClear={selection.clear} />
 
       <Paper radius="lg" withBorder>
         <DataTable
-          records={data?.items ?? []}
+          storeKey="sales.salesInvoices"
+          engine={engine}
+          exportFileName="sales-invoices"
           columns={columns}
           selectedRecords={selection.selected}
           onSelectedRecordsChange={selection.setSelected}
           isRecordSelectable={selectable}
           rowClassName={(row) => (highlight.includes(row.id) ? 'app-grid__row--highlight' : undefined)}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No invoices yet."
           onRowClick={({ record }) => void navigate(`${ROUTE}/${record.id}`)}
@@ -330,7 +415,18 @@ export function SalesInvoicesPage() {
 
       <BulkResultsModal opened={bulkResult !== null} title={bulkResult?.title ?? ''} successLabel={bulkResult?.successLabel ?? ''} result={bulkResult?.result ?? null} labelOf={(item) => `draft #${item.id}`} onClose={() => setBulkResult(null)} />
 
-      <CancelReasonModal opened={cancelling !== null} onClose={() => setCancelling(null)} documentLabel={cancelling ? label(cancelling) : ''} busy={cancelBusy} onConfirm={(reason) => void cancelInvoice(reason)} />
+      <CancelReasonModal
+        opened={cancelling !== null}
+        onClose={() => setCancelling(null)}
+        documentLabel={cancelling ? label(cancelling) : ''}
+        busy={cancelBusy}
+        onConfirm={(reason) => void cancelInvoice(reason)}
+        description={
+          cancelling?.receiptNumber
+            ? `Cancelling writes the opposite stock movements AND reverses this cash sale's receipt ${cancelling.receiptNumber}, with the same reason. The invoice and the receipt stay in place as a record. It cannot be undone.`
+            : undefined
+        }
+      />
     </div>
   )
 }

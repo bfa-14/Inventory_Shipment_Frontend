@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconEye, IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
-import type { BranchLookupDto, PartyDto, PartySortBy, PartyTypeName } from '../../api/types'
+import type { BranchLookupDto, PartyDto, PartyTypeName } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { triStateFilter, triStateQuery, type ColumnFilterValue } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -76,25 +76,27 @@ export function PartiesPage() {
    * every other control lands at once, and the hook guarantees one request per settled state with
    * the newest one winning.
    */
-  const grid = useGridQuery<Filters, PartyDto, Awaited<ReturnType<typeof partiesApi.search>>>({
+  const grid = useGridQuery<Filters, PartyDto, AllRows<PartyDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'partyCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The parties could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        partiesApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            partyType: (filters.partyType as PartyTypeName | null) ?? undefined,
-            branchId: numberOrUndefined(filters.branchId),
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'PartyCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          partiesApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              partyType: (filters.partyType as PartyTypeName | null) ?? undefined,
+              branchId: numberOrUndefined(filters.branchId),
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -102,12 +104,27 @@ export function PartiesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.parties',
+    sort: [{ accessor: 'partyCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
+  // A string rather than a keyof: Party Type is a column without a field behind it.
 
   function exportCsv() {
     downloadCsv(
       'parties.csv',
       ['Party Code', 'Party Name', 'Party Type', 'Phone', 'Email', 'Branch', 'Status', 'Created'],
-      (data?.items ?? []).map((p) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      engine.rows.map((p) => [
         p.partyCode,
         p.partyName,
         partyTypesOf(p)
@@ -181,7 +198,7 @@ export function PartiesPage() {
   }
 
   const columns: DataTableColumn<PartyDto>[] = [
-    rowNumberColumn<PartyDto>(grid.page, grid.pageSize),
+    rowNumberColumn<PartyDto>(engine.page, engine.pageSize),
     /* Party Code, Party Name and Email carry no header funnel: this grid pages on the server and
        the search endpoint takes one free-text parameter matching code, name, phone, mobile OR
        e-mail, so a box on any one of those headers could only narrow by something other than the
@@ -189,16 +206,21 @@ export function PartiesPage() {
     {
       accessor: 'partyCode',
       title: 'Party Code',
-      sortable: true,
       width: 130,
       render: (p) => <Text fw={600}>{p.partyCode}</Text>,
     },
-    { accessor: 'partyName', title: 'Party Name', sortable: true, width: 190 },
+    {
+      accessor: 'partyName',
+      title: 'Party Name',
+      width: 190,
+    },
     {
       accessor: 'partyType',
       title: 'Party Type',
-      // A party may hold several types, so this is a set of badges, not one value - and the API
-      // filters by a single type, which is what the filter bar's Party Type dropdown sends.
+      // Sorts on the joined text the badges read as, so parties group by their first type.
+      // A party may hold several types, so the cell is a set of badges. The funnel matches the
+      // joined text rather than offering combinations, and the tick list is built from what the
+      // rows actually hold.
       width: 190,
       render: (p) => {
         const types = partyTypesOf(p)
@@ -220,15 +242,15 @@ export function PartiesPage() {
           {
             accessor: 'phone',
             title: 'Phone',
-            sortable: true,
             width: 130,
+            // No tick list: a phone number is very nearly one value per row.
             render: (p: PartyDto) => p.phone ?? <Text c="dimmed">—</Text>,
           } satisfies DataTableColumn<PartyDto>,
         ]),
     {
       accessor: 'email',
       title: 'Email',
-      sortable: true,
+      // No tick list: an e-mail is one value per row.
       // No width: it takes whatever the fixed columns leave.
       render: (p) => p.email ?? <Text c="dimmed">—</Text>,
     },
@@ -238,33 +260,17 @@ export function PartiesPage() {
           {
             accessor: 'branchName',
             title: 'Branch',
-            sortable: true,
             width: 150,
             // The funnel is single-select: the API filters by one branch id, and a list that let
             // three be ticked and then sent one would be lying about what it did.
-            ...columnFilter({
-              label: 'Branch',
-              value: branchFilterValue(branches, filters.branchId),
-              onApply: (next) => setFilter('branchId', branchIdOf(branches, next)),
-              options: branches.map(branchLabel),
-              single: true,
-            }),
             render: (p: PartyDto) => p.branchName ?? <Text c="dimmed">—</Text>,
           } satisfies DataTableColumn<PartyDto>,
         ]),
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       // Caption + sort arrows + funnel all share this header, so it is wider than the pill needs.
       width: 130,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (p) => <StatusBadge active={p.isActive} />,
     },
     {
@@ -326,7 +332,7 @@ export function PartiesPage() {
           <TextInput
             placeholder="Search by party code, name, phone or email..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search parties"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -338,7 +344,7 @@ export function PartiesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Party type"
+            label="Party type"
             placeholder="All types"
             data={PARTY_TYPE_OPTIONS}
             value={filters.partyType}
@@ -349,7 +355,7 @@ export function PartiesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Branch"
+            label="Branch"
             placeholder="All branches"
             data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
             value={filters.branchId}
@@ -362,7 +368,7 @@ export function PartiesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -391,15 +397,10 @@ export function PartiesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PartyDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.parties"
+          engine={engine}
+          exportFileName="parties"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its first icon does: open the record. A reader who
           // may edit lands in the editable form, everyone else in the read-only one.
@@ -431,36 +432,28 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
-
 const PARTY_TYPE_OPTIONS = PARTY_TYPES.map((t) => ({ value: t.value, label: t.label }))
 
-const ACCESSOR_TO_SORT: Record<string, PartySortBy> = {
-  partyCode: 'PartyCode',
-  partyName: 'PartyName',
-  branchName: 'BranchName',
-  email: 'Email',
-  phone: 'Phone',
-  isActive: 'IsActive',
-}
+/**
+ * What each column SHOWS for a party - the text its header filter matches and its funnel lists.
+ * A party may hold several types, so Party Type is matched against the badges joined together.
+ */
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<PartyDto>[] = [
+  { accessor: 'partyCode', summary: 'count' },
+  { accessor: 'partyName' },
+  { accessor: 'partyType', text: (p) => partyTypesOf(p).map((t) => t.label).join(', ') },
+  { accessor: 'phone', text: (p) => p.phone ?? '' },
+  { accessor: 'email', text: (p) => p.email ?? '' },
+  { accessor: 'branchName', text: (p) => p.branchName ?? '' },
+  { accessor: 'isActive', kind: 'boolean', text: (p) => (p.isActive ? 'Active' : 'Inactive') },
+]
 
 function branchLabel(branch: BranchLookupDto): string {
   return `${branch.branchCode} - ${branch.branchName}`
-}
-
-/** The Branch funnel speaks in labels; the filter holds the id. These two translate between them. */
-function branchFilterValue(branches: BranchLookupDto[], id: string | null): ColumnFilterValue | undefined {
-  const match = branches.find((b) => String(b.id) === id)
-  return match ? { values: [branchLabel(match)] } : undefined
-}
-
-function branchIdOf(branches: BranchLookupDto[], value: ColumnFilterValue | undefined): string | null {
-  const values = value?.values
-  // The funnel is single-select, so anything other than exactly one tick means "every branch".
-  if (!values || values.length !== 1) return null
-  const match = branches.find((b) => branchLabel(b) === values[0])
-  return match ? String(match.id) : null
 }
 
 function numberOrUndefined(value: string | null): number | undefined {

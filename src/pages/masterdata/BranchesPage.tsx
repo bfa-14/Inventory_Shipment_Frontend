@@ -1,15 +1,15 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
-import type { BranchDto, BranchSortBy } from '../../api/types'
+import type { BranchDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
@@ -48,24 +48,26 @@ export function BranchesPage() {
    * The filter bar and the column funnels are two ways into the SAME filter, and both go through
    * `setFilter`, so a header reading "Active" over a bar reading "All" is not a state that exists.
    */
-  const grid = useGridQuery<Filters, BranchDto, Awaited<ReturnType<typeof branchesApi.search>>>({
+  const grid = useGridQuery<Filters, BranchDto, AllRows<BranchDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'branchCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The branches could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        branchesApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            isMainBranch: filters.isMainBranch === null ? undefined : filters.isMainBranch === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'BranchCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          branchesApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              isMainBranch: filters.isMainBranch === null ? undefined : filters.isMainBranch === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -73,12 +75,26 @@ export function BranchesPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.branches',
+    sort: [{ accessor: 'branchCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
 
   function exportCsv() {
     downloadCsv(
       'branches.csv',
       ['Branch Code', 'Branch Name', 'Address', 'Is Main Branch', 'Status'],
-      (data?.items ?? []).map((b) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      engine.rows.map((b) => [
         b.branchCode,
         b.branchName,
         b.address ?? '',
@@ -142,45 +158,34 @@ export function BranchesPage() {
   }
 
   const columns: DataTableColumn<BranchDto>[] = [
-    rowNumberColumn<BranchDto>(grid.page, grid.pageSize),
-    /* Branch Code, Branch Name and Address carry no header filter: this grid pages on the server and
-       the search endpoint takes one free-text parameter that matches code OR name, so a per-column
-       box here could only narrow by something other than the column it sits on. The search box in
-       the filter bar is that parameter, under its own name. See docs/frontend-conventions.md. */
-    { accessor: 'branchCode', title: 'Branch Code', sortable: true, width: 150 },
-    { accessor: 'branchName', title: 'Branch Name', sortable: true },
+    rowNumberColumn<BranchDto>(engine.page, engine.pageSize),
+    /* These three now carry their own funnel. The page holds the whole table, so each one is
+       matched here against the text its own cell shows - which is what the search box in the filter
+       bar could never do, being one parameter over code OR name. */
+    {
+      accessor: 'branchCode',
+      title: 'Branch Code',
+      width: 150,
+    },
+    {
+      accessor: 'branchName',
+      title: 'Branch Name',
+    },
     {
       accessor: 'address',
       title: 'Address',
-      sortable: true,
       render: (b) => b.address ?? '-',
     },
     {
       accessor: 'isMainBranch',
       title: 'Is Main Branch',
-      sortable: true,
       width: 190,
-      ...columnFilter({
-        label: 'Is Main Branch',
-        value: triStateFilter(filters.isMainBranch, 'Yes', 'No'),
-        onApply: (next) => setFilter('isMainBranch', triStateQuery(next, 'Yes')),
-        options: YES_NO_VALUES,
-        withText: false,
-      }),
       render: (b) => <MainFlag isMain={b.isMainBranch} />,
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (b) => <StatusBadge active={b.isActive} />,
     },
     {
@@ -241,7 +246,7 @@ export function BranchesPage() {
           <TextInput
             placeholder="Search by branch code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search branches"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -253,7 +258,7 @@ export function BranchesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -264,7 +269,7 @@ export function BranchesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Is Main Branch"
+            label="Is Main Branch"
             placeholder="All"
             data={YES_NO_OPTIONS}
             value={filters.isMainBranch}
@@ -293,15 +298,10 @@ export function BranchesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<BranchDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.branches"
+          engine={engine}
+          exportFileName="branches"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', branch: record }) : undefined}
@@ -335,16 +335,21 @@ const YES_NO_OPTIONS = [
   { value: 'false', label: 'No' },
 ]
 
-/** The words the two header funnels offer - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
-const YES_NO_VALUES = ['Yes', 'No']
 
+/**
+ * What each column SHOWS for a branch - the text its header filter matches. The table is small
+ * enough to hold in full, so these are matched here rather than by the search procedure, and every
+ * column can answer a funnel instead of only the three the procedure takes parameters for.
+ */
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<BranchDto>[] = [
+  { accessor: 'branchCode', summary: 'count' },
+  { accessor: 'branchName' },
+  { accessor: 'address', text: (b) => b.address ?? '' },
+  { accessor: 'isMainBranch', kind: 'boolean', text: (b) => (b.isMainBranch ? 'Yes' : 'No') },
+  { accessor: 'isActive', kind: 'boolean', text: (b) => (b.isActive ? 'Active' : 'Inactive') },
+]
 
-const ACCESSOR_TO_SORT: Record<string, BranchSortBy> = {
-  branchCode: 'BranchCode',
-  branchName: 'BranchName',
-  address: 'Address',
-  isMainBranch: 'IsMainBranch',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
-}

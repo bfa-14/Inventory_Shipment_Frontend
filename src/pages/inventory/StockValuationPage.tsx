@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Paper, Select, SimpleGrid, Text } from '@mantine/core'
 import { IconFileExport } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -13,6 +13,7 @@ import { money } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useGridQuery } from '../../hooks/useGridQuery'
@@ -27,15 +28,23 @@ const NO_FILTERS: Filters = { warehouseId: null }
 
 const NO_ROWS: InventoryValuationRowDto[] = []
 
-/** Sorts on whatever column was clicked: numbers numerically, codes and names as text. */
-function compareRows(a: InventoryValuationRowDto, b: InventoryValuationRowDto, key: keyof InventoryValuationRowDto): number {
-  const left = a[key]
-  const right = b[key]
-  if (typeof left === 'number' || typeof right === 'number') {
-    return (typeof left === 'number' ? left : 0) - (typeof right === 'number' ? right : 0)
-  }
-  return String(left ?? '').localeCompare(String(right ?? ''))
+/** How a warehouse cell reads - shared by the column's render and its filter, so the two agree. */
+function warehouseText(row: InventoryValuationRowDto): string {
+  return row.warehouseName === null ? '—' : `${row.warehouseCode ?? ''} - ${row.warehouseName}`
 }
+
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<InventoryValuationRowDto>[] = [
+  { accessor: 'itemCode', summary: 'count' },
+  { accessor: 'itemName' },
+  { accessor: 'warehouseName', text: warehouseText },
+  { accessor: 'onHandBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.onHandBase) },
+  { accessor: 'averageCost', kind: 'number', text: (r) => (r.averageCost === null ? '—' : formatNumber(r.averageCost, 2)) },
+  { accessor: 'inventoryValue', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.inventoryValue, 2) },
+]
 
 /**
  * What the stock is worth: on hand × the item's moving average cost.
@@ -63,21 +72,20 @@ export function StockValuationPage() {
   const { filters, setFilter, data, loading, error } = grid
   const rows = data?.items ?? NO_ROWS
 
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'inventory.stockValuation',
+    sort: [{ accessor: 'inventoryValue', direction: 'desc' }],
+  })
+
   useEffect(() => {
     // Inactive warehouses are offered too: stock sitting in one still has to be valued.
     warehousesApi.lookup(false).then(setWarehouses).catch(() => {})
   }, [])
-
-  const sortKey = grid.sortStatus.columnAccessor as keyof InventoryValuationRowDto
-  const sortDirection = grid.sortStatus.direction
-
-  const sorted = useMemo(() => {
-    const ordered = [...rows].sort((a, b) => compareRows(a, b, sortKey))
-    if (sortDirection === 'desc') ordered.reverse()
-    return ordered
-  }, [rows, sortKey, sortDirection])
-
-  const records = sorted.slice((grid.page - 1) * grid.pageSize, grid.page * grid.pageSize)
 
   async function exportToExcel() {
     try {
@@ -88,11 +96,14 @@ export function StockValuationPage() {
   }
 
   const columns: DataTableColumn<InventoryValuationRowDto>[] = [
-    { accessor: 'itemCode', title: 'Item Code', sortable: true, width: 140 },
+    {
+      accessor: 'itemCode',
+      title: 'Item Code',
+      width: 140,
+    },
     {
       accessor: 'itemName',
       title: 'Item',
-      sortable: true,
       render: (row) => (
         <Text fz="sm" fw={500}>
           {row.itemName}
@@ -106,17 +117,14 @@ export function StockValuationPage() {
           {
             accessor: 'warehouseName',
             title: 'Warehouse',
-            sortable: true,
             width: 200,
-            render: (row: InventoryValuationRowDto) =>
-              row.warehouseName === null ? '—' : `${row.warehouseCode ?? ''} - ${row.warehouseName}`,
+            render: (row: InventoryValuationRowDto) => warehouseText(row),
           } satisfies DataTableColumn<InventoryValuationRowDto>,
         ]
       : []),
     {
       accessor: 'onHandBase',
       title: 'On Hand',
-      sortable: true,
       width: 110,
       textAlign: 'right',
       render: (row) => (
@@ -128,7 +136,6 @@ export function StockValuationPage() {
     {
       accessor: 'averageCost',
       title: 'Average Cost (USD)',
-      sortable: true,
       width: 150,
       textAlign: 'right',
       render: (row) => (
@@ -140,7 +147,6 @@ export function StockValuationPage() {
     {
       accessor: 'inventoryValue',
       title: 'Inventory Value (USD)',
-      sortable: true,
       width: 170,
       textAlign: 'right',
       render: (row) => (
@@ -206,16 +212,11 @@ export function StockValuationPage() {
 
       <Paper radius="lg" withBorder>
         <DataTable
-          records={records}
+          storeKey="inventory.stockValuation"
+          engine={engine}
+          exportFileName="stock-valuation"
           columns={columns}
           idAccessor="itemId"
-          totalRecords={rows.length}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No stock to value."
         />

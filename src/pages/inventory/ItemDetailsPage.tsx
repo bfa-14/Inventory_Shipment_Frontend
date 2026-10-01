@@ -42,7 +42,7 @@ import { ItemImageCard } from './ItemImageCard'
 import { ItemAuditCard, ItemQuickLinksCard, ItemStockCard } from './ItemSideCards'
 import { ItemUnitFormModal } from './ItemUnitFormModal'
 import { ItemUnitsCard } from './ItemUnitsCard'
-import { brandLabel, familyOptions, useItemLookups, warehouseLabel } from './lookups'
+import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
 
 const MAX_CODE = 30
 const MAX_NAME = 200
@@ -390,6 +390,18 @@ function ItemDetails() {
    * honest thing to say when that is what happened.
    */
   async function save(values: FormValues) {
+    /* AT LEAST ONE UNIT, and checked BEFORE the item is created rather than after. An item with no
+       units cannot be sold, bought or counted - there is no quantity to state it in - and the
+       create call below is the point of no return: once it returns, the item exists and a refusal
+       here would leave a half-made record behind. The rest of the required fields are @mantine/form
+       rules on the fields themselves; this one belongs to the Units card, which has no field. */
+    if (isNew && draftUnits.length === 0) {
+      const message = 'Add at least one unit before saving. An item with no units cannot be sold, bought or counted.'
+      setFormError(message)
+      notify.error(message)
+      return
+    }
+
     setSaving(true)
     setFormError(null)
     setStale(false)
@@ -991,7 +1003,15 @@ function ItemDetails() {
                               searchable
                               clearable
                               nothingFoundMessage="No family found"
-                              data={familyOptions(lookups.families)}
+                              /* Headings shown but greyed: an item is filed under one particular
+                                 family, not under the heading above it - and a leaf on its own
+                                 ("Battery") means little without the branch standing over it. The
+                                 family it already carries stays selectable whatever happens to the
+                                 tree, so an edit cannot blank it. */
+                              data={familyOptions(lookups.families, {
+                                leavesSelectableOnly: true,
+                                keepId: Number(form.values.itemFamilyId) || null,
+                              })}
                               {...form.getInputProps('itemFamilyId')}
                             />
                           </Field>
@@ -1010,7 +1030,13 @@ function ItemDetails() {
                               searchable
                               clearable
                               nothingFoundMessage="No warehouse found"
-                              data={lookups.warehouses.map((w) => ({ value: String(w.id), label: warehouseLabel(w) }))}
+                              /* Leaves only: stock lives on the warehouses with nothing standing
+                                 under them, so a grouping is shown for its bearings but cannot be
+                                 the default an item is stocked in. */
+                              data={warehouseOptions(lookups.warehouses, {
+                                leavesSelectableOnly: true,
+                                keepId: Number(form.values.defaultWarehouseId) || null,
+                              })}
                               {...form.getInputProps('defaultWarehouseId')}
                             />
                           </Field>
@@ -1265,6 +1291,9 @@ function ItemDetails() {
                     editable={editable}
                     loading={loading}
                     busyUnitId={busyUnitId}
+                    // Only while creating: an existing item that has somehow lost its units is a
+                    // problem to fix, not a form to refuse, and its own page already says so.
+                    required={isNew}
                     onAdd={() => setUnitDialog({})}
                     onEdit={(unit) => setUnitDialog({ unit })}
                     onDelete={(unit) => void deleteUnit(unit)}

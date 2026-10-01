@@ -12,6 +12,10 @@ interface CancelReasonModalProps {
   confirmLabel?: string
   /** What the cancellation does, when it is not the stock document's reversal. */
   description?: string
+  /** The dialog's heading, when "Cancel <document>" is the wrong verb — a receipt is reversed, not cancelled. */
+  title?: string
+  /** The reason box's hint, for the same reason. */
+  placeholder?: string
 }
 
 const DEFAULT_DESCRIPTION =
@@ -36,6 +40,8 @@ export function CancelReasonModal({
   onConfirm,
   confirmLabel = 'Cancel document',
   description = DEFAULT_DESCRIPTION,
+  title,
+  placeholder,
 }: CancelReasonModalProps) {
   /*
    * THE FORM IS A CHILD SO THAT CLOSING FORGETS IT. Mantine unmounts a modal's children when it
@@ -43,8 +49,8 @@ export function CancelReasonModal({
    * to clear it — and the previous cancellation's reason can never be attached to this one.
    */
   return (
-    <Modal opened={opened} onClose={onClose} title={`Cancel ${documentLabel}`} centered>
-      <ReasonForm onClose={onClose} busy={busy} onConfirm={onConfirm} confirmLabel={confirmLabel} description={description} />
+    <Modal opened={opened} onClose={onClose} title={title ?? `Cancel ${documentLabel}`} centered>
+      <ReasonForm onClose={onClose} busy={busy} onConfirm={onConfirm} confirmLabel={confirmLabel} description={description} placeholder={placeholder ?? 'Why is this being cancelled?'} />
     </Modal>
   )
 }
@@ -55,7 +61,8 @@ function ReasonForm({
   onConfirm,
   confirmLabel,
   description,
-}: Pick<CancelReasonModalProps, 'onClose' | 'busy' | 'onConfirm'> & { confirmLabel: string; description: string }) {
+  placeholder,
+}: Pick<CancelReasonModalProps, 'onClose' | 'busy' | 'onConfirm'> & { confirmLabel: string; description: string; placeholder: string }) {
   const [reason, setReason] = useState('')
   const ready = reason.trim().length > 0
 
@@ -67,7 +74,7 @@ function ReasonForm({
         <Textarea
           label="Reason"
           withAsterisk
-          placeholder="Why is this being cancelled?"
+          placeholder={placeholder}
           value={reason}
           onChange={(event) => setReason(event.currentTarget.value)}
           maxLength={300}

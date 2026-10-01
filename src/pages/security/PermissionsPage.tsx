@@ -59,7 +59,7 @@ export function PermissionsPage() {
           <TextInput
             placeholder="Filter by code, name or description"
             leftSection={<IconSearch size={16} />}
-            aria-label="Filter permissions"
+            label="Search"
             value={filter}
             onChange={(e) => setFilter(e.currentTarget.value)}
           />

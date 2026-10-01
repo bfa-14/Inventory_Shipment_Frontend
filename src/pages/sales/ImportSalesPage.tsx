@@ -11,7 +11,9 @@ import {
 import { ApiError } from '../../api/http'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
 import { branchesApi } from '../../api/masterdata/branches'
+import { cashBankAccountsApi, type CashBankAccountLookupDto } from '../../api/masterdata/cashBankAccounts'
 import { partiesApi } from '../../api/masterdata/parties'
+import { paymentMethodsApi, type PaymentMethodLookupDto } from '../../api/masterdata/paymentMethods'
 import { priceListsApi } from '../../api/masterdata/priceLists'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import {
@@ -35,8 +37,11 @@ import {
   type SalesImportHeaderErrors,
 } from '../../components/sales/SalesImportHeaderCard'
 import { SalesLinesGrid, type SalesLine } from '../../components/sales/SalesLinesGrid'
+import { SalesPaymentCard } from '../../components/sales/SalesPaymentCard'
+import { EMPTY_PAYMENT, type SalesPaymentErrors, type SalesPaymentForm } from '../../components/sales/salesPayment'
 import { SalesTotals } from '../../components/sales/SalesTotals'
 import { mergeImported, stockKey } from '../../components/sales/salesLines'
+import { confirmOutOfStock, parseOutOfStockMessage, type OutOfStockRow } from '../../components/sales/outOfStock'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -93,6 +98,12 @@ export function ImportSalesPage() {
     notes: '',
   })
   const [errors, setErrors] = useState<SalesImportHeaderErrors>({})
+  /* HOW THE CUSTOMER PAYS: the invoice this import makes is posted at once, so a Cash import also
+     makes and posts its receipt in the same step, exactly like posting a Cash invoice. */
+  const [payment, setPayment] = useState<SalesPaymentForm>(EMPTY_PAYMENT)
+  const [paymentErrors, setPaymentErrors] = useState<SalesPaymentErrors>({})
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodLookupDto[]>([])
+  const [cashAccounts, setCashAccounts] = useState<CashBankAccountLookupDto[]>([])
 
   /** Set once the reader picks a price list by hand; a client's default no longer overrides it. */
   const priceListTouched = useRef(false)
@@ -122,6 +133,8 @@ export function ImportSalesPage() {
        is one, and the salesman who is the signed-in user are each decided in the fetch that brings
        them — not in an effect watching the lists, which would be a second render deciding what the
        first already knew. */
+    paymentMethodsApi.lookup(false).then(setPaymentMethods).catch(() => {})
+    cashBankAccountsApi.lookup({ activeOnly: false }).then(setCashAccounts).catch(() => {})
     branchesApi
       .lookup()
       .then((rows) => {
@@ -405,9 +418,27 @@ export function ImportSalesPage() {
 
   const rateMissing = header.priceListId !== null && !(rate?.isBaseCurrency === true) && header.exchangeRate === null
 
+  function changePayment(patch: Partial<SalesPaymentForm>) {
+    setPaymentErrors({})
+    setPayment((current) => {
+      const next = { ...current, ...patch }
+      if (patch.paymentType === 2) return { ...next, receiptMethodId: null, receiptAccountId: null, paymentReference: '' }
+      return next
+    })
+  }
+
+  const paymentIncomplete =
+    payment.paymentType === null
+      ? 'Choose a Payment Type (Cash or On Account).'
+      : payment.paymentType === 1 && (!payment.receiptMethodId || !payment.receiptAccountId)
+        ? 'A Cash import needs a receipt method and a cash / bank account.'
+        : null
+
   /** Why the Post button is disabled, or null when it is not. The tooltip and the guard share it. */
   const postBlockedBy: string | null = !canCreate
     ? 'Posting also needs the sales.invoices.create permission.'
+    : paymentIncomplete !== null
+      ? paymentIncomplete
     : lines.length === 0
       ? 'Import some lines first.'
       : quantityErrorCount > 0
@@ -447,10 +478,16 @@ export function ImportSalesPage() {
       referenceNo: header.referenceNo.trim() || null,
       notes: header.notes.trim() || null,
       draftReference: draftReference.current,
+      paymentType: payment.paymentType,
+      receiptMethodId: payment.paymentType === 1 && payment.receiptMethodId ? Number(payment.receiptMethodId) : null,
+      receiptAccountId: payment.paymentType === 1 && payment.receiptAccountId ? Number(payment.receiptAccountId) : null,
+      paymentReference: payment.paymentType === 1 ? payment.paymentReference.trim() || null : null,
       lines: lines.map((line, index) => ({
         lineNo: index + 1,
         itemId: line.itemId,
         itemUnitId: line.itemUnitId,
+        // The Excel import has no Specification column; the line is saved without one.
+        specification: null,
         warehouseId: line.warehouseId,
         expiryDate: line.expiryDate,
         quantity: line.quantity,
@@ -499,6 +536,9 @@ export function ImportSalesPage() {
       return
     }
     if (postBlockedBy !== null) {
+      if (paymentIncomplete !== null) {
+        setPaymentErrors(payment.paymentType === null ? { paymentType: paymentIncomplete } : { receiptAccountId: paymentIncomplete })
+      }
       notify.error(postBlockedBy)
       return
     }
@@ -509,14 +549,29 @@ export function ImportSalesPage() {
 
     const go = await confirm({
       title: 'Post to Stock',
-      message: `Post ${lines.length} line(s) to stock? A sales invoice will be created and posted, and the stock of ${warehouseNames} will be reduced. This cannot be undone here.`,
+      message: `Post ${lines.length} line(s) to stock? A sales invoice will be created and posted, and the stock of ${warehouseNames} will be reduced${payment.paymentType === 1 ? ', and a receipt for the full total created and posted' : ''}. This cannot be undone here.`,
       confirmLabel: 'Post to Stock',
     })
     if (!go) return
 
     setPosting(true)
     try {
-      const posted = await salesInvoicesApi.importPost(toRequest())
+      let posted
+      try {
+        posted = await salesInvoicesApi.importPost(toRequest())
+      } catch (error) {
+        /* An out-of-stock sale the policy allows is refused until the user confirms. There is no invoice to
+           ask about yet (this call saves and posts in one go), so the warning is built from what the server
+           said, with the names this page already knows; Proceed sends the same lines again, confirmed. */
+        if (!(error instanceof ApiError) || error.code !== 'OUT_OF_STOCK_CONFIRM') throw error
+        const rows: OutOfStockRow[] = parseOutOfStockMessage(error.message).map((row) => ({
+          ...row,
+          itemName: lines.find((l) => l.itemCode === row.itemCode)?.itemName,
+          warehouseName: warehouses.find((w) => w.warehouseCode === row.warehouseCode)?.warehouseName,
+        }))
+        if (rows.length === 0 || !(await confirmOutOfStock(rows))) return
+        posted = await salesInvoicesApi.importPost({ ...toRequest(), acknowledgeOutOfStock: true })
+      }
       setResult(posted)
       setLineErrors({})
       notify.success(`Posted ${posted.documentNumber} — ${posted.movementsWritten} line(s) written to the stock movements.`)
@@ -617,6 +672,31 @@ export function ImportSalesPage() {
         errors={errors}
         disabled={posting || result !== null}
       />
+
+      {result === null && (
+        <SalesPaymentCard
+          value={payment}
+          onChange={changePayment}
+          methods={paymentMethods}
+          accounts={cashAccounts}
+          currencyId={rate?.currencyId ?? null}
+          currencyCode={rate?.currencyCode ?? priceList?.currencyCode ?? 'USD'}
+          branchId={header.branchId === null ? null : Number(header.branchId)}
+          readOnly={false}
+          disabled={posting}
+          errors={paymentErrors}
+          paymentStatus={null}
+          paidAmount={null}
+          outstandingAmount={null}
+          totalAmount={null}
+          decimalPlaces={2}
+          receiptId={null}
+          receiptNumber={null}
+          receiptStatus={null}
+          methodName={null}
+          accountLabel={null}
+        />
+      )}
 
       {result ? (
         <Paper radius="lg" p="md" withBorder>

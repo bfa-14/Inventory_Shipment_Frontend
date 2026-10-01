@@ -1,16 +1,16 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { brandsApi } from '../../api/masterdata/brands'
-import type { BrandDto, BrandSortBy } from '../../api/types'
+import type { BrandDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
@@ -48,23 +48,25 @@ export function BrandsPage() {
    * The filter bar and the Status funnel are two ways into the SAME filter, and both go through
    * `setFilter`, so a header reading "Active" over a bar reading "All" is not a state that exists.
    */
-  const grid = useGridQuery<Filters, BrandDto, Awaited<ReturnType<typeof brandsApi.search>>>({
+  const grid = useGridQuery<Filters, BrandDto, AllRows<BrandDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'brandCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The brands could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        brandsApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'BrandCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          brandsApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -72,12 +74,26 @@ export function BrandsPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.brands',
+    sort: [{ accessor: 'brandCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
 
   function exportCsv() {
     downloadCsv(
       'brands.csv',
       ['Brand Code', 'Brand Name', 'Description', 'Status', 'Created'],
-      (data?.items ?? []).map((b) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      engine.rows.map((b) => [
         b.brandCode,
         b.brandName,
         b.description ?? '',
@@ -146,17 +162,24 @@ export function BrandsPage() {
   }
 
   const columns: DataTableColumn<BrandDto>[] = [
-    rowNumberColumn<BrandDto>(grid.page, grid.pageSize),
-    /* Brand Code, Brand Name and Description carry no header filter: this grid pages on the server
-       and the search endpoint takes one free-text parameter that matches code OR name, so a
-       per-column box here could only narrow by something other than the column it sits on. The
-       search box in the filter bar is that parameter, under its own name. Description is not a
-       search parameter at all. See docs/frontend-conventions.md. */
-    { accessor: 'brandCode', title: 'Brand Code', sortable: true, width: 150 },
-    { accessor: 'brandName', title: 'Brand Name', sortable: true, width: 220 },
+    rowNumberColumn<BrandDto>(engine.page, engine.pageSize),
+    /* These three now carry their own funnel. The page holds the whole table, so each is matched
+       here against the text its own cell shows - which the filter bar's search box could never do,
+       being one parameter over code OR name, and never over Description at all. */
+    {
+      accessor: 'brandCode',
+      title: 'Brand Code',
+      width: 150,
+    },
+    {
+      accessor: 'brandName',
+      title: 'Brand Name',
+      width: 220,
+    },
     {
       accessor: 'description',
       title: 'Description',
+      // No tick list: a description is prose, so the list would be one entry per row.
       // No width: it takes whatever the fixed columns leave, so the grid fits a laptop.
       render: (brand) =>
         brand.description ? (
@@ -172,22 +195,14 @@ export function BrandsPage() {
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (b) => <StatusBadge active={b.isActive} />,
     },
     {
       accessor: 'createdAtUtc',
       title: 'Created',
-      sortable: true,
       width: 180,
+      // No tick list: every row is a different instant, so the list would be one entry per row.
       render: (b) => formatDateTime(b.createdAtUtc),
     },
     {
@@ -241,7 +256,7 @@ export function BrandsPage() {
           <TextInput
             placeholder="Search by brand code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search brands"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -253,7 +268,7 @@ export function BrandsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -282,15 +297,10 @@ export function BrandsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<BrandDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.brands"
+          engine={engine}
+          exportFileName="brands"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', brand: record }) : undefined}
@@ -319,12 +329,15 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<BrandDto>[] = [
+  { accessor: 'brandCode', summary: 'count' },
+  { accessor: 'brandName' },
+  { accessor: 'description', text: (b) => b.description ?? '' },
+  { accessor: 'isActive', kind: 'boolean', text: (b) => (b.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'createdAtUtc', kind: 'date', text: (b) => formatDateTime(b.createdAtUtc) },
+]
 
-const ACCESSOR_TO_SORT: Record<string, BrandSortBy> = {
-  brandCode: 'BrandCode',
-  brandName: 'BrandName',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
-}

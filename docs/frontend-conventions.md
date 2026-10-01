@@ -122,7 +122,7 @@ modifier in the hint is read from the reader's own platform.
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
 | `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
-| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row**. |
+| `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on draggable widths and the header's right-click column chooser, and names where they are remembered), `summaryRecords` (the filtered rows the footer totals — see **The summary row**). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
 | `rowNumberColumn(page, recordsPerPage)` | The leading "#" column, numbered across pages. |
@@ -243,6 +243,92 @@ repository and the controller first - add the funnels in the same story.
 Widths: a header cell carries caption + sort arrows + funnel, so a column sized for caption + arrows alone
 clips once it gains one. Budget about 30px more.
 
+## Column chooser and column widths
+
+Every list page's grid lets the reader hide columns and drag column edges, and remembers both.
+A page turns this on with **one prop** - `storeKey` on `DataTable`:
+
+```tsx
+<DataTable<BranchDto> storeKey="masterdata.branches" ... />
+```
+
+`storeKey` names where the choices are kept (localStorage, so per browser and per person, never sent
+to the server). The wrapper then marks every column `resizable` for itself, so a column list needs
+no extra flags, and `mantine-datatable`'s own `useDataTableColumns` does the storing.
+
+**The chooser is not on screen.** Right-click the grid's **header** → **Column chooser** → a small
+dialog with one checkbox per column and **Reset columns** / **Reset widths**. Nothing is shown until
+it is asked for: a grid is read far more often than it is rearranged. Widths are dragged directly on
+the header edge, and double-clicking that edge resets the one column.
+
+Note the wrapper deliberately does **not** set `toggleable` on columns, although those are exactly
+the columns the chooser offers. `mantine-datatable` treats that flag as permission to run its own
+column UI - a cross in every header, and a checkbox list that opens straight from the right-click
+with no menu in between. Hiding does not depend on the flag (`effectiveColumns` reads the stored
+toggle state either way), so the flag stays off and `FIXED_ACCESSORS` decides what the chooser lists.
+
+Conventions:
+
+- **The key is namespaced after the page** - `masterdata.branches`, `logistics.containers`,
+  `purchase.purchaseDocuments`, `security.users`. It is persisted, so treat it as permanent: reusing
+  one key for two grids has them overwrite each other's layout, and renaming one throws away what
+  the reader arranged.
+- **`#` and `Actions` are never hideable or resizable** (`FIXED_ACCESSORS` in `DataTable.tsx`). `#`
+  is a position marker rather than data, and `Actions` is what `pinLastColumn` deliberately keeps in
+  view. `mantine-datatable` also never resizes the last column, whatever it is, and a resize takes
+  width from the neighbouring column rather than widening the table - each keeps a 50px floor.
+- **The context menu is the header's alone.** A right-click on a row stays the browser's, so copying
+  a cell is not interrupted.
+- **A grid inside a form leaves `storeKey` out** - the document and shortage line grids, and the load
+  items drawer. There a hidden column would hide a figure someone is editing. Without the prop the
+  grid behaves exactly as before and stores nothing.
+- The last visible column cannot be unticked: a grid of no columns is a blank rectangle with a
+  paging footer under it.
+- A column can start hidden with `defaultToggle: false` on its definition.
+
+A reader can hide a column whose funnel is set, which would otherwise leave a filter narrowing the
+rows with nothing on screen saying so. The "N column filters in effect" strip above the table is what
+covers that, and it is why that strip now shows for either reason.
+
+## The summary row
+
+Grids that hold their whole result carry a footer row. **Every column's footer cell is the control**:
+click it and pick **Count**, **Sum**, **Average**, **Min** or **Max** — or **None**, which is where every
+column starts. A column with no numbers in it offers only Count. Choices are remembered per grid, under
+`<storeKey>-summaries`, beside the column layout.
+
+A page turns it on by passing the rows to total:
+
+```tsx
+<DataTable<BranchDto> storeKey="masterdata.branches" records={records} summaryRecords={narrowed} … />
+```
+
+`summaryRecords` is the **filtered, unpaged** set — the same `narrowed` the footer count reads from.
+Not the page on screen, which would change as the reader turned it, and not the whole table, which would
+answer a question they had just narrowed away from.
+
+A grid that pages on the **server** can only add up the rows it was sent, so it passes the page and says
+so — `summaryScope="page"` prints **“of this page”** under every figure:
+
+```tsx
+<DataTable storeKey="inventory.stockDocuments" records={data?.items ?? []}
+           summaryRecords={data?.items ?? []} summaryScope="page" … />
+```
+
+The qualifier is in the **cell**, not once above the grid, because the figure is what gets read, quoted
+and screenshotted — and on its own a Sum looks like a total of everything. A total of ten rows passed
+off as a total of five hundred is how a grid lies, and the label is what stops it.
+
+The honest version of those figures is the search procedure returning aggregates over the whole filtered
+result. Until a grid's procedure does that, its footer covers the page and admits it.
+
+Two columns never get a cell: `#` and `Actions` (`FIXED_ACCESSORS`) — a total of row numbers is not a
+fact about anything. A column that brings its **own** `footer` keeps it: the sales profit report states
+its totals in its own words, and a generic Sum must not overwrite them.
+
+Sum, Average, Min and Max read the row's raw field, so they work wherever that field is a number; a blank
+cell is skipped rather than counted as zero. Whole numbers print whole; anything else keeps two places.
+
 ## Control mapping
 
 | Field | Control |
@@ -281,6 +367,16 @@ back through `form.setErrors({ field: message })`.
 Any filter change resets to **page 1** (the page size and the sort are kept). Sorting resets the page too but
 never touches the filters. **Clear Filters** stays: it restores every filter to its default and applies at
 once, and it is **disabled while nothing is filtered**.
+
+**Every filter control carries a visible `label`** - the field it filters on, worded as the column is
+(`Status`, `Is Main Branch`, `Branch / Site`, `Date from`). A search box is labelled just `Search`,
+whatever it searches; its placeholder is what says which columns it matches ("Search by branch code or
+name..."). `aria-label` is not enough: a lone `All` in a dropdown tells a sighted reader nothing about
+which field is narrowed, and the page cannot be read at a glance. The placeholder then says what
+*no choice* means (`All`, `Any`) and never repeats the label. An icon-only control - the Containers
+page's **Advanced filters** toggle - keeps `aria-label`, since a visible label would be wrong there.
+`FilterBar` aligns its columns on `flex-end`, so a **Clear Filters** button with no label of its own
+still lines up with the inputs beside it.
 
 Grids that filter on the **server** get all of this from one hook, [`src/hooks/useGridQuery.ts`](../src/hooks/useGridQuery.ts):
 
@@ -435,11 +531,22 @@ override permission (sales). The pages no longer hard-code `INV_IN` / `INV_OUT` 
 keeps the direction only (the fallback while the configuration loads). Document numbers run per branch
 (`IN-KLW-000012`): the number column is 190 px and never truncates.
 
-## One document = one warehouse
+## The warehouse is a line's, not the document's
 
-The header warehouse is *the* warehouse of the document (the header card labels it "Warehouse"); the
-lines grid has no Warehouse column, and every line is sent with `warehouseId` = the header warehouse
-to keep the API contract. A file naming several warehouses does not become one document — see below.
+Inventory In/Out, Sales and Purchase all take the warehouse per LINE: the lines grid has a Warehouse
+column and the header card has no Warehouse field. One document may move stock in several
+warehouses.
+
+The header still *has* a warehouse, because the document lists, filters, reports and Excel exports
+all show one — but it is now only a label. The editors send `warehouseId: null` in the header and
+the server keeps the first line's.
+
+New rows are seeded from the branch's main warehouse (the page's `defaultWarehouseId`), so the
+ordinary single-warehouse document still needs no picking; the row's own cell overrides it. Changing
+the branch clears every line's warehouse, because warehouses belong to one branch.
+
+The import creates ONE document however many warehouses the file names — see below. Each row keeps
+the warehouse the file gave it.
 
 ## Bulk actions
 
@@ -451,16 +558,18 @@ selectable) held by **`useBulkSelection()`** so the selection survives paging. `
 shows **`BulkResultsModal`** (number, result badge, message per document), drops the succeeded rows from
 the selection and reloads the grid. Sales and purchase lists reuse the same three pieces.
 
-## Import: one document per warehouse
+## Import: one document, whatever warehouses the file names
 
 `ImportInvoiceItemsWizard` always sends the hosting page's `documentTypeCode` (the template download uses
 it too, and the preview shows a **Type** column; rows typed for another kind are Errors). When the
-validated rows span several warehouses and the host passed **`importCreate`**, step 3 lists the groups
-("WH-001 - 12 lines, WH-002 - 3 lines") with a "Post immediately" checkbox and creates one document per
-warehouse through the family's `import-create` endpoint; the result panel links the new documents and
-"Go to the list" calls `onDocumentsCreated`, where the host navigates with `state.highlight` (the list
-tints those rows). With one warehouse the lines are appended as before; if it is not the header warehouse
-the wizard asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`.
+validated rows span several warehouses and the host passed **`importCreate`**, step 3 lists them
+("WH-001 - 12 lines, WH-002 - 3 lines") with a "Post immediately" checkbox and creates **one** document
+through the family's `import-create` endpoint — every line keeping the warehouse the file named. The
+result's Warehouse column says "2 warehouses" rather than naming one (`warehouseCount`); "Go to the
+list" calls `onDocumentsCreated`, where the host navigates with `state.highlight` (the list tints those
+rows). With one warehouse the lines are appended as before; if it is not the seeded warehouse the wizard
+asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`, which now
+moves the lines and the seed rather than a header field.
 ## Sales invoice page
 
 `/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are
@@ -483,7 +592,7 @@ lifecycle where posted and cancelled are read-only text. What is the invoice's o
   sent to the API (`unitPrice`), a list price is left for the server to re-find. On Hand turns red when
   qty × formula exceeds it; the page repeats the count above the grid.
 - **Import from Excel**: the wizard in invoice mode with `checkStock`; a multi-warehouse file becomes one
-  invoice per warehouse through `importCreate` (Manual prices only are sent).
+  mixed-warehouse invoice through `importCreate` (Manual prices only are sent).
 - **Errors**: `Line N:` messages land on line N; INSUFFICIENT_STOCK highlights every line of the named
   item and refreshes its On Hand; CONCURRENCY reloads. Same unsaved-changes guard as Inventory In.
 - **List**: filters (search, branch, client, salesman, status, dates), bulk Post / Delete on ticked
@@ -515,7 +624,7 @@ in **cost mode**:
   under it; a larger quantity turns the row red before the server's SOURCE_INVALID does, and that message
   ("Line 1: … only 6 remain on the order line.") lands on line N like every other `Line N:` error.
 - **Import from Excel**: the wizard in stock (cost) mode with the kind's `documentTypeCode`; the Unit Price
-  / Cost column is the unit cost; a multi-warehouse file becomes one document per warehouse through
+  / Cost column is the unit cost; a multi-warehouse file becomes one mixed-warehouse document through
   `purchaseDocumentsApi.importCreate`.
 - **Summary** (`SalesTotals` reused): subtotal, discount, grand total in the document currency and the
   "≈ … USD" line at the document rate. **Linked Documents** (`LinkedDocumentsCard`): the source and every

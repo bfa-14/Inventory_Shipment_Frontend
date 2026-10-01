@@ -62,9 +62,10 @@ import { PERMISSIONS } from '../../navigation'
 let keySeed = 0
 const nextKey = () => `pur-${++keySeed}`
 
-function emptyLine(): PurchaseLine {
+function emptyLine(warehouseId: number | null): PurchaseLine {
   return {
     key: nextKey(), id: null, itemId: null, itemCode: '', itemName: '', itemUnitId: null, unitTypeName: '', packingFormula: 1,
+    warehouseId,
     units: [], quantity: 1, unitPrice: null, discountPercent: 0, expiryDate: null, notes: '', onHandBase: null,
     importRowNumber: null, sourceLineId: null, sourceRemainingBase: null,
   }
@@ -122,12 +123,19 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
+  /**
+   * The warehouse a NEW line starts in — not the document's.
+   *
+   * The warehouse belongs to each line now; the branch's main warehouse seeds new rows so the
+   * ordinary single-warehouse document still needs no picking, and the row's cell overrides it.
+   */
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [currencies, setCurrencies] = useState<CurrencyLookupDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
 
   const [header, setHeader] = useState<PurchaseHeader>({
-    documentDate: isoDate(new Date()), expectedDate: null, branchId: null, warehouseId: null, supplierId: null,
+    documentDate: isoDate(new Date()), expectedDate: null, branchId: null, supplierId: null,
     currencyId: null, rateType: 1, exchangeRate: null, supplierReference: '', exporterReference: '', commercialInvoiceNo: '',
     receiptMode: '1', notes: '',
   })
@@ -254,7 +262,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       documentDate: doc.documentDate.slice(0, 10),
       expectedDate: doc.expectedDate ? doc.expectedDate.slice(0, 10) : null,
       branchId: String(doc.branchId),
-      warehouseId: String(doc.warehouseId),
       supplierId: String(doc.supplierId),
       currencyId: String(doc.currencyId),
       rateType: doc.rateType,
@@ -273,6 +280,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         itemCode: line.itemCode,
         itemName: line.itemName,
         itemUnitId: line.itemUnitId,
+        warehouseId: line.warehouseId,
         unitTypeName: line.unitTypeName,
         packingFormula: line.packingFormula,
         units: [],
@@ -354,10 +362,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       .then((rows) => {
         if (cancelled) return
         setWarehouses(rows)
-        setHeader((current) => {
-          if (current.warehouseId !== null) return current
+        setDefaultWarehouseId((current) => {
+          if (current !== null) return current
           const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? { ...current, warehouseId: String(main.id) } : current
+          return main ? main.id : null
         })
       })
       .catch(() => {})
@@ -413,7 +421,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       if (chosen !== null) next.currencyId = String(chosen)
     }
     if (next.currencyId !== undefined || next.rateType !== undefined || next.documentDate !== undefined) rateDirty.current = true
-    if (next.branchId !== undefined) setWarehouses([])
+    /* A BRANCH CHANGE INVALIDATES EVERY LINE'S WAREHOUSE: warehouses belong to one branch, so
+       a row still holding the old one would be refused on save. Clearing them shows the gap. */
+    if (next.branchId !== undefined) {
+      setWarehouses([])
+      setDefaultWarehouseId(null)
+      setLines((current) => current.map((line) => ({ ...line, warehouseId: null, onHandBase: null })))
+    }
     setErrors({})
     setHeader((current) => ({ ...current, ...next }))
   }
@@ -421,14 +435,16 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   /* ── pricing and stock ────────────────────────────────────────────────────────────────────── */
 
   const refreshOnHand = useCallback(
-    async (key: string, itemId: number) => {
-      if (!header.warehouseId) return
+    /* THE WAREHOUSE IS THE CALLER'S, not the header's: every row may receive into a different one,
+       so a lookup that read one shared warehouse would show the wrong stock on most rows. */
+    async (key: string, itemId: number, warehouseId: number | null) => {
+      if (warehouseId === null) return
       try {
-        const { onHandBase } = await inventoryLookupsApi.onHand(itemId, Number(header.warehouseId))
+        const { onHandBase } = await inventoryLookupsApi.onHand(itemId, warehouseId)
         setLines((current) => current.map((l) => (l.key === key ? { ...l, onHandBase } : l)))
       } catch {}
     },
-    [header.warehouseId],
+    [],
   )
 
   const patchLine = useCallback((key: string, patch: Partial<PurchaseLine>) => {
@@ -457,13 +473,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               : line,
           ),
         )
-        void refreshOnHand(key, details.id)
+        void refreshOnHand(key, details.id, lines.find((l) => l.key === key)?.warehouseId ?? defaultWarehouseId)
         focusWhenDrawn(`[data-line-qty="${key}"] input`)
       } catch (error) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
       }
     },
-    [refreshOnHand, header.exchangeRate],
+    [refreshOnHand, header.exchangeRate, lines, defaultWarehouseId],
   )
 
   const addScanned = useCallback(
@@ -490,12 +506,12 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       const key = nextKey()
       setLines((current) => [
         ...current,
-        { ...emptyLine(), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: details.units, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula, unitPrice: defaultPurchasePrice(details.lastCost, unit.packingFormula, header.exchangeRate) },
+        { ...emptyLine(defaultWarehouseId), key, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: details.units, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula, unitPrice: defaultPurchasePrice(details.lastCost, unit.packingFormula, header.exchangeRate) },
       ])
-      void refreshOnHand(key, details.id)
+      void refreshOnHand(key, details.id, defaultWarehouseId)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
     },
-    [lines, patchLine, refreshOnHand, header.exchangeRate],
+    [lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId],
   )
 
   async function loadUnits(key: string) {
@@ -557,7 +573,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   function addEmptyLine() {
     markDirty()
-    setLines((current) => [...current, emptyLine()])
+    setLines((current) => [...current, emptyLine(defaultWarehouseId)])
     focusWhenDrawn(`[data-line-item="${lines.length}"] input`)
   }
 
@@ -577,7 +593,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   function appendImported(imported: ImportedLine[]) {
     markDirty()
     const added: PurchaseLine[] = imported.map((line) => ({
-      ...emptyLine(),
+      ...emptyLine(line.warehouseId ?? defaultWarehouseId),
       itemId: line.itemId,
       itemCode: line.itemCode,
       itemName: line.itemName,
@@ -594,7 +610,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }))
     setLines((current) => [...current, ...added])
     notify.success(`${imported.length} line(s) imported.`)
-    for (const line of added) if (line.itemId !== null) void refreshOnHand(line.key, line.itemId)
+    for (const line of added) if (line.itemId !== null) void refreshOnHand(line.key, line.itemId, line.warehouseId)
   }
 
   /* ── totals ───────────────────────────────────────────────────────────────────────────────── */
@@ -632,7 +648,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     const next: PurchaseHeaderErrors = {}
     if (!header.documentDate) next.documentDate = 'Choose a date.'
     if (!header.branchId) next.branchId = 'Choose a branch.'
-    if (!header.warehouseId) next.warehouseId = 'Choose a warehouse.'
     if (!header.supplierId) next.supplierId = 'Choose a supplier.'
     if (!header.currencyId) next.currencyId = 'Choose a currency.'
     if (header.currencyId && !isBaseCurrency && header.exchangeRate === null) next.exchangeRate = 'Enter an exchange rate.'
@@ -682,7 +697,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       documentDate: header.documentDate,
       expectedDate: header.expectedDate,
       branchId: Number(header.branchId),
-      warehouseId: Number(header.warehouseId),
+      // Omitted on purpose: the warehouse is a LINE's now, and the server keeps the first one.
+      warehouseId: null,
       supplierId: Number(header.supplierId),
       currencyId: Number(header.currencyId),
       rateType: header.rateType,
@@ -702,7 +718,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         lineNo: index + 1,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
-        warehouseId: Number(header.warehouseId),
+        warehouseId: line.warehouseId!,
         expiryDate: line.expiryDate,
         quantity: line.quantity,
         unitPrice: priceEditable ? line.unitPrice : null,
@@ -739,7 +755,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       const stock = /^Insufficient stock for (\S+) in/.exec(error.message)
       if (stock) {
         setLines((current) => current.map((line) => (line.itemCode === stock[1] ? { ...line, error: error.message } : line)))
-        for (const line of lines) if (line.itemCode === stock[1] && line.itemId) void refreshOnHand(line.key, line.itemId)
+        for (const line of lines) if (line.itemCode === stock[1] && line.itemId) void refreshOnHand(line.key, line.itemId, line.warehouseId)
       }
     }
     if (error.code === 'EXPORTER_REFERENCE_REQUIRED') setErrors((current) => ({ ...current, exporterReference: error.message }))
@@ -905,7 +921,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   }
 
   const documentLabel = document?.documentNumber ?? `draft #${document?.id}`
-  const canImportHere = editable && canImport && !fromSource && header.branchId !== null && header.warehouseId !== null
+  const canImportHere = editable && canImport && !fromSource && header.branchId !== null && defaultWarehouseId !== null
   const source = document && document.sourceDocumentId !== null
     ? { id: document.sourceDocumentId, documentNumber: document.sourceDocumentNumber, documentTypeCode: document.sourceDocumentTypeCode ?? (kind.code === 'PRET' ? 'PINV' : 'PO') }
     : null
@@ -985,7 +1001,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         value={header}
         onChange={changeHeader}
         branches={branches}
-        warehouses={warehouses}
         suppliers={suppliers}
         currencies={currencies}
         rate={rate}
@@ -1044,6 +1059,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
+          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => void unitChosen(key, unit)}
           onUnitsNeeded={(key) => void loadUnits(key)}
@@ -1239,8 +1255,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onClose={() => setImportOpen(false)}
           header={{
             branchId: Number(header.branchId),
-            warehouseId: Number(header.warehouseId),
-            warehouseCode: warehouses.find((w) => String(w.id) === header.warehouseId)?.warehouseCode,
+            warehouseId: defaultWarehouseId!,
+            warehouseCode: warehouses.find((w) => w.id === defaultWarehouseId)?.warehouseCode,
             priceListId: null,
             currencyCode,
             decimalPlaces,
@@ -1280,15 +1296,20 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             void navigate(kind.route, { state: { highlight: created.documents.map((d) => d.id) } })
           }}
           onSwitchWarehouse={(warehouseId) => {
+            /* The document has no warehouse of its own to switch any more, so this moves the LINES
+               and the seed for new rows — which is what "the file is for another warehouse" meant. */
             markDirty()
-            setHeader((current) => ({ ...current, warehouseId: String(warehouseId) }))
+            setDefaultWarehouseId(warehouseId)
+            setLines((current) => current.map((line) => ({ ...line, warehouseId, onHandBase: null })))
           }}
         />
       )}
 
       {editable && kind.code === 'PRET' && lines.some((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase) && (
         <Alert color="orange">
-          {formatNumber(lines.filter((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase).length)} line(s) return more than the stock on hand in {warehouses.find((w) => String(w.id) === header.warehouseId)?.warehouseName ?? document?.warehouseName ?? 'the warehouse'}. The posting will be refused unless the quantities are reduced.
+          {/* NO WAREHOUSE IS NAMED HERE any more: each line has its own, so one name would be wrong
+              for most of the rows it is counting. The Warehouse column on the row says which. */}
+          {formatNumber(lines.filter((l) => l.onHandBase !== null && l.quantity * (l.packingFormula || 1) > l.onHandBase).length)} line(s) return more than the stock on hand in their warehouse. The posting will be refused unless the quantities are reduced.
         </Alert>
       )}
     </Stack>

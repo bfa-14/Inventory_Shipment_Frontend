@@ -227,7 +227,11 @@ export interface SaveStockDocumentRequest {
   /** 'yyyy-MM-dd'. */
   documentDate: string
   branchId: number
-  warehouseId: number
+  /**
+   * The document's warehouse, which is now only a label: the warehouse lives on each LINE. Null
+   * lets the server keep the first line's, which is what the editor sends.
+   */
+  warehouseId?: number | null
   reasonId?: number | null
   referenceNo?: string | null
   notes?: string | null
@@ -298,7 +302,7 @@ export const stockDocumentsApi = {
   /** Deletes each draft in its own call; a posted document among the ids fails alone with NOT_DRAFT. */
   bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
 
-  /** One document per warehouse found in the lines, each posted at once when asked. */
+  /** ONE document holding every line, each in the warehouse it names; posted at once when asked. */
   importCreate: (payload: ImportCreateStockDocumentsRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 

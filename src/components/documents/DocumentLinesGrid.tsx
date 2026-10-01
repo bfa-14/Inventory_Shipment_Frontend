@@ -1,10 +1,9 @@
 import { ActionIcon, Anchor, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
 import { formatNumber, numberInputValue } from '../format'
-import { fromIsoDate, isoDate, money, unitLabel } from './documentKind'
+import { money, unitLabel } from './documentKind'
 
 /**
  * One row of the grid while it is being edited.
@@ -32,8 +31,12 @@ export interface EditableLine {
   notes: string
   /** Stock in this item and warehouse, or null while it is being fetched. */
   onHandBase: number | null
-  /** That item's units, fetched when the item is chosen, so the Unit select has something to offer. */
-  units: ItemUnitDto[]
+  /**
+   * What the Unit select offers. Narrowed to the three fields it actually draws with, so a line
+   * loaded from the server can seed this from the unit it already carries without inventing the
+   * rest of an ItemUnitDto - the full list replaces it once the item's units arrive.
+   */
+  units: Pick<ItemUnitDto, 'id' | 'unitTypeName' | 'packingFormula'>[]
   /** A "Line N: …" message the API sent back about this row. */
   error?: string
 }
@@ -45,6 +48,14 @@ interface DocumentLinesGridProps {
   onAdd: () => void
   /** Every active item, for the Item Code select. Searchable, so the whole list is fine. */
   items: ItemLookupDto[]
+  /**
+   * The warehouses of the document's branch, for the per-line Warehouse select.
+   *
+   * THE WAREHOUSE IS A LINE'S, NOT THE DOCUMENT'S. One document may move stock in several
+   * warehouses, so the choice belongs next to the quantity it applies to — and On Hand, the column
+   * beside it, is only meaningful once this cell has a value.
+   */
+  warehouses: { value: string; label: string }[]
   /** When an item is picked, the page fetches its units and its last cost. */
   onItemChosen: (key: string, itemId: number) => void
   currencyCode: string
@@ -72,6 +83,7 @@ export function DocumentLinesGrid({
   onRemove,
   onAdd,
   items,
+  warehouses,
   onItemChosen,
   currencyCode,
   costIsEditable,
@@ -94,7 +106,7 @@ export function DocumentLinesGrid({
   const total = (line: EditableLine) => line.quantity * line.unitCost
 
   return (
-    <Table.ScrollContainer minWidth={1050}>
+    <Table.ScrollContainer minWidth={1240}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -102,11 +114,11 @@ export function DocumentLinesGrid({
             <Table.Th w={240}>Item Code</Table.Th>
             <Table.Th w={200}>Item Name</Table.Th>
             <Table.Th w={140}>Unit</Table.Th>
-            <Table.Th w={150}>Expiry Date</Table.Th>
+            <Table.Th w={190}>Warehouse</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
             <Table.Th w={130} ta="right">Unit Cost</Table.Th>
-            <Table.Th w={130} ta="right">Amount</Table.Th>
+            <Table.Th w={130} ta="right">Total Cost</Table.Th>
             <Table.Th w={160}>Notes</Table.Th>
             <Table.Th w={84} />
           </Table.Tr>
@@ -213,17 +225,25 @@ export function DocumentLinesGrid({
 
                 <Table.Td>
                   {readOnly ? (
-                    <Text fz="sm">{line.expiryDate?.slice(0, 10) ?? '—'}</Text>
+                    <Text fz="sm">
+                      {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
+                    </Text>
                   ) : (
-                    <DateInput
-                      value={fromIsoDate(line.expiryDate)}
-                      placeholder="Optional"
-                      clearable
-                      valueFormat="DD/MM/YYYY"
-                      onChange={(next) =>
-                        onChange(line.key, { expiryDate: next ? isoDate(new Date(next)) : null })
-                      }
-                      popoverProps={{ withinPortal: true }}
+                    <Select
+                      data={warehouses}
+                      value={line.warehouseId === null ? null : String(line.warehouseId)}
+                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      disabled={warehouses.length === 0}
+                      searchable
+                      /* On Hand belongs to the item AND the warehouse, so changing this makes the
+                         number beside it stale. Clearing it back to null shows a dash rather than
+                         the previous warehouse's stock while the new figure is fetched. */
+                      onChange={(next) => {
+                        if (!next) return
+                        onChange(line.key, { warehouseId: Number(next), onHandBase: null })
+                      }}
+                      error={Boolean(line.error) && line.warehouseId === null}
+                      comboboxProps={{ withinPortal: true }}
                     />
                   )}
                 </Table.Td>

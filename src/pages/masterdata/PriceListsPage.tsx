@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { priceListsApi } from '../../api/masterdata/priceLists'
-import type { CurrencyLookupDto, PriceListDto, PriceListSortBy } from '../../api/types'
+import type { CurrencyLookupDto, PriceListDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { currencyLabel } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
@@ -57,24 +57,26 @@ export function PriceListsPage() {
    * The filter bar and the column funnels are two ways into the SAME filter, and both go through
    * `setFilter`, so a header reading "Active" over a bar reading "All" is not a state that exists.
    */
-  const grid = useGridQuery<Filters, PriceListDto, Awaited<ReturnType<typeof priceListsApi.search>>>({
+  const grid = useGridQuery<Filters, PriceListDto, AllRows<PriceListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'priceListCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The price lists could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        priceListsApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            currencyId: filters.currencyId === null ? undefined : Number(filters.currencyId),
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'PriceListCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          priceListsApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              currencyId: filters.currencyId === null ? undefined : Number(filters.currencyId),
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -82,6 +84,19 @@ export function PriceListsPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.priceLists',
+    sort: [{ accessor: 'priceListCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
 
   // Every currency, including inactive ones, so lists priced in a deactivated currency can still
   // be filtered out of the grid.
@@ -98,7 +113,8 @@ export function PriceListsPage() {
     downloadCsv(
       'price-lists.csv',
       ['Price List Code', 'Price List Name', 'Currency', 'Prices', 'Description', 'Status'],
-      (data?.items ?? []).map((p) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      engine.rows.map((p) => [
         p.priceListCode,
         p.priceListName,
         priceListCurrency(p),
@@ -172,20 +188,11 @@ export function PriceListsPage() {
     if (confirmed) await setStatus(priceList, activating)
   }
 
-  /* The Currency funnel picks ONE currency, because the endpoint filters by a single currencyId -
-     see the `single` note on ColumnFilter. */
-  const filteredCurrency = currencies.find((c) => String(c.id) === filters.currencyId)
-
   const columns: DataTableColumn<PriceListDto>[] = [
-    rowNumberColumn<PriceListDto>(grid.page, grid.pageSize),
-    /* Price List Code and Price List Name carry no header filter: this grid pages on the server and
-       the search endpoint takes one free-text parameter that matches code OR name, so a per-column
-       box here could only narrow by something other than the column it sits on. The search box in
-       the filter bar is that parameter, under its own name. See docs/frontend-conventions.md. */
+    rowNumberColumn<PriceListDto>(engine.page, engine.pageSize),
     {
       accessor: 'priceListCode',
       title: 'Price List Code',
-      sortable: true,
       width: 170,
       render: (p) => (
         <Text fz="sm" fw={600}>
@@ -193,50 +200,20 @@ export function PriceListsPage() {
         </Text>
       ),
     },
-    { accessor: 'priceListName', title: 'Price List Name', sortable: true },
+    {
+      accessor: 'priceListName',
+      title: 'Price List Name',
+    },
     {
       accessor: 'currencyCode',
       title: 'Currency',
-      sortable: true,
       width: 220,
-      ...columnFilter({
-        label: 'Currency',
-        value: filteredCurrency ? { values: [currencyLabel(filteredCurrency)] } : undefined,
-        onApply: (next) => {
-          const picked = next?.values?.[0]
-          const currency = picked ? currencies.find((c) => currencyLabel(c) === picked) : undefined
-          setFilter('currencyId', currency ? String(currency.id) : null)
-        },
-        options: currencies.map(currencyLabel),
-        withText: false,
-        single: true,
-      }),
       render: (p) => <Text fz="sm">{priceListCurrency(p)}</Text>,
-    },
-    {
-      // Not sortable and not filterable: priceCount is counted by the search procedure, and neither
-      // the sort list nor the filters it accepts include it.
-      accessor: 'priceCount',
-      title: 'Prices',
-      width: 110,
-      render: (p) => (
-        <Text fz="sm" c="dimmed">
-          {p.priceCount}
-        </Text>
-      ),
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (p) => <StatusBadge active={p.isActive} />,
     },
     {
@@ -292,7 +269,7 @@ export function PriceListsPage() {
           <TextInput
             placeholder="Search by price list code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search price lists"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -304,7 +281,7 @@ export function PriceListsPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Currency"
+            label="Currency"
             placeholder="All"
             searchable
             clearable
@@ -317,7 +294,7 @@ export function PriceListsPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -346,15 +323,10 @@ export function PriceListsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PriceListDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.priceLists"
+          engine={engine}
+          exportFileName="price-lists"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={
             filtered
@@ -385,12 +357,14 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-/** The words the Status funnel offers - the labels above, as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<PriceListDto>[] = [
+  { accessor: 'priceListCode', summary: 'count' },
+  { accessor: 'priceListName' },
+  { accessor: 'currencyCode', text: priceListCurrency },
+  { accessor: 'isActive', kind: 'boolean', text: (p) => (p.isActive ? 'Active' : 'Inactive') },
+]
 
-const ACCESSOR_TO_SORT: Record<string, PriceListSortBy> = {
-  priceListCode: 'PriceListCode',
-  priceListName: 'PriceListName',
-  currencyCode: 'CurrencyCode',
-  isActive: 'IsActive',
-}

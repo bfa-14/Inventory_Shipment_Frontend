@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFileExport, IconFilterOff, IconPlus, IconPrinter, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { shortagesApi, type ShortageDocumentListDto, type ShortageDocumentStatus } from '../../api/inventory/shortages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -17,6 +18,7 @@ import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { SHORTAGE_STATUS_COLOURS, SHORTAGES_ROUTE } from '../../components/shortages/shortageMath'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -38,15 +40,24 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', warehouseId: null, branchId: null, supplierId: null, status: null, createdBy: null, dateFrom: null, dateTo: null }
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  documentNumber: 'DocumentNumber',
-  documentDate: 'DocumentDate',
-  description: 'Description',
-  warehouseName: 'WarehouseName',
-  supplierName: 'SupplierName',
-  status: 'Status',
-  createdAtUtc: 'CreatedAtUtc',
-}
+/** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
+const GRID_COLUMNS: GridColumnMeta<ShortageDocumentListDto>[] = [
+  { accessor: 'documentNumber', summary: 'count' },
+  { accessor: 'description' },
+  { accessor: 'documentDate', kind: 'date' },
+  { accessor: 'warehouseName' },
+  { accessor: 'branchName' },
+  { accessor: 'supplierName' },
+  { accessor: 'leadTimeMonths', kind: 'number' },
+  { accessor: 'totalLines', kind: 'number', summary: 'sum' },
+  { accessor: 'containersRounded', kind: 'number', summary: 'sum' },
+  { accessor: 'purchaseOrders', kind: 'number' },
+  { accessor: 'status', kind: 'list' },
+  { accessor: 'createdByName', text: (r) => r.createdByName ?? '' },
+  { accessor: 'createdAtUtc', kind: 'date', text: (r) => stamp(r.createdAtUtc) },
+  { accessor: 'postedByName', text: (r) => r.postedByName ?? '' },
+  { accessor: 'postedAtUtc', kind: 'date', text: (r) => stamp(r.postedAtUtc) },
+]
 
 const numberOrUndefined = (value: string | null) => (value === null ? undefined : Number(value))
 
@@ -67,35 +78,50 @@ export function ShortagesPage() {
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [users, setUsers] = useState<UserLookupDto[]>([])
 
-  const grid = useGridQuery<Filters, ShortageDocumentListDto, Awaited<ReturnType<typeof shortagesApi.list>>>({
+  const grid = useGridQuery<Filters, ShortageDocumentListDto, AllRows<ShortageDocumentListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The shortage plans could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        shortagesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            warehouseId: numberOrUndefined(filters.warehouseId),
-            branchId: numberOrUndefined(filters.branchId),
-            supplierId: numberOrUndefined(filters.supplierId),
-            status: (filters.status as ShortageDocumentStatus | null) ?? undefined,
-            createdBy: numberOrUndefined(filters.createdBy),
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          shortagesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              warehouseId: numberOrUndefined(filters.warehouseId),
+              branchId: numberOrUndefined(filters.branchId),
+              supplierId: numberOrUndefined(filters.supplierId),
+              status: (filters.status as ShortageDocumentStatus | null) ?? undefined,
+              createdBy: numberOrUndefined(filters.createdBy),
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'DocumentDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED PLANS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'inventory.shortages',
+    sort: [{ accessor: 'documentDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     warehousesApi.lookup(false).then(setWarehouses).catch(() => {})
@@ -128,11 +154,10 @@ export function ShortagesPage() {
   }
 
   const columns: DataTableColumn<ShortageDocumentListDto>[] = [
-    rowNumberColumn<ShortageDocumentListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<ShortageDocumentListDto>(engine.page, engine.pageSize),
     {
       accessor: 'documentNumber',
       title: 'Shortage No.',
-      sortable: true,
       width: 170,
       render: (row) => (
         <Anchor component={Link} to={`${SHORTAGES_ROUTE}/${row.id}`} fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
@@ -140,14 +165,13 @@ export function ShortagesPage() {
         </Anchor>
       ),
     },
-    { accessor: 'description', title: 'Description', sortable: true, width: 220, render: (row) => <Text fz="sm" lineClamp={2}>{row.description}</Text> },
-    { accessor: 'documentDate', title: 'Date', sortable: true, width: 110, render: (row) => dateLabel(row.documentDate) },
-    { accessor: 'warehouseName', title: 'Warehouse', sortable: true, width: 150 },
+    { accessor: 'description', title: 'Description', width: 220, render: (row) => <Text fz="sm" lineClamp={2}>{row.description}</Text> },
+    { accessor: 'documentDate', title: 'Date', width: 110, render: (row) => dateLabel(row.documentDate) },
+    { accessor: 'warehouseName', title: 'Warehouse', width: 150 },
     { accessor: 'branchName', title: 'Branch', width: 150 },
     {
       accessor: 'supplierName',
       title: 'Supplier',
-      sortable: true,
       width: 190,
       render: (row) => (
         <div>
@@ -176,12 +200,11 @@ export function ShortagesPage() {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 100,
       render: (row) => <Badge color={SHORTAGE_STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{row.status}</Badge>,
     },
     { accessor: 'createdByName', title: 'Created By', width: 160, render: (row) => row.createdByName ?? '—' },
-    { accessor: 'createdAtUtc', title: 'Created On', sortable: true, width: 170, render: (row) => <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{stamp(row.createdAtUtc)}</Text> },
+    { accessor: 'createdAtUtc', title: 'Created On', width: 170, render: (row) => <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{stamp(row.createdAtUtc)}</Text> },
     { accessor: 'postedByName', title: 'Posted By', width: 160, render: (row) => row.postedByName ?? '—' },
     { accessor: 'postedAtUtc', title: 'Posted On', width: 170, render: (row) => <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{stamp(row.postedAtUtc)}</Text> },
     {
@@ -256,17 +279,18 @@ export function ShortagesPage() {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more plans than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" withBorder>
         <DataTable
-          records={data?.items ?? []}
+          storeKey="inventory.shortages"
+          engine={engine}
+          exportFileName="shortage-plans"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText="No shortage plans yet."
           onRowClick={({ record }) => open(record)}

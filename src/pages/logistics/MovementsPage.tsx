@@ -5,6 +5,7 @@ import { DateInput } from '@mantine/dates'
 import { useDebouncedValue } from '@mantine/hooks'
 import { IconArrowRight, IconFileSpreadsheet, IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { containersApi } from '../../api/logistics/containers'
 import {
   MOVEMENT_STATUSES,
@@ -21,6 +22,7 @@ import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber } from '../../components/format'
 import { StageIcon } from '../../components/logistics/movementStage'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -51,14 +53,22 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-/** The columns usp_Movement_Search can sort by; every other column is left unsortable. */
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  movementNo: 'MovementNo',
-  startDate: 'StartDate',
-  eta: 'Eta',
-  endDate: 'EndDate',
-  status: 'Status',
-}
+/** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
+const GRID_COLUMNS: GridColumnMeta<MovementListDto>[] = [
+  { accessor: 'movementNo', summary: 'count' },
+  { accessor: 'typeName', kind: 'list' },
+  { accessor: 'route', text: (r) => `${r.fromName} → ${r.toName}` },
+  { accessor: 'plannedDate', kind: 'date' },
+  { accessor: 'startDate', kind: 'date' },
+  { accessor: 'eta', kind: 'date' },
+  { accessor: 'endDate', kind: 'date' },
+  { accessor: 'carrierName', text: (r) => r.carrierName ?? '' },
+  { accessor: 'vehicleOrVessel', text: (r) => [r.vehicleOrVessel, r.voyageNo].filter(Boolean).join(' · ') },
+  { accessor: 'containerRefs', text: (r) => r.containerRefs ?? '' },
+  { accessor: 'chargesPostedBase', kind: 'number', summary: 'sum', text: (r) => (r.chargesPostedBase ? formatMoney(r.chargesPostedBase, 'USD') : '') },
+  { accessor: 'attachmentCount', kind: 'number' },
+  { accessor: 'status', kind: 'list', text: (r) => r.statusName },
+]
 
 type Option = { value: string; label: string }
 
@@ -91,28 +101,43 @@ export function MovementsPage() {
   const [pickedContainer, setPickedContainer] = useState<Option | null>(null)
   const [debouncedContainerSearch] = useDebouncedValue(containerSearch, 300)
 
-  const grid = useGridQuery<Filters, MovementListDto, Awaited<ReturnType<typeof movementsApi.list>>>({
+  const grid = useGridQuery<Filters, MovementListDto, AllRows<MovementListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'startDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: 'The movements could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        movementsApi.list(
-          {
-            ...toQuery(filters),
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'StartDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          movementsApi.list(
+            {
+              ...toQuery(filters),
+              sortBy: 'StartDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED MOVEMENTS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The filters above the grid still
+     narrow what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'logistics.movements',
+    sort: [{ accessor: 'startDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     movementTypesApi.lookup(false).then(setTypes).catch(() => {})
@@ -153,11 +178,10 @@ export function MovementsPage() {
   const text = (value: string | null) => (value ? <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{value}</Text> : dash)
 
   const columns: DataTableColumn<MovementListDto>[] = [
-    rowNumberColumn<MovementListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<MovementListDto>(engine.page, engine.pageSize),
     {
       accessor: 'movementNo',
       title: 'Movement No.',
-      sortable: true,
       width: 160,
       render: (row) => (
         <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${row.id}`} fz="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>
@@ -202,11 +226,10 @@ export function MovementsPage() {
       ),
     },
     { accessor: 'plannedDate', title: 'Planned', width: 105, render: (row) => dateLabel(row.plannedDate) },
-    { accessor: 'startDate', title: 'Start', sortable: true, width: 105, render: (row) => dateLabel(row.startDate) },
+    { accessor: 'startDate', title: 'Start', width: 105, render: (row) => dateLabel(row.startDate) },
     {
       accessor: 'eta',
       title: 'ETA',
-      sortable: true,
       width: 105,
       render: (row) => (
         <Text fz="sm" c={row.isLate ? 'red' : undefined} fw={row.isLate ? 600 : undefined}>
@@ -214,7 +237,7 @@ export function MovementsPage() {
         </Text>
       ),
     },
-    { accessor: 'endDate', title: 'End', sortable: true, width: 105, render: (row) => dateLabel(row.endDate) },
+    { accessor: 'endDate', title: 'End', width: 105, render: (row) => dateLabel(row.endDate) },
     { accessor: 'carrierName', title: 'Carrier', width: 160, render: (row) => text(row.carrierName) },
     {
       accessor: 'vehicleOrVessel',
@@ -246,7 +269,6 @@ export function MovementsPage() {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 150,
       render: (row) => (
         <Group gap={4} wrap="nowrap">
@@ -356,17 +378,18 @@ export function MovementsPage() {
         </Alert>
       ) : null}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more movements than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <Paper radius="lg" withBorder>
         <DataTable<MovementListDto>
-          records={data?.items ?? []}
+          storeKey="logistics.movements"
+          engine={engine}
+          exportFileName="movements"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={grid.isDefault ? 'No movements yet.' : 'No movements match these filters.'}
           onRowClick={({ record }) => void navigate(`${MOVEMENTS_ROUTE}/${record.id}`)}

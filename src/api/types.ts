@@ -214,8 +214,18 @@ export interface WarehouseDto {
   branchCode: string
   branchName: string
   address: string | null
+  /** The warehouse this one stands under; null for a root. */
+  parentId: number | null
+  parentCode: string | null
+  parentName: string | null
+  /** Depth in the tree, 1 for a root. */
+  level: number
+  /** Warehouses directly under this one. 0 means a leaf - and stock lives on the leaves. */
+  childCount: number
   isMainWarehouse: boolean
   isActive: boolean
+  /** Sales invoices selling more than it holds: true allows (after a warning), false refuses, null follows the global setting. */
+  allowOutOfStockOverride: boolean | null
   createdAtUtc: string
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
@@ -228,10 +238,14 @@ export interface SaveWarehouseRequest {
   warehouseName: string
   branchId: number
   address?: string | null
+  /** The warehouse this one stands under; null makes it a root. It need not share the branch. */
+  parentId?: number | null
   isMainWarehouse: boolean
   isActive: boolean
   /** Confirms taking the Main Warehouse flag away from the warehouse that currently holds it. */
   replaceMainWarehouse: boolean
+  /** True allows selling out-of-stock items from this warehouse, false refuses, null follows the global setting. */
+  allowOutOfStockOverride?: boolean | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }
@@ -273,6 +287,10 @@ export interface WarehouseLookupDto {
   branchName: string
   isMainWarehouse: boolean
   isActive: boolean
+  /** The tree, so a picker can draw it and offer only the leaves that may hold stock. */
+  parentId: number | null
+  level: number
+  childCount: number
 }
 
 // ----- master data: currencies -----
@@ -910,4 +928,6 @@ export interface PartyLookupDto {
   defaultCurrencyId: number | null
   userId: number | null
   isActive: boolean
+  /** The address as Parties holds it, so a document header can show it. */
+  address: string | null
 }

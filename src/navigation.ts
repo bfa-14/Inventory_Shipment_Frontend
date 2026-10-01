@@ -64,6 +64,12 @@ export const PERMISSIONS = {
   invoicesPost: 'sales.invoices.post',
   invoicesCancel: 'sales.invoices.cancel',
   invoicesDelete: 'sales.invoices.delete',
+  receiptsView: 'sales.receipts.view',
+  receiptsCreate: 'sales.receipts.create',
+  receiptsPost: 'sales.receipts.post',
+  receiptsReverse: 'sales.receipts.reverse',
+  receiptsDelete: 'sales.receipts.delete',
+  receiptsAllocate: 'sales.receipts.allocate',
   documentTypesManage: 'inventory.documenttypes.manage',
   shortagesView: 'inventory.shortages.view',
   shortagesCreate: 'inventory.shortages.create',
@@ -85,6 +91,8 @@ export const PERMISSIONS = {
   purchaseReturnsCancel: 'purchase.returns.cancel',
   purchaseReturnsDelete: 'purchase.returns.delete',
   chargeTypesManage: 'purchase.chargetypes.manage',
+  settingsManage: 'configuration.settings.manage',
+  outOfStockAuditView: 'sales.outofstockaudit.view',
   landedCostsView: 'purchase.landedcosts.view',
   landedCostsCreate: 'purchase.landedcosts.create',
   landedCostsPost: 'purchase.landedcosts.post',
@@ -109,6 +117,8 @@ export const PERMISSIONS = {
   portsManage: 'masterdata.ports.manage',
   attachmentTypesManage: 'masterdata.attachmenttypes.manage',
   movementTypesManage: 'masterdata.movementtypes.manage',
+  paymentMethodsManage: 'masterdata.paymentmethods.manage',
+  cashBankAccountsManage: 'masterdata.cashbankaccounts.manage',
 } as const
 
 export interface NavItem {
@@ -225,6 +235,10 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Sales Invoices', to: '/sales/invoices', permission: PERMISSIONS.invoicesView, icon: 'invoice' },
       // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
+      { label: 'Receipts', to: '/sales/receipts', permission: PERMISSIONS.receiptsView, icon: 'wallet' },
+      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.receiptsView, icon: 'reports' },
+      // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
+      { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },
       {
         label: 'Import Sales from Excel',
         to: '/sales/import-preview',
@@ -245,6 +259,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Branches / Sites', to: '/setup/master-data/branches', permission: PERMISSIONS.branchesView },
           { label: 'Warehouses', to: '/setup/master-data/warehouses', permission: PERMISSIONS.warehousesView },
           { label: 'Currencies', to: '/setup/master-data/currencies', permission: PERMISSIONS.currenciesView },
+          { label: 'Exchange Rates', to: '/setup/master-data/exchange-rates', permission: PERMISSIONS.exchangeRatesView },
           { label: 'Item Families', to: '/setup/master-data/item-families', permission: PERMISSIONS.itemFamiliesView },
           { label: 'Brands', to: '/setup/master-data/brands', permission: PERMISSIONS.brandsView },
           { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
@@ -254,6 +269,9 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Ports', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
           { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
+          // The lists a customer receipt line picks from.
+          { label: 'Payment Methods', to: '/setup/master-data/payment-methods', permission: PERMISSIONS.paymentMethodsManage },
+          { label: 'Cash / Bank Accounts', to: '/setup/master-data/cash-bank-accounts', permission: PERMISSIONS.cashBankAccountsManage },
         ],
       },
       {
@@ -286,6 +304,8 @@ export const NAVIGATION: NavSection[] = [
         permission: PERMISSIONS.documentTypesManage,
         icon: 'settings',
       },
+      // Switches that change how the whole system behaves; each setting is a row, drawn by one page.
+      { label: 'Settings', to: '/configuration/settings', permission: PERMISSIONS.settingsManage, icon: 'settings' },
     ],
   },
 ]

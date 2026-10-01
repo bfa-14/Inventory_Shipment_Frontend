@@ -18,6 +18,14 @@ const ACTION_COLOURS: Record<string, string> = {
   Updated: 'blue',
   Posted: 'green',
   Cancelled: 'red',
+  // Receipts: a reversal is orange (undone, not wrong); allocations are the money reaching invoices.
+  Reversed: 'orange',
+  Allocated: 'teal',
+  Deallocated: 'orange',
+  // Cash sales: the receipt made by, or undone with, an invoice.
+  AutoCreated: 'teal',
+  ReceiptPosted: 'green',
+  ReceiptReversed: 'orange',
   // Shortage plans: the live figures were refreshed; a purchase order was created from the plan.
   Recalculated: 'violet',
   POCreated: 'teal',

@@ -1,13 +1,15 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
-import { ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
+import { appliesToLabel, ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -25,6 +27,18 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', category: null, isActive: null }
 
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number), what it
+ * shows, and whether the footer totals it. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<AttachmentTypeDto>[] = [
+  { accessor: 'category', summary: 'count' },
+  { accessor: 'subType' },
+  { accessor: 'appliesTo', kind: 'list', text: (r) => appliesToLabel(r.appliesTo) },
+  { accessor: 'sortOrder', kind: 'number', text: (r) => formatNumber(r.sortOrder) },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
+
 type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTypeDto } | null
 
 /** What a container file is - "Shipping / Bill of Lading" - so the paperwork can be sorted and found. */
@@ -33,31 +47,43 @@ export function AttachmentTypesPage() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const canManage = hasPermission(PERMISSIONS.attachmentTypesManage)
 
-  const grid = useGridQuery<Filters, AttachmentTypeDto, Awaited<ReturnType<typeof attachmentTypesApi.list>>>({
+  const grid = useGridQuery<Filters, AttachmentTypeDto, AllRows<AttachmentTypeDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'sortOrder', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The attachment types could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        attachmentTypesApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            category: filters.category ?? undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'SortOrder',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          attachmentTypesApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              category: filters.category ?? undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: filter, multi-column sort, paging,
+     footer totals over all the filtered rows, CSV. The bar above the grid still narrows what is
+     loaded; the grid's own column filters narrow what is loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.attachmentTypes',
+    sort: [{ accessor: 'sortOrder', direction: 'asc' }],
+  })
   const load = grid.reload
 
   async function afterSave(message: string) {
@@ -103,11 +129,36 @@ export function AttachmentTypesPage() {
   }
 
   const columns: DataTableColumn<AttachmentTypeDto>[] = [
-    rowNumberColumn<AttachmentTypeDto>(grid.page, grid.pageSize),
-    { accessor: 'category', title: 'Category', sortable: true, width: 180, render: (row) => <Text fw={600} fz="sm">{row.category}</Text> },
-    { accessor: 'subType', title: 'Sub Type', sortable: true },
-    { accessor: 'sortOrder', title: 'Sort Order', sortable: true, width: 120, textAlign: 'right', render: (row) => formatNumber(row.sortOrder) },
-    { accessor: 'isActive', title: 'Status', sortable: true, width: 120, render: (row) => <StatusBadge active={row.isActive} /> },
+    rowNumberColumn<AttachmentTypeDto>(engine.page, engine.pageSize),
+    {
+      accessor: 'category',
+      title: 'Category',
+      width: 180,
+      render: (row) => <Text fw={600} fz="sm">{row.category}</Text>,
+    },
+    {
+      accessor: 'subType',
+      title: 'Sub Type',
+    },
+    {
+      accessor: 'appliesTo',
+      title: 'Used on',
+      width: 130,
+      render: (row) => appliesToLabel(row.appliesTo),
+    },
+    {
+      accessor: 'sortOrder',
+      title: 'Sort Order',
+      width: 120,
+      textAlign: 'right',
+      render: (row) => formatNumber(row.sortOrder),
+    },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      width: 120,
+      render: (row) => <StatusBadge active={row.isActive} />,
+    },
     {
       accessor: 'actions',
       title: 'Actions',
@@ -128,7 +179,7 @@ export function AttachmentTypesPage() {
     <>
       <PageHeader
         title="Attachment Types"
-        subtitle="The kinds of document a container file can be filed as."
+        subtitle="The kinds of document a container file or a customer receipt can be filed as."
         actions={
           canManage ? (
             <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
@@ -143,7 +194,7 @@ export function AttachmentTypesPage() {
           <TextInput
             placeholder="Category or sub type"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -152,10 +203,10 @@ export function AttachmentTypesPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
+          <Select label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
+          <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
           <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={grid.clearFilters} disabled={grid.isDefault}>
@@ -172,15 +223,10 @@ export function AttachmentTypesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<AttachmentTypeDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.attachmentTypes"
+          engine={engine}
+          exportFileName="attachment-types"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', attachmentType: record }) : undefined}
           noRecordsText={grid.isDefault ? 'No attachment types yet.' : 'No attachment types found. Try clearing the filters.'}
@@ -206,9 +252,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  sortOrder: 'SortOrder',
-  category: 'Category',
-  subType: 'SubType',
-  isActive: 'IsActive',
-}

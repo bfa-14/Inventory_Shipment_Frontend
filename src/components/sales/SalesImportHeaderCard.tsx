@@ -1,7 +1,6 @@
 import { Grid, NumberInput, Paper, Select, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import {
-  SALES_RATE_TYPES,
   salesRateTypeLabel,
   type RateResolutionDto,
   type SalesRateType,
@@ -183,17 +182,9 @@ export function SalesImportHeaderCard({
           />
         </Grid.Col>
 
-        <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-          <Select
-            label="Rate Type"
-            data={SALES_RATE_TYPES.map((t) => ({ value: String(t.value), label: t.label }))}
-            value={String(value.rateType)}
-            onChange={(next) => next && onChange({ rateType: Number(next) as SalesRateType })}
-            // The base currency has one rate, 1, whatever the type; the choice would change nothing.
-            disabled={disabled || !value.priceListId || isBase}
-            allowDeselect={false}
-          />
-        </Grid.Col>
+        {/* RATE TYPE IS NOT SHOWN, as on the invoice header. The import still sends one — it picks
+            which published rate the exchange rate is read from — but it is no longer a choice the
+            header offers; the default (Official) is used. */}
 
         <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
           {isBase ? (

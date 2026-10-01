@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionIcon, Alert, Box, Button, Group, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
 import {
@@ -18,6 +18,7 @@ import type { ItemFamilyDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -26,10 +27,7 @@ import { RowActions } from '../../components/ui/RowActions'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { PERMISSIONS } from '../../navigation'
 import { ItemFamilyFormModal } from './ItemFamilyFormModal'
-import { ancestors, childrenOf, descendants, flattenTree, indexFamilies, parentOptionLabel } from './itemFamilyTree'
-
-/** Which rows the reader has opened. Survives a reload so a deep tree does not collapse under them. */
-const EXPANDED_KEY = 'inventory_shipment.itemFamilies.expanded'
+import { descendants, flattenTree, indexFamilies, parentOptionLabel } from './itemFamilyTree'
 
 /** Pixels of indent per level - the only thing that makes the hierarchy readable in a flat grid. */
 const INDENT = 20
@@ -70,25 +68,12 @@ export function ItemFamiliesPage() {
   // An empty box is a finished thought, and so is Enter: both skip the wait.
   const appliedSearch = search === '' || flushedSearch === search ? search : debouncedSearch
 
-  const storedExpanded = useMemo(() => readExpanded(), [])
-  const [expanded, setExpanded] = useState<Set<number>>(() => storedExpanded ?? new Set())
-  // Nothing was stored yet: the first load opens the roots so the tree does not read as a flat list.
-  const seeded = useRef(storedExpanded !== null)
-
-  useEffect(() => {
-    if (seeded.current) writeExpanded(expanded)
-  }, [expanded])
-
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const rows = await itemFamiliesApi.tree()
       setFamilies(rows)
-      if (!seeded.current) {
-        seeded.current = true
-        setExpanded(new Set(rows.filter((f) => f.parentId === null && f.childCount > 0).map((f) => f.id)))
-      }
     } catch (err) {
       setError(err instanceof ApiError ? err.messages.join(' ') : 'The item families could not be loaded.')
     } finally {
@@ -103,62 +88,60 @@ export function ItemFamiliesPage() {
 
   const index = useMemo(() => indexFamilies(families), [families])
 
-  const filtering = appliedSearch.trim() !== '' || status !== null || scopeId !== null
-
   /**
-   * The rows the grid draws, top to bottom. Unfiltered that is a depth-first walk that stops at
-   * every collapsed row; filtered it is every match plus its ancestors, so a hit three levels down
-   * is still shown under the families it belongs to instead of floating on its own.
+   * What each column IS, for the grid engine. The parent column shows the parent's NAME, which only the
+   * tree index can look up from an id.
    */
-  const visibleRows = useMemo(() => {
-    if (!filtering) return flattenTree(index, (id) => expanded.has(id))
-
-    // The Family filter narrows the whole view to one subtree; the others then work inside it.
-    const scope = scopeId === null ? null : Number(scopeId)
-    let inScope: ItemFamilyDto[]
-    if (scope === null) {
-      inScope = [...index.byId.values()]
-    } else {
-      const root = index.byId.get(scope)
-      inScope = root ? [root, ...descendants(index, scope)] : []
-    }
-
-    const scopeIds = new Set(inScope.map((f) => f.id))
-    const term = appliedSearch.trim().toLowerCase()
-    const wantActive = status === null ? null : status === 'true'
-
-    const keep = new Set<number>()
-    for (const family of inScope) {
-      const matchesTerm =
-        term === '' ||
-        family.familyCode.toLowerCase().includes(term) ||
-        family.familyName.toLowerCase().includes(term)
-      const matchesStatus = wantActive === null || family.isActive === wantActive
-      if (!matchesTerm || !matchesStatus) continue
-
-      keep.add(family.id)
-      // Keep the path down to the match, clipped at the scope so the Family filter still shows
-      // only that family's subtree.
-      for (const parent of ancestors(index, family.id)) {
-        if (!scopeIds.has(parent.id)) break
-        keep.add(parent.id)
-      }
-    }
-
-    // A filtered tree is always fully open: a match hidden inside a collapsed parent would read
-    // as no match at all.
-    return flattenTree(index, () => true, keep)
-  }, [index, filtering, expanded, appliedSearch, status, scopeId])
-
-  /**
-   * A row is drawn open when its children are actually on screen. Reading it back from the rows
-   * rather than from `expanded` keeps the chevron honest while a filter forces the tree open.
-   */
-  const shownIds = useMemo(() => new Set(visibleRows.map((f) => f.id)), [visibleRows])
-  const isOpen = useCallback(
-    (family: ItemFamilyDto) => childrenOf(index, family.id).some((child) => shownIds.has(child.id)),
-    [index, shownIds],
+  const gridColumns = useMemo<GridColumnMeta<ItemFamilyDto>[]>(
+    () => [
+      { accessor: 'familyCode', summary: 'count' },
+      { accessor: 'familyName' },
+      {
+        accessor: 'parentId',
+        kind: 'list',
+        text: (family) => (family.parentId === null ? '' : (index.byId.get(family.parentId)?.familyName ?? '')),
+      },
+      { accessor: 'description', text: (family) => family.description ?? '' },
+      { accessor: 'childCount', kind: 'number' },
+      { accessor: 'isActive', kind: 'boolean', text: (family) => (family.isActive ? 'Active' : 'Inactive') },
+    ],
+    [index],
   )
+
+  /**
+   * The search box, the Status pick and the Family scope are the PAGE's own conditions. The engine
+   * adds the column filters on top, keeps every match under its ancestors (clipped at the scope, so a
+   * Family pick still shows only that family's subtree), opens everything while narrowed, and sorts
+   * among siblings - never across the tree, which would cut children from their parents.
+   */
+  const pageFiltering = appliedSearch.trim() !== '' || status !== null || scopeId !== null
+  const scopeSet = useMemo(() => {
+    if (scopeId === null) return null
+    const root = index.byId.get(Number(scopeId))
+    return new Set(root ? [root.id, ...descendants(index, root.id).map((family) => family.id)] : [])
+  }, [index, scopeId])
+  const term = appliedSearch.trim().toLowerCase()
+  const wantActive = status === null ? null : status === 'true'
+
+  const engine = useDataGrid({
+    rows: families,
+    columns: gridColumns,
+    storeKey: 'masterdata.itemFamilies',
+    sort: [{ accessor: 'familyCode', direction: 'asc' }],
+    tree: {
+      idOf: (family) => family.id,
+      parentOf: (family) => (scopeId !== null && family.id === Number(scopeId) ? null : family.parentId),
+      // The first visit opens the roots, so the tree does not read as a flat list.
+      openByDefault: (family) => family.parentId === null && family.childCount > 0,
+      narrowed: pageFiltering,
+      match: (family) =>
+        (scopeSet === null || scopeSet.has(family.id)) &&
+        (term === '' || family.familyCode.toLowerCase().includes(term) || family.familyName.toLowerCase().includes(term)) &&
+        (wantActive === null || family.isActive === wantActive),
+    },
+  })
+
+  const filtering = pageFiltering || engine.activeCount > 0
 
   const familyOptions = useMemo(
     () =>
@@ -166,21 +149,12 @@ export function ItemFamiliesPage() {
     [index],
   )
 
-  function toggleRow(id: number) {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
   function expandAll() {
-    setExpanded(new Set(families.filter((f) => f.childCount > 0).map((f) => f.id)))
+    engine.expandAll()
   }
 
   function collapseAll() {
-    setExpanded(new Set())
+    engine.collapseAll()
   }
 
   function clearFilters() {
@@ -188,6 +162,7 @@ export function ItemFamiliesPage() {
     setFlushedSearch('')
     setStatus(null)
     setScopeId(null)
+    engine.clearFilters()
   }
 
   async function afterChange(message: string) {
@@ -260,18 +235,19 @@ export function ItemFamiliesPage() {
       // Wide enough that a level-4 code still clears its indent before the column ends.
       width: 280,
       render: (family) => {
-        const open = isOpen(family)
-        const hasChildren = family.childCount > 0
+        const info = engine.treeInfo(family)
+        const open = info.open
+        const hasChildren = info.hasChildren
 
         return (
-          <Group gap={6} wrap="nowrap" style={{ paddingLeft: family.level * INDENT }}>
+          <Group gap={6} wrap="nowrap" style={{ paddingLeft: info.depth * INDENT }}>
             {hasChildren ? (
               <ActionIcon
                 variant="subtle"
                 color="gray"
                 size="sm"
                 aria-label={`${open ? 'Collapse' : 'Expand'} ${family.familyName}`}
-                onClick={() => toggleRow(family.id)}
+                onClick={() => engine.toggleNode(family)}
               >
                 {open ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
               </ActionIcon>
@@ -293,7 +269,12 @@ export function ItemFamiliesPage() {
         )
       },
     },
-    { accessor: 'familyName', title: 'Family Name', width: 180, ellipsis: true },
+    {
+      accessor: 'familyName',
+      title: 'Family Name',
+      width: 180,
+      ellipsis: true,
+    },
     {
       accessor: 'parentId',
       title: 'Parent Family',
@@ -321,7 +302,12 @@ export function ItemFamiliesPage() {
           <Text c="dimmed">—</Text>
         ),
     },
-    { accessor: 'childCount', title: 'Children', width: 90, textAlign: 'right' },
+    {
+      accessor: 'childCount',
+      title: 'Children',
+      width: 90,
+      textAlign: 'right',
+    },
     {
       accessor: 'isActive',
       title: 'Status',
@@ -384,7 +370,7 @@ export function ItemFamiliesPage() {
           <TextInput
             placeholder="Search by family code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search item families"
+            label="Search"
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
             // Enter applies what is typed now instead of waiting out the debounce.
@@ -396,7 +382,7 @@ export function ItemFamiliesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={status}
@@ -407,7 +393,7 @@ export function ItemFamiliesPage() {
 
         <FilterBar.Col span={3}>
           <Select
-            aria-label="Family"
+            label="Family"
             placeholder="All families"
             data={familyOptions}
             value={scopeId}
@@ -440,7 +426,9 @@ export function ItemFamiliesPage() {
         {/* No paging: a page break would cut a parent from its children and page 2 would be a
             list of orphans. The whole tree is here, and the filters narrow it in the browser. */}
         <DataTable<ItemFamilyDto>
-          records={visibleRows}
+          storeKey="masterdata.itemFamilies"
+          engine={engine}
+          exportFileName="item-families"
           columns={columns}
           idAccessor="id"
           fetching={loading}
@@ -480,25 +468,3 @@ const STATUS_OPTIONS = [
   { value: 'true', label: 'Active' },
   { value: 'false', label: 'Inactive' },
 ]
-
-/** null when nothing has been stored yet, so the first load can open the roots instead. */
-function readExpanded(): Set<number> | null {
-  try {
-    const raw = localStorage.getItem(EXPANDED_KEY)
-    if (raw === null) return null
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return null
-    return new Set(parsed.filter((id): id is number => typeof id === 'number'))
-  } catch {
-    // A browser that refuses storage still gets a working tree, just a forgetful one.
-    return null
-  }
-}
-
-function writeExpanded(ids: Set<number>): void {
-  try {
-    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...ids]))
-  } catch {
-    // Nothing to do: the expansion simply will not survive the next reload.
-  }
-}

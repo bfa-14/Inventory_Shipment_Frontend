@@ -21,17 +21,15 @@ import type { RoleDto, UserDto } from '../../api/types'
 import { usersApi } from '../../api/users'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
-import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../../components/ui/DataTable'
+import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { FormModal } from '../../components/ui/FormModal'
-import { useGridFilters, type ColumnText } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { PAGE_SIZE_DEFAULT } from '../../config'
 import { PERMISSIONS } from '../../navigation'
 
 type Dialog =
@@ -48,17 +46,18 @@ const PASSWORD_HINT = 'At least 8 characters with upper and lower case, a digit 
  * offers a tick list, the values that list is built from. Module-level so the filter callbacks keep
  * their identity between renders.
  */
-const COLUMN_TEXT: Record<string, ColumnText<UserDto>> = {
-  username: (u) => u.username,
-  fullName: (u) => u.fullName,
-  email: (u) => u.email,
-  roles: (u) => u.roles.join(', '),
-  isActive: (u) => (u.isActive ? 'Active' : 'Inactive'),
-  lastLoginAtUtc: (u) => formatDateTime(u.lastLoginAtUtc),
-}
-
-/** The closed set the Status funnel offers, whatever the loaded page happens to contain. */
-const STATUS_VALUES = ['Active', 'Inactive']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<UserDto>[] = [
+  { accessor: 'username', summary: 'count' },
+  { accessor: 'fullName' },
+  { accessor: 'email' },
+  { accessor: 'roles', text: (u) => u.roles.join(', ') },
+  { accessor: 'isActive', kind: 'boolean', text: (u) => (u.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'lastLoginAtUtc', kind: 'date', text: (u) => formatDateTime(u.lastLoginAtUtc) },
+]
 
 export function UsersPage() {
   const { user: currentUser, hasPermission } = useAuth()
@@ -69,15 +68,6 @@ export function UsersPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<UserDto>>({
-    columnAccessor: 'username',
-    direction: 'asc',
-  })
-  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
-  const grid = useGridFilters(COLUMN_TEXT, () => setPage(1))
-  const { apply: applyColumnFilters, options: columnOptions } = grid
 
   const canCreate = hasPermission(PERMISSIONS.usersCreate)
   const canEdit = hasPermission(PERMISSIONS.usersEdit)
@@ -110,10 +100,10 @@ export function UsersPage() {
     void loadRoles()
   }, [load, loadRoles])
 
-  /** The users endpoint returns everything at once, so filtering and paging happen here. */
-  const filtered = useMemo(() => {
+  /** The search box is one question over three fields; the engine's column filters then each ask about their own column, and all of them AND. */
+  const matching = useMemo(() => {
     const term = search.trim().toLowerCase()
-    const matching = term
+    return term
       ? users.filter(
           (u) =>
             u.username.toLowerCase().includes(term) ||
@@ -121,32 +111,16 @@ export function UsersPage() {
             u.email.toLowerCase().includes(term),
         )
       : users
+  }, [users, search])
 
-    // The search box and the column funnels narrow the same list, in that order: the box is one
-    // question over three fields, each funnel a question about its own column, and all of them AND.
-    const narrowed = applyColumnFilters(matching)
-
-    const key = sortStatus.columnAccessor as keyof UserDto
-    const sorted = [...narrowed].sort((a, b) => String(a[key] ?? '').localeCompare(String(b[key] ?? '')))
-    if (sortStatus.direction === 'desc') sorted.reverse()
-    return sorted
-  }, [users, search, sortStatus, applyColumnFilters])
-
-  /**
-   * The tick lists come from EVERY user, not from the rows currently surviving the filters - a list
-   * that shrank under the cursor as values were ticked would be unusable, and a value already
-   * filtered out could never be un-ticked.
-   */
-  const values = useMemo(
-    () => ({
-      username: columnOptions(users, 'username'),
-      fullName: columnOptions(users, 'fullName'),
-      email: columnOptions(users, 'email'),
-    }),
-    [users, columnOptions],
-  )
-
-  const records = filtered.slice((page - 1) * pageSize, page * pageSize)
+  /* THE ENGINE HOLDS THE WHOLE LIST AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. */
+  const engine = useDataGrid({
+    rows: matching,
+    columns: GRID_COLUMNS,
+    storeKey: 'security.users',
+    sort: [{ accessor: 'username', direction: 'asc' }],
+  })
 
   async function afterChange(message: string) {
     setDialog(null)
@@ -178,28 +152,22 @@ export function UsersPage() {
     {
       accessor: 'username',
       title: 'Username',
-      sortable: true,
       width: 195,
-      ...columnFilter({ ...grid.bind('username'), label: 'Username', options: values.username }),
     },
     {
       accessor: 'fullName',
       title: 'Full name',
-      sortable: true,
-      ...columnFilter({ ...grid.bind('fullName'), label: 'Full name', options: values.fullName }),
     },
     {
       accessor: 'email',
       title: 'E-mail',
-      sortable: true,
-      ...columnFilter({ ...grid.bind('email'), label: 'E-mail', options: values.email }),
     },
     {
       accessor: 'roles',
       title: 'Roles',
+      // Sorts on the joined text the cell shows, so users group by their first role.
       // No tick list: a cell holding several roles would offer combinations ("Admin, Manager")
       // rather than roles, so the box - which matches inside the joined text - is the honest control.
-      ...columnFilter({ ...grid.bind('roles'), label: 'Roles', placeholder: 'Role contains...' }),
       render: (u) =>
         u.roles.length === 0 ? (
           <Text c="dimmed" fz="sm">
@@ -218,19 +186,15 @@ export function UsersPage() {
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 150,
-      ...columnFilter({ ...grid.bind('isActive'), label: 'Status', options: STATUS_VALUES, withText: false }),
       render: (u) => <StatusBadge active={u.isActive} />,
     },
     {
       accessor: 'lastLoginAtUtc',
       title: 'Last sign-in',
-      sortable: true,
       width: 215,
       // No tick list: every sign-in is a different instant, so the list would be one entry per row.
       // The box matches the formatted text, so "2026-08" or "14/07" narrows it the way it reads.
-      ...columnFilter({ ...grid.bind('lastLoginAtUtc'), label: 'Last sign-in' }),
       render: (u) => formatDateTime(u.lastLoginAtUtc),
     },
     {
@@ -299,11 +263,11 @@ export function UsersPage() {
           <TextInput
             placeholder="Search username, name or e-mail"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search users"
+            label="Search"
             value={search}
             onChange={(e) => {
               setSearch(e.currentTarget.value)
-              setPage(1)
+              engine.setPage(1)
             }}
           />
         </FilterBar.Col>
@@ -317,25 +281,13 @@ export function UsersPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<UserDto>
-          records={records}
+          storeKey="security.users"
+          engine={engine}
+          exportFileName="users"
           columns={columns}
-          totalRecords={filtered.length}
-          page={page}
-          recordsPerPage={pageSize}
-          onPageChange={setPage}
-          onRecordsPerPageChange={(size) => {
-            setPageSize(size)
-            setPage(1)
-          }}
-          sortStatus={sortStatus}
-          onSortStatusChange={(status) => {
-            setSortStatus(status)
-            setPage(1)
-          }}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', user: record }) : undefined}
-          filters={grid}
           noRecordsText={users.length === 0 ? 'No users yet.' : 'No user matches your search.'}
         />
       </Paper>

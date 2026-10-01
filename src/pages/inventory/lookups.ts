@@ -74,18 +74,168 @@ export function warehouseLabel(warehouse: WarehouseLookupDto): string {
 }
 
 /**
- * The family's label in a picker, indented one dash per level below the root so the hierarchy is
- * readable in a flat list. A Select has no room for a real tree, and the codes alone
- * ("FAM-001-03-01") do not tell a reader where a family sits.
+ * The family's label in a picker: its whole path, parents first -
+ * "Motorcycles \ Electricals \ Battery".
+ *
+ * THE PATH RATHER THAN AN INDENT. An indented name reads as a tree in the open list and as nothing
+ * at all in the closed field: "Battery" alone does not say WHICH Battery, and the codes
+ * ("FAM-001-03-01") say it only to whoever has memorised them. The path says it in both places,
+ * and it makes the search behave the way a reader expects - typing "Electricals" now finds
+ * everything standing under it, which an indented list could never do.
+ *
+ * `byId` is every family that was loaded, so the walk can climb to the root. A family whose parent
+ * is missing from it - deactivated, say - stops there and shows the path it can.
  */
-export function familyOptionLabel(family: ItemFamilyLookupDto): string {
-  const indent = '— '.repeat(Math.max(0, family.level - 1))
-  return `${indent}${family.familyName}${family.isActive ? '' : ' (inactive)'}`
+export function familyOptionLabel(
+  family: ItemFamilyLookupDto,
+  byId: Map<number, ItemFamilyLookupDto>,
+): string {
+  const names: string[] = []
+  const seen = new Set<number>()
+
+  let current: ItemFamilyLookupDto | undefined = family
+  // Guarded against a cycle the API forbids but a stale reload could still be holding.
+  while (current !== undefined && !seen.has(current.id)) {
+    seen.add(current.id)
+    names.unshift(current.familyName)
+    current = current.parentId === null ? undefined : byId.get(current.parentId)
+  }
+
+  return `${names.join(' \\ ')}${family.isActive ? '' : ' (inactive)'}`
 }
 
-/** Options for a family Select, in tree order (a parent immediately before its children). */
-export function familyOptions(families: ItemFamilyLookupDto[]): { value: string; label: string }[] {
-  return orderAsTree(families).map((family) => ({ value: String(family.id), label: familyOptionLabel(family) }))
+/** One entry of a picker. `disabled` shows it without letting it be chosen. */
+export interface PickerOption {
+  value: string
+  label: string
+  disabled?: boolean
+}
+
+/** A heading with its choices under it. The heading itself is never selectable. */
+export interface PickerGroup {
+  group: string
+  items: PickerOption[]
+}
+
+/**
+ * Options for a family Select, in tree order (a parent immediately before its children).
+ *
+ * `leavesSelectableOnly` GREYS THE PARENTS OUT RATHER THAN HIDING THEM. An item is filed under one
+ * particular family, not under the heading above it - filing a bike under "Motorcycles" instead of
+ * under its model is how a catalogue stops answering "how many of these do we have". But a list of
+ * leaves alone loses the thing that made the leaf make sense: "Battery" means little until you can
+ * see "Motorcycles \ Electricals" standing over it. So the headings stay, dimmed and unclickable,
+ * and the reader keeps their bearings while only the leaves can be chosen. Each label carries its
+ * own path as well, so the chosen family still reads in full once the list has closed.
+ *
+ * `keepId` stays selectable whatever the rest of the rule says. An item already filed under a
+ * family that has since been given children must go on showing it: greying it out would blank the
+ * field on the next save and write that blank back as a real change.
+ */
+export function familyOptions(
+  families: ItemFamilyLookupDto[],
+  options?: { leavesSelectableOnly?: boolean; keepId?: number | null },
+): PickerOption[] {
+  const ordered = orderAsTree(families)
+  // Every family that was loaded, so a label can climb from a leaf to its root.
+  const byId = new Map(families.map((family) => [family.id, family]))
+
+  if (options?.leavesSelectableOnly !== true) {
+    return ordered.map((family) => toFamilyOption(family, byId, false))
+  }
+
+  // Judged on the families in hand. The lookup carries the active ones, so a family whose children
+  // are all deactivated reads as a leaf - which is right: they are not on offer either.
+  const parents = new Set<number>()
+  for (const family of families) {
+    if (family.parentId !== null) parents.add(family.parentId)
+  }
+
+  return ordered.map((family) =>
+    toFamilyOption(family, byId, parents.has(family.id) && family.id !== options.keepId),
+  )
+}
+
+function toFamilyOption(
+  family: ItemFamilyLookupDto,
+  byId: Map<number, ItemFamilyLookupDto>,
+  disabled: boolean,
+): PickerOption {
+  return { value: String(family.id), label: familyOptionLabel(family, byId), disabled }
+}
+
+/**
+ * Warehouses as the tree they now form, each labelled by its whole path.
+ *
+ * `leavesSelectableOnly` GREYS OUT THE PARENTS. Stock lives on the leaves: a warehouse with others
+ * standing under it is a grouping, and what it holds is the sum of them, so naming it on a document
+ * would leave the quantity belonging to no particular place. The parents stay visible because a
+ * leaf code on its own does not say where it sits.
+ *
+ * `keepId` stays selectable whatever the rule says, so a record already pointing at a warehouse
+ * that has since been given children does not silently lose it on the next save.
+ */
+export function warehouseOptions(
+  warehouses: WarehouseLookupDto[],
+  options?: { leavesSelectableOnly?: boolean; keepId?: number | null },
+): PickerOption[] {
+  const byId = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]))
+
+  /** The whole path, parents first - the same reasoning as a family's label. */
+  const label = (warehouse: WarehouseLookupDto): string => {
+    const names: string[] = []
+    const seen = new Set<number>()
+
+    let current: WarehouseLookupDto | undefined = warehouse
+    while (current !== undefined && !seen.has(current.id)) {
+      seen.add(current.id)
+      names.unshift(current.warehouseCode)
+      current = current.parentId === null ? undefined : byId.get(current.parentId)
+    }
+
+    return `${names.join(' \\ ')} - ${warehouse.warehouseName}${warehouse.isActive ? '' : ' (inactive)'}`
+  }
+
+  // A parent whose own parent is not in the list stands as a root, so nothing is dropped.
+  const byParent = new Map<number, WarehouseLookupDto[]>()
+  const ROOT = 0
+  for (const warehouse of warehouses) {
+    const key = warehouse.parentId !== null && byId.has(warehouse.parentId) ? warehouse.parentId : ROOT
+    const siblings = byParent.get(key)
+    if (siblings) siblings.push(warehouse)
+    else byParent.set(key, [warehouse])
+  }
+
+  for (const siblings of byParent.values()) {
+    siblings.sort((a, b) => a.warehouseCode.localeCompare(b.warehouseCode, undefined, { numeric: true }))
+  }
+
+  const ordered: WarehouseLookupDto[] = []
+  const seen = new Set<number>()
+  const stack = [...(byParent.get(ROOT) ?? [])].reverse()
+
+  while (stack.length > 0) {
+    const warehouse = stack.pop() as WarehouseLookupDto
+    if (seen.has(warehouse.id)) continue
+    seen.add(warehouse.id)
+    ordered.push(warehouse)
+
+    const children = byParent.get(warehouse.id) ?? []
+    for (let i = children.length - 1; i >= 0; i -= 1) stack.push(children[i] as WarehouseLookupDto)
+  }
+
+  for (const warehouse of warehouses) {
+    if (!seen.has(warehouse.id)) ordered.push(warehouse)
+  }
+
+  return ordered.map((warehouse) => ({
+    value: String(warehouse.id),
+    label: label(warehouse),
+    disabled:
+      options?.leavesSelectableOnly === true &&
+      (byParent.get(warehouse.id)?.length ?? 0) > 0 &&
+      warehouse.id !== options.keepId,
+  }))
 }
 
 /**

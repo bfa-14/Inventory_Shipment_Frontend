@@ -6,7 +6,6 @@ import { fromIsoDate, isoDate } from './documentKind'
 /** What the header holds. The page owns the state; this only draws and reports changes. */
 export interface DocumentHeaderValue {
   branchId: string | null
-  warehouseId: string | null
   documentDate: string
   reasonId: string | null
   referenceNo: string
@@ -22,7 +21,6 @@ interface DocumentHeaderCardProps {
   value: DocumentHeaderValue
   onChange: (patch: Partial<DocumentHeaderValue>) => void
   branches: Option[]
-  warehouses: Option[]
   reasons: StockReasonDto[]
   /** Required when the document type says so; the asterisk and the validation follow this. */
   reasonRequired: boolean
@@ -51,7 +49,6 @@ export function DocumentHeaderCard({
   value,
   onChange,
   branches,
-  warehouses,
   reasons,
   reasonRequired,
   documentNumber,
@@ -96,37 +93,10 @@ export function DocumentHeaderCard({
               placeholder="Choose a branch"
               data={branches}
               value={value.branchId}
-              // Changing the branch invalidates the warehouse under it, so both move together.
-              onChange={(next) => onChange({ branchId: next, warehouseId: null })}
+              // The warehouse now lives on each LINE; changing the branch is handled by the page,
+              // which clears the lines' warehouses because they belong to the old branch.
+              onChange={(next) => onChange({ branchId: next })}
               error={errors.branchId}
-              searchable
-            />
-          )}
-        </Grid.Col>
-
-        <Grid.Col span={{ base: 12, sm: 6, lg: 'auto' }}>
-          {readOnly ? (
-            field('Warehouse', warehouses.find((w) => w.value === value.warehouseId)?.label ?? '')
-          ) : (
-            <Select
-              // THE document's warehouse, not a default: one document holds one warehouse and every
-              // line takes this one. A file naming several becomes several documents.
-              label="Warehouse"
-              withAsterisk
-              placeholder={value.branchId ? 'Choose a warehouse' : 'Choose a branch first'}
-              data={warehouses}
-              value={value.warehouseId}
-              onChange={(next) => onChange({ warehouseId: next })}
-              disabled={!value.branchId}
-              /* A BRANCH WITH NO WAREHOUSES IS A REAL STATE and it has to say so. An empty dropdown
-                 under a required field reads as a page that failed to load, and the reader retries
-                 instead of picking another branch — which is the only thing that would help. */
-              error={
-                errors.warehouseId
-                ?? (value.branchId && warehouses.length === 0
-                  ? 'This branch has no active warehouses. Pick another branch, or add one first.'
-                  : undefined)
-              }
               searchable
             />
           )}

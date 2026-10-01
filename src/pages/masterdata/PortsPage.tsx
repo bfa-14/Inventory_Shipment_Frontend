@@ -1,12 +1,14 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { PORT_KINDS, portsApi, type PortDto, type PortKind } from '../../api/masterdata/ports'
 import { useAuth } from '../../auth/useAuth'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
@@ -29,31 +31,50 @@ type Dialog = { kind: 'create' } | { kind: 'edit'; port: PortDto } | null
 
 const KIND_COLOURS: Record<PortKind, string> = { Sea: 'blue', Inland: 'teal', Border: 'orange', Air: 'grape' }
 
+/** How a country cell reads - shared by the column's render and its filter, so the two agree. */
+function countryText(row: PortDto): string {
+  if (!row.countryCode) return ''
+  const country = findCountry(row.countryCode)
+  return country ? `${country.name} (${country.code})` : row.countryCode
+}
+
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<PortDto>[] = [
+  { accessor: 'portCode', summary: 'count' },
+  { accessor: 'portName' },
+  { accessor: 'kind' },
+  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+]
+
 /** Sea ports, border posts and inland places: the stops of a container's route. */
 export function PortsPage() {
   const { hasPermission } = useAuth()
   const [dialog, setDialog] = useState<Dialog>(null)
   const canManage = hasPermission(PERMISSIONS.portsManage)
 
-  const grid = useGridQuery<Filters, PortDto, Awaited<ReturnType<typeof portsApi.list>>>({
+  const grid = useGridQuery<Filters, PortDto, AllRows<PortDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'portCode', direction: 'asc' },
-    paging: 'server',
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The ports could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        portsApi.list(
-          {
-            search: filters.search.trim() || undefined,
-            kind: (filters.kind as PortKind | null) ?? undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'PortCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          portsApi.list(
+            {
+              search: filters.search.trim() || undefined,
+              kind: (filters.kind as PortKind | null) ?? undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
@@ -61,6 +82,19 @@ export function PortsPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.ports',
+    sort: [{ accessor: 'portCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
 
   async function afterSave(message: string) {
     setDialog(null)
@@ -105,28 +139,38 @@ export function PortsPage() {
   }
 
   const columns: DataTableColumn<PortDto>[] = [
-    rowNumberColumn<PortDto>(grid.page, grid.pageSize),
-    { accessor: 'portCode', title: 'Port Code', sortable: true, width: 120, render: (row) => <Text fw={600} fz="sm">{row.portCode}</Text> },
-    { accessor: 'portName', title: 'Port Name', sortable: true },
+    rowNumberColumn<PortDto>(engine.page, engine.pageSize),
+    {
+      accessor: 'portCode',
+      title: 'Port Code',
+      width: 120,
+      render: (row) => <Text fw={600} fz="sm">{row.portCode}</Text>,
+    },
+    {
+      accessor: 'portName',
+      title: 'Port Name',
+    },
     {
       accessor: 'countryCode',
       title: 'Country',
-      sortable: true,
       width: 200,
       render: (row) => {
-        if (!row.countryCode) return <Text c="dimmed">—</Text>
-        const country = findCountry(row.countryCode)
-        return country ? `${country.name} (${country.code})` : row.countryCode
+        const text = countryText(row)
+        return text === '' ? <Text c="dimmed">—</Text> : text
       },
     },
     {
       accessor: 'kind',
       title: 'Kind',
-      sortable: true,
       width: 110,
       render: (row) => <Badge variant="light" color={KIND_COLOURS[row.kind] ?? 'gray'}>{row.kind}</Badge>,
     },
-    { accessor: 'isActive', title: 'Status', sortable: true, width: 120, render: (row) => <StatusBadge active={row.isActive} /> },
+    {
+      accessor: 'isActive',
+      title: 'Status',
+      width: 120,
+      render: (row) => <StatusBadge active={row.isActive} />,
+    },
     {
       accessor: 'actions',
       title: 'Actions',
@@ -162,7 +206,7 @@ export function PortsPage() {
           <TextInput
             placeholder="Port code or name"
             leftSection={<IconSearch size={16} />}
-            aria-label="Search"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -171,10 +215,10 @@ export function PortsPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Kind" placeholder="All kinds" data={PORT_KINDS} value={filters.kind} onChange={(value) => setFilter('kind', value)} clearable />
+          <Select label="Kind" placeholder="All kinds" data={PORT_KINDS} value={filters.kind} onChange={(value) => setFilter('kind', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select aria-label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
+          <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
           <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={grid.clearFilters} disabled={grid.isDefault}>
@@ -191,15 +235,10 @@ export function PortsPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<PortDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.ports"
+          engine={engine}
+          exportFileName="ports"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', port: record }) : undefined}
           noRecordsText={grid.isDefault ? 'No ports yet.' : 'No ports found. Try clearing the filters.'}
@@ -223,10 +262,3 @@ const STATUS_OPTIONS = [
   { value: 'false', label: 'Inactive' },
 ]
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  portCode: 'PortCode',
-  portName: 'PortName',
-  countryCode: 'CountryCode',
-  kind: 'Kind',
-  isActive: 'IsActive',
-}

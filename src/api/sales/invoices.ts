@@ -28,6 +28,14 @@ export function salesRateTypeLabel(type: SalesRateType): string {
   return SALES_RATE_TYPES.find((t) => t.value === type)?.label ?? String(type)
 }
 
+/** 1 Cash (a receipt is made and posted with the invoice), 2 On Account (paid later by receipts). */
+export type SalesPaymentType = 1 | 2
+
+export const SALES_PAYMENT_TYPES: readonly { value: SalesPaymentType; label: string }[] = [
+  { value: 1, label: 'Cash' },
+  { value: 2, label: 'On Account' },
+]
+
 /** What GET rate answers: the price list's currency and the rate in force on a date. */
 export interface RateResolutionDto {
   priceListId: number
@@ -41,6 +49,33 @@ export interface RateResolutionDto {
   rate: number | null
   rateDate: string | null
   baseCurrencyCode: string | null
+}
+
+/** One item + warehouse an invoice asks more of than the warehouse holds, with the policy's verdict. */
+export interface OutOfStockLineDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  /** What the warehouse holds now, in base units. */
+  currentQty: number
+  /** What the invoice sells from it, in base units. */
+  quantitySold: number
+  /** True: may be sold after the user confirms. False: the post will be refused. */
+  allowed: boolean
+  /** Which level decided: the warehouse's own override, or the global setting. */
+  policySource: 'Warehouse' | 'Global'
+}
+
+/** What posting an invoice would run into, so the page can warn BEFORE it posts. */
+export interface StockCheckDto {
+  lines: OutOfStockLineDto[]
+  /** A shortage the policy does not allow: the post would be refused. */
+  hasBlocked: boolean
+  /** Every shortage is allowed, so posting needs the user's confirmation. */
+  needsConfirmation: boolean
 }
 
 /** What import-post answers: the posted invoice in summary, and how many ledger rows it wrote. */
@@ -68,6 +103,8 @@ export interface SaveSalesInvoiceLine {
   itemId: number
   itemUnitId: number
   warehouseId: number
+  /** Chosen from the specifications of the item's units; null when it has none. */
+  specification: string | null
   expiryDate: string | null
   quantity: number
   /**
@@ -85,13 +122,21 @@ export interface SaveSalesInvoiceLine {
 }
 
 export interface SaveSalesInvoiceRequest {
+  /** Import-post only: the user has seen the out-of-stock warning and chose to proceed. */
+  acknowledgeOutOfStock?: boolean
   documentDate: string
   dueDate?: string | null
   branchId: number
-  warehouseId: number
+  /**
+   * The invoice's warehouse, which is now only a label: the warehouse lives on each LINE. Null
+   * lets the server keep the first line's, which is what the editor sends.
+   */
+  warehouseId?: number | null
   clientId: number
   salesmanId: number | null
   priceListId: number
+  /** The currency the customer is billed in. Null follows the price list's. */
+  currencyId?: number | null
   rateType: SalesRateType
   /** Null: the server takes the rate in force for the date. A value overrides it. */
   exchangeRate: number | null
@@ -100,10 +145,21 @@ export interface SaveSalesInvoiceRequest {
   lines: SaveSalesInvoiceLine[]
   /** The import wizard's reference, so its audit rows are stamped with the invoice's id. */
   draftReference?: string | null
+  /**
+   * How the customer pays. May be empty on a draft; posting needs it. The method, account and
+   * reference only matter for Cash, and saving never creates a receipt.
+   */
+  paymentType?: SalesPaymentType | null
+  receiptMethodId?: number | null
+  receiptAccountId?: number | null
+  paymentReference?: string | null
   rowVersion?: string | null
 }
 
 export type SalesInvoiceStatus = 'Draft' | 'Posted' | 'Cancelled'
+
+/** Unpaid / Partial / Paid. The server sends null for a draft or cancelled invoice: only a posted one has a payment status. */
+export type SalesPaymentStatus = 'Unpaid' | 'Partial' | 'Paid'
 
 /** One row of the invoice list. */
 export interface SalesInvoiceListDto {
@@ -137,6 +193,15 @@ export interface SalesInvoiceListDto {
   totalDiscount: number
   totalAmount: number
   totalAmountBase: number
+  /** In the invoice currency; derived from live allocations on posted receipts. Null unless posted. */
+  paidAmount: number | null
+  outstandingAmount: number | null
+  paymentStatus: SalesPaymentStatus | null
+  paymentType: SalesPaymentType | null
+  paymentTypeName: string | null
+  /** The receipt a Cash invoice made when it was posted. */
+  receiptId: number | null
+  receiptNumber: string | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -152,6 +217,8 @@ export interface SalesInvoiceQuery {
   clientId?: number
   salesmanId?: number
   status?: SalesInvoiceStatus
+  paymentStatus?: SalesPaymentStatus
+  paymentType?: SalesPaymentType
   dateFrom?: string
   dateTo?: string
   sortBy?: string
@@ -175,6 +242,10 @@ export interface ImportCreateSalesInvoicesRequest {
   draftReference?: string | null
   lines: ImportCreateLine[]
   postImmediately: boolean
+  paymentType?: SalesPaymentType | null
+  receiptMethodId?: number | null
+  receiptAccountId?: number | null
+  paymentReference?: string | null
 }
 
 export interface SalesInvoiceLineDto {
@@ -188,6 +259,8 @@ export interface SalesInvoiceLineDto {
   skuCode: string | null
   barcode: string | null
   packingFormula: number
+  /** The specification the line was sold as — a snapshot on the line. */
+  specification: string | null
   warehouseId: number
   warehouseCode: string
   warehouseName: string
@@ -284,6 +357,22 @@ export interface SalesInvoiceDto {
   totalDiscount: number
   totalAmount: number
   totalAmountBase: number
+  /** Null unless the invoice is posted. In the invoice currency. */
+  paidAmount: number | null
+  outstandingAmount: number | null
+  paymentStatus: SalesPaymentStatus | null
+  paymentType: SalesPaymentType | null
+  paymentTypeName: string | null
+  receiptMethodId: number | null
+  receiptMethodName: string | null
+  receiptAccountId: number | null
+  receiptAccountCode: string | null
+  receiptAccountName: string | null
+  paymentReference: string | null
+  /** The receipt this invoice made when it was posted (Cash only), and its status. */
+  receiptId: number | null
+  receiptNumber: string | null
+  receiptStatus: 'Draft' | 'Posted' | 'Reversed' | null
   /** Cost of the goods that left. Null on a draft and for a reader without sales.profit.view. */
   totalCostBase: number | null
   totalGrossProfitBase: number | null
@@ -335,6 +424,8 @@ export const salesInvoicesApi = {
     if (query.clientId !== undefined) params.set('clientId', String(query.clientId))
     if (query.salesmanId !== undefined) params.set('salesmanId', String(query.salesmanId))
     if (query.status) params.set('status', query.status)
+    if (query.paymentStatus) params.set('paymentStatus', query.paymentStatus)
+    if (query.paymentType !== undefined) params.set('paymentType', String(query.paymentType))
     if (query.dateFrom) params.set('dateFrom', query.dateFrom)
     if (query.dateTo) params.set('dateTo', query.dateTo)
     if (query.sortBy) params.set('sortBy', query.sortBy)
@@ -350,8 +441,15 @@ export const salesInvoicesApi = {
   update: (id: number, payload: SaveSalesInvoiceRequest) =>
     request<SalesInvoiceDto>(`${BASE}/${id}`, { method: 'PUT', body: payload }),
 
-  post: (id: number, rowVersion: string | null) =>
-    request<SalesInvoiceDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion } }),
+  /**
+   * `acknowledgeOutOfStock` says the user saw the out-of-stock warning and chose to proceed. Without it a
+   * shortage the policy allows is refused with OUT_OF_STOCK_CONFIRM; one it forbids is INSUFFICIENT_STOCK either way.
+   */
+  post: (id: number, rowVersion: string | null, acknowledgeOutOfStock = false) =>
+    request<SalesInvoiceDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion, acknowledgeOutOfStock } }),
+
+  /** What posting would run into: the shortages and the policy's verdict on each. Empty = nothing to warn about. */
+  stockCheck: (id: number) => request<StockCheckDto>(`${BASE}/${id}/stock-check`),
 
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<SalesInvoiceDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
@@ -381,18 +479,39 @@ export const salesInvoicesApi = {
 
   bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
 
-  /** One invoice per warehouse found in the lines, each posted at once when asked. */
+  /** ONE invoice holding every line, each in the warehouse it names; posted at once when asked. */
   importCreate: (payload: ImportCreateSalesInvoicesRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 
-  /** The rate in force for a price list's currency on a date (today when omitted). */
-  rate: (priceListId: number, rateType: SalesRateType, date?: string | null, signal?: AbortSignal) => {
+  /**
+   * The rate in force on a date (today when omitted) for the invoice's currency.
+   *
+   * `currencyId` is the currency the invoice is billed in; omitted, the answer is for the price
+   * list's currency, which is what an invoice that has not chosen one is billed in.
+   */
+  rate: (
+    priceListId: number,
+    rateType: SalesRateType,
+    date?: string | null,
+    signal?: AbortSignal,
+    currencyId?: number | null,
+  ) => {
     const params = new URLSearchParams({ priceListId: String(priceListId), rateType: String(rateType) })
     if (date) params.set('date', date)
+    if (currencyId != null) params.set('currencyId', String(currencyId))
     return request<RateResolutionDto>(`${BASE}/rate?${params.toString()}`, { signal })
   },
 
   /** The posted invoice as a workbook, saved by the browser. */
+  /**
+   * The specifications already typed for this item on sales lines, newest first.
+   *
+   * SUGGESTIONS, NOT A LIST TO PICK FROM. The line's Specification is free text; this only saves
+   * retyping what the last invoice for the same item said, so an unsold item answers `[]`.
+   */
+  itemSpecifications: (itemId: number, signal?: AbortSignal) =>
+    request<string[]>(`${BASE}/item-specifications?itemId=${itemId}`, { signal }),
+
   exportToExcel: async (id: number, fileName: string) => save(await fetchBlob(`${BASE}/${id}/export`), fileName),
 }
 

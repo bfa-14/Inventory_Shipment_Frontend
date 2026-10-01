@@ -81,6 +81,8 @@ export const STATUS_COLOURS: Record<string, string> = {
   Draft: 'gray',
   Posted: 'green',
   Cancelled: 'red',
+  // A reversed receipt is a record of something undone, not of something that went wrong.
+  Reversed: 'orange',
 }
 
 /** Money as the documents show it: "14,020,800.00 USD". The stock ledger is in the base currency. */

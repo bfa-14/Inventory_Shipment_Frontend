@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import {
   stockDocumentsApi,
   type StockDocumentListDto,
@@ -27,6 +28,7 @@ import { BulkResultsModal } from '../../components/documents/BulkResultsModal'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -55,15 +57,22 @@ const NO_FILTERS: Filters = {
 
 const STATUSES = ['Draft', 'Posted', 'Cancelled']
 
-const ACCESSOR_TO_SORT: Record<string, string> = {
-  documentNumber: 'DocumentNumber',
-  documentDate: 'DocumentDate',
-  branchName: 'BranchName',
-  warehouseName: 'WarehouseName',
-  status: 'Status',
-  totalCost: 'TotalCost',
-  createdAtUtc: 'CreatedAtUtc',
-}
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date as
+ * a date) and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<StockDocumentListDto>[] = [
+  { accessor: 'documentNumber', summary: 'count', text: (r) => r.documentNumber ?? 'DRAFT' },
+  { accessor: 'documentDate', kind: 'date' },
+  { accessor: 'branchName' },
+  { accessor: 'warehouseName' },
+  { accessor: 'reasonName', text: (r) => r.reasonName ?? '' },
+  { accessor: 'referenceNo', text: (r) => r.referenceNo ?? '' },
+  { accessor: 'totalItems', kind: 'number' },
+  { accessor: 'totalQuantity', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalQuantity) },
+  { accessor: 'totalCost', kind: 'number', summary: 'sum', text: (r) => money(r.totalCost, r.currencyCode) },
+  { accessor: 'status', kind: 'list' },
+]
 
 /**
  * Every document of one kind — Inventory In or Inventory Out, decided by the `kind` prop.
@@ -96,28 +105,32 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
 
-  const grid = useGridQuery<Filters, StockDocumentListDto, Awaited<ReturnType<typeof stockDocumentsApi.search>>>({
+  const grid = useGridQuery<Filters, StockDocumentListDto, AllRows<StockDocumentListDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
+    // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
+    paging: 'client',
     errorMessage: `The ${kind.title} documents could not be loaded.`,
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        stockDocumentsApi.search(
-          {
-            documentTypeCode: kind.code,
-            search: filters.search.trim() || undefined,
-            branchId: filters.branchId === null ? undefined : Number(filters.branchId),
-            warehouseId: filters.warehouseId === null ? undefined : Number(filters.warehouseId),
-            status: (filters.status as StockDocumentStatus | null) ?? undefined,
-            dateFrom: filters.dateFrom ?? undefined,
-            dateTo: filters.dateTo ?? undefined,
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'DocumentDate',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          stockDocumentsApi.search(
+            {
+              documentTypeCode: kind.code,
+              search: filters.search.trim() || undefined,
+              branchId: filters.branchId === null ? undefined : Number(filters.branchId),
+              warehouseId: filters.warehouseId === null ? undefined : Number(filters.warehouseId),
+              status: (filters.status as StockDocumentStatus | null) ?? undefined,
+              dateFrom: filters.dateFrom ?? undefined,
+              dateTo: filters.dateTo ?? undefined,
+              sortBy: 'DocumentDate',
+              sortDir: 'desc',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [kind.code],
     ),
@@ -125,6 +138,17 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE LOADED DOCUMENTS AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column
+     sort, paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows
+     what is loaded from the server; the column filters then narrow that. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'inventory.stockDocuments',
+    sort: [{ accessor: 'documentDate', direction: 'desc' }],
+  })
 
   useEffect(() => {
     branchesApi.lookup(false).then(setBranches).catch(() => {
@@ -264,11 +288,10 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   }
 
   const columns: DataTableColumn<StockDocumentListDto>[] = [
-    rowNumberColumn<StockDocumentListDto>(grid.page, grid.pageSize),
+    rowNumberColumn<StockDocumentListDto>(engine.page, engine.pageSize),
     {
       accessor: 'documentNumber',
       title: 'Document No.',
-      sortable: true,
       // Per-branch numbers are longer ("IN-KLW-000012"); the column must never truncate one.
       width: 190,
       /* A draft of a type that numbers on posting has no number yet, and an empty cell would read as
@@ -283,12 +306,11 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
     {
       accessor: 'documentDate',
       title: 'Date',
-      sortable: true,
       width: 110,
       render: (row) => dateLabel(row.documentDate),
     },
-    { accessor: 'branchName', title: 'Branch', sortable: true },
-    { accessor: 'warehouseName', title: 'Warehouse', sortable: true },
+    { accessor: 'branchName', title: 'Branch' },
+    { accessor: 'warehouseName', title: 'Warehouse' },
     { accessor: 'reasonName', title: 'Reason', render: (row) => row.reasonName ?? '—' },
     { accessor: 'referenceNo', title: 'Reference', render: (row) => row.referenceNo ?? '—' },
     { accessor: 'totalItems', title: 'Items', width: 70, textAlign: 'right', render: (row) => formatNumber(row.totalItems) },
@@ -302,7 +324,6 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
     {
       accessor: 'totalCost',
       title: 'Total Cost',
-      sortable: true,
       width: 140,
       textAlign: 'right',
       render: (row) => money(row.totalCost, row.currencyCode),
@@ -310,7 +331,6 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
     {
       accessor: 'status',
       title: 'Status',
-      sortable: true,
       width: 110,
       render: (row) => (
         <Badge color={STATUS_COLOURS[row.status] ?? 'gray'} variant="light">
@@ -456,6 +476,12 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
         </Alert>
       )}
 
+      {data?.truncated ? (
+        <Alert color="yellow" mb="md" title="Showing the newest rows only">
+          There are more documents than the grid loads at once. Narrow the list with the filters above (dates, status, customer) to see the rest.
+        </Alert>
+      ) : null}
+
       <BulkActionsBar
         count={selection.ids.length}
         canPost={canPost}
@@ -468,19 +494,14 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
 
       <Paper radius="lg" withBorder>
         <DataTable
-          records={data?.items ?? []}
+          storeKey="inventory.stockDocuments"
+          engine={engine}
+          exportFileName="stock-documents"
           columns={columns}
           selectedRecords={selection.selected}
           onSelectedRecordsChange={selection.setSelected}
           isRecordSelectable={selectable}
           rowClassName={(row) => (highlight.includes(row.id) ? 'app-grid__row--highlight' : undefined)}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           noRecordsText={`No ${kind.title} documents yet.`}
           onRowClick={({ record }) => void navigate(`${kind.route}/${record.id}`)}

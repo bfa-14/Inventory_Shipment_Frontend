@@ -7,6 +7,7 @@ import { PURCHASE_INVOICE, PURCHASE_ORDER, PURCHASE_RETURN } from './components/
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DocumentTypesPage } from './pages/configuration/DocumentTypesPage'
+import { SettingsPage } from './pages/configuration/SettingsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
@@ -21,6 +22,7 @@ import { LoginPage } from './pages/LoginPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
 import { BrandsPage } from './pages/masterdata/BrandsPage'
 import { CurrenciesPage } from './pages/masterdata/CurrenciesPage'
+import { ExchangeRatesPage } from './pages/masterdata/ExchangeRatesPage'
 import { ItemFamiliesPage } from './pages/masterdata/ItemFamiliesPage'
 import { PartiesPage } from './pages/masterdata/PartiesPage'
 import { PriceListsPage } from './pages/masterdata/PriceListsPage'
@@ -36,6 +38,8 @@ import { MovementPage } from './pages/logistics/MovementPage'
 import { MovementsPage } from './pages/logistics/MovementsPage'
 import { TrackingPage } from './pages/logistics/TrackingPage'
 import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
+import { PaymentMethodsPage } from './pages/masterdata/PaymentMethodsPage'
+import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
 import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
 import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
@@ -43,6 +47,12 @@ import { PurchaseDocumentPage } from './pages/purchase/PurchaseDocumentPage'
 import { PurchaseDocumentsPage } from './pages/purchase/PurchaseDocumentsPage'
 import { ImportSalesPage } from './pages/sales/ImportSalesPage'
 import { SalesInvoicePage } from './pages/sales/SalesInvoicePage'
+import { CustomerStatementPage } from './pages/sales/CustomerStatementPage'
+import { CustomerStatementPrintPage } from './pages/sales/CustomerStatementPrintPage'
+import { ReceiptPage } from './pages/sales/ReceiptPage'
+import { ReceiptPrintPage } from './pages/sales/ReceiptPrintPage'
+import { OutOfStockAuditPage } from './pages/sales/OutOfStockAuditPage'
+import { ReceiptsPage } from './pages/sales/ReceiptsPage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
@@ -65,6 +75,12 @@ export default function App() {
               <Route path="/inventory/shortages/:id/print" element={<ShortagePrintPage />} />
             </Route>
 
+            {/* Receipts and statements on paper: outside the shell, like the shortage plan. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
+              <Route path="/sales/receipts/:id/print" element={<ReceiptPrintPage />} />
+              <Route path="/sales/receipts/statement/print" element={<CustomerStatementPrintPage />} />
+            </Route>
+
             <Route element={<AppShell />}>
               <Route index element={<DashboardPage />} />
               <Route path="/account/password" element={<ChangePasswordPage />} />
@@ -78,6 +94,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.currenciesView} />}>
                 <Route path="/setup/master-data/currencies" element={<CurrenciesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.exchangeRatesView} />}>
+                <Route path="/setup/master-data/exchange-rates" element={<ExchangeRatesPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.itemFamiliesView} />}>
                 <Route path="/setup/master-data/item-families" element={<ItemFamiliesPage />} />
@@ -102,6 +121,12 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementTypesManage} />}>
                 <Route path="/setup/master-data/movement-types" element={<MovementTypesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.paymentMethodsManage} />}>
+                <Route path="/setup/master-data/payment-methods" element={<PaymentMethodsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.cashBankAccountsManage} />}>
+                <Route path="/setup/master-data/cash-bank-accounts" element={<CashBankAccountsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.containersCreate} />}>
@@ -200,6 +225,10 @@ export default function App() {
                 <Route path="/sales/profit" element={<SalesProfitPage />} />
               </Route>
 
+              <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
+                <Route path="/sales/out-of-stock-audit" element={<OutOfStockAuditPage />} />
+              </Route>
+
               {/* Import Sales from Excel: validate a file against the stock and post it as an invoice.
                   Guarded by the import permission; posting is checked on the page (and the API). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.invoicesImport} />}>
@@ -212,9 +241,21 @@ export default function App() {
                 <Route path="/sales/invoices/new" element={<SalesInvoicePage />} />
                 <Route path="/sales/invoices/:id" element={<SalesInvoicePage />} />
               </Route>
+              {/* Customer receipts: list and document behind the view permission; saving, posting,
+                  reversing and allocating are checked on the page (and by the API). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
+                <Route path="/sales/receipts" element={<ReceiptsPage />} />
+                <Route path="/sales/receipts/statement" element={<CustomerStatementPage />} />
+                <Route path="/sales/receipts/new" element={<ReceiptPage />} />
+                <Route path="/sales/receipts/:id" element={<ReceiptPage />} />
+              </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.documentTypesManage} />}>
                 <Route path="/configuration/document-types" element={<DocumentTypesPage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.settingsManage} />}>
+                <Route path="/configuration/settings" element={<SettingsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

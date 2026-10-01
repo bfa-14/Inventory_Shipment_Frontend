@@ -1,17 +1,17 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Paper, Select, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
+import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { currenciesApi } from '../../api/masterdata/currencies'
-import type { CurrencyDto, CurrencySortBy } from '../../api/types'
+import type { CurrencyDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { formatDateTime } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
-import { columnFilter } from '../../components/ui/columnFilter'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
-import { triStateFilter, triStateQuery } from '../../components/ui/gridFilters'
+import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -46,37 +46,53 @@ export function CurrenciesPage() {
    * every other control lands at once, and the hook guarantees one request per settled state with
    * the newest one winning.
    */
-  const grid = useGridQuery<Filters, CurrencyDto, Awaited<ReturnType<typeof currenciesApi.search>>>({
+  const grid = useGridQuery<Filters, CurrencyDto, AllRows<CurrencyDto>>({
     initialFilters: NO_FILTERS,
     debounced: ['search'],
     initialSort: { columnAccessor: 'currencyCode', direction: 'asc' },
+    // The whole table comes back in one go, so turning a page or re-sorting must not ask again.
+    paging: 'client',
     errorMessage: 'The currencies could not be loaded.',
     fetcher: useCallback(
-      ({ filters, page, pageSize, sortStatus, signal }) =>
-        currenciesApi.search(
-          {
-            search: filters.search.trim() || undefined,
-            isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
-            isBaseCurrency: filters.isBaseCurrency === null ? undefined : filters.isBaseCurrency === 'true',
-            sortBy: ACCESSOR_TO_SORT[sortStatus.columnAccessor as string] ?? 'CurrencyCode',
-            sortDir: sortStatus.direction,
-            page,
-            pageSize,
-          },
-          signal,
+      ({ filters, signal }) =>
+        fetchAllPages((page, pageSize) =>
+          currenciesApi.search(
+            {
+              search: filters.search.trim() || undefined,
+              isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              isBaseCurrency: filters.isBaseCurrency === null ? undefined : filters.isBaseCurrency === 'true',
+              page,
+              pageSize,
+            },
+            signal,
+          ),
         ),
       [],
     ),
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  const rows = useMemo(() => data?.items ?? [], [data])
+
+  /* THE ENGINE HOLDS THE WHOLE TABLE AND ANSWERS FOR EVERY COLUMN: typed filters, multi-column sort,
+     paging, footer totals over all the filtered rows, CSV. The bar above the grid still narrows what
+     is loaded from the server; the column filters then narrow what was loaded. */
+  const engine = useDataGrid({
+    rows,
+    columns: GRID_COLUMNS,
+    storeKey: 'masterdata.currencies',
+    sort: [{ accessor: 'currencyCode', direction: 'asc' }],
+  })
+
+  // A filter that leaves three rows must not strand the reader on page 4 of the old result.
   const load = grid.reload
 
   function exportCsv() {
     downloadCsv(
       'currencies.csv',
       ['Code', 'Name', 'Symbol', 'Decimals', 'Base Currency', 'Status'],
-      (data?.items ?? []).map((c) => [
+      // What the reader is looking at, funnels and all - not the whole table behind them.
+      engine.rows.map((c) => [
         c.currencyCode,
         c.currencyName,
         c.symbol ?? '',
@@ -148,54 +164,49 @@ export function CurrenciesPage() {
   }
 
   const columns: DataTableColumn<CurrencyDto>[] = [
-    rowNumberColumn<CurrencyDto>(grid.page, grid.pageSize),
+    rowNumberColumn<CurrencyDto>(engine.page, engine.pageSize),
     /* Code, Name and Symbol carry no header filter: this grid pages on the server and the search
        endpoint takes one free-text parameter matching code OR name, so a per-column box here could
        only narrow by something other than the column it sits on. The search box in the filter bar
        is that parameter, under its own name. Decimals has no server filter at all. */
-    { accessor: 'currencyCode', title: 'Code', sortable: true, width: 110 },
-    { accessor: 'currencyName', title: 'Name', sortable: true },
-    { accessor: 'symbol', title: 'Symbol', width: 100, render: (c) => c.symbol ?? '-' },
+    {
+      accessor: 'currencyCode',
+      title: 'Code',
+      width: 110,
+    },
+    {
+      accessor: 'currencyName',
+      title: 'Name',
+    },
+    {
+      accessor: 'symbol',
+      title: 'Symbol',
+      width: 100,
+      render: (c) => c.symbol ?? '-',
+    },
     {
       accessor: 'decimalPlaces',
       title: 'Decimals',
-      sortable: true,
       width: 120,
       textAlign: 'right',
     },
     {
       accessor: 'isBaseCurrency',
       title: 'Base',
-      sortable: true,
       width: 130,
-      ...columnFilter({
-        label: 'Base',
-        value: triStateFilter(filters.isBaseCurrency, 'Base', 'Not base'),
-        onApply: (next) => setFilter('isBaseCurrency', triStateQuery(next, 'Base')),
-        options: BASE_VALUES,
-        withText: false,
-      }),
       render: (c) => (c.isBaseCurrency ? <Badge variant="light">Base</Badge> : '-'),
     },
     {
       accessor: 'isActive',
       title: 'Status',
-      sortable: true,
       width: 140,
-      ...columnFilter({
-        label: 'Status',
-        value: triStateFilter(filters.isActive, 'Active', 'Inactive'),
-        onApply: (next) => setFilter('isActive', triStateQuery(next, 'Active')),
-        options: STATUS_VALUES,
-        withText: false,
-      }),
       render: (c) => <StatusBadge active={c.isActive} />,
     },
     {
       accessor: 'createdAtUtc',
       title: 'Created',
-      sortable: true,
       width: 180,
+      // No tick list: every row is a different instant, so the list would be one entry per row.
       render: (c) => formatDateTime(c.createdAtUtc),
     },
     {
@@ -256,7 +267,7 @@ export function CurrenciesPage() {
           <TextInput
             placeholder="Search by currency code or name..."
             leftSection={<IconSearch size={16} />}
-            aria-label="Search currencies"
+            label="Search"
             value={filters.search}
             onChange={(e) => setFilter('search', e.currentTarget.value)}
             // Enter sends what is typed now instead of waiting out the debounce.
@@ -268,7 +279,7 @@ export function CurrenciesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Status"
+            label="Status"
             placeholder="All"
             data={STATUS_OPTIONS}
             value={filters.isActive}
@@ -279,7 +290,7 @@ export function CurrenciesPage() {
 
         <FilterBar.Col span={2}>
           <Select
-            aria-label="Base currency"
+            label="Base currency"
             placeholder="All"
             data={BASE_OPTIONS}
             value={filters.isBaseCurrency}
@@ -308,15 +319,10 @@ export function CurrenciesPage() {
 
       <Paper radius="lg" p="md" withBorder>
         <DataTable<CurrencyDto>
-          records={data?.items ?? []}
+          storeKey="masterdata.currencies"
+          engine={engine}
+          exportFileName="currencies"
           columns={columns}
-          totalRecords={data?.totalCount ?? 0}
-          page={grid.page}
-          recordsPerPage={grid.pageSize}
-          onPageChange={grid.setPage}
-          onRecordsPerPageChange={grid.setPageSize}
-          sortStatus={grid.sortStatus}
-          onSortStatusChange={grid.setSortStatus}
           fetching={loading}
           // Enter on the selected row does what its pencil does.
           onRowActivate={canEdit ? ({ record }) => setDialog({ kind: 'edit', currency: record }) : undefined}
@@ -352,15 +358,17 @@ const BASE_OPTIONS = [
   { value: 'false', label: 'Non-base' },
 ]
 
-/** The words the two header funnels offer - as the cells print them. */
-const STATUS_VALUES = ['Active', 'Inactive']
-const BASE_VALUES = ['Base', 'Not base']
+/**
+ * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
+ * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
+ */
+const GRID_COLUMNS: GridColumnMeta<CurrencyDto>[] = [
+  { accessor: 'currencyCode', summary: 'count' },
+  { accessor: 'currencyName' },
+  { accessor: 'symbol', text: (c) => c.symbol ?? '-' },
+  { accessor: 'decimalPlaces', kind: 'number', text: (c) => String(c.decimalPlaces) },
+  { accessor: 'isBaseCurrency', kind: 'boolean', text: (c) => (c.isBaseCurrency ? 'Base' : 'Not base') },
+  { accessor: 'isActive', kind: 'boolean', text: (c) => (c.isActive ? 'Active' : 'Inactive') },
+  { accessor: 'createdAtUtc', kind: 'date', text: (c) => formatDateTime(c.createdAtUtc) },
+]
 
-const ACCESSOR_TO_SORT: Record<string, CurrencySortBy> = {
-  currencyCode: 'CurrencyCode',
-  currencyName: 'CurrencyName',
-  decimalPlaces: 'DecimalPlaces',
-  isBaseCurrency: 'IsBaseCurrency',
-  isActive: 'IsActive',
-  createdAtUtc: 'CreatedAtUtc',
-}
