@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core'
-import { IconArrowBackUp, IconBox, IconBoxMultiple, IconFileInvoice, IconLock, IconPlus, IconReceipt2, IconTrash } from '@tabler/icons-react'
+import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
+import {
+  IconArrowBackUp,
+  IconBox,
+  IconBoxMultiple,
+  IconCheck,
+  IconFileInvoice,
+  IconLock,
+  IconMail,
+  IconPlus,
+  IconRefresh,
+  IconSend,
+  IconTrash,
+  IconX,
+} from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containersApi, type ContainerListDto } from '../../api/logistics/containers'
 import { itemsApi } from '../../api/inventory/items'
+import { approvalsApi, type PurchaseOrderApprovalDto } from '../../api/purchase/approvals'
 import { chargeTypesApi, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
 import { inventoryLookupsApi } from '../../api/inventory/stockDocuments'
 import { branchesApi } from '../../api/masterdata/branches'
@@ -13,6 +27,7 @@ import { partiesApi } from '../../api/masterdata/parties'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import {
   purchaseDocumentsApi,
+  type CreatedPurchaseInvoiceDto,
   type PurchaseDocumentDto,
   type PurchaseRateResolutionDto,
   type ReceiptMode,
@@ -31,11 +46,22 @@ import { formatNumber } from '../../components/format'
 import { AddContainerModal } from '../../components/logistics/AddContainerModal'
 import { AutoPlanModal } from '../../components/logistics/AutoPlanModal'
 import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
+import { NewChargeModal } from '../../components/logistics/NewChargeModal'
+import { announceApproved } from '../../components/purchase/approvalNotices'
+import { ApprovalTimeline } from '../../components/purchase/ApprovalTimeline'
 import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
+import { CreateInvoiceFromOrderModal } from '../../components/purchase/CreateInvoiceFromOrderModal'
+import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
+import { ONE_ITEM_HINT } from '../../components/purchase/onePerItem'
+import { OrderActionButton } from '../../components/purchase/OrderActionButton'
+import { newOrderAbilities, orderAbilities, type OrderAbility } from '../../components/purchase/orderAbilities'
+import { OrderApprovalCard } from '../../components/purchase/OrderApprovalCard'
 import { InvoiceContainerChargesCard } from '../../components/purchase/InvoiceContainerChargesCard'
 import { InvoiceContainersCard } from '../../components/purchase/InvoiceContainersCard'
+import { ShippedInvoiceContainersCard } from '../../components/purchase/ShippedInvoiceContainersCard'
 import { OrderContainersCard } from '../../components/purchase/OrderContainersCard'
+import { PostedInvoiceChargesCard } from '../../components/purchase/PostedInvoiceChargesCard'
 import { PurchaseChargesGrid } from '../../components/purchase/PurchaseChargesGrid'
 import {
   chargeFromDto,
@@ -51,13 +77,16 @@ import { PurchaseHeaderCard, type PurchaseHeader, type PurchaseHeaderErrors } fr
 import { PURCHASE_INVOICE, PURCHASE_RETURN, type PurchaseKind } from '../../components/purchase/purchaseKind'
 import { defaultPurchasePrice, lineMaximum, purchaseUnitOf } from '../../components/purchase/purchaseLines'
 import { PurchaseLinesGrid, type PurchaseLine } from '../../components/purchase/PurchaseLinesGrid'
+import { SendToSupplierModal } from '../../components/purchase/SendToSupplierModal'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
 import { SalesTotals } from '../../components/sales/SalesTotals'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { refreshApprovalsMe, useApprovalsMe } from '../../hooks/useApprovalsMe'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
+import { routes } from '../../routes'
 
 let keySeed = 0
 const nextKey = () => `pur-${++keySeed}`
@@ -95,7 +124,9 @@ function focusWhenDrawn(selector: string, attempt = 0) {
 export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
+  /* The approval rules and the reader's rights: what a NEW order offers (Create & approve, Create & send…). */
+  const approvalsMe = useApprovalsMe()
 
   const documentId = id && id !== 'new' ? Number(id) : null
   const isNew = documentId === null
@@ -104,10 +135,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const canPost = hasPermission(kind.permissions.post)
   const canCancelDoc = hasPermission(kind.permissions.cancel)
   const canImport = hasPermission(PERMISSIONS.invoicesImport)
-  const canLandedCost = hasPermission(PERMISSIONS.landedCostsCreate)
-  const canCreateInvoice = kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.create)
+  /* "Add charge" on an invoice: its own charges on a draft (the create permission, through `editable`),
+     a late charge (landed cost adjustment) on a posted local one, a container charge on an import. */
+  const canViewLateCharges = hasPermission(PERMISSIONS.landedCostsView)
+  const canAddLateCharge = hasPermission(PERMISSIONS.landedCostsCreate)
+  const canPostLateCharges = hasPermission(PERMISSIONS.landedCostsPost)
+  const canAddContainerCharge = hasPermission(PERMISSIONS.containerChargesCreate)
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
-  const canAddContainer = kind.code === 'PO' && hasPermission(PERMISSIONS.containersCreate)
   const canOverCapacity = hasPermission(PERMISSIONS.containersOverCapacity)
   const canConfirmContainers = hasPermission(PERMISSIONS.containersConfirm)
 
@@ -160,7 +194,22 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   /* The containers ticked on the order's Containers card: kept here, the card unmounts while the order reloads. */
   const [containerSelection, setContainerSelection] = useState<ContainerListDto[]>([])
   const [invoiceFromContainersOpen, setInvoiceFromContainersOpen] = useState(false)
+  /* "Create Purchase Invoice" on an order: one draft per item, so a dialog says how many first. */
+  const [createInvoiceOpen, setCreateInvoiceOpen] = useState(false)
+  /** Several invoices made at once — one per item, or a split — listed rather than one of them opened. */
+  const [createdInvoices, setCreatedInvoices] = useState<CreatedPurchaseInvoiceDto[] | null>(null)
+  const [splitting, setSplitting] = useState(false)
   const [invoiceCandidates, setInvoiceCandidates] = useState(0)
+  /* An imported invoice's "Add charge": the container charge dialog, on the invoice's containers. */
+  const [containerChargeOpen, setContainerChargeOpen] = useState(false)
+
+  /* AN ORDER'S APPROVAL, as the server answers it for this reader: who may decide, what waits, the
+     history. Read again after every change of the order — every approval action ends in one. */
+  const [approval, setApproval] = useState<PurchaseOrderApprovalDto | null>(null)
+  const [approvalFailed, setApprovalFailed] = useState(false)
+  const [approvalBusy, setApprovalBusy] = useState(false)
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [supplierOpen, setSupplierOpen] = useState(false)
 
   /* THE CHARGES ARE THEIR OWN DOCUMENT HALF: the lines are the supplier's bill, the charges are
      everybody else's, and the API saves them with two different calls. Only a purchase invoice has
@@ -180,8 +229,17 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const readOnly = !isNew && status !== 'Draft'
   /** An invoice made from containers: lines grouped by container, charges on the containers, exporter ref. required. */
   const containerBound = kind.code === 'PINV' && document?.isContainerBound === true
+  /* "Shipped in containers" (script 43): the switch as the reader has it now, and as it is saved. An invoice of an
+     order shipped in containers is received at the offload of the containers it is linked to, now or later. */
+  const shipped = kind.code === 'PINV' && header.receiptMode === '2'
+  const savedShipped = kind.code === 'PINV' && document?.shippedInContainers === true
+  const showShippedCard = kind.code === 'PINV' && document != null && document.sourceDocumentId !== null && (shipped || savedShipped)
   const editable = !readOnly && (isNew ? canCreate : canCreate && document?.canEdit === true)
   const fromSource = document?.sourceDocumentId != null
+  /* A SUPPLIER INVOICE HOLDS ONE ITEM: the item of its first line, which every other line must share. */
+  const invoiceItemId = kind.code === 'PINV' ? (lines.find((line) => line.itemId !== null)?.itemId ?? null) : null
+  /* A draft saved with several items before that rule: it is split before it can be posted. */
+  const savedItemCount = kind.code === 'PINV' && document ? new Set(document.lines.map((line) => line.itemId)).size : 0
 
   /* ── loading ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -321,7 +379,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     try {
       const doc = await purchaseDocumentsApi.get(documentId)
       if (doc.documentTypeCode !== kind.code) {
-        setLoadError(`This is a ${doc.documentTypeName.toLowerCase()}, not a ${kind.title.toLowerCase()}.`)
+        // THE DOCUMENT DECIDES, NOT THE URL: an order opened under another kind's route moves to its own.
+        void navigate(routes.purchaseDocument(doc.documentTypeCode, doc.id), { replace: true })
         return
       }
       applyDocument(doc)
@@ -331,11 +390,41 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     } finally {
       setLoading(false)
     }
-  }, [documentId, applyDocument, kind.code, kind.title, kind.noun])
+  }, [documentId, applyDocument, kind.code, kind.noun, navigate])
 
   useEffect(() => {
     void reload()
   }, [reload])
+
+  /**
+   * The document again WITHOUT the page-wide loader. A charge added or posted changes the costs and
+   * the charge cards, not the page — and the full reload would unmount the card holding the result
+   * of a posting the reader is still looking at.
+   */
+  const refreshQuietly = useCallback(async () => {
+    if (documentId === null) return
+    try {
+      applyDocument(await purchaseDocumentsApi.get(documentId))
+    } catch {
+      /* The figures stay as they were; the next full load says what went wrong. */
+    }
+  }, [documentId, applyDocument])
+
+  const loadApproval = useCallback(async (orderId: number) => {
+    try {
+      setApproval(await approvalsApi.get(orderId))
+      setApprovalFailed(false)
+    } catch {
+      /* Without it the page offers the plain posting, and the server refuses it with its own sentence
+         if the order needs approval after all. */
+      setApprovalFailed(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (kind.code !== 'PO' || !document) return
+    void loadApproval(document.id)
+  }, [kind.code, document, loadApproval])
 
   /* An approved order with containers: is anything loaded and not yet invoiced? That is what offers
      "Create Invoice from Containers…". */
@@ -484,6 +573,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   const addScanned = useCallback(
     async (item: ItemListDto) => {
+      const held = kind.code === 'PINV' ? (lines.find((line) => line.itemId !== null)?.itemId ?? null) : null
+      if (held !== null && held !== item.id) {
+        notify.error(ONE_ITEM_HINT)
+        return
+      }
       markDirty()
       let details
       try {
@@ -511,7 +605,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       void refreshOnHand(key, details.id, defaultWarehouseId)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
     },
-    [lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId],
+    [kind.code, lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId],
   )
 
   async function loadUnits(key: string) {
@@ -709,6 +803,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             exporterReference: header.exporterReference.trim() || null,
             commercialInvoiceNo: header.commercialInvoiceNo.trim() || null,
             receiptMode: Number(header.receiptMode) as ReceiptMode,
+            shippedInContainers: header.receiptMode === '2',
           }
         : {}),
       notes: header.notes.trim() || null,
@@ -787,7 +882,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       applyDocument(withCharges, new Map(remapped.map((c, index) => [index + 1, c.allocations])))
       notify.success(documentId === null ? 'Draft created.' : 'Draft saved.')
-      if (documentId === null) navigate(`${kind.route}/${withCharges.id}`, { replace: true })
+      if (documentId === null) navigate(routes.purchaseDocument(kind.code, withCharges.id), { replace: true })
       return withCharges
     } catch (error) {
       showApiError(error)
@@ -850,20 +945,202 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   async function createFromThis() {
     if (!document) return
-    const target = kind.code === 'PO' ? PURCHASE_INVOICE : PURCHASE_RETURN
+    if (kind.code === 'PO') {
+      setCreateInvoiceOpen(true)
+      return
+    }
+    const target = PURCHASE_RETURN
     const go = await confirm({
       title: `Create ${target.title.toLowerCase()}`,
-      message: kind.code === 'PO'
-        ? `Create a purchase invoice draft from ${document.documentNumber} with everything that remains to receive?`
-        : `Create a purchase return draft from ${document.documentNumber} with everything that can still be returned?`,
+      message: `Create a purchase return draft from ${document.documentNumber} with everything that can still be returned?`,
       confirmLabel: 'Create',
     })
     if (!go) return
     setSaving(true)
     try {
-      const created = kind.code === 'PO' ? await purchaseDocumentsApi.createInvoice(document.id) : await purchaseDocumentsApi.createReturn(document.id)
+      const created = await purchaseDocumentsApi.createReturn(document.id)
       notify.success(`${target.title} draft created.`)
-      void navigate(`${target.route}/${created.id}`)
+      void navigate(routes.purchaseDocument(target.code, created.id))
+    } catch (error) {
+      showApiError(error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /**
+   * A draft invoice holding several items (saved before one item per invoice) into one invoice per item.
+   * It works on the SAVED invoice, so unsaved changes are saved or discarded first.
+   */
+  async function splitByItem() {
+    if (!document) return
+    if (dirty.current) {
+      notify.error('Save or discard your changes first: Split by item works on the saved invoice.')
+      return
+    }
+    const go = await confirm({
+      title: 'Split by item',
+      message: `Split ${documentLabel} into ${savedItemCount} invoices, one per item? The item of its first line stays on it; every other item moves to a new draft invoice with the same header.`,
+      confirmLabel: 'Split by item',
+    })
+    if (!go) return
+    setSplitting(true)
+    try {
+      const answer = await purchaseDocumentsApi.splitByItem(document.id, document.rowVersion)
+      notify.success(`Split into ${answer.invoices.length} invoices, one per item.`)
+      setCreatedInvoices(answer.invoices)
+      await refreshQuietly()
+    } catch (error) {
+      showApiError(error)
+    } finally {
+      setSplitting(false)
+    }
+  }
+
+  /** "Go to the order's invoices": on the order, its Linked Documents card; on an invoice, its order. */
+  function goToOrderInvoices() {
+    setCreatedInvoices(null)
+    if (kind.code === 'PO') {
+      window.document.querySelector('[data-linked-documents]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } else if (document?.sourceDocumentId != null) {
+      void navigate(routes.purchaseOrder(document.sourceDocumentId))
+    }
+  }
+
+  /* ── approval (orders) ────────────────────────────────────────────────────────────────────── */
+
+  /** Unsaved changes go in first: what is sent or approved is what the reader sees. */
+  async function savedOrder(): Promise<PurchaseDocumentDto | null> {
+    if (!document) return null
+    return editable && dirty.current ? saveDraft() : document
+  }
+
+  /** After any approval action: the order (which reloads its approval) and the menu badge. */
+  function afterApproval() {
+    void refreshQuietly()
+    void refreshApprovalsMe()
+  }
+
+  function approvalRefused(error: unknown) {
+    notify.error(error instanceof ApiError ? error.message : 'The approval could not be updated.')
+    // The order moved under the reader (decided elsewhere, a link expired, changed meanwhile): show what is true now.
+    if (error instanceof ApiError && (error.status === 409 || error.status === 410)) afterApproval()
+  }
+
+  async function runApproval(action: () => Promise<void>) {
+    setApprovalBusy(true)
+    try {
+      await action()
+      afterApproval()
+    } catch (error) {
+      approvalRefused(error)
+    } finally {
+      setApprovalBusy(false)
+    }
+  }
+
+  async function sendForApproval() {
+    const order = await savedOrder()
+    if (!order) return
+    await runApproval(async () => notify.success((await approvalsApi.sendForApproval(order.id, order.rowVersion)).message))
+  }
+
+  async function approveNow() {
+    const order = await savedOrder()
+    if (!order) return
+    const go = await confirm({ title: 'Approve and post', message: 'Approve and post this order now?', confirmLabel: 'Approve & post' })
+    if (!go) return
+    await runApproval(async () => announceApproved(await approvalsApi.approveNow(order.id, order.rowVersion)))
+  }
+
+  async function approveOrder() {
+    if (!document) return
+    // As on the Approvals page: approving posts the order and emails it - one click is not enough for that.
+    const go = await confirm({
+      title: 'Approve purchase order',
+      message: 'Approve this order? It will be posted and sent to the supplier.',
+      confirmLabel: 'Approve',
+    })
+    if (!go) return
+    await runApproval(async () => announceApproved(await approvalsApi.approve(document.id, document.rowVersion)))
+  }
+
+  async function rejectOrder(reason: string) {
+    if (!document) return
+    await runApproval(async () => {
+      await approvalsApi.reject(document.id, reason, document.rowVersion)
+      notify.success('Rejected: the order is a draft again.')
+      setRejectOpen(false)
+    })
+  }
+
+  async function resendApproval() {
+    if (!document) return
+    await runApproval(async () => notify.success((await approvalsApi.resend(document.id, document.rowVersion)).message))
+  }
+
+  async function withdrawApproval() {
+    if (!document) return
+    const go = await confirm({
+      title: 'Withdraw the request',
+      message: 'The order becomes a draft again and the links already emailed stop working.',
+      confirmLabel: 'Withdraw',
+      danger: true,
+    })
+    if (!go) return
+    await runApproval(async () => {
+      await approvalsApi.withdraw(document.id, document.rowVersion)
+      notify.success('Request withdrawn: the order is a draft again.')
+    })
+  }
+
+  async function sendToSupplier(payload: { to: string; cc: string | null; message: string | null }) {
+    if (!document) return
+    setApprovalBusy(true)
+    try {
+      const result = await approvalsApi.sendToSupplier(document.id, payload)
+      if (result.sent) notify.success(result.message)
+      else notify.warning(result.message)
+      setSupplierOpen(false)
+      void loadApproval(document.id)
+    } catch (error) {
+      notify.error(error instanceof ApiError ? error.message : 'The email could not be queued.')
+    } finally {
+      setApprovalBusy(false)
+    }
+  }
+
+  /** A NEW order sent for approval in one call — or posted at once when it needs none. A refusal keeps the draft. */
+  async function createAndSend() {
+    if (!validate()) return
+    setSaving(true)
+    try {
+      const result = await approvalsApi.createAndSend(toRequest())
+      dirty.current = false
+      if (result.posted || result.approvalRequested) notify.success(result.message)
+      else notify.warning(result.message)
+      void refreshApprovalsMe()
+      void navigate(routes.purchaseOrder(result.id), { replace: true })
+    } catch (error) {
+      showApiError(error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /** A NEW order approved at once by its in-app approver author (or posted when it needs no approval). */
+  async function createAndApprove() {
+    if (!validate()) return
+    setSaving(true)
+    try {
+      const result = await approvalsApi.createAndApprove(toRequest())
+      dirty.current = false
+      if (result.approved || result.posted) notify.success(result.message)
+      else notify.warning(result.message)
+      // What went wrong with the follow-up emails (the supplier has no address...), as after approve-now.
+      for (const warning of result.warnings) notify.warning(warning)
+      void refreshApprovalsMe()
+      void navigate(routes.purchaseOrder(result.id), { replace: true })
     } catch (error) {
       showApiError(error)
     } finally {
@@ -926,23 +1203,55 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     ? { id: document.sourceDocumentId, documentNumber: document.sourceDocumentNumber, documentTypeCode: document.sourceDocumentTypeCode ?? (kind.code === 'PRET' ? 'PINV' : 'PO') }
     : null
 
+  /* An order: what can be done on it and why not — computed once, read by every order button. */
+  const abilities =
+    kind.code === 'PO' && document
+      ? orderAbilities(document, hasPermission, invoiceCandidates, approval ? { state: approval.state, userId: user?.id ?? null } : null, editable)
+      : null
+  /* Until the approval answers, a draft order offers neither the posting nor the request: one of them is about to be wrong. */
+  const approvalKnown = approval !== null || approvalFailed
+  const creating = kind.code === 'PO' && isNew ? newOrderAbilities(approvalsMe, hasPermission) : null
+  const approvalState = kind.code === 'PO' && document ? (approval?.state ?? null) : null
+  const orderAction = (ability: OrderAbility | undefined) => ({
+    visible: ability?.visible === true,
+    disabled: ability?.blockedBy != null,
+    disabledReason: ability?.blockedBy ?? undefined,
+  })
+
   const actions: DocumentAction[] = readOnly
     ? [
         { key: 'attachments', label: `Attachments (${document?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
-        { key: 'landed-cost', label: 'New landed cost adjustment', icon: <IconReceipt2 size={16} />, colour: 'grape', visible: canLandedCost && document?.canAdjustLandedCost === true, onClick: () => void navigate(`/purchase/landed-cost-adjustments/new?invoiceId=${document?.id}`) },
-        { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', visible: canCreateInvoice && document?.canCreateInvoice === true, loading: saving, onClick: () => void createFromThis() },
+        { key: 'send-supplier', label: 'Send to supplier...', icon: <IconMail size={16} />, colour: 'indigo', ...orderAction(abilities?.sendToSupplier), onClick: () => setSupplierOpen(true) },
+        { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.createInvoice), loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
-        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', visible: kind.code === 'PO' && canPost && document?.canClose === true, onClick: () => setCloseOpen(true) },
+        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
         { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
       ]
     : [
         { key: 'attachments', label: `Attachments (${document?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
         { key: 'import', label: 'Import from Excel', icon: DocumentIcons.import, visible: canImportHere, onClick: () => setImportOpen(true) },
+        // A saved draft order shows what comes after its approval, disabled, with the reason.
+        { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, colour: 'green', ...orderAction(abilities?.createInvoice), onClick: () => void createFromThis() },
+        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
         { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
-        { key: 'post', label: kind.code === 'PO' ? 'Save & Confirm' : 'Save & Post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: editable && canPost, loading: saving, onClick: () => void saveAndPost() },
+        ...(creating
+          ? ([
+              /* A NEW ORDER, as the approval rules say it may be created (newOrderAbilities). */
+              { key: 'create-post', label: 'Create & post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, ...orderAction(creating.createAndPost), loading: saving, onClick: () => void saveAndPost() },
+              { key: 'create-send', label: 'Create & send for approval', icon: <IconSend size={16} />, variant: creating.createAndApprove.visible ? 'default' : 'filled', colour: kind.colour, ...orderAction(creating.createAndSend), loading: saving, onClick: () => void createAndSend() },
+              { key: 'create-approve', label: 'Create & approve', icon: <IconCheck size={16} />, variant: 'filled', colour: 'green', ...orderAction(creating.createAndApprove), loading: saving, onClick: () => void createAndApprove() },
+            ] satisfies DocumentAction[])
+          : kind.code === 'PO'
+            ? ([
+                /* A SAVED DRAFT ORDER: posted as it is, or through its approval (orderAbilities). */
+                { key: 'post', label: 'Save & Confirm', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: approvalKnown && abilities?.post.visible === true, loading: saving, onClick: () => void saveAndPost() },
+                { key: 'send-approval', label: 'Send for approval', icon: <IconSend size={16} />, variant: abilities?.approveDirect.visible ? 'default' : 'filled', colour: kind.colour, ...orderAction(abilities?.sendForApproval), loading: saving || approvalBusy, onClick: () => void sendForApproval() },
+                { key: 'approve-now', label: 'Approve & post', icon: <IconCheck size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.approveDirect), loading: saving || approvalBusy, onClick: () => void approveNow() },
+              ] satisfies DocumentAction[])
+            : [{ key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: editable && canPost, loading: saving, onClick: () => void saveAndPost() } satisfies DocumentAction]),
       ]
 
   return (
@@ -951,12 +1260,48 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       <DocumentActionBar actions={actions} />
 
+      {/* A rejected order is a draft again: why, first, so the author knows what to change before sending it again. */}
+      {approvalState?.status === 'Draft' && approvalState.lastRejectReason && (
+        <Alert color="red" icon={<IconX size={18} />} data-rejected-banner>
+          Rejected by {approvalState.lastRejectedByName ?? 'an approver'} on {stamp(approvalState.lastRejectedAtUtc)}: {approvalState.lastRejectReason}
+        </Alert>
+      )}
+
+      {document && status === 'PendingApproval' && approval && (
+        <OrderApprovalCard
+          state={approval.state}
+          approvers={approval.approvers}
+          actions={
+            <Group gap="xs">
+              <OrderActionButton ability={abilities?.approve ?? { visible: false, blockedBy: null }} color="green" leftSection={<IconCheck size={16} />} loading={approvalBusy} onClick={() => void approveOrder()} data-approve>
+                Approve
+              </OrderActionButton>
+              <OrderActionButton ability={abilities?.reject ?? { visible: false, blockedBy: null }} color="red" variant="light" leftSection={<IconX size={16} />} disabled={approvalBusy} onClick={() => setRejectOpen(true)} data-reject>
+                Reject...
+              </OrderActionButton>
+              <OrderActionButton ability={abilities?.resendApproval ?? { visible: false, blockedBy: null }} variant="default" leftSection={<IconRefresh size={16} />} disabled={approvalBusy} onClick={() => void resendApproval()} hint="New links to the approvers, and a new email.">
+                Send again
+              </OrderActionButton>
+              <OrderActionButton ability={abilities?.withdrawApproval ?? { visible: false, blockedBy: null }} variant="default" color="orange" leftSection={<IconArrowBackUp size={16} />} disabled={approvalBusy} onClick={() => void withdrawApproval()}>
+                Withdraw
+              </OrderActionButton>
+            </Group>
+          }
+        />
+      )}
+
       {document && status === 'Posted' && (
         <Alert color={kind.colour} title={`${kind.code === 'PO' ? 'Confirmed' : 'Posted'} — ${document.documentNumber}`}>
           {kind.code === 'PO' ? 'Confirmed' : 'Posted'} by {document.postedByName ?? 'unknown'} on {stamp(document.postedAtUtc)}.{' '}
           {kind.code === 'PINV' && document.receiptMode === 2
             ? 'The item costs are set; the stock enters when the containers carrying it are offloaded. This invoice can no longer be edited.'
             : kind.postedBanner}
+          {approvalState?.sentToSupplierAtUtc ? ` Sent to the supplier on ${stamp(approvalState.sentToSupplierAtUtc)}.` : ''}
+        </Alert>
+      )}
+      {approvalState?.supplierNotEmailed && (status === 'Posted' || status === 'Closed') && (
+        <Alert color="orange" title="Not sent to the supplier" data-supplier-not-emailed>
+          Not sent to the supplier: no email address. Add it to the supplier, then use Send to supplier.
         </Alert>
       )}
       {document && status === 'Closed' && (
@@ -967,6 +1312,21 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       {document && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${document.documentNumber ?? 'draft'}`}>
           Cancelled by {document.cancelledByName ?? 'unknown'} on {stamp(document.cancelledAtUtc)}.{document.cancelReason ? ` Reason: ${document.cancelReason}` : ''}
+        </Alert>
+      )}
+      {kind.code === 'PINV' && document && status === 'Draft' && savedItemCount > 1 && (
+        <Alert color="orange" title={`This invoice holds ${savedItemCount} items: split it before posting`} data-multi-item-invoice>
+          <Group justify="space-between" align="center" wrap="wrap" gap="sm">
+            <Text fz="sm">
+              A supplier invoice holds one item. Split by item keeps the item of the first line on this invoice and moves every
+              other item to a new draft invoice with the same header.
+            </Text>
+            {editable && (
+              <Button size="xs" color="orange" loading={splitting} onClick={() => void splitByItem()} data-split-by-item>
+                Split by item
+              </Button>
+            )}
+          </Group>
         </Alert>
       )}
 
@@ -1013,8 +1373,14 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         readOnly={!editable}
         errors={errors}
         disabled={saving}
-        receiptModeLocked={containerBound}
-        exporterRequired={containerBound}
+        shippedLockedReason={
+          document?.lines.some((line) => line.containerLineId != null)
+            ? 'Unlink the containers before switching off Shipped in containers.'
+            : !shipped && (document?.sourceDocumentId ?? null) === null
+              ? 'Only an invoice created from a purchase order can be shipped in containers.'
+              : null
+        }
+        exporterRequired={containerBound || shipped}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -1070,55 +1436,115 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           linesFromSource={fromSource}
           showTransit={kind.code === 'PO'}
           showCosts={hasCharges && readOnly && !containerBound}
-          groupByContainer={containerBound}
+          groupByContainer={containerBound || savedShipped}
           showEstimatedLanded={containerBound}
           allowAdd={!containerBound}
+          onlyItemId={invoiceItemId}
           baseCurrencyCode={baseCode}
           readOnly={!editable}
         />
+        {editable && kind.code === 'PINV' && !fromSource && invoiceItemId !== null && (
+          <Text fz="xs" c="dimmed" mt="xs" data-one-item-hint>
+            {ONE_ITEM_HINT}
+          </Text>
+        )}
       </Paper>
 
-      {kind.code === 'PO' && document && document.status !== 'Draft' && (
+      {/* EVERY ORDER shows its Containers card to a reader who may see containers; the buttons say
+          why they cannot be pressed (orderAbilities) rather than appearing on some orders only. */}
+      {abilities && document && abilities.showContainers && (
         <OrderContainersCard
           purchaseOrderId={document.id}
           containers={document.containers}
           selected={containerSelection}
           onSelectedChange={setContainerSelection}
           onChanged={() => void reload()}
+          emptyText={
+            abilities.addContainer.visible && abilities.addContainer.blockedBy === null
+              ? undefined
+              : 'No container on this order yet.'
+          }
           actions={
             <>
-              {canAddContainer && document.status === 'Posted' && (
-                <Button size="xs" leftSection={<IconBox size={14} />} onClick={() => setAddContainerOpen(true)}>
-                  Add Container…
-                </Button>
-              )}
-              {canAddContainer && document.status === 'Posted' && (
-                <Button size="xs" variant="light" leftSection={<IconBoxMultiple size={14} />} onClick={() => setAutoPlanOpen(true)} data-auto-plan>
-                  Auto-plan containers…
-                </Button>
-              )}
-              {canCreateInvoice && invoiceCandidates > 0 && (
-                <Tooltip
-                  label="This order is shipped in containers: invoices are created from its containers."
-                  withArrow
-                  multiline
-                  w={260}
-                >
-                  <Button size="xs" color="green" leftSection={<IconFileInvoice size={14} />} onClick={() => setInvoiceFromContainersOpen(true)}>
-                    Create Invoice from Containers…
-                  </Button>
-                </Tooltip>
-              )}
+              <OrderActionButton ability={abilities.addContainer} size="xs" leftSection={<IconBox size={14} />} onClick={() => setAddContainerOpen(true)} data-add-container>
+                Add Container…
+              </OrderActionButton>
+              <OrderActionButton
+                ability={abilities.autoPlan}
+                size="xs"
+                variant="light"
+                leftSection={<IconBoxMultiple size={14} />}
+                onClick={() => setAutoPlanOpen(true)}
+                data-auto-plan
+              >
+                Auto-plan containers…
+              </OrderActionButton>
+              <OrderActionButton
+                ability={abilities.invoiceFromContainers}
+                size="xs"
+                color="green"
+                leftSection={<IconFileInvoice size={14} />}
+                onClick={() => setInvoiceFromContainersOpen(true)}
+                hint="This order is shipped in containers: invoices are created from its containers."
+                data-invoice-from-containers
+              >
+                Create Invoice from Containers…
+              </OrderActionButton>
             </>
           }
         />
       )}
 
-      {containerBound && document && (
-        <InvoiceContainerChargesCard charges={document.charges} totalBase={document.containerChargesBase} baseCurrencyCode={baseCode} />
+      {showShippedCard && document && (
+        <ShippedInvoiceContainersCard
+          invoice={document}
+          pendingSwitch={!savedShipped}
+          canLink={hasPermission(PURCHASE_INVOICE.permissions.create) && (status === 'Draft' || (status === 'Posted' && savedShipped))}
+          canAddContainers={hasPermission(PERMISSIONS.containersCreate)}
+          canOverCapacity={canOverCapacity}
+          canConfirmContainers={canConfirmContainers}
+          ensureSaved={() => {
+            if (!dirty.current) return true
+            notify.info('Save the invoice first: linking containers rewrites its lines.')
+            return false
+          }}
+          onChanged={() => void refreshQuietly()}
+        />
       )}
 
-      {hasCharges && !containerBound && (editable || charges.length > 0 || (document?.charges.length ?? 0) > 0) && (
+      {containerBound && document && (
+        <InvoiceContainerChargesCard
+          charges={document.charges}
+          totalBase={document.containerChargesBase}
+          baseCurrencyCode={baseCode}
+          actions={
+            canAddContainerCharge && document.containers.length > 0 ? (
+              <Button variant="default" leftSection={<IconPlus size={16} />} onClick={() => setContainerChargeOpen(true)} data-add-charge>
+                Add charge
+              </Button>
+            ) : null
+          }
+        />
+      )}
+
+      {/* A posted local invoice: its own charges, read-only, and the late ones (landed cost adjustments). */}
+      {hasCharges && !containerBound && !savedShipped && document && status === 'Posted' && (
+        <PostedInvoiceChargesCard
+          invoiceId={document.id}
+          invoiceDate={document.documentDate}
+          invoiceCharges={document.charges.filter((c) => c.documentKind === 'PINV')}
+          chargeTypes={chargeTypes}
+          providers={suppliers}
+          currencies={currencies}
+          baseCurrencyCode={baseCode}
+          canView={canViewLateCharges}
+          canAdd={canAddLateCharge}
+          canPost={canPostLateCharges}
+          onPosted={() => void refreshQuietly()}
+        />
+      )}
+
+      {hasCharges && !containerBound && status !== 'Posted' && (shipped ? charges.length > 0 : editable || charges.length > 0 || (document?.charges.length ?? 0) > 0) && (
         <PurchaseChargesGrid
           lines={editable ? charges : (document?.charges ?? []).map((c) => chargeFromDto(c))}
           onChange={patchCharge}
@@ -1136,7 +1562,35 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <AuditTrail entries={document?.audit ?? []} />
+          {kind.code === 'PO' && document ? (
+            <Tabs defaultValue="activity" keepMounted={false}>
+              <Tabs.List mb="sm">
+                <Tabs.Tab value="activity">Activity</Tabs.Tab>
+                <Tabs.Tab value="approval" data-approval-tab>
+                  Approval{approval && approval.history.length > 0 ? ` (${approval.history.length})` : ''}
+                </Tabs.Tab>
+              </Tabs.List>
+              <Tabs.Panel value="activity">
+                <AuditTrail entries={document.audit} />
+              </Tabs.Panel>
+              <Tabs.Panel value="approval">
+                <Paper radius="lg" p="md" withBorder>
+                  <Title order={5} mb="sm">
+                    Approval
+                  </Title>
+                  {approval || !approvalFailed ? (
+                    <ApprovalTimeline events={approval?.history ?? []} />
+                  ) : (
+                    <Text size="sm" c="red">
+                      The approval history could not be loaded.
+                    </Text>
+                  )}
+                </Paper>
+              </Tabs.Panel>
+            </Tabs>
+          ) : (
+            <AuditTrail entries={document?.audit ?? []} />
+          )}
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 5 }}>
           <Stack>
@@ -1189,8 +1643,12 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               </Paper>
             )}
 
-            <LinkedDocumentsCard linked={document?.linked ?? []} />
-            {kind.code === 'PINV' && document ? <InvoiceContainersCard containers={document.containers} /> : null}
+            <LinkedDocumentsCard
+              linked={document?.linked ?? []}
+              canPostInvoices={kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.post)}
+              onPosted={() => void refreshQuietly()}
+            />
+            {kind.code === 'PINV' && document && !showShippedCard ? <InvoiceContainersCard containers={document.containers} /> : null}
           </Stack>
         </Grid.Col>
       </Grid>
@@ -1235,16 +1693,83 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         />
       )}
 
+      {containerBound && document && (
+        <NewChargeModal
+          opened={containerChargeOpen}
+          onClose={() => setContainerChargeOpen(false)}
+          presetContainerIds={document.containers.map((c) => c.id)}
+          presetSplitRule="Pieces"
+          onCreated={() => void refreshQuietly()}
+        />
+      )}
+
       {kind.code === 'PO' && document && invoiceFromContainersOpen && (
         <InvoiceFromContainersModal
           opened
           onClose={() => setInvoiceFromContainersOpen(false)}
           purchaseOrderId={document.id}
-          onCreated={(ids) => {
+          onCreated={(invoices) => {
             setInvoiceFromContainersOpen(false)
-            void navigate(`${PURCHASE_INVOICE.route}/${ids[0]}`)
+            if (invoices.length === 1) {
+              void navigate(routes.purchaseInvoice(invoices[0].id))
+            } else {
+              setCreatedInvoices(invoices)
+              void refreshQuietly()
+            }
           }}
         />
+      )}
+
+      {kind.code === 'PO' && document && createInvoiceOpen && (
+        <CreateInvoiceFromOrderModal
+          order={document}
+          orderId={document.id}
+          onClose={() => setCreateInvoiceOpen(false)}
+          onCreated={(created) => {
+            setCreateInvoiceOpen(false)
+            notify.success(`${created.message}.`)
+            if (created.invoices.length === 1) {
+              void navigate(routes.purchaseInvoice(created.firstId))
+            } else {
+              setCreatedInvoices(created.invoices)
+              void refreshQuietly()
+            }
+          }}
+        />
+      )}
+
+      {document && createdInvoices && (
+        <CreatedInvoicesModal
+          opened
+          invoices={createdInvoices}
+          currencyCode={document.currencyCode}
+          onClose={() => setCreatedInvoices(null)}
+          onGoToOrder={kind.code === 'PO' || document.sourceDocumentId != null ? goToOrderInvoices : undefined}
+        />
+      )}
+
+      {kind.code === 'PO' && document && (
+        <>
+          <CancelReasonModal
+            opened={rejectOpen}
+            onClose={() => setRejectOpen(false)}
+            documentLabel={documentLabel}
+            title={`Reject ${documentLabel}`}
+            description="The order goes back to its author as a draft, with your reason. They can change it and send it again."
+            placeholder="Why is this order rejected?"
+            confirmLabel="Reject"
+            busy={approvalBusy}
+            onConfirm={(reason) => void rejectOrder(reason)}
+          />
+          <SendToSupplierModal
+            opened={supplierOpen}
+            onClose={() => setSupplierOpen(false)}
+            documentLabel={`${documentLabel} of ${document.supplierName}`}
+            supplierEmail={approval?.state.supplierEmail ?? document.supplierEmail}
+            busy={approvalBusy}
+            onSend={(payload) => void sendToSupplier(payload)}
+          />
+        </>
       )}
 
       <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />
@@ -1290,7 +1815,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               })),
             })
           }
-          documentRoute={(docId) => `${kind.route}/${docId}`}
+          documentRoute={(docId) => routes.purchaseDocument(kind.code, docId)}
+          onePerItem={kind.code === 'PINV'}
+          heldItemId={invoiceItemId}
           onDocumentsCreated={(created) => {
             dirty.current = false
             void navigate(kind.route, { state: { highlight: created.documents.map((d) => d.id) } })

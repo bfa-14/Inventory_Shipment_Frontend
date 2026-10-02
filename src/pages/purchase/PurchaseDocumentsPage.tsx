@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
+import { routes } from '../../routes'
 import { Alert, Anchor, Badge, Button, Group, Paper, Progress, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconArrowBackUp, IconEye, IconFileInvoice, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
@@ -8,7 +9,7 @@ import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
-import { purchaseDocumentsApi, type PurchaseDocumentListDto, type PurchaseDocumentStatus } from '../../api/purchase/documents'
+import { purchaseDocumentsApi, type CreatedPurchaseInvoiceDto, type PurchaseDocumentListDto, type PurchaseDocumentStatus } from '../../api/purchase/documents'
 import type { BranchLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
@@ -16,12 +17,15 @@ import { BulkResultsModal } from '../../components/documents/BulkResultsModal'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
+import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
+import { CreateInvoiceFromOrderModal } from '../../components/purchase/CreateInvoiceFromOrderModal'
 import {
   PURCHASE_INVOICE,
   PURCHASE_ORDER,
   PURCHASE_RETURN,
   PURCHASE_STATUS_COLOURS,
   PURCHASE_STATUSES,
+  purchaseStatusLabel,
   supplierLabel,
   type PurchaseKind,
 } from '../../components/purchase/purchaseKind'
@@ -61,6 +65,7 @@ const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
   { accessor: 'documentDate', kind: 'date' },
   { accessor: 'supplierName' },
   { accessor: 'exporterReference', text: (r) => r.exporterReference ?? '' },
+  { accessor: 'itemCode', text: itemText },
   { accessor: 'branchName' },
   { accessor: 'warehouseName' },
   { accessor: 'sourceDocumentNumber', text: (r) => r.sourceDocumentNumber ?? '' },
@@ -70,6 +75,11 @@ const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
   { accessor: 'receivedPercent', kind: 'number', text: (r) => (r.receivedPercent === null ? '' : `${formatNumber(r.receivedPercent, 0)}%`) },
   { accessor: 'status', kind: 'list' },
 ]
+
+/** A supplier invoice's item, "code - name": it holds one (a draft made before that rule may hold more). */
+function itemText(row: PurchaseDocumentListDto): string {
+  return row.itemCode ? `${row.itemCode} - ${row.itemName ?? ''}` : ''
+}
 
 /** What the kind was made from: an invoice comes from an order, a return from an invoice, an order from nothing. */
 function sourceKindOf(kind: PurchaseKind): PurchaseKind | null {
@@ -108,6 +118,9 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   const selection = useBulkSelection<PurchaseDocumentListDto>()
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
+  /* "Create invoice" on an order row: one draft per item, so a dialog says how many first, and lists them after. */
+  const [invoiceFrom, setInvoiceFrom] = useState<PurchaseDocumentListDto | null>(null)
+  const [createdInvoices, setCreatedInvoices] = useState<{ orderId: number; currencyCode: string; invoices: CreatedPurchaseInvoiceDto[] } | null>(null)
 
   const grid = useGridQuery<Filters, PurchaseDocumentListDto, AllRows<PurchaseDocumentListDto>>({
     initialFilters: NO_FILTERS,
@@ -207,19 +220,21 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   }
 
   async function createFrom(row: PurchaseDocumentListDto) {
-    const target = kind.code === 'PO' ? PURCHASE_INVOICE : PURCHASE_RETURN
+    if (kind.code === 'PO') {
+      setInvoiceFrom(row)
+      return
+    }
+    const target = PURCHASE_RETURN
     const go = await confirm({
       title: `Create ${target.title.toLowerCase()}`,
-      message: kind.code === 'PO'
-        ? `Create a purchase invoice draft from ${label(row)} with everything that remains to receive?`
-        : `Create a purchase return draft from ${label(row)} with everything that can still be returned?`,
+      message: `Create a purchase return draft from ${label(row)} with everything that can still be returned?`,
       confirmLabel: 'Create',
     })
     if (!go) return
     try {
-      const created = kind.code === 'PO' ? await purchaseDocumentsApi.createInvoice(row.id) : await purchaseDocumentsApi.createReturn(row.id)
+      const created = await purchaseDocumentsApi.createReturn(row.id)
       notify.success(`${target.title} draft created.`)
-      void navigate(`${target.route}/${created.id}`)
+      void navigate(routes.purchaseDocument(target.code, created.id))
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : `The ${target.noun} could not be created.`)
     }
@@ -297,6 +312,24 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
             visibleMediaQuery: (theme) => `(min-width: ${theme.breakpoints.sm})`,
             render: (row) => row.exporterReference ?? <Text fz="sm" c="dimmed">—</Text>,
           } as DataTableColumn<PurchaseDocumentListDto>,
+          {
+            accessor: 'itemCode',
+            title: 'Item',
+            width: 230,
+            render: (row) =>
+              row.itemCode ? (
+                <Group gap={6} wrap="nowrap">
+                  <Text fz="sm" lineClamp={1} style={{ minWidth: 0 }}>{itemText(row)}</Text>
+                  {(row.itemCount ?? 0) > 1 ? (
+                    <Tooltip label="Made before one item per invoice: split it before posting.">
+                      <Badge color="orange" variant="light" size="sm" style={{ flexShrink: 0 }}>{formatNumber(row.itemCount)} items</Badge>
+                    </Tooltip>
+                  ) : null}
+                </Group>
+              ) : (
+                <Text fz="sm" c="dimmed">—</Text>
+              ),
+          } as DataTableColumn<PurchaseDocumentListDto>,
         ]
       : []),
     { accessor: 'branchName', title: 'Branch' },
@@ -311,7 +344,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
               row.sourceDocumentId === null ? (
                 <Text fz="sm" c="dimmed">—</Text>
               ) : (
-                <Anchor component={Link} to={`${sourceKind.route}/${row.sourceDocumentId}`} fz="sm" onClick={(event) => event.stopPropagation()}>
+                <Anchor component={Link} to={routes.purchaseDocument(sourceKind.code, row.sourceDocumentId)} fz="sm" onClick={(event) => event.stopPropagation()}>
                   {row.sourceDocumentNumber ?? `draft #${row.sourceDocumentId}`}
                 </Anchor>
               ),
@@ -345,7 +378,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
       accessor: 'status',
       title: 'Status',
       width: 110,
-      render: (row) => <Badge color={PURCHASE_STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{row.status}</Badge>,
+      render: (row) => <Badge color={PURCHASE_STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{purchaseStatusLabel(row.status)}</Badge>,
     },
     {
       accessor: 'actions',
@@ -355,9 +388,9 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
       render: (row) => (
         <RowActions
           label={label(row)}
-          edit={{ visible: canCreate && row.status === 'Draft', onClick: () => void navigate(`${kind.route}/${row.id}`) }}
+          edit={{ visible: canCreate && row.status === 'Draft', onClick: () => void navigate(routes.purchaseDocument(kind.code, row.id)) }}
           custom={[
-            { icon: <IconEye size={16} />, tooltip: 'View', onClick: () => void navigate(`${kind.route}/${row.id}`) },
+            { icon: <IconEye size={16} />, tooltip: 'View', onClick: () => void navigate(routes.purchaseDocument(kind.code, row.id)) },
             { icon: <IconSend size={16} />, tooltip: kind.postVerb, visible: canPost && row.status === 'Draft', onClick: () => void post(row) },
             { icon: <IconFileInvoice size={16} />, tooltip: 'Create invoice', color: 'green', visible: canCreateInvoice && row.status === 'Posted', onClick: () => void createFrom(row) },
             { icon: <IconArrowBackUp size={16} />, tooltip: 'Create return', color: 'orange', visible: canCreateReturn && row.status === 'Posted', onClick: () => void createFrom(row) },
@@ -384,7 +417,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
 
       <FilterBar>
         <FilterBar.Col span={3}>
-          <TextInput label="Search" placeholder={kind.code === 'PINV' ? 'Number, supplier, exporter ref., commercial invoice no.' : 'Number, supplier reference or supplier'} leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
+          <TextInput label="Search" placeholder={kind.code === 'PINV' ? 'Number, supplier, exporter ref., commercial invoice no., item code' : 'Number, supplier reference or supplier'} leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Branch" placeholder="All branches" data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))} value={filters.branchId} onChange={(next) => setFilter('branchId', next)} clearable searchable />
@@ -393,7 +426,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
           <Select label="Supplier" placeholder="All suppliers" data={suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) }))} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select label="Status" placeholder="All" data={[...PURCHASE_STATUSES]} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+          <Select label="Status" placeholder="All" data={PURCHASE_STATUSES.map((value) => ({ value, label: purchaseStatusLabel(value) }))} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom ? new Date(filters.dateFrom) : null} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
@@ -429,11 +462,38 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
           rowClassName={(row) => (highlight.includes(row.id) ? 'app-grid__row--highlight' : undefined)}
           fetching={loading}
           noRecordsText={`No ${kind.plural.toLowerCase()} yet.`}
-          onRowClick={({ record }) => void navigate(`${kind.route}/${record.id}`)}
+          onRowClick={({ record }) => void navigate(routes.purchaseDocument(kind.code, record.id))}
         />
       </Paper>
 
       <BulkResultsModal opened={bulkResult !== null} title={bulkResult?.title ?? ''} successLabel={bulkResult?.successLabel ?? ''} result={bulkResult?.result ?? null} labelOf={(item) => `draft #${item.id}`} onClose={() => setBulkResult(null)} />
+
+      {invoiceFrom ? (
+        <CreateInvoiceFromOrderModal
+          orderId={invoiceFrom.id}
+          onClose={() => setInvoiceFrom(null)}
+          onCreated={(created) => {
+            const order = invoiceFrom
+            setInvoiceFrom(null)
+            notify.success(`${created.message}.`)
+            if (created.invoices.length === 1) void navigate(routes.purchaseInvoice(created.firstId))
+            else {
+              setCreatedInvoices({ orderId: order.id, currencyCode: order.currencyCode, invoices: created.invoices })
+              void load()
+            }
+          }}
+        />
+      ) : null}
+
+      {createdInvoices ? (
+        <CreatedInvoicesModal
+          opened
+          invoices={createdInvoices.invoices}
+          currencyCode={createdInvoices.currencyCode}
+          onClose={() => setCreatedInvoices(null)}
+          onGoToOrder={() => void navigate(routes.purchaseOrder(createdInvoices.orderId))}
+        />
+      ) : null}
 
       <CancelReasonModal opened={cancelling !== null} onClose={() => setCancelling(null)} documentLabel={cancelling ? label(cancelling) : ''} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
     </div>

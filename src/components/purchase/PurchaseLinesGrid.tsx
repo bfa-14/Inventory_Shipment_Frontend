@@ -96,6 +96,11 @@ interface PurchaseLinesGridProps {
   showEstimatedLanded?: boolean
   /** False on an invoice from containers: its lines are the container lines, none can be added. */
   allowAdd?: boolean
+  /**
+   * A supplier invoice holds ONE item: once a line has one, the Item Code select of a new row offers only
+   * that item (the others stay listed, disabled). Null = any item.
+   */
+  onlyItemId?: number | null
   readOnly: boolean
   /** The warehouses of the document's branch, for the per-line Warehouse select. */
   warehouses: { value: string; label: string }[]
@@ -130,12 +135,17 @@ export function PurchaseLinesGrid({
   groupByContainer = false,
   showEstimatedLanded = false,
   allowAdd = true,
+  onlyItemId = null,
   readOnly,
   warehouses,
 }: PurchaseLinesGridProps) {
   const columnCount = 12 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
 
-  const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
+  const itemOptions = items.map((i) => ({
+    value: String(i.id),
+    label: `${i.itemCode} — ${i.itemName}`,
+    disabled: onlyItemId !== null && i.id !== onlyItemId,
+  }))
 
   return (
     <Table.ScrollContainer minWidth={1340 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
@@ -195,7 +205,7 @@ export function PurchaseLinesGrid({
                         ) : null}
                       </Group>
                     ) : (
-                      <Text fz="sm" c="dimmed">Without container</Text>
+                      <Text fz="sm" c="dimmed" fw={600}>Not in a container yet</Text>
                     )}
                   </Table.Td>
                 </Table.Tr>

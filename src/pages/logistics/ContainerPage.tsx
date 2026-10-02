@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { routes } from '../../routes'
 import {
   Alert,
   Anchor,
@@ -46,6 +47,7 @@ import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/master
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import { warehousesApi } from '../../api/masterdata/warehouses'
+import type { CreatedPurchaseInvoiceDto } from '../../api/purchase/documents'
 import type { BranchLookupDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { AuditTrail } from '../../components/documents/AuditTrail'
@@ -74,6 +76,7 @@ import { ContainerInvoicesCard } from '../../components/logistics/ContainerInvoi
 import { ContainerRouteMapCard } from '../../components/logistics/ContainerRouteMapCard'
 import { ContainerRouteTimeline } from '../../components/logistics/ContainerRouteTimeline'
 import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
+import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
 import { LoadedItemsSection } from '../../components/logistics/LoadedItemsSection'
 import { OffloadModal } from '../../components/logistics/OffloadModal'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
@@ -137,6 +140,8 @@ export function ContainerPage() {
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [addItemsOpen, setAddItemsOpen] = useState(false)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
+  /** Several invoices made at once (one per item): listed rather than one of them opened. */
+  const [createdInvoices, setCreatedInvoices] = useState<{ invoices: CreatedPurchaseInvoiceDto[]; orderIds: number[] } | null>(null)
   const [offloadOpen, setOffloadOpen] = useState(false)
   const [offloadError, setOffloadError] = useState<string | null>(null)
   const [reasonDialog, setReasonDialog] = useState<ReasonDialog>(null)
@@ -535,7 +540,7 @@ export function ContainerPage() {
             <Text fz="sm">
               Open an approved purchase order and use <b>Add Container…</b>: the container is loaded with the order's lines, in pieces.
             </Text>
-            <Button component={Link} to="/purchase/orders" variant="light">
+            <Button component={Link} to={routes.purchaseOrders} variant="light">
               Go to Purchase Orders
             </Button>
           </Stack>
@@ -634,7 +639,7 @@ export function ContainerPage() {
                     Purchase Order
                   </Text>
                   {container?.purchaseOrderId ? (
-                    <Anchor component={Link} to={`/purchase/orders/${container.purchaseOrderId}`} fz="sm" fw={600}>
+                    <Anchor component={Link} to={routes.purchaseOrder(container.purchaseOrderId)} fz="sm" fw={600}>
                       {container.purchaseOrderNumber ?? `#${container.purchaseOrderId}`}
                     </Anchor>
                   ) : (
@@ -800,10 +805,24 @@ export function ContainerPage() {
           opened
           onClose={() => setInvoiceOpen(false)}
           containerId={container.id}
-          onCreated={(ids) => {
+          onCreated={(invoices, orderIds) => {
             setInvoiceOpen(false)
-            void navigate(`/purchase/invoices/${ids[0]}`)
+            if (invoices.length === 1) void navigate(routes.purchaseInvoice(invoices[0].id))
+            else setCreatedInvoices({ invoices, orderIds })
           }}
+        />
+      ) : null}
+
+      {createdInvoices ? (
+        <CreatedInvoicesModal
+          opened
+          invoices={createdInvoices.invoices}
+          onClose={() => setCreatedInvoices(null)}
+          onGoToOrder={
+            createdInvoices.orderIds.length === 1
+              ? () => void navigate(routes.purchaseOrder(createdInvoices.orderIds[0]))
+              : undefined
+          }
         />
       ) : null}
 

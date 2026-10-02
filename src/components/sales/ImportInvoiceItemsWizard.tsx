@@ -95,6 +95,13 @@ export interface ImportInvoiceItemsWizardProps {
   importCreate?: (lines: ImportedLine[], postImmediately: boolean) => Promise<ImportCreateResult>
   /** Where a created document lives, for the links in the result panel. */
   documentRoute?: (id: number) => string
+  /**
+   * A supplier invoice holds ONE item. With import-create given, a file of several items — or of another
+   * item than the open invoice's — becomes one new invoice per item instead of being appended.
+   */
+  onePerItem?: boolean
+  /** The item the open invoice already holds (its first line's), null when it has no line yet. */
+  heldItemId?: number | null
   /** After the result panel's "Go to the list": the host navigates and highlights the new rows. */
   onDocumentsCreated?: (result: ImportCreateResult) => void
   /**
@@ -158,6 +165,8 @@ function ImportWizardBody({
   onImported,
   importCreate,
   documentRoute,
+  onePerItem = false,
+  heldItemId = null,
   onDocumentsCreated,
   onSwitchWarehouse,
 }: ImportInvoiceItemsWizardProps) {
@@ -179,6 +188,8 @@ function ImportWizardBody({
   const [phase, setPhase] = useState<Phase>('appending')
   const [postImmediately, setPostImmediately] = useState(false)
   const [created, setCreated] = useState<ImportCreateResult | null>(null)
+  /** Step 3 makes one invoice per item of the file (a supplier invoice holds one item). */
+  const [byItem, setByItem] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -197,6 +208,18 @@ function ImportWizardBody({
       const group = groups.find((g) => g.warehouseId === row.warehouseId)
       if (group) group.rows++
       else groups.push({ warehouseId: row.warehouseId, warehouseCode: row.warehouseCode ?? String(row.warehouseId), rows: 1 })
+    }
+    return groups
+  }, [importable])
+
+  /** The items the importable rows name, first-seen order, with how many rows each has. */
+  const itemGroups = useMemo(() => {
+    const groups: { itemId: number; itemCode: string; itemName: string; rows: number }[] = []
+    for (const row of importable) {
+      if (row.itemId === null) continue
+      const group = groups.find((g) => g.itemId === row.itemId)
+      if (group) group.rows++
+      else groups.push({ itemId: row.itemId, itemCode: row.itemCode ?? String(row.itemId), itemName: row.itemName ?? '', rows: 1 })
     }
     return groups
   }, [importable])
@@ -318,6 +341,15 @@ function ImportWizardBody({
   async function runImport() {
     if (!result || importable.length === 0) return
 
+    // ONE ITEM PER SUPPLIER INVOICE: several items, or another item than the open invoice holds, cannot be
+    // appended to it — they become new invoices, one per item.
+    if (onePerItem && importCreate && (itemGroups.length > 1 || (heldItemId !== null && itemGroups[0]?.itemId !== heldItemId))) {
+      setByItem(true)
+      setStep(2)
+      setPhase('groups')
+      return
+    }
+
     if (warehouseGroups.length > 1 && importCreate) {
       setStep(2)
       setPhase('groups')
@@ -375,7 +407,7 @@ function ImportWizardBody({
       // The audit row goes against the first invoice when the family has one; stock documents keep
       // the draft reference only.
       await logImport(isStock ? undefined : answer.documents[0]?.id)
-      if (answer.failed.length === 0) notify.success(`${answer.created} document(s) created${answer.posted > 0 ? `, ${answer.posted} posted` : ''}.`)
+      if (answer.failed.length === 0) notify.success(`${answer.created} ${byItem ? 'invoice' : 'document'}(s) created${answer.posted > 0 ? `, ${answer.posted} posted` : ''}.`)
       else notify.error(`The document could not be ${postImmediately ? 'posted' : 'created'} — see the reason below.`)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The documents could not be created.')
@@ -683,25 +715,42 @@ function ImportWizardBody({
 
       {step === 2 && result && (phase === 'groups' || phase === 'creating') && (
         <Stack>
-          <Alert color="blue" title="One document, several warehouses">
-            The file names {warehouseGroups.length} warehouses. They become ONE new document whose
-            lines each keep the warehouse the file gave them; the open document is left as it is.
-          </Alert>
+          {byItem ? (
+            <Alert color="blue" title="One invoice per item" data-import-by-item>
+              The file holds {formatNumber(itemGroups.length)} item(s). A supplier invoice holds one item: they become{' '}
+              {formatNumber(itemGroups.length)} new invoice(s), one per item, with the header of this one; the open invoice is
+              left as it is.
+            </Alert>
+          ) : (
+            <Alert color="blue" title="One document, several warehouses">
+              The file names {warehouseGroups.length} warehouses. They become ONE new document whose
+              lines each keep the warehouse the file gave them; the open document is left as it is.
+            </Alert>
+          )}
 
           <Table withTableBorder withColumnBorders>
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>Warehouse</Table.Th>
+                <Table.Th>{byItem ? 'Item' : 'Warehouse'}</Table.Th>
                 <Table.Th ta="right">Lines</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {warehouseGroups.map((g) => (
-                <Table.Tr key={g.warehouseId}>
-                  <Table.Td>{g.warehouseCode}</Table.Td>
-                  <Table.Td ta="right">{formatNumber(g.rows)}</Table.Td>
-                </Table.Tr>
-              ))}
+              {byItem
+                ? itemGroups.map((g) => (
+                    <Table.Tr key={g.itemId}>
+                      <Table.Td>
+                        {g.itemCode} - {g.itemName}
+                      </Table.Td>
+                      <Table.Td ta="right">{formatNumber(g.rows)}</Table.Td>
+                    </Table.Tr>
+                  ))
+                : warehouseGroups.map((g) => (
+                    <Table.Tr key={g.warehouseId}>
+                      <Table.Td>{g.warehouseCode}</Table.Td>
+                      <Table.Td ta="right">{formatNumber(g.rows)}</Table.Td>
+                    </Table.Tr>
+                  ))}
             </Table.Tbody>
           </Table>
 
@@ -718,7 +767,7 @@ function ImportWizardBody({
               Cancel
             </Button>
             <Button loading={phase === 'creating'} onClick={() => void createMixedDocument()}>
-              Create one document
+              {byItem ? (itemGroups.length === 1 ? 'Create 1 invoice' : `Create ${formatNumber(itemGroups.length)} invoices`) : 'Create one document'}
             </Button>
           </Group>
         </Stack>
@@ -726,19 +775,26 @@ function ImportWizardBody({
 
       {step === 2 && phase === 'created' && created && (
         <Stack>
-          <Alert color={created.failed.length === 0 ? 'green' : 'orange'} title={`${created.created} document(s) created${created.posted > 0 ? `, ${created.posted} posted` : ''}`}>
-            {created.failed.length === 0
-              ? 'Every row in the file is on the document, each in the warehouse the file named.'
-              : 'The reason is listed below.'}
+          <Alert
+            color={created.failed.length === 0 ? 'green' : 'orange'}
+            title={`${created.created} ${byItem ? 'invoice' : 'document'}(s) created${byItem ? ', one per item' : ''}${created.posted > 0 ? `, ${created.posted} posted` : ''}`}
+          >
+            {created.failed.length > 0
+              ? 'The reason is listed below.'
+              : byItem
+                ? 'Every row in the file is on the invoice of its item, each in the warehouse the file named.'
+                : 'Every row in the file is on the document, each in the warehouse the file named.'}
           </Alert>
 
-          <Table withTableBorder withColumnBorders>
+          <Table withTableBorder withColumnBorders data-import-created>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Document</Table.Th>
+                {byItem && <Table.Th>Item</Table.Th>}
                 <Table.Th>Warehouse</Table.Th>
                 <Table.Th ta="right">Lines</Table.Th>
                 <Table.Th>Status</Table.Th>
+                {documentRoute && <Table.Th w={70} />}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -755,6 +811,11 @@ function ImportWizardBody({
                   </Table.Td>
                   {/* A MIXED DOCUMENT HAS NO SINGLE WAREHOUSE to name, so it says how many it spans
                       rather than naming the header's and implying the rest are in it. */}
+                  {byItem && (
+                    <Table.Td>
+                      {d.itemCode ? `${d.itemCode} - ${d.itemName ?? ''}` : '—'}
+                    </Table.Td>
+                  )}
                   <Table.Td>
                     {d.warehouseCount > 1 ? `${formatNumber(d.warehouseCount)} warehouses` : d.warehouseName}
                   </Table.Td>
@@ -764,6 +825,13 @@ function ImportWizardBody({
                       {d.status}
                     </Badge>
                   </Table.Td>
+                  {documentRoute && (
+                    <Table.Td>
+                      <Anchor component={Link} to={documentRoute(d.id)} fz="sm" fw={500}>
+                        Open
+                      </Anchor>
+                    </Table.Td>
+                  )}
                 </Table.Tr>
               ))}
               {created.failed.map((f, index) => (
@@ -771,7 +839,7 @@ function ImportWizardBody({
                    to be keyed by, and a mixed document has no one warehouse to name either. The
                    warehouse is named only when there is one to name. */
                 <Table.Tr key={`failed-${index}`}>
-                  <Table.Td colSpan={4}>
+                  <Table.Td colSpan={4 + (byItem ? 1 : 0) + (documentRoute ? 1 : 0)}>
                     <Text fz="sm" c="red">
                       {f.warehouseName ?? (f.warehouseId === null ? null : `warehouse #${f.warehouseId}`)}
                       {f.warehouseName || f.warehouseId !== null ? ': ' : ''}

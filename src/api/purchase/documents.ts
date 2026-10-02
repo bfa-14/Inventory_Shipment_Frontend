@@ -1,4 +1,4 @@
-import type { BulkActionResult, ImportCreateLine, ImportCreateResult } from '../documents'
+import type { BulkActionItemResult, BulkActionResult, ImportCreateLine, ImportCreateResult } from '../documents'
 import { fetchBlob, postForm, request } from '../http'
 import type { SalesRateType } from '../sales/invoices'
 import type { PurchaseChargeDto, SetPurchaseChargesRequest } from './landedCostAdjustments'
@@ -13,10 +13,50 @@ import type { PagedResult } from '../types'
  */
 const BASE = '/api/purchase/documents'
 
+/** Copied to every invoice a create makes (one per item). Blank = none. */
+export interface InvoiceReferences {
+  exporterReference?: string | null
+  commercialInvoiceNo?: string | null
+}
+
+function referencesBody(references?: InvoiceReferences) {
+  return {
+    exporterReference: references?.exporterReference?.trim() || null,
+    commercialInvoiceNo: references?.commercialInvoiceNo?.trim() || null,
+  }
+}
+
+/** One supplier invoice a create or a split made: a supplier invoice holds ONE item. */
+export interface CreatedPurchaseInvoiceDto {
+  id: number
+  itemId: number | null
+  itemCode: string | null
+  itemName: string | null
+  lineCount: number
+  quantityBase: number
+  totalAmount: number
+}
+
+/** "Create invoice" from an order or its containers: one draft per item. `id` = `firstId`. */
+export interface CreatedPurchaseInvoicesDto {
+  firstId: number
+  id: number
+  invoices: CreatedPurchaseInvoiceDto[]
+  /** "3 invoices created, one per item" or "Invoice created". */
+  message: string
+}
+
+export interface SplitByItemResultDto {
+  invoices: CreatedPurchaseInvoiceDto[]
+}
+
 export type PurchaseDocumentTypeCode = 'PO' | 'PINV' | 'PRET'
 
-/** Purchase documents have one status more than the others: a posted order is OPEN until it is CLOSED. */
-export type PurchaseDocumentStatus = 'Draft' | 'Posted' | 'Cancelled' | 'Closed'
+/**
+ * Purchase documents have one status more than the others: a posted order is OPEN until it is CLOSED.
+ * An order sent for approval is PendingApproval (not editable, not posted yet) until it is approved.
+ */
+export type PurchaseDocumentStatus = 'Draft' | 'PendingApproval' | 'Posted' | 'Cancelled' | 'Closed'
 
 export interface PurchaseRateResolutionDto {
   currencyId: number
@@ -66,8 +106,10 @@ export interface SavePurchaseDocumentRequest {
   /** Null = resolved from the exchange rates for the document date. */
   exchangeRate: number | null
   supplierReference: string | null
-  /** Ignored for invoices: automatic (2 from containers, 1 otherwise). */
+  /** 1 on posting, 2 at the container offload; null = unchanged. Invoices send shippedInContainers instead. */
   receiptMode?: ReceiptMode | null
+  /** Invoices: "Shipped in containers" (receipt mode 2). Refused off while a line is linked (409 RECEIPT_MODE_LOCKED). */
+  shippedInContainers?: boolean | null
   exporterReference?: string | null
   commercialInvoiceNo?: string | null
   notes: string | null
@@ -149,6 +191,12 @@ export interface PurchaseDocumentListDto {
   sourceDocumentNumber: string | null
   /** Orders only: how much of the ordered quantity has been invoiced, 0–100. */
   receivedPercent: number | null
+  /** Supplier invoices: the item it holds (the one of its first line); null for orders and returns. */
+  itemId: number | null
+  itemCode: string | null
+  itemName: string | null
+  /** Supplier invoices: how many items it holds — more than 1 only on a draft made before one item per invoice. */
+  itemCount: number | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -303,12 +351,16 @@ export interface PurchaseDocumentDto {
   commercialInvoiceNo: string | null
   /** Invoices: 1 = stock on posting, 2 = stock on container offload (forced once in a container). */
   receiptMode: ReceiptMode
+  /** Invoices: "Shipped in containers" = receipt mode 2 - the goods enter the stock at the container offload. */
+  shippedInContainers: boolean
   notes: string | null
   status: PurchaseDocumentStatus
   /** Invoices created from containers: the exporter reference is required to post. */
   isContainerBound: boolean
   /** Orders: containers carrying its lines; invoices: its containers. */
   containerCount: number
+  /** Invoices: containers its pieces fill, summed over its items (null when no item has a Container unit). */
+  containersNeeded: number | null
   /** Orders: loaded in containers (base units). */
   loadedBase: number | null
   /** Invoices from containers: the posted container charges falling on its lines. */
@@ -436,17 +488,27 @@ export const purchaseDocumentsApi = {
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 
-  /** A purchase invoice draft holding what remains to receive on the posted order. */
-  createInvoice: (id: number, documentDate?: string | null) =>
-    request<PurchaseDocumentDto>(`${BASE}/${id}/create-invoice`, { method: 'POST', body: { documentDate: documentDate ?? null } }),
+  /** Purchase invoice drafts holding what remains to receive on the posted order: ONE PER ITEM. */
+  createInvoice: (id: number, documentDate?: string | null, references?: InvoiceReferences) =>
+    request<CreatedPurchaseInvoicesDto>(`${BASE}/${id}/create-invoice`, {
+      method: 'POST',
+      body: { documentDate: documentDate ?? null, ...referencesBody(references) },
+    }),
 
   /** A purchase return draft holding what can still be returned from the posted invoice. */
-  /** A draft invoice from container lines of the order; no lines = everything loaded and not yet invoiced. */
-  invoiceFromContainers: (orderId: number, documentDate?: string | null, lines?: ContainerLineQuantity[]) =>
-    request<{ id: number }>(`${BASE}/${orderId}/invoice-from-containers`, {
+  /** Draft invoices from container lines of the order, ONE PER ITEM; no lines = everything loaded and not yet invoiced. */
+  invoiceFromContainers: (orderId: number, documentDate?: string | null, lines?: ContainerLineQuantity[], references?: InvoiceReferences) =>
+    request<CreatedPurchaseInvoicesDto>(`${BASE}/${orderId}/invoice-from-containers`, {
       method: 'POST',
-      body: { documentDate: documentDate ?? null, lines: lines ?? [] },
+      body: { documentDate: documentDate ?? null, lines: lines ?? [], ...referencesBody(references) },
     }),
+
+  /** A draft invoice holding several items (made before one item per invoice) into one invoice per item; the original first. */
+  splitByItem: (id: number, rowVersion: string | null) =>
+    request<SplitByItemResultDto>(`${BASE}/${id}/split-by-item`, { method: 'POST', body: { rowVersion } }),
+
+  /** Posts each draft purchase invoice on its own, in order: one refusal does not stop the others. */
+  postMany: (ids: number[]) => request<BulkActionItemResult[]>(`${BASE}/post-many`, { method: 'POST', body: { ids } }),
 
   createReturn: (id: number, documentDate?: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/create-return`, { method: 'POST', body: { documentDate: documentDate ?? null } }),

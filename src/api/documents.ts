@@ -50,6 +50,10 @@ export interface ImportCreateDocument {
   lineCount: number
   /** Draft | Posted — Draft when posting was not asked for, or was refused (see failed). */
   status: string
+  /** A supplier invoice's item: it holds one, so a file of several items makes one invoice per item. Absent for the other kinds. */
+  itemId?: number | null
+  itemCode?: string | null
+  itemName?: string | null
 }
 
 export interface ImportCreateFailure {

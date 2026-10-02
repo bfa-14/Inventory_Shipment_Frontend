@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Anchor, Badge, Checkbox, Group, Loader, NumberInput, ScrollArea, Stack, Table, Text } from '@mantine/core'
+import { Alert, Anchor, Badge, Checkbox, Group, Loader, NumberInput, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput } from '@mantine/core'
 import { DatePickerInput } from '@mantine/dates'
 import { Link } from 'react-router'
 import { ApiError } from '../../api/http'
 import { containersApi, containerStatusColour, containerStatusLabel, type InvoiceCandidateDto } from '../../api/logistics/containers'
-import { purchaseDocumentsApi } from '../../api/purchase/documents'
+import { purchaseDocumentsApi, type CreatedPurchaseInvoiceDto } from '../../api/purchase/documents'
+import { distinctInOrder, onePerItemLine } from '../purchase/onePerItem'
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { FormModal } from '../ui/FormModal'
@@ -17,8 +18,11 @@ interface InvoiceFromContainersModalProps {
   purchaseOrderId?: number
   /** …or of this one container (any order on board: one invoice per order). */
   containerId?: number
-  /** The drafts created, one per purchase order; the host opens the first. */
-  onCreated: (invoiceIds: number[]) => void
+  /**
+   * The drafts created — one per item of each order (a supplier invoice holds one item) — and the orders
+   * they are of. The host opens the one, or lists the several.
+   */
+  onCreated: (invoices: CreatedPurchaseInvoiceDto[], orderIds: number[]) => void
 }
 
 interface Pick {
@@ -28,14 +32,18 @@ interface Pick {
 
 /**
  * "Create Invoice from Containers…": the container lines still to invoice, grouped by container,
- * each ticked with its available quantity. Create makes ONE draft purchase invoice per purchase
- * order (an order's lines may sit in several containers; a container may carry several orders),
- * every line pointing to its container line. The server re-checks every quantity (65019 / 65011).
+ * each ticked with its available quantity. Create makes ONE draft purchase invoice per ITEM of each
+ * purchase order (a supplier invoice holds one item; an order's lines may sit in several containers;
+ * a container may carry several orders), every line pointing to its container line, the exporter's
+ * reference and the commercial invoice number copied to each. The server re-checks every quantity
+ * (65019 / 65011).
  */
 export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, containerId, onCreated }: InvoiceFromContainersModalProps) {
   const [rows, setRows] = useState<InvoiceCandidateDto[] | null>(null)
   const [picks, setPicks] = useState<Record<number, Pick>>({})
   const [documentDate, setDocumentDate] = useState<string | null>(isoDate(new Date()))
+  const [exporterReference, setExporterReference] = useState('')
+  const [commercialInvoiceNo, setCommercialInvoiceNo] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -64,7 +72,11 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
 
   const chosen = (rows ?? []).filter((row) => picks[row.containerLineId]?.checked && Number(picks[row.containerLineId]?.quantity || 0) > 0)
   const invalid = chosen.find((row) => Number(picks[row.containerLineId].quantity) > row.availableBase)
-  const orderCount = new Set(chosen.map((row) => row.purchaseOrderId)).size
+  const orderIds = distinctInOrder(chosen.map((row) => row.purchaseOrderId))
+  /* One invoice per item of each order: the item codes in the order of their first ticked line. */
+  const invoiceItems = orderIds.flatMap((orderId) =>
+    distinctInOrder(chosen.filter((row) => row.purchaseOrderId === orderId).map((row) => row.itemCode)),
+  )
 
   function patch(containerLineId: number, next: Partial<Pick>) {
     setPicks((all) => ({ ...all, [containerLineId]: { ...all[containerLineId], ...next } }))
@@ -74,20 +86,22 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
     if (chosen.length === 0 || invalid) return
     setSaving(true)
     setError(null)
-    const created: number[] = []
+    const created: CreatedPurchaseInvoiceDto[] = []
+    const createdFor: number[] = []
     try {
-      for (const orderId of [...new Set(chosen.map((row) => row.purchaseOrderId))]) {
+      for (const orderId of orderIds) {
         const lines = chosen
           .filter((row) => row.purchaseOrderId === orderId)
           .map((row) => ({ containerLineId: row.containerLineId, quantityBase: Number(picks[row.containerLineId].quantity) }))
-        const { id } = await purchaseDocumentsApi.invoiceFromContainers(orderId, documentDate, lines)
-        created.push(id)
+        const answer = await purchaseDocumentsApi.invoiceFromContainers(orderId, documentDate, lines, { exporterReference, commercialInvoiceNo })
+        created.push(...answer.invoices)
+        createdFor.push(orderId)
       }
-      notify.success(created.length === 1 ? 'Draft purchase invoice created.' : `${created.length} draft purchase invoices created (one per order).`)
-      onCreated(created)
+      notify.success(created.length === 1 ? 'Draft purchase invoice created.' : `${created.length} draft purchase invoices created, one per item.`)
+      onCreated(created, createdFor)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'The invoice could not be created.')
-      if (created.length > 0) onCreated(created)
+      if (created.length > 0) onCreated(created, createdFor)
     } finally {
       setSaving(false)
     }
@@ -100,7 +114,7 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
       title="Create Invoice from Containers"
       size="80rem"
       saving={saving}
-      saveLabel={orderCount > 1 ? `Create ${orderCount} invoices` : 'Create invoice'}
+      saveLabel={invoiceItems.length > 1 ? `Create ${invoiceItems.length} invoices` : 'Create invoice'}
       saveDisabled={chosen.length === 0 || Boolean(invalid)}
       onSubmit={() => void create()}
     >
@@ -115,6 +129,22 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
           onChange={(next) => setDocumentDate(next ? isoDate(new Date(next)) : null)}
           w={220}
         />
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" maw={560}>
+          <TextInput
+            label="Exporter's ref."
+            description="copied to every invoice"
+            maxLength={50}
+            value={exporterReference}
+            onChange={(event) => setExporterReference(event.currentTarget.value)}
+          />
+          <TextInput
+            label="Commercial invoice no."
+            description="copied to every invoice"
+            maxLength={50}
+            value={commercialInvoiceNo}
+            onChange={(event) => setCommercialInvoiceNo(event.currentTarget.value)}
+          />
+        </SimpleGrid>
         {error ? <Alert color="red">{error}</Alert> : null}
         {rows === null && !error ? <Loader size="sm" /> : null}
         {rows && rows.length === 0 ? (
@@ -207,6 +237,11 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
             </div>
           )
         })}
+        {invoiceItems.length > 0 ? (
+          <Alert color="blue" variant="light" data-one-invoice-per-item>
+            {onePerItemLine(invoiceItems)}
+          </Alert>
+        ) : null}
       </Stack>
     </FormModal>
   )

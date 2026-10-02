@@ -609,6 +609,32 @@ title, plural, noun, route, colour, the posting wording and the five `purchase.<
 Nothing in the pages branches on `'PO'` except through that table. They sit on the sales invoice skeleton
 in **cost mode**:
 
+- **One URL per document, built in one place.** Every link to a purchase document uses
+  `routes.purchaseOrder(id)` / `purchaseInvoice(id)` / `purchaseReturn(id)` / `purchaseDocument(typeCode, id)`
+  (`src/routes.ts`). This covers the lists, the containers list and container page, the shortages, the
+  linked documents and the source chip. The page decides everything from the document it LOADS: its type,
+  status, containers and invoicing figures, plus the reader's permissions. Never from the route it came
+  from, a query string or navigation state; only a `?tab=` may choose the tab that opens. A URL whose kind
+  does not match the loaded document (`/purchase/invoices/<an order's id>`) is replaced by that document's
+  own route.
+- **A page instance per document.** The six document routes render `PurchaseDocumentRoute`, which keys
+  `PurchaseDocumentPage` per document. Without that key, React reused one instance from an order to its
+  invoice and back (ticked containers, lookups loaded for the other kind, a frame of the previous document).
+  The one exception is `/new` turning into `/:id` on the first save, which keeps its instance.
+- **What can be done on an order, and why not: `orderAbilities`** (`src/components/purchase/orderAbilities.ts`).
+  It returns `{ visible, blockedBy }` for every order button. A missing permission hides the button. An
+  order that is not approved and open keeps the button visible and disabled, with the reason as its
+  tooltip (`OrderActionButton`, or `disabledReason` in the action bar):
+  - draft: "Approve the order first: containers / invoices are created from an approved order.";
+  - PendingApproval: "This order is waiting for approval.";
+  - closed: "This order is closed.";
+  - cancelled: "This order is cancelled.".
+
+  The **Containers card** shows on every saved order to readers with `containers.view`. Its Add Container… /
+  Auto-plan containers… buttons need `containers.create`, and Create Invoice from Containers… needs
+  `purchase.invoices.create`. The action bar's Create Purchase Invoice and Close Order read the same
+  object. A new order action, approval ones included, is added there, not decided in its button.
+
 - **Header** (`PurchaseHeaderCard`): document no. (orders are numbered on save, invoices and returns on
   posting), document date, expected / due date, supplier (searchable; **picking a supplier sets Currency to
   the supplier's default currency**, else the base one, until the reader picks another), branch, warehouse,
@@ -641,6 +667,51 @@ in **cost mode**:
   column that links to the order / invoice, a **Received** progress bar on orders (0–100 % of the ordered
   quantity invoiced), bulk Post / Delete on ticked drafts, row actions gated by permission and status
   including Create invoice / Create return.
+- **Charges card (invoices)**: one **"+ Add charge"** in every status, and what it adds depends on the invoice:
+  - **local draft**: the invoice's own charges (`PurchaseChargesGrid`, saved with the draft; `purchase.invoices.create`);
+  - **local posted**: `PostedInvoiceChargesCard`. It lists the charges posted with the invoice (badge
+    "With the invoice", read-only) and the **late charges** (badge "Late" plus the adjustment status and
+    number). "+ Add charge" opens `LateChargeModal`, which saves a draft late charge into the invoice's
+    open landed cost adjustment (`src/api/purchase/lateCharges.ts`, `purchase.landedcosts.create`).
+    Draft ones can be edited and deleted. **"Post late charges (n)"** (`purchase.landedcosts.post`)
+    posts that adjustment and shows each line's landed cost per unit, before and after. The page then
+    refreshes quietly (`refreshQuietly`), without the page-wide loader, so the result stays on screen;
+  - **imported** (draft or posted): the container charge dialog (`NewChargeModal`) with the invoice's
+    containers preselected, split By pieces (`containers.charges.create`). Its drafts show a
+    "Post it in Container Charges" link.
+
+  There is no "New landed cost adjustment" action on the invoice any more: "+ Add charge" replaces it.
+- **Shipped in containers (invoices, script 43)**: a switch in the header is the invoice's receipt mode.
+  - On means stock in at the offload of the containers the invoice is linked to; off means stock in on posting.
+  - It is disabled with a tooltip while lines are linked, and on an invoice that is not from an order.
+  - An invoice created from an order with containers starts on.
+  - While it is on, `ShippedInvoiceContainersCard` replaces the side card "where are my goods"
+    (`InvoiceContainersCard`). Per item it shows invoiced, pieces per container (or an orange link to set the
+    Container unit), containers needed "2.5 (2 full + 42 pcs)", linked, and not linked (orange).
+  - Its linked containers can be unlinked while Draft or Confirmed.
+  - Its buttons:
+    - **Link containers…** (`LinkContainersModal`): candidates grouped by container; containers that started
+      moving are never offered;
+    - **Add container…**: `AddContainerModal` with `invoice`;
+    - **Auto-plan…**: `AutoPlanModal` with `invoice`.
+  - Both dialogs keep the order's form and call `src/api/purchase/invoiceContainers.ts`, which creates and
+    links in one transaction.
+  - Linking rewrites the invoice's lines, so the card refuses while the page has unsaved changes.
+  - The lines are grouped by container, the rest under "Not in a container yet".
+- **One item per supplier invoice (script 45)**: a purchase invoice holds one item, over any number of lines.
+  - "Create Purchase Invoice" (`CreateInvoiceFromOrderModal`, order page and order list) and "Create Invoice from
+    Containers…" say "One invoice per item: n invoices will be created (codes)" and take the exporter's ref. and
+    the commercial invoice no., copied to every invoice. One invoice opens as before; several are listed in
+    `CreatedInvoicesModal` (Open links, "Go to the order's invoices").
+  - On an invoice with a line, the item select offers only that item (`PurchaseLinesGrid` `onlyItemId`) and the
+    quick search refuses another, with `ONE_ITEM_HINT`. A draft holding several items (made before) shows an
+    orange Alert and **Split by item**, which lists the invoices in the same modal.
+  - The order's Linked Documents card ticks its draft invoices and posts them with **Post selected** (`post-many`,
+    one refusal does not stop the others, results in `BulkResultsModal`).
+  - The invoice list has an Item column (code - name; an orange "n items" badge on an old multi-item draft) and
+    its search matches the item code.
+  - The Excel import on an invoice (`onePerItem`): a file of several items, or of another item than the open
+    invoice's, becomes one new invoice per item through `import-create`; the result lists each with an Open link.
 - **API**: `src/api/purchase/documents.ts` — one module for the three kinds; every 403 from it names the
   permission that was missing (`code: FORBIDDEN`).
 
