@@ -2,6 +2,7 @@ import { Fragment } from 'react'
 import { ActionIcon, Anchor, Badge, Button, Checkbox, Group, NumberInput, Paper, ScrollArea, Table, Text, Title, Tooltip } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
+import { routes } from '../../routes'
 import type { FobSource } from '../../api/logistics/containers'
 import { formatNumber, numberInputValue } from '../format'
 import { lineOil, type LoadLine } from './containerForm'
@@ -85,7 +86,7 @@ export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems,
                       <Table.Tr data-order-group={line.purchaseOrderId}>
                         <Table.Td colSpan={columnCount} bg="var(--mantine-color-gray-0)">
                           <Group gap="xs">
-                            <Anchor component={Link} to={`/purchase/orders/${line.purchaseOrderId}`} fw={700} fz="sm">
+                            <Anchor component={Link} to={routes.purchaseOrder(line.purchaseOrderId)} fw={700} fz="sm">
                               {line.purchaseOrderNumber ?? `Order #${line.purchaseOrderId}`}
                             </Anchor>
                             <Text fz="sm" c="dimmed">

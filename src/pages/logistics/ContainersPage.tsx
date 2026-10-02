@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { routes } from '../../routes'
 import {
   ActionIcon,
   Alert,
@@ -344,8 +345,10 @@ export function ContainersPage() {
       title: 'Order No.',
       width: 175,
       render: (row) =>
-        row.purchaseOrderId && row.orderCount === 1 ? (
-          <Anchor component={Link} to={`/purchase/orders/${row.purchaseOrderId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+        // A link only when the order of the lines IS the container's own order: purchaseOrderId is the
+        // order the container was created from, and the list does not carry the id of another one.
+        row.purchaseOrderId && row.orderCount === 1 && row.orderNumbers === row.purchaseOrderNumber ? (
+          <Anchor component={Link} to={routes.purchaseOrder(row.purchaseOrderId)} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
             {row.orderNumbers}
           </Anchor>
         ) : (

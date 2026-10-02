@@ -1,6 +1,7 @@
 import { Anchor, Badge, Button, Group, Paper, ScrollArea, Table, Text, Title } from '@mantine/core'
 import { IconFileInvoice } from '@tabler/icons-react'
 import { Link } from 'react-router'
+import { routes } from '../../routes'
 import type { ContainerInvoiceDto } from '../../api/logistics/containers'
 import { dateLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
@@ -61,7 +62,7 @@ export function ContainerInvoicesCard({
                 return (
                   <Table.Tr key={i.purchaseDocumentId}>
                     <Table.Td>
-                      <Anchor component={Link} to={`/purchase/invoices/${i.purchaseDocumentId}`} fz="sm" fw={600}>
+                      <Anchor component={Link} to={routes.purchaseInvoice(i.purchaseDocumentId)} fz="sm" fw={600}>
                         {i.documentNumber ?? `Draft #${i.purchaseDocumentId}`}
                       </Anchor>
                     </Table.Td>

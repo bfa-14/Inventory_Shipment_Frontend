@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { routes } from '../../routes'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconEye, IconFileExport, IconFilterOff, IconPlus, IconSearch, IconSend, IconX } from '@tabler/icons-react'
@@ -18,7 +19,6 @@ import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { PURCHASE_INVOICE } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
@@ -202,7 +202,7 @@ export function LandedCostAdjustmentsPage() {
       render: (row) => (
         <Anchor
           component={Link}
-          to={`${PURCHASE_INVOICE.route}/${row.sourceInvoiceId}`}
+          to={routes.purchaseInvoice(row.sourceInvoiceId)}
           fz="sm"
           style={{ whiteSpace: 'nowrap' }}
           onClick={(event) => event.stopPropagation()}

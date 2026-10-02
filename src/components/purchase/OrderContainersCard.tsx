@@ -21,6 +21,8 @@ interface OrderContainersCardProps {
   onSelectedChange(next: ContainerListDto[]): void
   /** After a bulk action: the host reloads the order (and with it this card). */
   onChanged(): void
+  /** What an empty card says. The default points at Add Container, for a reader who can press it. */
+  emptyText?: string
 }
 
 /**
@@ -41,6 +43,7 @@ export function OrderContainersCard({
   selected: heldSelection,
   onSelectedChange: setSelected,
   onChanged,
+  emptyText = 'No container yet - use Add Container or Auto-plan.',
 }: OrderContainersCardProps) {
   const [rows, setRows] = useState<ContainerListDto[]>([])
 
@@ -76,7 +79,7 @@ export function OrderContainersCard({
       </Group>
       {containers.length === 0 ? (
         <Text fz="sm" c="dimmed" ta="center" py="md">
-          No container yet - use Add Container or Auto-plan.
+          {emptyText}
         </Text>
       ) : (
         <>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { routes } from '../../routes'
 import { Alert, Anchor, Badge, Button, Grid, Group, Loader, Paper, Select, SimpleGrid, Stack, Table, Text, Textarea, Title } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconSend, IconTrash, IconX } from '@tabler/icons-react'
@@ -31,7 +32,6 @@ import {
   type AllocationTarget,
   type ChargeLine,
 } from '../../components/purchase/purchaseCharges'
-import { PURCHASE_INVOICE } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -489,7 +489,7 @@ export function LandedCostAdjustmentPage() {
                 {invoiceId === null ? (
                   <Text fw={500}>—</Text>
                 ) : (
-                  <Anchor component={Link} to={`${PURCHASE_INVOICE.route}/${invoiceId}`} fw={500}>
+                  <Anchor component={Link} to={routes.purchaseInvoice(Number(invoiceId))} fw={500}>
                     {document?.sourceInvoiceNumber ?? invoice?.documentNumber ?? `#${invoiceId}`}
                   </Anchor>
                 )}
