@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { useAuth } from './useAuth'
 import { ForbiddenPage } from '../pages/ForbiddenPage'
+import { loginRouteFor } from './returnUrl'
 
 interface ProtectedRouteProps {
   /** When given, the user must hold this permission code or the Forbidden page is shown. */
@@ -21,7 +22,8 @@ export function ProtectedRoute({ permission }: ProtectedRouteProps) {
   }
 
   if (status !== 'authenticated' || !user) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+    // The page asked for travels in the URL (?returnUrl=), so it survives a reload of the sign-in page.
+    return <Navigate to={loginRouteFor(location.pathname + location.search + location.hash)} replace />
   }
 
   // Lacking a permission is not an authentication problem: show why instead of bouncing to login.

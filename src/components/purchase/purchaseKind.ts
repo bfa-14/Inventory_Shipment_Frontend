@@ -101,15 +101,21 @@ export function purchaseKindOf(code: PurchaseDocumentTypeCode | string | null | 
   return PURCHASE_KINDS.find((k) => k.code === code)
 }
 
-/** Draft grey, Posted green, Cancelled red — and Closed teal: finished, not undone. */
+/** Draft grey, waiting for approval yellow, Posted green, Cancelled red — and Closed teal: finished, not undone. */
 export const PURCHASE_STATUS_COLOURS: Record<PurchaseDocumentStatus, string> = {
   Draft: 'gray',
+  PendingApproval: 'yellow',
   Posted: 'green',
   Cancelled: 'red',
   Closed: 'teal',
 }
 
-export const PURCHASE_STATUSES: readonly PurchaseDocumentStatus[] = ['Draft', 'Posted', 'Cancelled', 'Closed']
+export const PURCHASE_STATUSES: readonly PurchaseDocumentStatus[] = ['Draft', 'PendingApproval', 'Posted', 'Cancelled', 'Closed']
+
+/** How a status reads on screen: the API's names, except the one that is two words run together. */
+export function purchaseStatusLabel(status: PurchaseDocumentStatus | string): string {
+  return status === 'PendingApproval' ? 'Waiting for approval' : status
+}
 
 /** "SUP-0001 - TVS Motor Company" — code first, so a typed code finds the supplier at once. */
 export function supplierLabel(party: { partyCode: string; partyName: string }): string {

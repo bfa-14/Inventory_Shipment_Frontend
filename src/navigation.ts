@@ -92,6 +92,9 @@ export const PERMISSIONS = {
   purchaseReturnsDelete: 'purchase.returns.delete',
   chargeTypesManage: 'purchase.chargetypes.manage',
   settingsManage: 'configuration.settings.manage',
+  emailsView: 'messaging.emails.view',
+  emailSettingsManage: 'settings.email.manage',
+  approvalManage: 'purchase.approval.manage',
   outOfStockAuditView: 'sales.outofstockaudit.view',
   landedCostsView: 'purchase.landedcosts.view',
   landedCostsCreate: 'purchase.landedcosts.create',
@@ -136,6 +139,13 @@ export interface NavItem {
    * working — for a screen that is kept but not offered, so a bookmark still opens it.
    */
   visible?: boolean
+  /**
+   * A fact about the reader that only the server knows live, beyond the permissions (see NavFacts):
+   * the item is listed only while it is true. Approvals is offered to the in-app approvers only.
+   */
+  requires?: 'canApproveInApp'
+  /** A live count shown in red beside the label (see NavFacts), hidden at 0: what waits for the reader. */
+  countOf?: 'pendingApprovals'
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
   /**
@@ -146,6 +156,16 @@ export interface NavItem {
   breadcrumb?: string[]
   /** Present on a group: the items it expands to. */
   children?: NavItem[]
+}
+
+/**
+ * What the menu needs to know about the reader that is not in their permissions — read from the
+ * server and refreshed while the application is open (useApprovalsMe). Missing facts count as false
+ * and 0, so an item that `requires` one stays hidden until the answer arrives.
+ */
+export interface NavFacts {
+  canApproveInApp: boolean
+  pendingApprovals: number
 }
 
 export interface NavSection {
@@ -205,6 +225,15 @@ export const NAVIGATION: NavSection[] = [
     breadcrumb: 'Purchase',
     items: [
       { label: 'Purchase Orders', to: '/purchase/orders', permission: PERMISSIONS.purchaseOrdersView, icon: 'cart' },
+      // The orders waiting for the reader's decision: approvers in the app only (Settings > Purchase approval).
+      {
+        label: 'Approvals',
+        to: '/purchase/approvals',
+        permission: PERMISSIONS.purchaseOrdersView,
+        requires: 'canApproveInApp',
+        countOf: 'pendingApprovals',
+        icon: 'approval',
+      },
       { label: 'Purchase Invoices', to: '/purchase/invoices', permission: PERMISSIONS.purchaseInvoicesView, icon: 'invoice' },
       { label: 'Purchase Returns', to: '/purchase/returns', permission: PERMISSIONS.purchaseReturnsView, icon: 'movement' },
       // Charges that arrive after the goods: they move value, not stock, so they are their own document.
@@ -304,8 +333,18 @@ export const NAVIGATION: NavSection[] = [
         permission: PERMISSIONS.documentTypesManage,
         icon: 'settings',
       },
-      // Switches that change how the whole system behaves; each setting is a row, drawn by one page.
-      { label: 'Settings', to: '/configuration/settings', permission: PERMISSIONS.settingsManage, icon: 'settings' },
+      {
+        // Settings, one page each: the global switches (each setting a row, drawn by one page), the mail
+        // server and its log, and who approves purchase orders.
+        label: 'Settings',
+        icon: 'settings',
+        children: [
+          { label: 'General', to: '/configuration/settings', permission: PERMISSIONS.settingsManage },
+          { label: 'Email', to: '/configuration/email', permission: PERMISSIONS.emailSettingsManage },
+          { label: 'Email log', to: '/configuration/email-log', permission: PERMISSIONS.emailsView },
+          { label: 'Purchase approval', to: '/configuration/purchase-approval', permission: PERMISSIONS.approvalManage },
+        ],
+      },
     ],
   },
 ]
@@ -324,9 +363,16 @@ export function isGroup(item: NavItem): boolean {
  * keeps its existing behaviour; the sidebar passes the reader's choice from useShowComingSoon().
  * With it false a group whose children are ALL unbuilt empties out and disappears with them, which
  * is what stops "Master Data" surviving as a heading over nothing.
+ *
+ * `facts` are the live answers an item may require (NavFacts); a caller that passes none hides those items.
  */
-export function visibleNavigation(hasPermission: (code: string) => boolean, showComingSoon = true): NavSection[] {
-  const allowed = (item: NavItem) => !item.permission || hasPermission(item.permission)
+export function visibleNavigation(
+  hasPermission: (code: string) => boolean,
+  showComingSoon = true,
+  facts: Partial<NavFacts> = {},
+): NavSection[] {
+  const allowed = (item: NavItem) =>
+    (!item.permission || hasPermission(item.permission)) && (!item.requires || facts[item.requires] === true)
   const built = (item: NavItem) => (showComingSoon || !item.comingSoon) && item.visible !== false
 
   return NAVIGATION.map((section) => ({

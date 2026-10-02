@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
+import { routes } from '../../routes'
 import { Alert, Badge, Button, Grid, Group, Loader, Paper, Stack, Text, Title, Tooltip } from '@mantine/core'
 import { IconCalculator, IconDownload, IconPrinter, IconShoppingCart, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -16,7 +17,7 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { PURCHASE_ORDER, PURCHASE_STATUS_COLOURS, supplierLabel } from '../../components/purchase/purchaseKind'
+import { PURCHASE_ORDER, PURCHASE_STATUS_COLOURS, purchaseStatusLabel, supplierLabel } from '../../components/purchase/purchaseKind'
 import { LoadItemsDrawer } from '../../components/shortages/LoadItemsDrawer'
 import { ShortageHeaderCard, type ShortageHeader, type ShortageHeaderErrors } from '../../components/shortages/ShortageHeaderCard'
 import { ShortageLinesGrid } from '../../components/shortages/ShortageLinesGrid'
@@ -378,7 +379,7 @@ export function ShortageDocumentPage() {
                     {order.documentNumber ?? `Draft, created ${dateLabel(order.createdAtUtc)}`}
                   </Text>
                   <Badge size="sm" variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>
-                    {order.status}
+                    {purchaseStatusLabel(order.status)}
                   </Badge>
                 </Group>
               ))}
@@ -394,7 +395,7 @@ export function ShortageDocumentPage() {
     try {
       const order = await shortagesApi.createPurchaseOrder(document.id)
       notify.success(`Purchase order ${order.documentNumber ?? `draft #${order.id}`} created from ${document.documentNumber}.`)
-      void navigate(`${PURCHASE_ORDER.route}/${order.id}`)
+      void navigate(routes.purchaseOrder(order.id))
     } catch (error) {
       showApiError(error, 'The purchase order could not be created.')
     } finally {

@@ -8,6 +8,7 @@ import {
   Group,
   Highlight,
   Image,
+  Indicator,
   NavLink,
   ScrollArea,
   Text,
@@ -18,7 +19,8 @@ import { IconChevronLeft, IconChevronRight, IconSearch } from '@tabler/icons-rea
 import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router'
 import { katangaLogo } from '../../assets'
 import { useAuth } from '../../auth/useAuth'
-import { findLeaf, isGroup, navLeaves, searchNavigation, visibleNavigation, type NavItem } from '../../navigation'
+import { useApprovalsMe } from '../../hooks/useApprovalsMe'
+import { findLeaf, isGroup, navLeaves, searchNavigation, visibleNavigation, type NavFacts, type NavItem } from '../../navigation'
 import { NavIcon } from './NavIcon'
 import { useShowComingSoon } from './useComingSoon'
 
@@ -40,7 +42,9 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
   const navigate = useNavigate()
 
   const [showComingSoon] = useShowComingSoon()
-  const allSections = visibleNavigation(hasPermission, showComingSoon)
+  const approvals = useApprovalsMe()
+  const facts: NavFacts = { canApproveInApp: approvals?.canApproveInApp === true, pendingApprovals: approvals?.pendingCount ?? 0 }
+  const allSections = visibleNavigation(hasPermission, showComingSoon, facts)
 
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -102,6 +106,18 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
     )
   }
 
+  /** What waits for the reader on this entry, in red; nothing at 0. Collapsed, the count sits on the icon. */
+  const countOf = (item: NavItem) => (item.countOf ? facts[item.countOf] : 0)
+  function countBadge(item: NavItem) {
+    const count = countOf(item)
+    if (collapsed || count === 0) return null
+    return (
+      <Badge className="app-navbar__count" size="sm" variant="filled" color="red" circle={count < 10} aria-label={`${count} waiting`} data-nav-count>
+        {count > 99 ? '99+' : count}
+      </Badge>
+    )
+  }
+
   const soonBadge = collapsed ? null : (
     <Badge size="xs" variant="light" color="gray">
       Soon
@@ -154,7 +170,15 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
   }
 
   function renderItem(item: NavItem) {
-    const icon = <NavIcon name={item.icon} />
+    const count = countOf(item)
+    const icon =
+      collapsed && count > 0 ? (
+        <Indicator color="red" size={16} label={count > 99 ? '99+' : count} offset={2} data-nav-count>
+          <NavIcon name={item.icon} />
+        </Indicator>
+      ) : (
+        <NavIcon name={item.icon} />
+      )
 
     if (item.comingSoon || (!item.to && !isGroup(item))) {
       return (
@@ -198,9 +222,10 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
         end
         label={label(item)}
         leftSection={icon}
+        rightSection={countBadge(item)}
         onClick={onNavigate}
         active={isActive(item.to as string)}
-        title={item.label}
+        title={count > 0 ? `${item.label} (${count} waiting)` : item.label}
         styles={{ root: { borderRadius: 'var(--mantine-radius-md)' }, label: NO_WRAP }}
       />
     )

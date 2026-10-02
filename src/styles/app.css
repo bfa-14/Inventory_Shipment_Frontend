@@ -71,6 +71,12 @@
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* What waits for the reader (Approvals): red, and readable on the navy - the dimmed tag above is for "Soon". */
+.app-navbar .mantine-Badge-root.app-navbar__count {
+  background-color: var(--mantine-color-red-6);
+  color: #fff;
+}
+
 /* The section heading ("BACKOFFICE") and the collapse control's divider. */
 .app-navbar .app-navbar__section-title {
   color: rgba(255, 255, 255, 0.5);

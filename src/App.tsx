@@ -7,6 +7,9 @@ import { PURCHASE_INVOICE, PURCHASE_ORDER, PURCHASE_RETURN } from './components/
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DocumentTypesPage } from './pages/configuration/DocumentTypesPage'
+import { EmailLogPage } from './pages/configuration/EmailLogPage'
+import { EmailSettingsPage } from './pages/configuration/EmailSettingsPage'
+import { PurchaseApprovalSettingsPage } from './pages/configuration/PurchaseApprovalSettingsPage'
 import { SettingsPage } from './pages/configuration/SettingsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
@@ -19,6 +22,7 @@ import { StockValuationPage } from './pages/inventory/StockValuationPage'
 import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
 import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
 import { LoginPage } from './pages/LoginPage'
+import { PublicPurchaseApprovalPage } from './pages/public/PublicPurchaseApprovalPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
 import { BrandsPage } from './pages/masterdata/BrandsPage'
 import { CurrenciesPage } from './pages/masterdata/CurrenciesPage'
@@ -43,7 +47,8 @@ import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
 import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
 import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
-import { PurchaseDocumentPage } from './pages/purchase/PurchaseDocumentPage'
+import { PurchaseApprovalsPage } from './pages/purchase/PurchaseApprovalsPage'
+import { PurchaseDocumentRoute } from './pages/purchase/PurchaseDocumentRoute'
 import { PurchaseDocumentsPage } from './pages/purchase/PurchaseDocumentsPage'
 import { ImportSalesPage } from './pages/sales/ImportSalesPage'
 import { SalesInvoicePage } from './pages/sales/SalesInvoicePage'
@@ -67,6 +72,8 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* The page of an emailed approval link: no sign-in, no menu - the token is the approver's proof. */}
+          <Route path="/purchase-approval/:token" element={<PublicPurchaseApprovalPage />} />
 
           {/* Everything below requires a signed-in user. */}
           <Route element={<ProtectedRoute />}>
@@ -192,18 +199,20 @@ export default function App() {
                   page (and by the API, which answers 403 naming the permission). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseOrdersView} />}>
                 <Route path="/purchase/orders" element={<PurchaseDocumentsPage kind={PURCHASE_ORDER} />} />
-                <Route path="/purchase/orders/new" element={<PurchaseDocumentPage kind={PURCHASE_ORDER} />} />
-                <Route path="/purchase/orders/:id" element={<PurchaseDocumentPage kind={PURCHASE_ORDER} />} />
+                <Route path="/purchase/orders/new" element={<PurchaseDocumentRoute kind={PURCHASE_ORDER} />} />
+                <Route path="/purchase/orders/:id" element={<PurchaseDocumentRoute kind={PURCHASE_ORDER} />} />
+                {/* Every order viewer may open it; the list holds only what the server says they can approve. */}
+                <Route path="/purchase/approvals" element={<PurchaseApprovalsPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseInvoicesView} />}>
                 <Route path="/purchase/invoices" element={<PurchaseDocumentsPage kind={PURCHASE_INVOICE} />} />
-                <Route path="/purchase/invoices/new" element={<PurchaseDocumentPage kind={PURCHASE_INVOICE} />} />
-                <Route path="/purchase/invoices/:id" element={<PurchaseDocumentPage kind={PURCHASE_INVOICE} />} />
+                <Route path="/purchase/invoices/new" element={<PurchaseDocumentRoute kind={PURCHASE_INVOICE} />} />
+                <Route path="/purchase/invoices/:id" element={<PurchaseDocumentRoute kind={PURCHASE_INVOICE} />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseReturnsView} />}>
                 <Route path="/purchase/returns" element={<PurchaseDocumentsPage kind={PURCHASE_RETURN} />} />
-                <Route path="/purchase/returns/new" element={<PurchaseDocumentPage kind={PURCHASE_RETURN} />} />
-                <Route path="/purchase/returns/:id" element={<PurchaseDocumentPage kind={PURCHASE_RETURN} />} />
+                <Route path="/purchase/returns/new" element={<PurchaseDocumentRoute kind={PURCHASE_RETURN} />} />
+                <Route path="/purchase/returns/:id" element={<PurchaseDocumentRoute kind={PURCHASE_RETURN} />} />
               </Route>
 
               {/* Charge types are setup — one permission for the lot. Landed cost adjustments are
@@ -256,6 +265,18 @@ export default function App() {
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.settingsManage} />}>
                 <Route path="/configuration/settings" element={<SettingsPage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.emailSettingsManage} />}>
+                <Route path="/configuration/email" element={<EmailSettingsPage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.emailsView} />}>
+                <Route path="/configuration/email-log" element={<EmailLogPage />} />
+              </Route>
+
+              <Route element={<ProtectedRoute permission={PERMISSIONS.approvalManage} />}>
+                <Route path="/configuration/purchase-approval" element={<PurchaseApprovalSettingsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.usersView} />}>

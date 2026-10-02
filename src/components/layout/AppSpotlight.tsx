@@ -3,6 +3,7 @@ import { Spotlight, type SpotlightActionData } from '@mantine/spotlight'
 import { IconSearch } from '@tabler/icons-react'
 import { useNavigate } from 'react-router'
 import { useAuth } from '../../auth/useAuth'
+import { useApprovalsMe } from '../../hooks/useApprovalsMe'
 import { navLeaves, visibleNavigation } from '../../navigation'
 import { NavIcon } from './NavIcon'
 
@@ -21,10 +22,12 @@ import { NavIcon } from './NavIcon'
 export function AppSpotlight() {
   const { hasPermission } = useAuth()
   const navigate = useNavigate()
+  // The live facts the sidebar uses too: Approvals is a page only an in-app approver is offered.
+  const canApproveInApp = useApprovalsMe()?.canApproveInApp === true
 
   const actions = useMemo<SpotlightActionData[]>(
     () =>
-      navLeaves(visibleNavigation(hasPermission, false)).map(({ item, section, group }) => {
+      navLeaves(visibleNavigation(hasPermission, false, { canApproveInApp })).map(({ item, section, group }) => {
         const path = [section.breadcrumb ?? section.title, group?.label].filter((part): part is string => !!part)
 
         return {
@@ -37,7 +40,7 @@ export function AppSpotlight() {
           onClick: () => void navigate(item.to as string),
         }
       }),
-    [hasPermission, navigate],
+    [hasPermission, navigate, canApproveInApp],
   )
 
   return (

@@ -5,17 +5,19 @@ import { useAuth } from '../auth/useAuth'
 import { useShowComingSoon } from '../components/layout/useComingSoon'
 import { formatDateTime, initials } from '../components/format'
 import { PageHeader } from '../components/ui/PageHeader'
+import { useApprovalsMe } from '../hooks/useApprovalsMe'
 import { navLeaves, visibleNavigation } from '../navigation'
 
 export function DashboardPage() {
   const { user, hasPermission } = useAuth()
   // Before the early return: hooks may not be called conditionally.
   const [showComingSoon, setShowComingSoon] = useShowComingSoon()
+  const canApproveInApp = useApprovalsMe()?.canApproveInApp === true
   if (!user) return null
 
   // One card per screen this user may actually open, grouped the way the sidebar groups them.
   const groups = new Map<string, { label: string; to: string }[]>()
-  for (const leaf of navLeaves(visibleNavigation(hasPermission, false))) {
+  for (const leaf of navLeaves(visibleNavigation(hasPermission, false, { canApproveInApp }))) {
     if (leaf.item.to === '/') continue
     const heading = leaf.group?.label ?? leaf.section.breadcrumb ?? leaf.section.title ?? 'Sections'
     groups.set(heading, [...(groups.get(heading) ?? []), { label: leaf.item.label, to: leaf.item.to as string }])

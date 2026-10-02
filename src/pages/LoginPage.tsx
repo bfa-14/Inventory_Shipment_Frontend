@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { Alert, Button, PasswordInput, TextInput } from '@mantine/core'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Navigate, useNavigate, useSearchParams } from 'react-router'
 import { ApiError } from '../api/http'
 import { bikeWatermark, katangaLogo, loginHero } from '../assets'
+import { safeReturnUrl } from '../auth/returnUrl'
 import { useAuth } from '../auth/useAuth'
 import { landingRoute } from '../navigation'
 
@@ -17,7 +18,7 @@ import { landingRoute } from '../navigation'
 export function LoginPage() {
   const { status, user, login } = useAuth()
   const navigate = useNavigate()
-  const location = useLocation()
+  const [searchParams] = useSearchParams()
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -25,8 +26,10 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 
-  // Honour the page the user was sent away from; otherwise land on Users when allowed.
-  const requested = (location.state as { from?: string } | null)?.from
+  // Honour the page the user was sent away from (?returnUrl=, a path of this site only - anything else
+  // is the home page); without one, land on Users when allowed.
+  const returnUrl = searchParams.get('returnUrl')
+  const requested = returnUrl === null ? undefined : safeReturnUrl(returnUrl)
 
   if (status === 'authenticated') {
     return <Navigate to={requested ?? landingRoute(user?.permissions)} replace />

@@ -1,9 +1,10 @@
 import { Anchor, Badge, Paper, Stack, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
+import { routes } from '../../routes'
 import type { ShortagePurchaseOrderDto } from '../../api/inventory/shortages'
 import { dateLabel } from '../documents/documentKind'
 import { formatMoney } from '../format'
-import { PURCHASE_ORDER, PURCHASE_STATUS_COLOURS } from '../purchase/purchaseKind'
+import { PURCHASE_STATUS_COLOURS, purchaseStatusLabel } from '../purchase/purchaseKind'
 
 /**
  * The purchase orders created from this plan — the second link of Shortage → PO → Purchase Invoice.
@@ -32,12 +33,12 @@ export function ShortagePurchaseOrdersCard({ orders }: { orders: ShortagePurchas
               {orders.map((order) => (
                 <Table.Tr key={order.id}>
                   <Table.Td>
-                    <Anchor component={Link} to={`${PURCHASE_ORDER.route}/${order.id}`} fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+                    <Anchor component={Link} to={routes.purchaseOrder(order.id)} fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
                       {order.documentNumber ?? `draft #${order.id}`}
                     </Anchor>
                   </Table.Td>
                   <Table.Td><Text fz="sm">{dateLabel(order.documentDate)}</Text></Table.Td>
-                  <Table.Td><Badge variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>{order.status}</Badge></Table.Td>
+                  <Table.Td><Badge variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>{purchaseStatusLabel(order.status)}</Badge></Table.Td>
                   <Table.Td ta="right"><Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{formatMoney(order.totalAmount, order.currencyCode)}</Text></Table.Td>
                 </Table.Tr>
               ))}

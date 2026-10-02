@@ -18,4 +18,9 @@ export const notify = {
   info(message: string) {
     notifications.show({ message, color: 'blue', autoClose: AUTO_CLOSE, withBorder: true })
   },
+
+  /** Done, but with something the reader has to know: the supplier was not emailed, say. Stays longer. */
+  warning(message: string) {
+    notifications.show({ message, color: 'orange', autoClose: AUTO_CLOSE * 2, withBorder: true })
+  },
 }
