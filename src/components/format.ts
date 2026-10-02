@@ -1,5 +1,15 @@
-export function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '-'
+/**
+ * A moment from the API in the reader's local time: "2026-10-01T20:26:00Z" reads "10/1/2026, 11:26:00 PM" at UTC+3.
+ *
+ * THE ONE HELPER FOR A TIME. The API sends every *Utc value with its "Z", so the browser converts it to the local
+ * time by itself: nothing here adds a zone or an offset - a correction made again would move the time a second
+ * time. A date without a time (a document date, "2026-10-01") is not a moment: formatDateOnly / dateLabel show it
+ * as it is.
+ *
+ * @param empty what an absent time reads ("-", or the "—" of the document pages' stamp())
+ */
+export function formatDateTime(value: string | null | undefined, empty = '-'): string {
+  if (!value) return empty
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }

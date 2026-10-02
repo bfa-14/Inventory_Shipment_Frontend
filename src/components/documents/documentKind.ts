@@ -1,6 +1,6 @@
 import type { StockDocumentTypeCode } from '../../api/inventory/stockDocuments'
 import { PERMISSIONS } from '../../navigation'
-import { formatMoney } from '../format'
+import { formatDateTime, formatMoney } from '../format'
 
 /**
  * Everything that differs between Inventory In and Inventory Out, in one table.
@@ -111,11 +111,9 @@ export function dateLabel(value: string | null | undefined): string {
   return `${day}/${month}/${year}`
 }
 
-/** A UTC timestamp as readable local text, for "posted on" lines. */
+/** A *Utc time in the reader's local time, for "posted on" lines: formatDateTime, with "—" when there is none. */
 export function stamp(value: string | null | undefined): string {
-  if (!value) return '—'
-  const parsed = new Date(value.endsWith('Z') ? value : `${value}Z`)
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString()
+  return formatDateTime(value, '—')
 }
 
 /** "PC" or "Box (x12)" — a unit is ambiguous without the formula the moment one holds more than one. */
