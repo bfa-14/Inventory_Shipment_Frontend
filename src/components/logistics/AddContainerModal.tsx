@@ -24,6 +24,7 @@ import { ApiError } from '../../api/http'
 import { containersApi, type AvailablePoLineDto, type ContainerDto, type SaveContainerRequest } from '../../api/logistics/containers'
 import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/masterdata/containerTypes'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
+import { invoiceContainersApi, type InvoiceContainersCreatedDto } from '../../api/purchase/invoiceContainers'
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { confirm } from '../ui/confirm'
@@ -37,14 +38,30 @@ export interface ContainerOrder {
   warehouseId: number
 }
 
+/**
+ * "Add container…" on an INVOICE shipped in containers (script 43): the order's form for the invoice's pieces outside
+ * containers - one item per container, at most those pieces - created on the order and linked to the invoice.
+ */
+export interface ContainerInvoice {
+  id: number
+  documentNumber: string | null
+  rowVersion: string | null
+  /** The invoice's pieces outside containers, per order line. */
+  unlinkedByPoLine: Record<number, number>
+}
+
 interface AddContainerModalProps {
   opened: boolean
   onClose: () => void
   order: ContainerOrder
+  /** For this invoice of the order instead of the order itself. */
+  invoice?: ContainerInvoice
   /** The reader may confirm a load above capacity (containers.overcapacity). */
   canOverCapacity: boolean
-  /** open = "Save and open": the host navigates to the new container. */
-  onSaved: (container: ContainerDto, open: boolean) => void
+  /** open = "Save and open": the host navigates to the new container. Order mode. */
+  onSaved?: (container: ContainerDto, open: boolean) => void
+  /** Invoice mode: the container created and the invoice's containers after the link. */
+  onInvoiceSaved?: (result: InvoiceContainersCreatedDto) => void
 }
 
 interface LoadRow {
@@ -64,7 +81,10 @@ interface LoadRow {
  * a warning, never a block: saving asks for confirmation and sends allowOverCapacity only when the
  * reader holds containers.overcapacity; otherwise the server's 409 message is shown.
  */
-export function AddContainerModal({ opened, onClose, order, canOverCapacity, onSaved }: AddContainerModalProps) {
+export function AddContainerModal({ opened, onClose, order, invoice, canOverCapacity, onSaved, onInvoiceSaved }: AddContainerModalProps) {
+  /** In invoice mode a line takes no more than the invoice's pieces of it outside containers. */
+  const maxOf = (line: AvailablePoLineDto) =>
+    invoice ? Math.min(line.maxHereBase, invoice.unlinkedByPoLine[line.poLineId] ?? 0) : line.maxHereBase
   const fullScreen = useMediaQuery('(max-width: 48em)')
 
   const [types, setTypes] = useState<ContainerTypeLookupDto[]>([])
@@ -92,19 +112,26 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
       .availablePoLines({ purchaseOrderId: order.id })
       .then((lines) => {
         if (!live) return
+        // An invoice offers only its order lines with pieces outside containers, prefilled with those pieces.
+        const offered = invoice ? lines.filter((line) => (invoice.unlinkedByPoLine[line.poLineId] ?? 0) > 0) : lines
         setRows(
-          lines.map((line) => ({
-            line,
-            quantity: line.availableBase > 0 ? line.availableBase : '',
-            oilIncluded: (line.itemOilQtyPerUnit ?? 0) > 0,
-            oilQtyPerUnit: line.itemOilQtyPerUnit ?? '',
-          })),
+          offered.map((line) => {
+            const start = invoice ? Math.min(line.availableBase, invoice.unlinkedByPoLine[line.poLineId] ?? 0) : line.availableBase
+            return {
+              line,
+              quantity: start > 0 ? start : '',
+              oilIncluded: (line.itemOilQtyPerUnit ?? 0) > 0,
+              oilQtyPerUnit: line.itemOilQtyPerUnit ?? '',
+            }
+          }),
         )
       })
       .catch((err: unknown) => live && setLoadError(err instanceof ApiError ? err.message : 'The order lines could not be loaded.'))
     return () => {
       live = false
     }
+    // The invoice's pieces are read once per opening, as the dialog was opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, order.id])
 
   const type = types.find((t) => String(t.id) === typeId) ?? null
@@ -123,7 +150,7 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
     let left = capacity
     setRows(
       rows.map((row) => {
-        const take = Math.max(0, Math.min(row.line.availableBase, left))
+        const take = Math.max(0, Math.min(invoice ? maxOf(row.line) : row.line.availableBase, left))
         left -= take
         return { ...row, quantity: take > 0 ? take : '' }
       }),
@@ -144,9 +171,13 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
       notify.error('Load at least one line.')
       return
     }
-    const tooMuch = picked.find((row) => Number(row.quantity) > row.line.maxHereBase)
+    const tooMuch = picked.find((row) => Number(row.quantity) > maxOf(row.line))
     if (tooMuch) {
-      notify.error(`${tooMuch.line.itemCode}: at most ${formatNumber(tooMuch.line.maxHereBase)} pieces can be loaded.`)
+      notify.error(`${tooMuch.line.itemCode}: at most ${formatNumber(maxOf(tooMuch.line))} pieces can be loaded.`)
+      return
+    }
+    if (invoice && new Set(picked.map((row) => row.line.itemId)).size > 1) {
+      notify.error('From an invoice, a container is added for one item at a time.')
       return
     }
 
@@ -160,6 +191,35 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
         if (!go) return
         allowOverCapacity = true
       }
+    }
+
+    if (invoice) {
+      setSaving('save')
+      try {
+        const result = await invoiceContainersApi.add(invoice.id, {
+          rowVersion: invoice.rowVersion,
+          quantityBase: picked.reduce((sum, row) => sum + Number(row.quantity), 0),
+          itemId: picked[0].line.itemId,
+          oilIncluded: picked[0].oilIncluded,
+          oilQtyPerUnit: picked[0].oilIncluded && picked[0].oilQtyPerUnit !== '' ? Number(picked[0].oilQtyPerUnit) : null,
+          containerNo: containerNo.trim() ? containerNo.trim().toUpperCase() : null,
+          containerTypeId: Number(typeId),
+          sealNo: sealNo.trim() || null,
+          orderDate,
+          shippingMethod: 'Sea',
+          portOfLoadingId: portOfLoadingId ? Number(portOfLoadingId) : null,
+          portOfDestinationId: portOfDestinationId ? Number(portOfDestinationId) : null,
+          eta,
+          allowOverCapacity,
+        })
+        notify.success(`Container ${result.created[0]?.containerRef ?? ''} created and linked to the invoice.`)
+        onInvoiceSaved?.(result)
+      } catch (err) {
+        notify.error(err instanceof ApiError ? err.message : 'The container could not be saved.')
+      } finally {
+        setSaving(null)
+      }
+      return
     }
 
     const request: SaveContainerRequest = {
@@ -217,7 +277,7 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
     try {
       const created = await containersApi.create(request)
       notify.success(`Container ${created.containerRef} created.`)
-      onSaved(created, open)
+      onSaved?.(created, open)
     } catch (err) {
       // OVER_CAPACITY without the right, ALLOCATION_EXCEEDS_INVOICE, DUPLICATE…: the server's sentence.
       notify.error(err instanceof ApiError ? err.message : 'The container could not be saved.')
@@ -236,7 +296,12 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
     <Modal
       opened={opened}
       onClose={onClose}
-      title={<Text fw={700}>Add Container - {order.documentNumber ?? `order #${order.id}`}</Text>}
+      title={
+        <Text fw={700}>
+          Add Container - {invoice ? `invoice ${invoice.documentNumber ?? `draft #${invoice.id}`}, ` : ''}
+          {order.documentNumber ?? `order #${order.id}`}
+        </Text>
+      }
       size="90rem"
       fullScreen={fullScreen}
       closeOnClickOutside={saving === null}
@@ -301,7 +366,7 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
 
         <div>
           <Group justify="space-between" mb="xs" wrap="wrap">
-            <Title order={6}>Lines of this order</Title>
+            <Title order={6}>{invoice ? 'Pieces of this invoice not in a container yet' : 'Lines of this order'}</Title>
             <Button size="xs" variant="light" leftSection={<IconBox size={14} />} disabled={capacity === null || !rows?.length} onClick={fillOneContainer}>
               Fill one container
             </Button>
@@ -332,7 +397,7 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
                 <Table.Tbody>
                   {rows.map((row) => {
                     const qty = Number(row.quantity || 0)
-                    const tooMuch = qty > row.line.maxHereBase
+                    const tooMuch = qty > maxOf(row.line)
                     return (
                       <Table.Tr key={row.line.poLineId}>
                         <Table.Td>
@@ -354,12 +419,12 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
                           <NumberInput
                             size="xs"
                             min={0}
-                            max={row.line.maxHereBase}
+                            max={maxOf(row.line)}
                             allowDecimal={false}
                             allowNegative={false}
                             thousandSeparator=","
                             value={row.quantity}
-                            error={tooMuch ? `Max ${formatNumber(row.line.maxHereBase)}` : undefined}
+                            error={tooMuch ? `Max ${formatNumber(maxOf(row.line))}` : undefined}
                             onChange={(next) => patch(row.line.poLineId, { quantity: numberInputValue(next) ?? '' })}
                             aria-label={`Load quantity of ${row.line.itemCode}`}
                           />
@@ -395,9 +460,11 @@ export function AddContainerModal({ opened, onClose, order, canOverCapacity, onS
           <Button variant="default" onClick={onClose} disabled={saving !== null}>
             Cancel
           </Button>
-          <Button variant="light" leftSection={<IconExternalLink size={16} />} loading={saving === 'open'} disabled={saving === 'save'} onClick={() => void save(true)}>
-            Save and open
-          </Button>
+          {!invoice && (
+            <Button variant="light" leftSection={<IconExternalLink size={16} />} loading={saving === 'open'} disabled={saving === 'save'} onClick={() => void save(true)}>
+              Save and open
+            </Button>
+          )}
           <Button leftSection={<IconDeviceFloppy size={16} />} loading={saving === 'save'} disabled={saving === 'open'} onClick={() => void save(false)}>
             Save
           </Button>

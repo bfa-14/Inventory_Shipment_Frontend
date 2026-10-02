@@ -27,7 +27,9 @@ import { ApiError } from '../../api/http'
 import {
   containersApi,
   type AutoPlanDto,
+  type AutoPlanRequest,
   type CapacitySource,
+  type CreateContainersFromPlanRequest,
   type CreatedContainerDto,
   type ItemCapacity,
   type PlanOrderLineDto,
@@ -36,6 +38,7 @@ import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/master
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import { warehousesApi } from '../../api/masterdata/warehouses'
+import { invoiceContainersApi } from '../../api/purchase/invoiceContainers'
 import type { PartyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
@@ -52,8 +55,20 @@ export interface AutoPlanOrder {
   warehouseId: number
 }
 
+/**
+ * The auto-plan of an INVOICE shipped in containers (script 43): the order's dialog, for the pieces the invoice has
+ * outside containers; what it creates is linked to the invoice in the same transaction.
+ */
+export interface AutoPlanInvoice {
+  id: number
+  documentNumber: string | null
+  rowVersion: string | null
+}
+
 interface AutoPlanModalProps {
   order: AutoPlanOrder
+  /** Plan for this invoice of the order instead of the whole order. */
+  invoice?: AutoPlanInvoice
   /** containers.overcapacity: may create containers above 100 % after one confirmation. */
   canOverCapacity: boolean
   /** containers.confirm: offers "Confirm the containers after creating them". */
@@ -128,7 +143,28 @@ function qty(line: PlanLine): number {
  *    100 % need containers.overcapacity and ONE confirmation listing all of them; without the right
  *    the list is shown and Create stays disabled.
  */
-export function AutoPlanModal({ order, canOverCapacity, canConfirm, onClose, onCreated }: AutoPlanModalProps) {
+export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onClose, onCreated }: AutoPlanModalProps) {
+  // The order's endpoints, or the invoice's: the same dialog, the same proposal shape.
+  const invoiceId = invoice?.id ?? null
+  const invoiceRowVersion = invoice?.rowVersion ?? null
+  const planner = useMemo(
+    () =>
+      invoiceId === null
+        ? { autoPlan: containersApi.autoPlan, createFromPlan: containersApi.createFromPlan }
+        : {
+            autoPlan: (payload: AutoPlanRequest, signal?: AbortSignal) =>
+              invoiceContainersApi.autoPlan(
+                invoiceId,
+                { containerTypeId: payload.containerTypeId, mixRemainders: payload.mixRemainders ?? true, capacities: payload.capacities },
+                signal,
+              ),
+            createFromPlan: async (payload: CreateContainersFromPlanRequest) => {
+              const { purchaseOrderId: _order, ...rest } = payload
+              return (await invoiceContainersApi.createFromPlan(invoiceId, { ...rest, rowVersion: invoiceRowVersion })).created
+            },
+          },
+    [invoiceId, invoiceRowVersion],
+  )
   const [types, setTypes] = useState<ContainerTypeLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
@@ -188,7 +224,7 @@ export function AutoPlanModal({ order, canOverCapacity, canConfirm, onClose, onC
   useEffect(() => {
     if (!typeId) return
     const controller = new AbortController()
-    containersApi
+    planner
       .autoPlan({ purchaseOrderId: order.id, containerTypeId: Number(typeId), mixRemainders: true }, controller.signal)
       .then((plan) => {
         setOrderLines(plan.orderLines)
@@ -200,7 +236,7 @@ export function AutoPlanModal({ order, canOverCapacity, canConfirm, onClose, onC
         setLinesError(err instanceof ApiError ? err.message : 'The order lines could not be loaded.')
       })
     return () => controller.abort()
-  }, [order.id, typeId])
+  }, [order.id, typeId, planner])
 
   /** Another type: the lines are asked again (its capacity is a default) and the proposal is dropped. */
   function changeType(next: string | null) {
@@ -299,7 +335,7 @@ export function AutoPlanModal({ order, canOverCapacity, canConfirm, onClose, onC
     setErrorSeq(null)
     setErrorLine(null)
     try {
-      const plan: AutoPlanDto = await containersApi.autoPlan({
+      const plan: AutoPlanDto = await planner.autoPlan({
         purchaseOrderId: order.id,
         containerTypeId: Number(typeId),
         mixRemainders: mix,
@@ -374,7 +410,7 @@ export function AutoPlanModal({ order, canOverCapacity, canConfirm, onClose, onC
     setErrorSeq(null)
     setErrorLine(null)
     try {
-      const created = await containersApi.createFromPlan({
+      const created = await planner.createFromPlan({
         purchaseOrderId: order.id,
         containerTypeId: Number(typeId),
         orderDate,
@@ -427,7 +463,12 @@ export function AutoPlanModal({ order, canOverCapacity, canConfirm, onClose, onC
       onClose={onClose}
       fullScreen
       closeOnClickOutside={false}
-      title={<Text fw={700}>Auto-plan containers - {order.documentNumber ?? `order #${order.id}`}</Text>}
+      title={
+        <Text fw={700}>
+          Auto-plan containers - {invoice ? `invoice ${invoice.documentNumber ?? `draft #${invoice.id}`}, ` : ''}
+          {order.documentNumber ?? `order #${order.id}`}
+        </Text>
+      }
     >
       <Stack gap="md">
         <Paper withBorder radius="lg" p="md">

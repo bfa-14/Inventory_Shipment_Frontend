@@ -1,8 +1,9 @@
-import { Anchor, Badge, Grid, Group, NumberInput, Paper, Select, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { Anchor, Badge, Grid, Group, NumberInput, Paper, Select, Switch, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconLink } from '@tabler/icons-react'
 import { Link } from 'react-router'
-import { RECEIPT_MODE_LABELS, type PurchaseRateResolutionDto, type ReceiptMode } from '../../api/purchase/documents'
+import { routes } from '../../routes'
+import type { PurchaseRateResolutionDto } from '../../api/purchase/documents'
 import { SALES_RATE_TYPES, salesRateTypeLabel, type SalesRateType } from '../../api/sales/invoices'
 import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
@@ -58,8 +59,8 @@ interface PurchaseHeaderCardProps {
   readOnly: boolean
   errors: PurchaseHeaderErrors
   disabled: boolean
-  /** Invoices: a container carries it, so it is received at offload whatever the reader picks. */
-  receiptModeLocked?: boolean
+  /** Invoices: why "Shipped in containers" cannot be changed now (lines linked, no purchase order); null = it can. */
+  shippedLockedReason?: string | null
   /** An invoice from containers: the exporter reference is required to post (EXPORTER_REFERENCE_REQUIRED). */
   exporterRequired?: boolean
 }
@@ -91,7 +92,7 @@ export function PurchaseHeaderCard({
   readOnly,
   errors,
   disabled,
-  receiptModeLocked = false,
+  shippedLockedReason = null,
   exporterRequired = false,
 }: PurchaseHeaderCardProps) {
   const isInvoice = kind.code === 'PINV'
@@ -144,7 +145,7 @@ export function PurchaseHeaderCard({
             color={sourceKind?.colour ?? 'gray'}
             leftSection={<IconLink size={14} />}
             component={Link}
-            to={`${sourceKind?.route ?? '/purchase/orders'}/${source.id}`}
+            to={routes.purchaseDocument(source.documentTypeCode, source.id)}
             style={{ cursor: 'pointer', textTransform: 'none' }}
             data-source-chip
           >
@@ -342,9 +343,25 @@ export function PurchaseHeaderCard({
               )}
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-              {/* AUTOMATIC SINCE THE CONTAINER MODEL: an invoice from containers is received at the
-                  offload, any other on posting. Shown, never chosen. */}
-              {field('Receipt Mode', RECEIPT_MODE_LABELS[(receiptModeLocked ? 2 : Number(value.receiptMode)) as ReceiptMode])}
+              {/* THE RECEIPT MODE, CHOSEN (script 43): shipped in containers = stock in at the offload of the
+                  containers the invoice is linked to; off = stock in on posting. Locked while containers are linked. */}
+              {readOnly ? (
+                field('Shipped in containers', value.receiptMode === '2' ? 'Yes - stock in at the container offload' : 'No - stock in on posting')
+              ) : (
+                <Tooltip label={shippedLockedReason} disabled={!shippedLockedReason} withArrow multiline w={280}>
+                  <div>
+                    <Switch
+                      mt={{ base: 0, lg: 'md' }}
+                      label="Shipped in containers"
+                      description="The goods enter the stock at the container offload, not when the invoice is posted."
+                      checked={value.receiptMode === '2'}
+                      disabled={disabled || shippedLockedReason !== null}
+                      onChange={(event) => onChange({ receiptMode: event.currentTarget.checked ? '2' : '1' })}
+                      data-shipped-in-containers
+                    />
+                  </div>
+                </Tooltip>
+              )}
             </Grid.Col>
           </>
         ) : null}
@@ -370,7 +387,7 @@ export function PurchaseHeaderCard({
       {source && readOnly === false && (
         <Text fz="xs" c="dimmed" mt="xs">
           Made from {sourceKind?.title.toLowerCase() ?? 'document'}{' '}
-          <Anchor component={Link} to={`${sourceKind?.route ?? '/purchase/orders'}/${source.id}`} fz="xs">
+          <Anchor component={Link} to={routes.purchaseDocument(source.documentTypeCode, source.id)} fz="xs">
             {source.documentNumber ?? `draft #${source.id}`}
           </Anchor>
           : the supplier and the branch are its own, and each line may take at most what remains on its source line.
