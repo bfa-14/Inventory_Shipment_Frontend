@@ -73,7 +73,7 @@ export function PurchaseChargesGrid({
         </div>
         {!readOnly && (
           <Button variant="default" leftSection={<IconPlus size={16} />} onClick={onAdd} data-add-charge>
-            Add Charge
+            Add charge
           </Button>
         )}
       </Group>

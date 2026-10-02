@@ -66,23 +66,31 @@ export function PostedInvoiceChargesCard({
   const [posting, setPosting] = useState(false)
   const [posted, setPosted] = useState<LateChargesPostedDto | null>(null)
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const result = await lateChargesApi.get(invoiceId, signal)
-      setLate(result)
-      setLoadError(null)
-    } catch (err) {
-      if (signal?.aborted) return
-      setLoadError(err instanceof ApiError ? err.message : 'The late charges could not be loaded.')
-    }
-  }, [invoiceId])
+  const showLoaded = useCallback((result: LateChargesDto) => {
+    setLate(result)
+    setLoadError(null)
+  }, [])
+
+  const showLoadError = useCallback((err: unknown) => {
+    setLoadError(err instanceof ApiError ? err.message : 'The late charges could not be loaded.')
+  }, [])
+
+  /** After an action whose answer did not carry the list (a failure, a posting). */
+  const load = useCallback(() => {
+    lateChargesApi.get(invoiceId).then(showLoaded).catch(showLoadError)
+  }, [invoiceId, showLoaded, showLoadError])
 
   useEffect(() => {
     if (!canView) return
     const controller = new AbortController()
-    void load(controller.signal)
+    lateChargesApi
+      .get(invoiceId, controller.signal)
+      .then(showLoaded)
+      .catch((err) => {
+        if (!controller.signal.aborted) showLoadError(err)
+      })
     return () => controller.abort()
-  }, [canView, load])
+  }, [canView, invoiceId, showLoaded, showLoadError])
 
   const draft = late?.draftAdjustment ?? null
   const draftCharges = draft ? (late?.charges ?? []).filter((c) => c.adjustmentId === draft.id) : []
@@ -106,7 +114,7 @@ export function PostedInvoiceChargesCard({
       notify.success('Late charge deleted.')
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The charge could not be deleted.')
-      void load()
+      load()
     } finally {
       setBusyId(null)
     }
@@ -131,7 +139,7 @@ export function PostedInvoiceChargesCard({
       notify.error(err instanceof ApiError ? err.message : 'The late charges could not be posted.')
     } finally {
       setPosting(false)
-      void load()
+      load()
     }
   }
 
