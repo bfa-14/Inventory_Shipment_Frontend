@@ -84,6 +84,11 @@ export interface ContainerChargeListDto extends ChargeFlags {
   /** Posted (or cancelled) after the offload: a cost adjustment. */
   adjustedAfterOffload: boolean
   attachmentCount: number
+  /* Supplier payments (script 47) - posted charges only, null otherwise. */
+  paidAmount: number | null
+  outstandingAmount: number | null
+  /** Unpaid, Partial or Paid. */
+  paymentStatus: string | null
   postedAtUtc: string | null
   createdAtUtc: string
   createdByName: string | null

@@ -96,6 +96,12 @@ export const PERMISSIONS = {
   emailSettingsManage: 'settings.email.manage',
   approvalManage: 'purchase.approval.manage',
   outOfStockAuditView: 'sales.outofstockaudit.view',
+  paymentsView: 'purchase.payments.view',
+  paymentsCreate: 'purchase.payments.create',
+  paymentsPost: 'purchase.payments.post',
+  paymentsReverse: 'purchase.payments.reverse',
+  paymentsDelete: 'purchase.payments.delete',
+  paymentsAllocate: 'purchase.payments.allocate',
   landedCostsView: 'purchase.landedcosts.view',
   landedCostsCreate: 'purchase.landedcosts.create',
   landedCostsPost: 'purchase.landedcosts.post',
@@ -236,6 +242,8 @@ export const NAVIGATION: NavSection[] = [
       },
       { label: 'Purchase Invoices', to: '/purchase/invoices', permission: PERMISSIONS.purchaseInvoicesView, icon: 'invoice' },
       { label: 'Purchase Returns', to: '/purchase/returns', permission: PERMISSIONS.purchaseReturnsView, icon: 'movement' },
+      // Money going out: advances, purchase invoice payments and container charge payments (US-PAY-001).
+      { label: 'Supplier Payments', to: '/purchase/payments', permission: PERMISSIONS.paymentsView, icon: 'wallet' },
       // Charges that arrive after the goods: they move value, not stock, so they are their own document.
       { label: 'Landed Cost Adjustments', to: '/purchase/landed-cost-adjustments', permission: PERMISSIONS.landedCostsView, icon: 'price' },
       // Defining the charge types is setup; entering a charge is not. Both live where they are used.

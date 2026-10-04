@@ -10,12 +10,13 @@ const BASE = '/api/masterdata/attachment-types'
 /** The categories the seed data uses. The column is free text; these are offered, not enforced. */
 export const ATTACHMENT_CATEGORIES = ['Container', 'Purchase', 'Shipping', 'Customs', 'Transport', 'Delivery', 'Bank', 'Cheque', 'Other']
 
-/** Which screens offer the type: the container pages (Logistics) or the customer receipt page (Receipt). */
-export type AttachmentAppliesTo = 'Logistics' | 'Receipt'
+/** Which screens offer the type: the container pages (Logistics), customer receipts (Receipt) or supplier payments (Payment). */
+export type AttachmentAppliesTo = 'Logistics' | 'Receipt' | 'Payment'
 
 export const ATTACHMENT_APPLIES_TO: { value: AttachmentAppliesTo; label: string }[] = [
   { value: 'Logistics', label: 'Containers' },
   { value: 'Receipt', label: 'Receipts' },
+  { value: 'Payment', label: 'Supplier payments' },
 ]
 
 export function appliesToLabel(value: AttachmentAppliesTo): string {

@@ -38,6 +38,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
+import { paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { useGridQuery } from '../../hooks/useGridQuery'
 
 interface Filters {
@@ -74,6 +75,8 @@ const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
   { accessor: 'totalAmountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalAmountBase, 2) },
   { accessor: 'receivedPercent', kind: 'number', text: (r) => (r.receivedPercent === null ? '' : `${formatNumber(r.receivedPercent, 0)}%`) },
   { accessor: 'status', kind: 'list' },
+  { accessor: 'paymentStatus', kind: 'list', text: (r) => (r.paymentStatus ? paymentStatusLabel(r.paymentStatus) : '') },
+  { accessor: 'outstandingAmount', kind: 'number', text: (r) => (r.outstandingAmount === null ? '' : formatNumber(r.outstandingAmount, r.decimalPlaces)) },
 ]
 
 /** A supplier invoice's item, "code - name": it holds one (a draft made before that rule may hold more). */
@@ -380,6 +383,26 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
       width: 110,
       render: (row) => <Badge color={PURCHASE_STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{purchaseStatusLabel(row.status)}</Badge>,
     },
+    ...(kind.code === 'PINV'
+      ? [
+          {
+            accessor: 'paymentStatus',
+            title: 'Payment',
+            width: 130,
+            // What supplier payments have settled: a posted invoice only.
+            render: (row) =>
+              row.paymentStatus ? <Badge color={paymentStatusColour(row.paymentStatus)} variant="light">{paymentStatusLabel(row.paymentStatus)}</Badge> : <Text fz="sm" c="dimmed">—</Text>,
+          } as DataTableColumn<PurchaseDocumentListDto>,
+          {
+            accessor: 'outstandingAmount',
+            title: 'Outstanding',
+            width: 150,
+            textAlign: 'right',
+            render: (row) =>
+              row.outstandingAmount === null ? <Text fz="sm" c="dimmed">—</Text> : <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{formatNumber(row.outstandingAmount, row.decimalPlaces)} {row.currencyCode}</Text>,
+          } as DataTableColumn<PurchaseDocumentListDto>,
+        ]
+      : []),
     {
       accessor: 'actions',
       title: 'Actions',
