@@ -1,5 +1,5 @@
-import type { DocumentFileFields } from '../documentFiles'
-import { fetchBlob, postForm, request } from '../http'
+import { attachmentEditForm, type DocumentFileEdit } from '../documentFiles'
+import { fetchBlob, postForm, putForm, request } from '../http'
 import type { PagedResult } from '../types'
 
 /**
@@ -955,9 +955,12 @@ export const containersApi = {
   listAttachments: (query: { containerId?: number; movementId?: number; attachmentTypeId?: number }) =>
     request<ContainerAttachmentDto[]>(`${BASE}/attachments${toQueryString(query)}`),
 
-  /** The type, date and note of one record (this container only). */
-  updateAttachment: (attachmentId: number, fields: DocumentFileFields) =>
-    request<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}`, { method: 'PUT', body: fields }),
+  /**
+   * The name, type, date and note of one record and optionally a new file (script 55). allShared = every container
+   * holding the file; otherwise this record only, and a new name or file becomes its own copy. Answers the record.
+   */
+  updateAttachment: (attachmentId: number, allShared: boolean, edit: DocumentFileEdit) =>
+    putForm<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, attachmentEditForm(edit)),
 
   attachmentBlob: (attachmentId: number) => fetchBlob(`${BASE}/attachments/${attachmentId}/download`),
 

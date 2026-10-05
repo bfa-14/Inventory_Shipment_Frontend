@@ -18,7 +18,7 @@ import {
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconDownload, IconPencil, IconTrash, IconUpload } from '@tabler/icons-react'
-import type { AttachmentDocumentKind, DocumentFileFields } from '../../api/documentFiles'
+import type { AttachmentDocumentKind, DocumentFileEdit, DocumentFileFields } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
 import { dateLabel, stamp } from '../documents/documentKind'
 import { formatNumber } from '../format'
@@ -72,7 +72,8 @@ export interface AttachmentRow {
 export interface AttachmentsSource<R extends AttachmentRow> {
   list: () => Promise<R[]>
   upload: (file: File, fields: DocumentFileFields, filing: ContainerFilingValue) => Promise<unknown>
-  update: (row: R, fields: DocumentFileFields) => Promise<unknown>
+  /** Name, type / date / note and optionally a new file; allShared = every container holding it (containers only). */
+  update: (row: R, edit: DocumentFileEdit, allShared: boolean) => Promise<unknown>
   download: (row: R) => Promise<void>
   /** Deletes the row; false = the reader kept it (a source that asks its own question). */
   remove: (row: R) => Promise<boolean | void>
@@ -104,6 +105,8 @@ interface AttachmentsPanelProps<R extends AttachmentRow> {
   groupOf?: (row: R) => AttachmentGroup
   /** After the file name: a container's "shared with 2 containers". */
   fileExtra?: (row: R) => ReactNode
+  /** Containers holding the row's file, its own included: above one the edit asks how far it goes. */
+  sharedCount?: (row: R) => number
   emptyText?: string
   /** Told after every upload, edit and delete, so the page's own counts and audit trail catch up. */
   onChanged?: () => void
@@ -113,8 +116,8 @@ interface AttachmentsPanelProps<R extends AttachmentRow> {
 
 /**
  * THE attachments list of every document and container: the type badge ("Purchase › Proforma Invoice"), the date
- * written on the document, the note, the size, who added it and when; download, edit the type / date / note,
- * delete; a filter by type. Dropping or picking a file opens the upload dialog with the file filled in - nothing
+ * written on the document, the note, the size, who added it and when; download, edit (name, type / date / note, and
+ * a new version of the file), delete; a filter by type. Dropping or picking a file opens the upload dialog with the file filled in - nothing
  * is uploaded without a type. Files still typed "Other" say so in orange next to their edit button.
  */
 export function AttachmentsPanel<R extends AttachmentRow>({
@@ -128,6 +131,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
   filing,
   groupOf,
   fileExtra,
+  sharedCount,
   emptyText = 'Nothing attached yet.',
   onChanged,
   card = true,
@@ -270,7 +274,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
         </ActionIcon>
       </Tooltip>
       {canAdd ? (
-        <Tooltip label="Edit type, date and note" withArrow>
+        <Tooltip label="Edit" withArrow>
           <ActionIcon variant="subtle" aria-label={`Edit ${row.fileName}`} onClick={() => setEditing(row)}>
             <IconPencil size={16} />
           </ActionIcon>
@@ -508,9 +512,10 @@ export function AttachmentsPanel<R extends AttachmentRow>({
       <AttachmentEditDialog
         file={editing}
         documentKind={documentKind}
-        onSave={(fields) => {
+        sharedCount={editing && sharedCount ? sharedCount(editing) : 1}
+        onSave={(edit, allShared) => {
           if (!sourceRef.current || !editing) return Promise.resolve()
-          return sourceRef.current.update(editing, fields)
+          return sourceRef.current.update(editing, edit, allShared)
         }}
         onClose={() => setEditing(null)}
         onSaved={() => {

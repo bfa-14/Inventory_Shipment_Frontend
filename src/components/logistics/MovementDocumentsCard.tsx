@@ -234,7 +234,7 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
                         </ActionIcon>
                       </Tooltip>
                       {canManage ? (
-                        <Tooltip label="Edit type, date and note" withArrow>
+                        <Tooltip label="Edit" withArrow>
                           <ActionIcon
                             variant="subtle"
                             aria-label={`Edit ${line.first.fileName}`}
@@ -293,9 +293,10 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
       <AttachmentEditDialog
         file={editing?.first ?? null}
         documentKind="CONTAINER"
-        onSave={async (fields) => {
-          // One file, one type: every container of this movement holding it changes together.
-          for (const row of editing?.rows ?? []) await containersApi.updateAttachment(row.id, fields)
+        onSave={async (edit) => {
+          // One upload, one edit: the line's first record with allShared reaches every container holding the file -
+          // the containers of this movement it was uploaded for.
+          if (editing) await containersApi.updateAttachment(editing.first.id, true, edit)
         }}
         onClose={() => setEditing(null)}
         onSaved={() => {

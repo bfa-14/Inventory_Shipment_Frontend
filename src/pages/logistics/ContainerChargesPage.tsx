@@ -34,6 +34,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
+import { paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
 
@@ -78,6 +79,7 @@ const GRID_COLUMNS: GridColumnMeta<ContainerChargeListDto>[] = [
   { accessor: 'allocationMethod', kind: 'list', text: (r) => allocationMethodLabel(r.allocationMethod) },
   { accessor: 'includeInLandedCost', kind: 'boolean', text: (r) => (r.includeInLandedCost ? 'Yes' : 'No') },
   { accessor: 'status', kind: 'list', text: (r) => r.statusName },
+  { accessor: 'paymentStatus', kind: 'list', text: (r) => (r.paymentStatus ? paymentStatusLabel(r.paymentStatus) : '') },
   { accessor: 'attachmentCount', kind: 'number' },
 ]
 
@@ -325,6 +327,14 @@ export function ContainerChargesPage() {
             {row.adjustedAfterOffload && <Badge variant="light" color="orange" size="xs">after offload</Badge>}
           </Group>
         ),
+      },
+      {
+        accessor: 'paymentStatus',
+        title: 'Payment',
+        width: 130,
+        // What supplier payments have settled: a posted charge only.
+        render: (row) =>
+          row.paymentStatus ? <Badge variant="light" color={paymentStatusColour(row.paymentStatus)}>{paymentStatusLabel(row.paymentStatus)}</Badge> : <Text fz="sm" c="dimmed">—</Text>,
       },
       { accessor: 'attachmentCount', title: 'Documents', width: 100, textAlign: 'center', render: (row) => formatNumber(row.attachmentCount) },
       {

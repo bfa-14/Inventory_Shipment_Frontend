@@ -18,8 +18,8 @@ interface ContainerDocumentsCardProps {
 /**
  * The container's paperwork, filed where it belongs: general papers, the documents of each leg of the
  * route, the invoices behind each charge - the shared attachments list, grouped. A file uploaded once for
- * several containers is ONE file; the badge says so, and deleting it asks whether it goes from this
- * container or from all of them.
+ * several containers is ONE file; the badge says so, and editing or deleting it asks whether that is for this
+ * container or for all of them.
  */
 export function ContainerDocumentsCard({ container, canManage, onChanged }: ContainerDocumentsCardProps) {
   const routeOrder = useMemo(
@@ -67,7 +67,7 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
     list: () => containersApi.listAttachments({ containerId: container.id }),
     upload: (file, fields, filed) =>
       containersApi.addAttachment({ file, containerIds: filed.containerIds, movementId: filed.movementId, ...fields }),
-    update: (row, fields) => containersApi.updateAttachment(row.id, fields),
+    update: (row, edit, allShared) => containersApi.updateAttachment(row.id, allShared, edit),
     download: (row) => containersApi.downloadAttachment(row.id, row.fileName),
     asksBeforeRemove: true,
     remove: async (row) => {
@@ -106,6 +106,7 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
       canRemove={canManage}
       filing={filing}
       groupOf={groupOf}
+      sharedCount={(row) => row.sharedWith + 1}
       fileExtra={(row) =>
         row.sharedWith > 0 ? (
           <Badge size="xs" variant="light" color="grape" style={{ flexShrink: 0 }}>

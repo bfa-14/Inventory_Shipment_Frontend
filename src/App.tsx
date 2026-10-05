@@ -47,6 +47,9 @@ import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
 import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
 import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
+import { PaymentPage } from './pages/purchase/PaymentPage'
+import { PaymentPrintPage } from './pages/purchase/PaymentPrintPage'
+import { PaymentsPage } from './pages/purchase/PaymentsPage'
 import { PurchaseApprovalsPage } from './pages/purchase/PurchaseApprovalsPage'
 import { PurchaseDocumentRoute } from './pages/purchase/PurchaseDocumentRoute'
 import { PurchaseDocumentsPage } from './pages/purchase/PurchaseDocumentsPage'
@@ -86,6 +89,9 @@ export default function App() {
             <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
               <Route path="/sales/receipts/:id/print" element={<ReceiptPrintPage />} />
               <Route path="/sales/receipts/statement/print" element={<CustomerStatementPrintPage />} />
+            </Route>
+            <Route element={<ProtectedRoute permission={PERMISSIONS.paymentsView} />}>
+              <Route path="/purchase/payments/:id/print" element={<PaymentPrintPage />} />
             </Route>
 
             <Route element={<AppShell />}>
@@ -220,6 +226,14 @@ export default function App() {
                   posting, cancelling and deleting are checked on the page (and by the API). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.chargeTypesManage} />}>
                 <Route path="/purchase/charge-types" element={<ChargeTypesPage />} />
+              </Route>
+
+              {/* Supplier payments: list and document behind the view permission; saving, posting, reversing and
+                  allocating are checked on the page (and by the API). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.paymentsView} />}>
+                <Route path="/purchase/payments" element={<PaymentsPage />} />
+                <Route path="/purchase/payments/new" element={<PaymentPage />} />
+                <Route path="/purchase/payments/:id" element={<PaymentPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.landedCostsCreate} />}>
                 <Route path="/purchase/landed-cost-adjustments/new" element={<LandedCostAdjustmentPage />} />

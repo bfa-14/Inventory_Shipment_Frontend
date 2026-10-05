@@ -772,7 +772,7 @@ export function ReceiptPage() {
         <ReceiptAttachmentsCard
           receiptId={receipt?.id ?? null}
           canAdd={canCreate && status !== 'Reversed'}
-          canRemove={canCreate && status === 'Draft'}
+          canRemove={canCreate && status !== 'Reversed'}
           onChanged={() => void reload()}
         />
       </div>

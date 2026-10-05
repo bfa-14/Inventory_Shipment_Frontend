@@ -7,7 +7,7 @@ interface ReceiptAttachmentsCardProps {
   receiptId: number | null
   /** Adding (and retyping) is allowed on a posted receipt too - the cheque photo often arrives after the cash. */
   canAdd: boolean
-  /** Removing is for drafts only; a posted receipt's evidence stays. */
+  /** Until the receipt is reversed; a reversed receipt's evidence stays as it was. */
   canRemove: boolean
   onChanged: () => void
 }
@@ -24,7 +24,7 @@ export function ReceiptAttachmentsCard({ receiptId, canAdd, canRemove, onChanged
       : {
           list: () => api.list(receiptId),
           upload: (file, fields) => api.add(receiptId, file, fields),
-          update: (row, fields) => api.update(receiptId, row.id, fields),
+          update: (row, edit) => api.update(receiptId, row.id, edit),
           download: (row) => api.download(receiptId, row.id, row.fileName),
           remove: (row) => api.remove(receiptId, row.id),
         }

@@ -43,7 +43,7 @@ export function AttachmentsDrawer({
       : {
           list: () => api.list(documentId),
           upload: (file, fields) => api.add(documentId, file, fields),
-          update: (row, fields) => api.update(documentId, row.id, fields),
+          update: (row, edit) => api.update(documentId, row.id, edit),
           download: (row) => api.download(documentId, row.id, row.fileName),
           remove: (row) => api.remove(documentId, row.id),
         }

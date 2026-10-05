@@ -83,7 +83,7 @@ export async function uploadFile<T>(
 ): Promise<T> {
   const form = new FormData()
   form.append(options.field ?? 'file', file, file.name)
-  return sendForm<T>(path, form, options.signal, true)
+  return sendForm<T>('POST', path, form, options.signal, true)
 }
 
 /**
@@ -95,7 +95,12 @@ export async function uploadFile<T>(
  * same sender, so it carries the bearer token and replays once after a refresh like everything else.
  */
 export async function postForm<T>(path: string, form: FormData, signal?: AbortSignal): Promise<T> {
-  return sendForm<T>(path, form, signal, true)
+  return sendForm<T>('POST', path, form, signal, true)
+}
+
+/** {@link postForm} as a PUT: an attachment's details, with or without a replacement file. */
+export async function putForm<T>(path: string, form: FormData, signal?: AbortSignal): Promise<T> {
+  return sendForm<T>('PUT', path, form, signal, true)
 }
 
 /**
@@ -151,6 +156,7 @@ export async function postForBlob(
 }
 
 async function sendForm<T>(
+  method: 'POST' | 'PUT',
   path: string,
   form: FormData,
   signal: AbortSignal | undefined,
@@ -162,7 +168,7 @@ async function sendForm<T>(
 
   let response: Response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', headers, body: form, signal })
+    response = await fetch(`${API_BASE_URL}${path}`, { method, headers, body: form, signal })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiError(0, null, 'Could not reach the API. Is Inventory_Shipment.API running?')
@@ -172,7 +178,7 @@ async function sendForm<T>(
     const fresh = await tokenProvider.refreshAccessToken()
     // FormData is single-use once consumed by fetch, but the same object can be re-sent: the
     // browser rebuilds the body from the entries, which are still there.
-    if (fresh) return sendForm<T>(path, form, signal, false)
+    if (fresh) return sendForm<T>(method, path, form, signal, false)
     tokenProvider.onSessionExpired()
   }
 

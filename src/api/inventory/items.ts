@@ -1,4 +1,4 @@
-import { fetchBlob, request, uploadFile } from '../http'
+import { fetchBlob, putForm, request, uploadFile } from '../http'
 import type {
   ItemDetailsDto,
   ItemFileDto,
@@ -96,6 +96,14 @@ export const itemsApi = {
    */
   fileBlob: (itemId: number, fileId: number, signal?: AbortSignal) =>
     fetchBlob(`${BASE}/${itemId}/files/${fileId}`, signal),
+
+  /** New name, and a new version of the file when one is given; it keeps its place. */
+  updateFile: (itemId: number, fileId: number, update: { fileName: string; file?: File | null }) => {
+    const form = new FormData()
+    form.append('fileName', update.fileName)
+    if (update.file) form.append('file', update.file, update.file.name)
+    return putForm<void>(`${BASE}/${itemId}/files/${fileId}`, form)
+  },
 
   removeFile: (itemId: number, fileId: number) =>
     request<void>(`${BASE}/${itemId}/files/${fileId}`, { method: 'DELETE' }),

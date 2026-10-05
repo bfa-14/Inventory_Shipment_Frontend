@@ -15,8 +15,11 @@ export const ATTACHMENT_CATEGORIES = [
   'Container', 'Purchase', 'Sales', 'Shipping', 'Customs', 'Transport', 'Delivery', 'Returns', 'Payment', 'Bank', 'Cheque', 'Other',
 ]
 
-/** The type's former single list (Logistics / Receipt). Kept by the API, no longer read: "Used for" replaced it. */
-export type AttachmentAppliesTo = 'Logistics' | 'Receipt'
+/**
+ * The type's former single list (Logistics / Receipt / Payment). Kept by the API, where a name is unique within its
+ * list, but no page reads it: "Used for" replaced it.
+ */
+export type AttachmentAppliesTo = 'Logistics' | 'Receipt' | 'Payment'
 
 /** A document kind a type can be used for: { code: 'PO', name: 'Purchase orders' }. */
 export interface AttachmentDocumentKindDto {

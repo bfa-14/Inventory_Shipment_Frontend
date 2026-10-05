@@ -198,6 +198,12 @@ export interface PurchaseDocumentListDto {
   itemName: string | null
   /** Supplier invoices: how many items it holds — more than 1 only on a draft made before one item per invoice. */
   itemCount: number | null
+  /* Supplier payments (script 47) - posted purchase invoices only, null otherwise. */
+  paidAmount: number | null
+  returnedAmount: number | null
+  outstandingAmount: number | null
+  /** Unpaid, Partial or Paid. */
+  paymentStatus: string | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -382,6 +388,12 @@ export interface PurchaseDocumentDto {
   totalChargesBase: number
   /** What the goods really cost: totalAmountBase + totalChargesBase. */
   totalLandedCostBase: number
+  /* Supplier payments (script 47) - posted purchase invoices only, null otherwise. */
+  paidAmount: number | null
+  returnedAmount: number | null
+  outstandingAmount: number | null
+  /** Unpaid, Partial or Paid. */
+  paymentStatus: string | null
   sourceDocumentId: number | null
   sourceDocumentNumber: string | null
   sourceDocumentTypeCode: PurchaseDocumentTypeCode | null
