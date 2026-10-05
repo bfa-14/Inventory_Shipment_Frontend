@@ -1,5 +1,6 @@
 import { fetchBlob, putForm, request, uploadFile } from '../http'
 import type {
+  ItemStockBalanceDto,
   ItemDetailsDto,
   ItemFileDto,
   ItemListDto,
@@ -43,6 +44,9 @@ export const itemsApi = {
 
   /** The item with its units and file metadata, in one round trip. */
   get: (id: number, signal?: AbortSignal) => request<ItemDetailsDto>(`${BASE}/${id}`, { signal }),
+
+  /** The item's on hand in every warehouse that has held it, with the totals. */
+  stockBalance: (id: number, signal?: AbortSignal) => request<ItemStockBalanceDto>(`${BASE}/${id}/stock-balance`, { signal }),
 
   /** Items for a dropdown, each with the SKU of its base unit. */
   /**

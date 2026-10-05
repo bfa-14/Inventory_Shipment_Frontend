@@ -33,7 +33,7 @@ import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sa
 import { SalesInvoiceHeaderCard, type SalesInvoiceHeader, type SalesInvoiceHeaderErrors } from '../../components/sales/SalesInvoiceHeaderCard'
 import { SalesInvoiceLinesGrid, type InvoiceLine } from '../../components/sales/SalesInvoiceLinesGrid'
 import { SalesPaymentCard } from '../../components/sales/SalesPaymentCard'
-import { EMPTY_PAYMENT, type SalesPaymentErrors, type SalesPaymentForm } from '../../components/sales/salesPayment'
+import { accountTypeFor, EMPTY_PAYMENT, type SalesPaymentErrors, type SalesPaymentForm } from '../../components/sales/salesPayment'
 import { SalesInvoiceProfitCard } from '../../components/sales/SalesInvoiceProfitCard'
 import { SalesTotals } from '../../components/sales/SalesTotals'
 import { decideOutOfStock } from '../../components/sales/outOfStock'
@@ -55,7 +55,7 @@ function emptyLine(warehouseId: number | null): InvoiceLine {
     specification: null,
     specifications: [],
     warehouseId,
-    units: [], quantity: 1, unitPrice: null, systemPrice: null, priceSource: 'PriceList', discountPercent: 0, expiryDate: null,
+    units: [], quantity: 1, unitPrice: null, systemPrice: null, listPrice: null, priceSource: 'PriceList', discountPercent: 0, expiryDate: null,
     notes: '', onHandBase: null, importRowNumber: null,
   }
 }
@@ -130,7 +130,7 @@ export function SalesInvoicePage() {
 
   const [header, setHeader] = useState<SalesInvoiceHeader>({
     documentDate: isoDate(new Date()), dueDate: null, branchId: null, clientId: null, salesmanId: null,
-    priceListId: null, currencyId: null, rateType: 1, exchangeRate: null, referenceNo: '', notes: '',
+    priceListId: null, currencyId: null, rateType: 1, exchangeRate: null, priceListRate: null, referenceNo: '', notes: '',
   })
   const [errors, setErrors] = useState<SalesInvoiceHeaderErrors>({})
   /* HOW THE CUSTOMER PAYS lives beside the header, not in it: it is its own card and its own rule
@@ -220,6 +220,7 @@ export function SalesInvoicePage() {
       currencyId: String(doc.currencyId),
       rateType: doc.rateType,
       exchangeRate: doc.exchangeRate,
+      priceListRate: doc.priceListRate,
       referenceNo: doc.referenceNo ?? '',
       notes: doc.notes ?? '',
     })
@@ -241,6 +242,8 @@ export function SalesInvoicePage() {
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         systemPrice: line.systemPrice,
+        // Fetched below for a draft, so a changed rate can convert it again.
+        listPrice: null,
         priceSource: line.priceSource === 'Manual' ? 'Manual' : 'PriceList',
         discountPercent: line.discountPercent,
         expiryDate: line.expiryDate ? line.expiryDate.slice(0, 10) : null,
@@ -258,6 +261,17 @@ export function SalesInvoicePage() {
     priceListTouched.current = true
     rateDirty.current = false
     dirty.current = false
+
+    /* A DRAFT'S LIST PRICES, in the price list's own currency. The saved line holds the converted
+       price only; without the list figure a rate typed later could not convert the line again. */
+    if (doc.status === 'Draft') {
+      for (const line of doc.lines) {
+        unitPricesApi
+          .resolve(line.itemUnitId, doc.priceListId, doc.branchId)
+          .then((answer) => setLines((current) => current.map((l) => (l.id === line.id ? { ...l, listPrice: answer.price } : l))))
+          .catch(() => {})
+      }
+    }
 
     /* THE SUGGESTIONS FOLLOW, ONE CALL PER DISTINCT ITEM. A reopened draft must offer the same list
        a fresh row does, or the box would look emptier on the invoice that has been saved. The
@@ -317,23 +331,26 @@ export function SalesInvoicePage() {
     })
   }, [header.branchId, warehouses])
 
-  /* The rate follows the price list, the type and the date — but overwrites a loaded invoice's own
-     rate only once the reader changed one of the three. */
-  const rateKey = header.priceListId ? `${header.priceListId}|${header.rateType}|${header.documentDate}|${header.currencyId ?? ''}` : ''
+  /* The rates follow the currency, the price list, the type and the date — but overwrite a loaded
+     invoice's own rates only once the reader changed one of them. TWO RATES: the invoice
+     currency's, and the price list currency's that converts its prices into the invoice currency. */
+  const rateKey = header.priceListId || header.currencyId ? `${header.priceListId ?? ''}|${header.rateType}|${header.documentDate}|${header.currencyId ?? ''}` : ''
   useEffect(() => {
-    if (!header.priceListId) return
-    const key = `${header.priceListId}|${header.rateType}|${header.documentDate}|${header.currencyId ?? ''}`
+    if (!header.priceListId && !header.currencyId) return
+    const key = `${header.priceListId ?? ''}|${header.rateType}|${header.documentDate}|${header.currencyId ?? ''}`
     const controller = new AbortController()
     salesInvoicesApi
-      .rate(Number(header.priceListId), header.rateType, header.documentDate || null, controller.signal, header.currencyId ? Number(header.currencyId) : null)
+      .rate(header.priceListId ? Number(header.priceListId) : null, header.rateType, header.documentDate || null, controller.signal, header.currencyId ? Number(header.currencyId) : null)
       .then((answer) => {
         setRate(answer)
         setRateFor(key)
-        setHeader((current) =>
-          rateDirty.current || current.exchangeRate === null
-            ? { ...current, exchangeRate: answer.isBaseCurrency ? 1 : answer.rate }
-            : current,
-        )
+        setHeader((current) => {
+          const next = { ...current }
+          if (rateDirty.current || current.exchangeRate === null) next.exchangeRate = answer.isBaseCurrency ? 1 : answer.rate
+          if (answer.priceListCurrencyId !== null && (rateDirty.current || current.priceListRate === null))
+            next.priceListRate = answer.priceListIsBaseCurrency ? 1 : answer.priceListRate
+          return next
+        })
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
@@ -346,11 +363,55 @@ export function SalesInvoicePage() {
 
   const rateLoading = rateKey !== '' && rateFor !== rateKey
   const priceList = priceLists.find((p) => String(p.id) === header.priceListId) ?? null
-  const currencyCode = invoice?.currencyCode ?? rate?.currencyCode ?? priceList?.currencyCode ?? 'USD'
-  const decimalPlaces = invoice?.decimalPlaces ?? rate?.decimalPlaces ?? priceList?.decimalPlaces ?? 2
-  const isBaseCurrency = invoice ? invoice.isBaseCurrency : (rate?.isBaseCurrency ?? true)
+  /* THE HEADER'S CURRENCY, not the saved one: a draft may have just been switched to another. */
+  const invoiceCurrency = currencies.find((c) => String(c.id) === header.currencyId) ?? null
+  const listCurrency = priceList ? (currencies.find((c) => c.id === priceList.currencyId) ?? null) : null
+  const sameCurrency = priceList !== null && invoiceCurrency !== null && priceList.currencyId === invoiceCurrency.id
+  const listIsBase = listCurrency?.isBaseCurrency ?? rate?.priceListIsBaseCurrency ?? false
+  const currencyCode = (readOnly ? invoice?.currencyCode : invoiceCurrency?.currencyCode) ?? invoice?.currencyCode ?? rate?.currencyCode ?? priceList?.currencyCode ?? 'USD'
+  const decimalPlaces = (readOnly ? invoice?.decimalPlaces : invoiceCurrency?.decimalPlaces) ?? invoice?.decimalPlaces ?? rate?.decimalPlaces ?? priceList?.decimalPlaces ?? 2
+  const isBaseCurrency = readOnly && invoice ? invoice.isBaseCurrency : (invoiceCurrency?.isBaseCurrency ?? rate?.isBaseCurrency ?? true)
   /** The currency the invoice is billed in, as an id: what a cash account has to hold. */
-  const invoiceCurrencyId = invoice?.currencyId ?? rate?.currencyId ?? null
+  const invoiceCurrencyId = header.currencyId ? Number(header.currencyId) : (invoice?.currencyId ?? null)
+
+  /* THE INVOICE CURRENCY STARTS AS THE PRICE LIST'S, however the list got there (chosen, or the
+     client's default), until the reader picks one. It is mandatory, and may be chosen first. */
+  useEffect(() => {
+    if (readOnly || header.currencyId || !priceList) return
+    setHeader((current) => (current.currencyId ? current : { ...current, currencyId: String(priceList.currencyId) }))
+  }, [readOnly, header.currencyId, priceList])
+
+  /* WHAT CONVERTS A LIST PRICE INTO THE INVOICE CURRENCY: invoice rate / price list rate, both "per
+     1 base". 1 when they are the same currency; null while a rate is missing. */
+  const priceFactor = useMemo(() => {
+    if (!priceList || !invoiceCurrency) return null
+    if (sameCurrency) return 1
+    const invoiceRate = invoiceCurrency.isBaseCurrency ? 1 : header.exchangeRate
+    const listRate = listIsBase ? 1 : header.priceListRate
+    return invoiceRate && listRate ? invoiceRate / listRate : null
+  }, [priceList, invoiceCurrency, sameCurrency, listIsBase, header.exchangeRate, header.priceListRate])
+  const factorRef = useRef(priceFactor)
+  useEffect(() => {
+    factorRef.current = priceFactor
+  }, [priceFactor])
+  /** A list price in the invoice currency, at the rates on the header now. */
+  const converted = (listPrice: number | null, factor = factorRef.current) =>
+    listPrice === null || factor === null ? listPrice : Math.round(listPrice * factor * 10000) / 10000
+
+  /* A CHANGED RATE RE-PRICES THE LINES. Every line still on its list price follows; a line priced by
+     hand keeps its price and only its list figure moves, for the "manual" badge. */
+  useEffect(() => {
+    if (priceFactor === null || readOnly) return
+    setLines((current) =>
+      current.map((l) => {
+        if (l.listPrice === null) return l
+        const price = converted(l.listPrice, priceFactor)
+        return l.priceSource === 'Manual' ? { ...l, systemPrice: price } : { ...l, unitPrice: price, systemPrice: price }
+      }),
+    )
+    // converted is a plain helper over the factor it is handed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceFactor, readOnly])
 
   function changePayment(patch: Partial<SalesPaymentForm>) {
     markDirty()
@@ -359,6 +420,12 @@ export function SalesInvoicePage() {
       const next = { ...current, ...patch }
       // On Account carries no method, account or reference: they would only be dropped on save anyway.
       if (patch.paymentType === 2) return { ...next, receiptMethodId: null, receiptAccountId: null, paymentReference: '' }
+      // Another method may take another kind of account: one that no longer fits is dropped.
+      if (patch.receiptMethodId !== undefined && next.receiptAccountId !== null) {
+        const method = paymentMethods.find((m) => String(m.id) === next.receiptMethodId)
+        const account = cashAccounts.find((a) => String(a.id) === next.receiptAccountId)
+        if (method && account && account.accountType !== accountTypeFor(method)) return { ...next, receiptAccountId: null }
+      }
       return next
     })
   }
@@ -383,7 +450,7 @@ export function SalesInvoicePage() {
       const client = clients.find((c) => String(c.id) === next.clientId)
       if (client && client.defaultPriceListId !== null) next.priceListId = String(client.defaultPriceListId)
     }
-    if (next.priceListId !== undefined || next.rateType !== undefined || next.documentDate !== undefined) rateDirty.current = true
+    if (next.priceListId !== undefined || next.currencyId !== undefined || next.rateType !== undefined || next.documentDate !== undefined) rateDirty.current = true
     /* A branch change keeps the lines' warehouses (a line may use any branch's); only the seed for
        new rows moves to the new branch's main warehouse. */
     if (next.branchId !== undefined) setDefaultWarehouseId(null)
@@ -411,10 +478,11 @@ export function SalesInvoicePage() {
   async function repriceAll(priceListId: string | null) {
     for (const line of lines) {
       if (line.itemUnitId === null) continue
-      const price = await resolvePrice(line.itemUnitId, priceListId)
+      const listPrice = await resolvePrice(line.itemUnitId, priceListId)
+      const price = converted(listPrice)
       setLines((current) =>
         current.map((l) =>
-          l.key === line.key && l.priceSource !== 'Manual' ? { ...l, unitPrice: price, systemPrice: price } : { ...l, systemPrice: l.key === line.key ? price : l.systemPrice },
+          l.key !== line.key ? l : l.priceSource !== 'Manual' ? { ...l, unitPrice: price, systemPrice: price, listPrice } : { ...l, systemPrice: price, listPrice },
         ),
       )
     }
@@ -467,9 +535,10 @@ export function SalesInvoicePage() {
   const defaultUnit = (units: ItemUnitDto[]) => units.find((u) => u.isSalesUnit) ?? units.find((u) => u.isBaseUnit) ?? units[0]
 
   async function priceLine(key: string, unit: ItemUnitDto) {
-    const price = await resolvePrice(unit.id)
+    const listPrice = await resolvePrice(unit.id)
+    const price = converted(listPrice)
     setLines((current) =>
-      current.map((l) => (l.key === key ? { ...l, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula, unitPrice: price, systemPrice: price, priceSource: 'PriceList' } : l)),
+      current.map((l) => (l.key === key ? { ...l, itemUnitId: unit.id, unitTypeName: unit.unitTypeName, packingFormula: unit.packingFormula, unitPrice: price, systemPrice: price, listPrice, priceSource: 'PriceList' } : l)),
     )
   }
 
@@ -482,7 +551,7 @@ export function SalesInvoicePage() {
         setLines((current) =>
           current.map((line) =>
             line.key === key
-              ? { ...line, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: sellableUnits(details.units, unit?.id), itemUnitId: unit?.id ?? null, unitTypeName: unit?.unitTypeName ?? '', packingFormula: unit?.packingFormula ?? 1, unitPrice: null, systemPrice: null, priceSource: 'PriceList', onHandBase: null, error: undefined }
+              ? { ...line, itemId: details.id, itemCode: details.itemCode, itemName: details.itemName, units: sellableUnits(details.units, unit?.id), itemUnitId: unit?.id ?? null, unitTypeName: unit?.unitTypeName ?? '', packingFormula: unit?.packingFormula ?? 1, unitPrice: null, systemPrice: null, listPrice: null, priceSource: 'PriceList', onHandBase: null, error: undefined }
               : line,
           ),
         )
@@ -608,9 +677,10 @@ export function SalesInvoicePage() {
       unitTypeName: line.unitTypeName,
       packingFormula: line.packingFormula,
       quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      // The wizard's price is the list's unless the file carried an honoured manual one.
-      systemPrice: line.priceSource === 'Manual' ? null : line.unitPrice,
+      // The wizard prices in the LIST's currency; a manual price from the file is the invoice's.
+      unitPrice: line.priceSource === 'Manual' ? line.unitPrice : converted(line.unitPrice),
+      systemPrice: line.priceSource === 'Manual' ? null : converted(line.unitPrice),
+      listPrice: line.priceSource === 'Manual' ? null : line.unitPrice,
       priceSource: line.priceSource === 'Manual' ? 'Manual' : 'PriceList',
       discountPercent: line.discountPercent,
       expiryDate: line.expiryDate,
@@ -644,7 +714,10 @@ export function SalesInvoicePage() {
     if (!header.branchId) next.branchId = 'Choose a branch.'
     if (!header.clientId) next.clientId = 'Choose a client.'
     if (!header.priceListId) next.priceListId = 'Choose a price list.'
-    if (header.priceListId && !isBaseCurrency && header.exchangeRate === null) next.exchangeRate = 'Enter an exchange rate.'
+    if (!header.currencyId) next.currencyId = 'Choose the invoice currency.'
+    if (header.currencyId && !isBaseCurrency && header.exchangeRate === null) next.exchangeRate = 'Enter an exchange rate.'
+    if (header.priceListId && header.currencyId && !sameCurrency && !listIsBase && header.priceListRate === null)
+      next.priceListRate = `Enter the ${listCurrency?.currencyCode ?? 'price list'} rate.`
     setErrors(next)
     if (Object.keys(next).length > 0) {
       notify.error('Some header fields still need filling in.')
@@ -696,10 +769,10 @@ export function SalesInvoicePage() {
       clientId: Number(header.clientId),
       salesmanId: header.salesmanId === null ? null : Number(header.salesmanId),
       priceListId: Number(header.priceListId),
-      // Null follows the price list's currency, which is what an untouched header means.
       currencyId: header.currencyId ? Number(header.currencyId) : null,
       rateType: header.rateType,
       exchangeRate: isBaseCurrency ? null : header.exchangeRate,
+      priceListRate: sameCurrency || listIsBase ? null : header.priceListRate,
       referenceNo: header.referenceNo.trim() || null,
       notes: header.notes.trim() || null,
       paymentType: payment.paymentType,
@@ -927,6 +1000,9 @@ export function SalesInvoicePage() {
         salesmen={salesmen}
         rate={rate}
         rateLoading={rateLoading}
+        invoiceCurrency={invoiceCurrency}
+        listCurrency={listCurrency}
+        sameCurrency={sameCurrency}
         documentNumber={invoice?.documentNumber ?? null}
         isNew={isNew}
         readOnly={!editable}
@@ -1084,8 +1160,10 @@ export function SalesInvoicePage() {
               clientId: Number(header.clientId),
               salesmanId: header.salesmanId === null ? null : Number(header.salesmanId),
               priceListId: Number(header.priceListId),
+              currencyId: header.currencyId ? Number(header.currencyId) : null,
               rateType: header.rateType,
               exchangeRate: isBaseCurrency ? null : header.exchangeRate,
+              priceListRate: sameCurrency || listIsBase ? null : header.priceListRate,
               referenceNo: header.referenceNo.trim() || null,
               notes: header.notes.trim() || null,
               draftReference: draftReference.current,

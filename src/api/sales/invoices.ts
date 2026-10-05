@@ -39,7 +39,8 @@ export const SALES_PAYMENT_TYPES: readonly { value: SalesPaymentType; label: str
 
 /** What GET rate answers: the price list's currency and the rate in force on a date. */
 export interface RateResolutionDto {
-  priceListId: number
+  /** Null when the rate was asked for a currency alone, before a price list is chosen. */
+  priceListId: number | null
   currencyId: number
   currencyCode: string
   symbol: string | null
@@ -50,6 +51,13 @@ export interface RateResolutionDto {
   rate: number | null
   rateDate: string | null
   baseCurrencyCode: string | null
+  /* The price list's own currency and its rate: a list price x invoice rate / this rate is the
+     price in the invoice currency. Null when no price list was given. */
+  priceListCurrencyId: number | null
+  priceListCurrencyCode: string | null
+  priceListIsBaseCurrency: boolean | null
+  priceListRate: number | null
+  priceListRateDate: string | null
 }
 
 /** One item + warehouse an invoice asks more of than the warehouse holds, with the policy's verdict. */
@@ -141,6 +149,8 @@ export interface SaveSalesInvoiceRequest {
   rateType: SalesRateType
   /** Null: the server takes the rate in force for the date. A value overrides it. */
   exchangeRate: number | null
+  /** The price list currency's rate when the invoice is billed in another. Null: the published one. */
+  priceListRate?: number | null
   referenceNo: string | null
   notes: string | null
   lines: SaveSalesInvoiceLine[]
@@ -236,8 +246,11 @@ export interface ImportCreateSalesInvoicesRequest {
   clientId: number
   salesmanId: number | null
   priceListId: number
+  /** The currency the invoices are billed in. Null follows the price list's. */
+  currencyId?: number | null
   rateType: SalesRateType
   exchangeRate: number | null
+  priceListRate?: number | null
   referenceNo: string | null
   notes: string | null
   draftReference?: string | null
@@ -348,6 +361,8 @@ export interface SalesInvoiceDto {
   isBaseCurrency: boolean
   rateType: SalesRateType
   exchangeRate: number
+  /** The price list currency's rate the lines were converted with; null when it is the invoice's own currency. */
+  priceListRate: number | null
   baseCurrencyCode: string | null
   referenceNo: string | null
   notes: string | null
@@ -477,19 +492,21 @@ export const salesInvoicesApi = {
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 
   /**
-   * The rate in force on a date (today when omitted) for the invoice's currency.
+   * The rate in force on a date (today when omitted) for the invoice's currency, and for the price
+   * list's currency beside it.
    *
    * `currencyId` is the currency the invoice is billed in; omitted, the answer is for the price
-   * list's currency, which is what an invoice that has not chosen one is billed in.
+   * list's. Either may be left out, not both: the currency is chosen first now.
    */
   rate: (
-    priceListId: number,
+    priceListId: number | null,
     rateType: SalesRateType,
     date?: string | null,
     signal?: AbortSignal,
     currencyId?: number | null,
   ) => {
-    const params = new URLSearchParams({ priceListId: String(priceListId), rateType: String(rateType) })
+    const params = new URLSearchParams({ rateType: String(rateType) })
+    if (priceListId != null) params.set('priceListId', String(priceListId))
     if (date) params.set('date', date)
     if (currencyId != null) params.set('currencyId', String(currencyId))
     return request<RateResolutionDto>(`${BASE}/rate?${params.toString()}`, { signal })

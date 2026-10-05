@@ -18,11 +18,13 @@ export interface SalesInvoiceHeader {
   clientId: string | null
   salesmanId: string | null
   priceListId: string | null
-  /** The currency the customer is billed in. Null follows the price list's. */
+  /** The currency the customer is billed in. Mandatory; it starts as the price list's. */
   currencyId: string | null
   rateType: SalesRateType
   /** The rate the invoice is valued at; null while none is known, and the page refuses to post then. */
   exchangeRate: number | null
+  /** The price list currency's rate, which converts its prices, when the invoice is billed in another. */
+  priceListRate: number | null
   referenceNo: string
   notes: string
 }
@@ -40,6 +42,10 @@ interface SalesInvoiceHeaderCardProps {
   salesmen: PartyLookupDto[]
   rate: RateResolutionDto | null
   rateLoading: boolean
+  /** The currency chosen in the header, and the price list's, as the page resolved them. */
+  invoiceCurrency: CurrencyLookupDto | null
+  listCurrency: CurrencyLookupDto | null
+  sameCurrency: boolean
   /** The number, or null while it will be assigned on posting. */
   documentNumber: string | null
   isNew: boolean
@@ -70,20 +76,60 @@ export function SalesInvoiceHeaderCard({
   salesmen,
   rate,
   rateLoading,
+  invoiceCurrency,
+  listCurrency,
+  sameCurrency,
   documentNumber,
   isNew,
   readOnly,
   errors,
   disabled,
 }: SalesInvoiceHeaderCardProps) {
-  const isBase = rate?.isBaseCurrency === true
-  const currency = rate?.currencyCode ?? priceLists.find((p) => String(p.id) === value.priceListId)?.currencyCode
-  const rateMissing = value.priceListId !== null && !rateLoading && rate !== null && !isBase && value.exchangeRate === null
+  const base = rate?.baseCurrencyCode ?? 'USD'
+  const invoiceIsBase = invoiceCurrency?.isBaseCurrency ?? rate?.isBaseCurrency ?? true
+  const listIsBase = listCurrency?.isBaseCurrency ?? rate?.priceListIsBaseCurrency ?? true
 
-  const rateDescription =
-    rate && !isBase && rate.rate !== null
-      ? `1 ${rate.baseCurrencyCode ?? 'USD'} = ${formatNumber(rate.rate, rate.decimalPlaces)} ${rate.currencyCode} (${salesRateTypeLabel(rate.rateType)}, ${dateLabel(rate.rateDate)})`
-      : undefined
+  /* Which rate each box edits: the invoice currency's, or the price list currency's. */
+  type RateBox = { key: 'exchangeRate' | 'priceListRate'; code: string; published: number | null; date: string | null; note?: string }
+  const invoiceBox: RateBox = { key: 'exchangeRate', code: invoiceCurrency?.currencyCode ?? rate?.currencyCode ?? '', published: rate?.rate ?? null, date: rate?.rateDate ?? null }
+  const listBox: RateBox = {
+    key: 'priceListRate', code: listCurrency?.currencyCode ?? rate?.priceListCurrencyCode ?? '',
+    published: rate?.priceListRate ?? null, date: rate?.priceListRateDate ?? null, note: 'the price list currency',
+  }
+  const listMatters = !sameCurrency && !listIsBase && value.priceListId !== null
+  const primary: RateBox | null = !invoiceIsBase ? invoiceBox : listMatters ? listBox : null
+  const secondary: RateBox | null = !invoiceIsBase && listMatters ? listBox : null
+
+  const rateInput = (label: string, box: RateBox | null) => {
+    if (box === null) return readOnly ? field(label, '1 (base currency)') : <TextInput label={label} value="1 (base currency)" readOnly />
+    const current = value[box.key]
+    const text = current === null ? '' : `1 ${base} = ${formatNumber(current, 6)} ${box.code}`
+    if (readOnly) return field(label, text)
+    const missing = !rateLoading && rate !== null && current === null
+    return (
+      <NumberInput
+        label={label}
+        withAsterisk
+        placeholder={rateLoading ? 'Looking up…' : 'Enter a rate'}
+        value={current ?? ''}
+        min={0}
+        decimalScale={6}
+        thousandSeparator=","
+        onChange={(next) => {
+          const parsed = numberInputValue(next)
+          onChange({ [box.key]: parsed !== null && parsed > 0 ? parsed : null })
+        }}
+        disabled={disabled}
+        description={`${box.code} per 1 ${base}${box.note ? ` (${box.note})` : ''}${box.published !== null && box.date ? ` · ${salesRateTypeLabel(value.rateType)} ${formatNumber(box.published, 6)} on ${dateLabel(box.date)}` : ''}`}
+        error={
+          errors[box.key]
+          ?? (missing
+            ? `No ${salesRateTypeLabel(value.rateType).toLowerCase()} rate is defined for ${box.code || 'this currency'} on this date — enter one to continue.`
+            : undefined)
+        }
+      />
+    )
+  }
 
   const field = (label: string, text: string) => (
     <div>
@@ -198,14 +244,14 @@ export function SalesInvoiceHeaderCard({
           ) : (
             <Select
               label="Invoice Currency"
-              data={currencies.map((c) => ({ value: String(c.id), label: c.currencyCode }))}
+              withAsterisk
+              data={currencies.filter((c) => c.isActive || String(c.id) === value.currencyId).map((c) => ({ value: String(c.id), label: `${c.currencyCode} - ${c.currencyName}` }))}
               value={value.currencyId}
-              placeholder={priceList ? `${priceList.currencyCode} (the price list's)` : 'Choose a price list first'}
+              placeholder="Choose a currency"
               onChange={(next) => onChange({ currencyId: next })}
-              disabled={disabled || !value.priceListId}
+              disabled={disabled}
               error={errors.currencyId}
-              /* Clearing it goes back to the price list's currency, which is what null means. */
-              clearable
+              allowDeselect={false}
               searchable
             />
           )}
@@ -252,35 +298,17 @@ export function SalesInvoiceHeaderCard({
             is not a choice the header offers any more. A new invoice takes the default (Official)
             and a saved one keeps whatever it was issued with. */}
 
+        {/* THE RATE THE READER SEES IS THE ONE THAT MATTERS. Billed in a foreign currency, it is that
+            currency's rate. Billed in the base currency from a foreign price list, it is the LIST's rate
+            - the one that converts its prices - rather than a fixed 1. Both foreign: both are shown. */}
         <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-          {readOnly ? (
-            field('Exchange Rate', isBase ? '1 (base currency)' : value.exchangeRate === null ? '' : `${formatNumber(value.exchangeRate, rate?.decimalPlaces ?? 2)} ${currency ?? ''} per ${rate?.baseCurrencyCode ?? 'USD'}`)
-          ) : isBase ? (
-            <TextInput label="Exchange Rate" value="1 (base currency)" readOnly />
-          ) : (
-            <NumberInput
-              label="Exchange Rate"
-              withAsterisk={value.priceListId !== null}
-              placeholder={!value.priceListId ? 'Choose a price list first' : rateLoading ? 'Looking up…' : 'Enter a rate'}
-              value={value.exchangeRate ?? ''}
-              min={0}
-              decimalScale={6}
-              thousandSeparator=","
-              onChange={(next) => {
-                const parsed = numberInputValue(next)
-                onChange({ exchangeRate: parsed !== null && parsed > 0 ? parsed : null })
-              }}
-              disabled={disabled || !value.priceListId}
-              description={rateDescription}
-              error={
-                errors.exchangeRate
-                ?? (rateMissing
-                  ? `No ${salesRateTypeLabel(value.rateType).toLowerCase()} rate is defined for ${currency ?? 'this currency'} on this date — enter one to continue.`
-                  : undefined)
-              }
-            />
-          )}
+          {rateInput('Exchange Rate', primary)}
         </Grid.Col>
+        {secondary && (
+          <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+            {rateInput('Price List Rate', secondary)}
+          </Grid.Col>
+        )}
 
         <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
           {readOnly ? (

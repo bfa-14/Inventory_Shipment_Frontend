@@ -28,6 +28,8 @@ export interface InvoiceLine {
   unitPrice: number | null
   /** The price list's own figure for the unit, for the "manual" badge. Null when the list has none. */
   systemPrice: number | null
+  /** That figure in the PRICE LIST's currency, before the rates convert it. Null until it is looked up. */
+  listPrice: number | null
   /** PriceList | Manual — Manual is what the server is told; a list price is left for it to re-find. */
   priceSource: 'PriceList' | 'Manual'
   discountPercent: number

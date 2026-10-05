@@ -1,4 +1,5 @@
 import { Badge, Card, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core'
+import { Link } from 'react-router'
 import { IconArrowsExchange, IconFiles, IconScale, IconShoppingCart, IconTruck } from '@tabler/icons-react'
 import type { ItemDetailsDto } from '../../api/types'
 import { formatDateOnly, formatDateTime, formatNumber } from '../../components/format'
@@ -95,22 +96,40 @@ export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
   )
 }
 
+/** The links that lead somewhere yet; the rest wait for their pages. */
+const LIVE_LINKS = [
+  { label: 'Stock Balance', icon: IconScale, to: (itemId: number) => `/inventory/items/${itemId}/stock-balance` },
+]
+
 const QUICK_LINKS = [
-  { label: 'Stock Balance', icon: IconScale },
   { label: 'Stock Movement', icon: IconArrowsExchange },
   { label: 'Purchase Orders', icon: IconShoppingCart },
   { label: 'Containers', icon: IconTruck },
   { label: 'Documents', icon: IconFiles },
 ]
 
-/** Where this item will be reachable from once the rest of the application exists. */
-export function ItemQuickLinksCard() {
+/**
+ * Where else this item can be looked at. A link needs a saved item; on a new one it waits.
+ */
+export function ItemQuickLinksCard({ itemId }: { itemId: number | null }) {
   return (
     <Card radius="lg" p="lg" withBorder>
       <Text fw={600} fz="md" mb="xs">
         Quick Links
       </Text>
       <Stack gap={2}>
+        {LIVE_LINKS.map(({ label, icon: Icon, to }) => (
+          <Tooltip key={label} label="Save the item first" withArrow position="left" disabled={itemId !== null}>
+            <NavLink
+              component={Link}
+              to={itemId === null ? '#' : to(itemId)}
+              label={label}
+              leftSection={<Icon size={17} stroke={1.6} />}
+              disabled={itemId === null}
+              styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
+            />
+          </Tooltip>
+        ))}
         {QUICK_LINKS.map(({ label, icon: Icon }) => (
           <Tooltip key={label} label="Coming soon" withArrow position="left">
             <NavLink

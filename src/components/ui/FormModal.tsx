@@ -48,6 +48,10 @@ function firstField(form: HTMLFormElement | null): HTMLElement | null {
     (element) => !element.closest(`.${FOOTER_CLASS}`),
   )
 
+  // A form that names its own starting field (data-autofocus) is taken at its word.
+  const chosen = candidates.find((element) => element.getAttribute('data-autofocus') === 'true')
+  if (chosen) return chosen
+
   return candidates.find((element) => element.getClientRects().length > 0) ?? candidates[0] ?? null
 }
 

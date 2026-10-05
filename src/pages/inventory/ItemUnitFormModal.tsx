@@ -47,8 +47,9 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
       packingFormula: unit?.packingFormula ?? (forceBase ? 1 : 1),
       skuCode: unit?.skuCode ?? '',
       barcode: unit?.barcode ?? '',
-      isSalesUnit: unit?.isSalesUnit ?? false,
-      isPurchaseUnit: unit?.isPurchaseUnit ?? false,
+      // A new unit is usually bought and sold in: both start on, and the reader turns off what does not apply.
+      isSalesUnit: unit?.isSalesUnit ?? true,
+      isPurchaseUnit: unit?.isPurchaseUnit ?? true,
       isBaseUnit: unit?.isBaseUnit ?? forceBase,
     },
     validate: {
@@ -164,7 +165,9 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
         placeholder="Pick a unit type"
         withAsterisk
         searchable
-        data-autofocus
+        /* Focus opens a searchable select, which helps when adding and gets in the way when editing:
+           an edit starts on the SKU Code instead. */
+        data-autofocus={editing ? undefined : true}
         nothingFoundMessage="No unit type found"
         data={unitTypes.map((type) => ({
           value: String(type.id),
@@ -193,6 +196,7 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
           label="SKU Code"
           placeholder="AP160-BOX"
           withAsterisk
+          data-autofocus={editing ? true : undefined}
           maxLength={MAX_SKU}
           {...form.getInputProps('skuCode')}
         />

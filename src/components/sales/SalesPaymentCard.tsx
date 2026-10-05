@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import type { CashBankAccountLookupDto } from '../../api/masterdata/cashBankAccounts'
 import type { PaymentMethodLookupDto } from '../../api/masterdata/paymentMethods'
 import { SALES_PAYMENT_TYPES, type SalesPaymentType } from '../../api/sales/invoices'
-import type { SalesPaymentErrors, SalesPaymentForm } from './salesPayment'
+import { accountTypeFor, type SalesPaymentErrors, type SalesPaymentForm } from './salesPayment'
 import { formatNumber } from '../format'
 import { paymentStatusColour, paymentStatusLabel } from './paymentStatus'
 
@@ -69,10 +69,13 @@ export function SalesPaymentCard({
   accountLabel,
 }: SalesPaymentCardProps) {
   const cash = value.paymentType === 1
+  const method = methods.find((m) => String(m.id) === value.receiptMethodId) ?? null
+  const kind = method ? accountTypeFor(method) : null
   const fitting = accounts.filter(
     (a) =>
       String(a.id) === value.receiptAccountId
-      || (a.isActive && (currencyId === null || a.currencyId === currencyId) && (a.branchId === null || branchId === null || a.branchId === branchId)),
+      || (a.isActive && (currencyId === null || a.currencyId === currencyId) && (a.branchId === null || branchId === null || a.branchId === branchId)
+          && (kind === null || a.accountType === kind)),
   )
 
   const field = (label: string, content: string) => (
@@ -134,14 +137,15 @@ export function SalesPaymentCard({
                 <Select
                   label="Cash / Bank Account"
                   withAsterisk
-                  placeholder={currencyId === null ? 'Choose a price list first' : `Account in ${currencyCode}`}
+                  placeholder={currencyId === null ? 'Choose the invoice currency first' : `${kind ?? 'Cash / bank'} account in ${currencyCode}`}
                   data={fitting.map((a) => ({ value: String(a.id), label: `${a.accountCode} - ${a.accountName}` }))}
                   value={value.receiptAccountId}
                   onChange={(next) => onChange({ receiptAccountId: next })}
                   error={errors.receiptAccountId}
-                  nothingFoundMessage={`No account in ${currencyCode}`}
+                  nothingFoundMessage={`No ${kind ? kind.toLowerCase() + ' ' : ''}account in ${currencyCode}`}
                   disabled={disabled}
                   searchable
+                  clearable
                 />
               )}
             </Grid.Col>

@@ -1322,7 +1322,7 @@ function ItemDetails() {
                   />
                   {item ? <ItemAuditCard item={item} /> : null}
                   <ItemStockCard item={item} />
-                  <ItemQuickLinksCard />
+                  <ItemQuickLinksCard itemId={item?.id ?? null} />
                 </Stack>
               </Grid.Col>
             </Grid>

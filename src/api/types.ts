@@ -931,3 +931,29 @@ export interface PartyLookupDto {
   /** The address as Parties holds it, so a document header can show it. */
   address: string | null
 }
+
+/** One item's stock in one warehouse that has held it (zero included). */
+export interface ItemStockBalanceRowDto {
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  warehouseIsActive: boolean
+  branchId: number
+  branchCode: string
+  branchName: string
+  /** Base units; negative when out-of-stock selling took it below zero. */
+  onHandBase: number
+  lastMovementAtUtc: string | null
+  averageCost: number | null
+  inventoryValue: number
+}
+
+/** The item card's Stock Balance: the item, its stock per warehouse and the totals. */
+export interface ItemStockBalanceDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  warehouses: ItemStockBalanceRowDto[]
+  totalOnHandBase: number
+  totalInventoryValue: number
+}
