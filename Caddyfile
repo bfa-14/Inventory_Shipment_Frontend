@@ -3,7 +3,9 @@
 # Serves the React app from /srv, forwards /api and /health to the API, and gets and renews the
 # HTTPS certificate for DOMAIN from Let's Encrypt (plain http:// is redirected to https://).
 # DOMAIN, ACME_EMAIL and API_UPSTREAM come from the environment: deploy/.env through docker-compose.
-
+#
+# The same app is also served over plain HTTP on port 8080 for an SSH tunnel; docker-compose publishes
+# that port on the server's 127.0.0.1 only (see "Open the app through SSH" in deploy/README.md).
 {
 	email {$ACME_EMAIL}
 }
@@ -26,7 +28,8 @@
 	}
 }
 
-{$DOMAIN} {
+# The app: the API routes, the bundles and the single-page app. One copy, served by both sites below.
+(app) {
 	encode zstd gzip
 
 	# The API: everything under /api, and the health probe.
@@ -54,4 +57,14 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+{$DOMAIN} {
+	import app
+}
+
+# For an SSH tunnel only (ssh -L 8080:localhost:8080 ...): never published beyond the server's 127.0.0.1,
+# so it works before the firewall lets 80/443 through, and never offers plain HTTP to the internet.
+http://:8080 {
+	import app
 }
