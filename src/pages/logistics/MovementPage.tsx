@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import {
-  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -10,7 +9,6 @@ import {
   Group,
   Loader,
   Modal,
-  MultiSelect,
   Paper,
   ScrollArea,
   Select,
@@ -22,11 +20,9 @@ import {
   Textarea,
   TextInput,
   Title,
-  Tooltip,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
-import { useDebouncedValue } from '@mantine/hooks'
 import {
   IconArrowLeft,
   IconBan,
@@ -37,17 +33,10 @@ import {
   IconPlus,
   IconReceipt,
   IconTrash,
-  IconX,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { containersApi, containerStatusColour, type ContainerListDto } from '../../api/logistics/containers'
-import {
-  movementsApi,
-  movementStatusColour,
-  type MovementContainerDto,
-  type MovementDto,
-  type SaveMovementRequest,
-} from '../../api/logistics/movements'
+import { containersApi } from '../../api/logistics/containers'
+import { movementsApi, movementStatusColour, type MovementDto, type SaveMovementRequest } from '../../api/logistics/movements'
 import { movementTypesApi, SINGLE_PLACE_STAGES, stageExplanation, type MovementTypeLookupDto } from '../../api/masterdata/movementTypes'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
@@ -58,7 +47,9 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber, todayDateOnly } from '../../components/format'
+import { MovementContainersCard } from '../../components/logistics/MovementContainersCard'
 import { MovementDocumentsCard } from '../../components/logistics/MovementDocumentsCard'
+import { fromSaved, type CardContainer } from '../../components/logistics/movementContainers'
 import { StageIcon } from '../../components/logistics/movementStage'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { confirm } from '../../components/ui/confirm'
@@ -97,19 +88,6 @@ const EMPTY: FormValues = {
   notes: '',
 }
 
-/** A container on the movement, whichever of the two API shapes it came from. */
-interface PickedContainer {
-  containerId: number
-  containerRef: string
-  containerNo: string | null
-  containerTypeCode: string
-  status: number
-  statusName: string
-  currentLocation: string | null
-  itemSummary: string | null
-  qty: number
-}
-
 type Option = { value: string; label: string }
 
 const CHARGE_STATUSES: Record<number, { label: string; colour: string }> = {
@@ -134,36 +112,19 @@ function toValues(dto: MovementDto): FormValues {
   }
 }
 
-function fromMovementContainer(c: MovementContainerDto): PickedContainer {
+/**
+ * A saved container as the movement now has it (status, pieces), keeping what the page had already learned about
+ * it - its orders and suppliers, and its place for the From, which a save does not change.
+ */
+function keepDetails(saved: CardContainer, before: CardContainer | undefined): CardContainer {
+  if (!before) return saved
   return {
-    containerId: c.containerId,
-    containerRef: c.containerRef,
-    containerNo: c.containerNo,
-    containerTypeCode: c.containerTypeCode,
-    status: c.containerStatus,
-    statusName: c.containerStatusName,
-    currentLocation: c.currentLocation,
-    itemSummary: c.itemSummary,
-    qty: c.totalAllocatedBase,
+    ...saved,
+    orderNumbers: before.orderNumbers ?? saved.orderNumbers,
+    supplierNames: before.supplierNames ?? saved.supplierNames,
+    itemSummary: before.itemSummary ?? saved.itemSummary,
+    place: before.place,
   }
-}
-
-function fromListRow(c: ContainerListDto): PickedContainer {
-  return {
-    containerId: c.id,
-    containerRef: c.containerRef,
-    containerNo: c.containerNo,
-    containerTypeCode: c.containerTypeCode,
-    status: c.status,
-    statusName: c.statusName,
-    currentLocation: c.currentLocation,
-    itemSummary: c.itemSummary,
-    qty: c.totalQtyBase,
-  }
-}
-
-function containerLabel(c: { containerRef: string; containerNo: string | null }): string {
-  return c.containerNo ? `${c.containerRef} - ${c.containerNo}` : c.containerRef
 }
 
 /** What happened to the movement, newest first, from the stamps the movement carries. */
@@ -200,14 +161,14 @@ export function MovementPage() {
   const [loading, setLoading] = useState(!isNew)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [stale, setStale] = useState<string | null>(null)
-  const [picked, setPicked] = useState<PickedContainer[]>([])
+  /** The ticked containers: what the movement holds once saved. */
+  const [ticked, setTicked] = useState<CardContainer[]>([])
+  /** The same as `dirty`, for what renders from it: Start and Complete wait for a save. */
+  const [unsaved, setUnsaved] = useState(false)
 
   const [types, setTypes] = useState<MovementTypeLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
   const [carriers, setCarriers] = useState<PartyLookupDto[]>([])
-  const [containerSearch, setContainerSearch] = useState('')
-  const [debouncedSearch] = useDebouncedValue(containerSearch, 300)
-  const [found, setFound] = useState<ContainerListDto[]>([])
 
   const [saving, setSaving] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -218,6 +179,7 @@ export function MovementPage() {
   const dirty = useRef(false)
   const markDirty = () => {
     dirty.current = true
+    setUnsaved(true)
   }
 
   const form = useForm<FormValues>({
@@ -240,9 +202,10 @@ export function MovementPage() {
       setMovement(dto)
       form.setValues(toValues(dto))
       form.resetDirty(toValues(dto))
-      setPicked(dto.containers.map(fromMovementContainer))
+      setTicked((current) => dto.containers.map((c) => keepDetails(fromSaved(c), current.find((p) => p.containerId === c.containerId))))
       setStale(null)
       dirty.current = false
+      setUnsaved(false)
     },
     // form is stable for the life of the page; listing it would re-create show on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -279,10 +242,10 @@ export function MovementPage() {
     const ids = [...new Set(preset.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))]
     Promise.all(ids.map((cid) => containersApi.get(cid).catch(() => null)))
       .then((list) =>
-        setPicked(
+        setTicked(
           list
             .filter((c) => c !== null)
-            .map((c) => {
+            .map((c): CardContainer => {
               const items = [...new Set(c.lines.map((l) => l.itemCode))]
               return {
                 containerId: c.id,
@@ -291,9 +254,12 @@ export function MovementPage() {
                 containerTypeCode: c.containerTypeCode,
                 status: c.status,
                 statusName: c.statusName,
-                currentLocation: c.currentLocation,
+                orderNumbers: null,
+                supplierNames: null,
                 itemSummary: items.length === 0 ? null : items.length === 1 ? items[0] : `Mixed - ${items.length} items`,
-                qty: c.totalAllocatedBase,
+                pieces: c.totalAllocatedBase,
+                currentLocation: c.currentLocation,
+                place: null,
               }
             }),
         ),
@@ -313,19 +279,30 @@ export function MovementPage() {
   const inProgress = movement?.status === 2
   const readOnly = !canManage || (movement !== null && !movement.canEdit)
 
-  // The container picker asks the server as it is typed. While the movement runs only containers
-  // already confirmed and not yet offloaded can join it; a planned one may take drafts as well.
+  const values = form.values
+  const fromId = values.fromPlaceId === null ? null : Number(values.fromPlaceId)
+
+  // A completed or cancelled movement is not asked about places; its containers' orders and suppliers come from the
+  // container list instead.
+  const movementForDetails = readOnly ? movement : null
   useEffect(() => {
-    if (readOnly) return
+    if (!movementForDetails || movementForDetails.containers.length === 0) return
     const controller = new AbortController()
     containersApi
-      .list({ search: debouncedSearch.trim() || undefined, pageSize: 50, sortBy: 'OrderDate', sortDir: 'desc' }, controller.signal)
-      .then((result) => setFound(result.items.filter((c) => c.status >= (inProgress ? 2 : 1) && c.status <= 5)))
+      .list({ movementId: movementForDetails.id, pageSize: 200 }, controller.signal)
+      .then((result) => {
+        const byId = new Map(result.items.map((c) => [c.id, c]))
+        setTicked((current) =>
+          current.map((c) => {
+            const row = byId.get(c.containerId)
+            return row ? { ...c, orderNumbers: row.orderNumbers, supplierNames: row.supplierNames, itemSummary: row.itemSummary } : c
+          }),
+        )
+      })
       .catch(() => {})
     return () => controller.abort()
-  }, [debouncedSearch, inProgress, readOnly])
+  }, [movementForDetails])
 
-  const values = form.values
   const type = types.find((t) => String(t.id) === values.movementTypeId) ?? null
   const singlePlace = type !== null && SINGLE_PLACE_STAGES.includes(type.stage)
 
@@ -349,13 +326,6 @@ export function MovementPage() {
   const carrierOptions = carriers
     .filter((c) => c.isActive || String(c.id) === values.carrierPartyId)
     .map((c) => ({ value: String(c.id), label: `${c.partyCode} - ${c.partyName}` }))
-  const containerOptions = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const c of picked) map.set(String(c.containerId), containerLabel(c))
-    for (const c of found) map.set(String(c.id), containerLabel(c))
-    return [...map].map(([value, label]) => ({ value, label }))
-  }, [picked, found])
-
   const placeLabel = (value: string | null) => {
     const port = ports.find((p) => String(p.id) === value)
     return port ? `${port.portCode} - ${portLabel(port)}` : null
@@ -376,11 +346,11 @@ export function MovementPage() {
     if (stage && SINGLE_PLACE_STAGES.includes(stage) && values.fromPlaceId && !values.toPlaceId) form.setFieldValue('toPlaceId', values.fromPlaceId)
   }
 
-  function pickContainers(ids: string[]) {
-    const byId = new Map(picked.map((c) => [String(c.containerId), c]))
-    for (const c of found) if (!byId.has(String(c.id))) byId.set(String(c.id), fromListRow(c))
-    setPicked(ids.map((cid) => byId.get(cid)).filter((c): c is PickedContainer => c !== undefined))
-    markDirty()
+  /** Ticking, unticking, the import and a new From: the movement's containers change, unsaved. */
+  function changeTicked(next: CardContainer[]) {
+    const changed = next.length !== ticked.length || next.some((c, index) => c.containerId !== ticked[index]?.containerId)
+    setTicked(next)
+    if (changed) markDirty()
   }
 
   function toRequest(v: FormValues, rowVersion: string | null): SaveMovementRequest {
@@ -396,7 +366,7 @@ export function MovementPage() {
       voyageNo: v.voyageNo.trim() || null,
       reference: v.reference.trim() || null,
       notes: v.notes.trim() || null,
-      containerIds: picked.map((c) => c.containerId),
+      containerIds: ticked.map((c) => c.containerId),
       rowVersion,
     }
   }
@@ -408,6 +378,8 @@ export function MovementPage() {
       return
     }
     if (err.code === 'CONCURRENCY') setStale(err.message)
+    // A container does not fit the movement: judge them all again, so the card marks it.
+    if (err.code === 'CONTAINER_NOT_AT_FROM') setTicked((current) => current.map((c) => ({ ...c, place: null })))
     notify.error(err.message)
   }
 
@@ -553,16 +525,25 @@ export function MovementPage() {
   }
 
   const saved = movement !== null
+  // Start and Complete act on the saved movement: never with changes on the page, never without a saved container.
+  const statusBlocked = unsaved
+    ? 'Save your changes first.'
+    : (movement?.containers.length ?? 0) === 0
+      ? 'Tick at least one container, then save.'
+      : null
   const actions: DocumentAction[] = [
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && canManage && movement.canDelete },
     { key: 'cancel', label: 'Cancel', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.canCancel },
-    { key: 'complete', label: 'Complete', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', loading: busyAction === 'complete', visible: saved && canManage && movement.canComplete },
-    { key: 'start', label: 'Start', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', loading: busyAction === 'start', visible: saved && canManage && movement.canStart },
-    { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
+    { key: 'complete', label: 'Complete', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', loading: busyAction === 'complete', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    { key: 'start', label: 'Start', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', loading: busyAction === 'start', visible: saved && canManage && movement.canStart, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly, disabled: ticked.length === 0, disabledReason: ticked.length === 0 ? 'Tick at least one container.' : undefined },
   ]
 
   const chargesTotal = (movement?.charges ?? []).filter((c) => c.status === 2).reduce((sum, c) => sum + c.amountBase, 0)
+
+  const fromPort = ports.find((p) => String(p.id) === values.fromPlaceId)
+  const fromName = fromPort ? portLabel(fromPort) : ''
 
   return (
     <div>
@@ -666,84 +647,16 @@ export function MovementPage() {
               )}
             </Section>
 
-            <Section title={`Containers (${formatNumber(picked.length)})`}>
-              {readOnly ? null : (
-                <MultiSelect
-                  label="Add containers"
-                  placeholder="Search by container ref. or no."
-                  description={inProgress ? 'The movement is running: only confirmed containers not yet offloaded can join.' : undefined}
-                  data={containerOptions}
-                  value={picked.map((c) => String(c.containerId))}
-                  onChange={pickContainers}
-                  searchable
-                  searchValue={containerSearch}
-                  onSearchChange={setContainerSearch}
-                  // The server has already matched what was typed, by ref OR number; filtering again would hide some.
-                  filter={({ options }) => options}
-                  hidePickedOptions
-                  clearable
-                  nothingFoundMessage="No container matches"
-                  mb="sm"
-                />
-              )}
-              {picked.length === 0 ? (
-                <Text c="dimmed" fz="sm" ta="center" py="sm">
-                  No container on this movement yet.
-                </Text>
-              ) : (
-                <ScrollArea type="auto">
-                  <Table miw={760} verticalSpacing={4}>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>Container Ref.</Table.Th>
-                        <Table.Th>Container No.</Table.Th>
-                        <Table.Th>Type</Table.Th>
-                        <Table.Th>Status</Table.Th>
-                        <Table.Th>Location</Table.Th>
-                        <Table.Th>Items</Table.Th>
-                        <Table.Th ta="right">Qty</Table.Th>
-                        {readOnly ? null : <Table.Th />}
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {picked.map((c) => (
-                        <Table.Tr key={c.containerId}>
-                          <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                            <Anchor component={Link} to={`${CONTAINERS_ROUTE}/${c.containerId}`} fz="sm" fw={600}>
-                              {c.containerRef}
-                            </Anchor>
-                          </Table.Td>
-                          <Table.Td>{c.containerNo ?? '—'}</Table.Td>
-                          <Table.Td>{c.containerTypeCode}</Table.Td>
-                          <Table.Td>
-                            <Badge color={containerStatusColour(c.status)} variant={c.status === 7 ? 'filled' : 'light'} style={{ whiteSpace: 'nowrap' }}>
-                              {c.statusName}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>{c.currentLocation ?? '—'}</Table.Td>
-                          <Table.Td>{c.itemSummary ?? '—'}</Table.Td>
-                          <Table.Td ta="right">{formatNumber(c.qty)}</Table.Td>
-                          {readOnly ? null : (
-                            <Table.Td>
-                              <Tooltip label="Remove from the movement" withArrow>
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="red"
-                                  aria-label={`Remove ${c.containerRef}`}
-                                  onClick={() => pickContainers(picked.filter((p) => p.containerId !== c.containerId).map((p) => String(p.containerId)))}
-                                >
-                                  <IconX size={16} />
-                                </ActionIcon>
-                              </Tooltip>
-                            </Table.Td>
-                          )}
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </ScrollArea>
-              )}
-            </Section>
+            <MovementContainersCard
+              movement={movement}
+              readOnly={readOnly}
+              fromPlaceId={fromId}
+              toPlaceId={values.toPlaceId === null ? null : Number(values.toPlaceId)}
+              movementTypeId={values.movementTypeId === null ? null : Number(values.movementTypeId)}
+              fromName={fromName}
+              ticked={ticked}
+              onTickedChange={changeTicked}
+            />
 
             {movement ? (
               <Paper radius="lg" p="md" withBorder>
@@ -961,6 +874,7 @@ function StatusDateModal({
   )
 }
 
+/** The two ways into the card's containers: both list what is at the From, so both wait for one. */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Paper radius="lg" p="md" withBorder>

@@ -1039,10 +1039,10 @@ export function SalesInvoicePage() {
         opened={attachmentsOpen}
         onClose={() => setAttachmentsOpen(false)}
         documentId={invoice?.id ?? null}
-        files={invoice?.files ?? []}
+        documentKind={invoice?.documentTypeCode === 'SRET' ? 'SRET' : invoice?.documentTypeCode === 'SO' ? 'SO' : TYPE}
         onChanged={() => void reload()}
         canEdit={canCreate}
-        api={salesInvoicesApi}
+        api={salesInvoicesApi.files}
       />
 
       <CancelReasonModal

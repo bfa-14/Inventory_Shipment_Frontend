@@ -1,3 +1,4 @@
+import type { DocumentFileFields } from '../documentFiles'
 import { fetchBlob, postForm, request } from '../http'
 import type { PagedResult } from '../types'
 
@@ -102,8 +103,14 @@ export interface ContainerListDto extends ContainerFlags {
   invoicingStatus: 0 | 1 | 2
   totalReceivedBase: number
   totalOilQty: number
-  maxUnits: number | null
-  utilizationPct: number | null
+  /** The fill from the items' Container units (script 50), in %; null when an item has none. */
+  fillPct: number | null
+  capacityKnown: boolean
+  /** The item codes without a Container unit, when the fill is unknown. */
+  missingContainerUnitItems: string | null
+  /** Pieces still fitting, for a container of one item (negative above capacity). */
+  remainingPcs: number | null
+  isOverCapacity: boolean
   blNo: string | null
   blDate: string | null
   dispatchDate: string | null
@@ -154,6 +161,8 @@ export interface ContainerLineDto {
   packingFormula: number
   poUnitTypeName: string
   poPackingFormula: number
+  /** The item's pieces in a full container (its Container unit, script 50); null when it has none. */
+  pcsPerContainer: number | null
   quantity: number
   quantityBase: number
   oilIncluded: boolean
@@ -304,12 +313,16 @@ export interface ContainerChargeAllocationDto {
 export interface ContainerAttachmentDto {
   id: number
   containerId: number
+  /** Filled by the attachments list, which can span the containers of a movement. */
+  containerRef?: string | null
   movementId: number | null
   movementNo: string | null
   chargeId: number | null
   attachmentTypeId: number | null
   category: string | null
   subType: string | null
+  /** No type, or typed "Other": the page asks for a real one. */
+  isOther: boolean
   /** The stored file — the same on every container the upload went to. */
   fileId: number
   fileName: string
@@ -348,7 +361,6 @@ export interface ContainerDto extends ContainerFlags {
   containerTypeId: number
   containerTypeCode: string
   containerTypeName: string
-  typeMaxUnits: number | null
   maxWeightKg: number | null
   maxVolumeCbm: number | null
   sealNo: string | null
@@ -389,13 +401,17 @@ export interface ContainerDto extends ContainerFlags {
   blNo: string | null
   blDate: string | null
   blNotes: string | null
-  maxUnits: number | null
   totalLines: number
   totalAllocatedBase: number
   totalReceivedBase: number
   totalOilQty: number
-  utilizationPct: number | null
-  remainingCapacityBase: number | null
+  /** The fill from the items' Container units (script 50), in %; null when an item has none. */
+  fillPct: number | null
+  capacityKnown: boolean
+  /** The item codes without a Container unit, when the fill is unknown. */
+  missingContainerUnitItems: string | null
+  /** Pieces still fitting, for a container of one item (negative above capacity). */
+  remainingPcs: number | null
   isOverCapacity: boolean
   branchId: number
   branchCode: string
@@ -572,7 +588,6 @@ export interface SaveContainerRequest {
   blNo: string | null
   blDate: string | null
   blNotes: string | null
-  maxUnits: number | null
   branchId: number
   warehouseId: number | null
   truckNo: string | null
@@ -713,7 +728,8 @@ export interface AttachmentUpload {
   containerIds: number[]
   movementId?: number | null
   chargeId?: number | null
-  attachmentTypeId?: number | null
+  /** Required: a type used for containers. */
+  attachmentTypeId: number
   note?: string | null
   documentDate?: string | null
 }
@@ -730,18 +746,11 @@ export interface AttachmentCreatedDto {
 
 /* ── many containers per order: auto-plan and bulk actions ────────────────────────────────── */
 
-/** Pieces of one item in a full container, as typed in the auto-plan dialog. */
-export interface ItemCapacity {
-  itemId: number
-  pcsPerContainer: number
-}
-
 export interface AutoPlanRequest {
   purchaseOrderId: number
   containerTypeId: number
   /** False = the rest of every order line gets its own container. */
   mixRemainders: boolean
-  capacities?: ItemCapacity[]
 }
 
 /** One proposed container. */
@@ -751,8 +760,6 @@ export interface PlannedContainerDto {
   units: number
   /** Sum of quantity / pieces per container, in % (one decimal); null when an item has no capacity. */
   fillPct: number | null
-  /** The equivalent capacity in pieces (84 for a full 84-piece container, 102 for 42 × 84 + 60 × 120). */
-  maxUnits: number | null
   /** The item code, or "Mixed - 2 items". */
   itemSummary: string
 }
@@ -773,8 +780,8 @@ export interface PlannedContainerLineDto {
   oilQtyPerUnit: number | null
 }
 
-/** Where the pieces per container of an order line come from. */
-export type CapacitySource = 'Entered' | 'Item' | 'Type' | 'None'
+/** Where the pieces per container of an order line come from (script 50): the item's Container unit, or nowhere. */
+export type CapacitySource = 'Item Definition' | 'None'
 
 /** One line of the order: what can still be loaded and what the plan loads. */
 export interface PlanOrderLineDto {
@@ -789,11 +796,15 @@ export interface PlanOrderLineDto {
   plannedBase: number
   pcsPerContainer: number | null
   capacitySource: CapacitySource
+  /** "Line 2 (TEST46-C): set its Container unit in Item Definition first." when the item has none. */
+  capacityMessage: string | null
   containersNeeded: number
   oilIncluded: boolean
 }
 
 export interface AutoPlanDto {
+  /** Set when no plan can be made (an item without a Container unit): no containers, and each order line says why. */
+  message: string | null
   containers: PlannedContainerDto[]
   lines: PlannedContainerLineDto[]
   orderLines: PlanOrderLineDto[]
@@ -828,8 +839,6 @@ export interface CreateContainersFromPlanRequest {
   eta?: string | null
   freeDays?: number | null
   containers: PlanContainerRequest[]
-  /** The SAME capacities as the proposal: the server recomputes each container's Max units from them. */
-  capacities?: ItemCapacity[]
   allowOverCapacity: boolean
   confirm: boolean
 }
@@ -841,8 +850,9 @@ export interface CreatedContainerDto {
   status: ContainerStatusCode
   totalLines: number
   totalAllocatedBase: number
-  maxUnits: number | null
-  utilizationPct: number | null
+  fillPct: number | null
+  capacityKnown: boolean
+  isOverCapacity: boolean
   rowVersion: string
 }
 
@@ -935,11 +945,19 @@ export const containersApi = {
     for (const id of upload.containerIds) form.append('containerIds', String(id))
     if (upload.movementId) form.append('movementId', String(upload.movementId))
     if (upload.chargeId) form.append('chargeId', String(upload.chargeId))
-    if (upload.attachmentTypeId) form.append('attachmentTypeId', String(upload.attachmentTypeId))
+    form.append('attachmentTypeId', String(upload.attachmentTypeId))
     if (upload.note) form.append('note', upload.note)
-    if (upload.documentDate) form.append('documentDate', upload.documentDate)
+    if (upload.documentDate) form.append('documentDate', upload.documentDate.slice(0, 10))
     return postForm<AttachmentCreatedDto[]>(`${BASE}/attachments`, form)
   },
+
+  /** The attachments of a container, or of a movement's containers, with their type (newest first). */
+  listAttachments: (query: { containerId?: number; movementId?: number; attachmentTypeId?: number }) =>
+    request<ContainerAttachmentDto[]>(`${BASE}/attachments${toQueryString(query)}`),
+
+  /** The type, date and note of one record (this container only). */
+  updateAttachment: (attachmentId: number, fields: DocumentFileFields) =>
+    request<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}`, { method: 'PUT', body: fields }),
 
   attachmentBlob: (attachmentId: number) => fetchBlob(`${BASE}/attachments/${attachmentId}/download`),
 

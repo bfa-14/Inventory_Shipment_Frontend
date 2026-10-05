@@ -36,6 +36,8 @@ import {
   type ContainerChargeDto,
 } from '../../api/logistics/containerCharges'
 import { containersApi } from '../../api/logistics/containers'
+import { AttachmentUploadDialog } from '../attachments/AttachmentUploadDialog'
+import { ATTACHMENT_ACCEPT, attachmentTypeLabel, formatBytes } from '../attachments/attachmentRules'
 import { movementsApi } from '../../api/logistics/movements'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -99,12 +101,6 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-function fileSize(bytes: number): string {
-  if (bytes < 1024) return `${formatNumber(bytes)} B`
-  if (bytes < 1024 * 1024) return `${formatNumber(bytes / 1024, 1)} KB`
-  return `${formatNumber(bytes / (1024 * 1024), 1)} MB`
-}
-
 /**
  * One container charge, opened from the charges list or the container page.
  *
@@ -150,7 +146,9 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
   const [providers, setProviders] = useState<PartyLookupDto[]>([])
   const [movementOptions, setMovementOptions] = useState<{ value: string; label: string }[]>([])
 
-  const [busy, setBusy] = useState<'save' | 'post' | 'cancel' | 'delete' | 'upload' | null>(null)
+  const [busy, setBusy] = useState<'save' | 'post' | 'cancel' | 'delete' | null>(null)
+  /** The file picked for an upload: the shared dialog asks its type, date and note before it goes. */
+  const [uploading, setUploading] = useState<{ file: File } | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
   const [rateLoading, setRateLoading] = useState(false)
@@ -363,21 +361,8 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
     }
   }
 
-  async function upload(file: File | null) {
-    if (!dto || !file) return
-    const containerIds = Array.from(new Set([dto.containerId, ...dto.group.map((g) => g.containerId)]))
-    setBusy('upload')
-    try {
-      await containersApi.addAttachment({ file, containerIds, chargeId: dto.id, movementId: dto.movementId })
-      notify.success(containerIds.length > 1 ? `Document added to ${formatNumber(containerIds.length)} containers.` : 'Document added.')
-      await load()
-      onChanged()
-    } catch (err) {
-      fail(err, 'The document could not be uploaded.')
-    } finally {
-      setBusy(null)
-    }
-  }
+  /** Every container of the group: an upload goes on all of them. */
+  const groupContainerIds = dto ? Array.from(new Set([dto.containerId, ...dto.group.map((g) => g.containerId)])) : []
 
   async function download(id: number, fileName: string) {
     try {
@@ -652,9 +637,9 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
         <Group justify="space-between" mb={4} wrap="wrap">
           <Title order={5}>Documents</Title>
           {mayAttach && dto.status !== 3 && (
-            <FileButton onChange={(file) => void upload(file)}>
+            <FileButton accept={ATTACHMENT_ACCEPT} onChange={(file) => file && setUploading({ file })}>
               {(props) => (
-                <Button {...props} size="xs" variant="default" leftSection={<IconUpload size={14} />} loading={busy === 'upload'}>
+                <Button {...props} size="xs" variant="default" leftSection={<IconUpload size={14} />}>
                   Upload
                 </Button>
               )}
@@ -675,7 +660,7 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
                 <div style={{ minWidth: 0 }}>
                   <Text fz="sm" truncate>{file.fileName}</Text>
                   <Text fz="xs" c="dimmed">
-                    {[file.category, file.documentDate ? dateLabel(file.documentDate) : null, fileSize(file.sizeBytes)].filter(Boolean).join(' · ')}
+                    {[attachmentTypeLabel(file.category, file.subType), file.documentDate ? dateLabel(file.documentDate) : null, formatBytes(file.sizeBytes)].join(' · ')}
                   </Text>
                 </div>
                 <Tooltip label="Download" withArrow>
@@ -741,6 +726,31 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
           </Tooltip>
         )}
       </Group>
+
+      <AttachmentUploadDialog
+        opened={uploading !== null}
+        documentKind="CONTAINER"
+        initialFile={uploading?.file ?? null}
+        filing={{
+          containerIds: groupContainerIds,
+          otherContainers: [],
+          movementOptions: [],
+          fixedText:
+            groupContainerIds.length > 1
+              ? `Filed under this charge on ${formatNumber(groupContainerIds.length)} containers.`
+              : `Filed under this charge on ${dto.containerRef}.`,
+        }}
+        onUpload={(file, fields) =>
+          containersApi.addAttachment({ file, containerIds: groupContainerIds, chargeId: dto.id, movementId: dto.movementId, ...fields })
+        }
+        onClose={() => setUploading(null)}
+        onUploaded={() => {
+          setUploading(null)
+          notify.success(groupContainerIds.length > 1 ? `Document added to ${formatNumber(groupContainerIds.length)} containers.` : 'Document added.')
+          void load()
+          onChanged()
+        }}
+      />
 
       {copyOpen && (
         <ApplyChargeModal

@@ -51,6 +51,7 @@ import type { ItemLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { ContainerSelectionBar } from '../../components/logistics/ContainerSelectionBar'
+import { ContainerFillCell } from '../../components/logistics/ContainerFillLine'
 import { refreshSelection } from '../../components/logistics/containerSelection'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
@@ -119,6 +120,7 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'invoicingStatus', kind: 'list', text: (r) => INVOICING_STATUSES[r.invoicingStatus]?.label ?? '' },
   { accessor: 'itemSummary', text: (r) => r.itemSummary ?? '' },
   { accessor: 'totalQtyBase', kind: 'number', summary: 'sum' },
+  { accessor: 'fillPct', kind: 'number', text: (r) => (r.fillPct === null ? '' : formatNumber(r.fillPct, 1)) },
   { accessor: 'chargesPostedBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.chargesPostedBase, 2) },
   { accessor: 'currentMovementNo', text: (r) => r.currentMovementNo ?? '' },
   { accessor: 'blNo', text: (r) => r.blNo ?? '' },
@@ -380,6 +382,14 @@ export function ContainersPage() {
       width: 80,
       textAlign: 'right',
       render: (row) => formatNumber(row.totalQtyBase),
+    },
+    {
+      accessor: 'fillPct',
+      title: 'Fill',
+      width: 90,
+      textAlign: 'right',
+      // From the items' Container units (script 50): "—" when an item has none, red above 100 %.
+      render: (row) => <ContainerFillCell fillPct={row.fillPct} missingItems={row.missingContainerUnitItems} />,
     },
     {
       accessor: 'chargesPostedBase',

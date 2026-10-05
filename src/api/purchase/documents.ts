@@ -1,5 +1,6 @@
 import type { BulkActionItemResult, BulkActionResult, ImportCreateLine, ImportCreateResult } from '../documents'
-import { fetchBlob, postForm, request } from '../http'
+import { documentFilesApi } from '../documentFiles'
+import { fetchBlob, request } from '../http'
 import type { SalesRateType } from '../sales/invoices'
 import type { PurchaseChargeDto, SetPurchaseChargesRequest } from './landedCostAdjustments'
 import type { PagedResult } from '../types'
@@ -513,16 +514,8 @@ export const purchaseDocumentsApi = {
   createReturn: (id: number, documentDate?: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/create-return`, { method: 'POST', body: { documentDate: documentDate ?? null } }),
 
-  addFile: (id: number, file: File) => {
-    const form = new FormData()
-    form.append('file', file, file.name)
-    return postForm<{ id: number }>(`${BASE}/${id}/files`, form)
-  },
-
-  downloadFile: async (id: number, fileId: number, fileName: string) =>
-    save(await fetchBlob(`${BASE}/${id}/files/${fileId}`), fileName),
-
-  removeFile: (id: number, fileId: number) => request<void>(`${BASE}/${id}/files/${fileId}`, { method: 'DELETE' }),
+  /** The files with their type, date and note (script 48): list, upload, edit, download, delete. */
+  files: documentFilesApi(BASE),
 
   bulkPost: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-post`, { method: 'POST', body: { ids } }),
 

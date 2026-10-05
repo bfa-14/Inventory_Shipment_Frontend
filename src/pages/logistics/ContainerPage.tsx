@@ -57,11 +57,12 @@ import { dateLabel, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { AddPoLinesModal } from '../../components/logistics/AddPoLinesModal'
 import { ContainerCapacityCard } from '../../components/logistics/ContainerCapacityCard'
+import { overCapacityMessage } from '../../components/logistics/containerFill'
 import { ContainerChargesCard } from '../../components/logistics/ContainerChargesCard'
 import { ContainerCostCard } from '../../components/logistics/ContainerCostCard'
 import { ContainerDocumentsCard } from '../../components/logistics/ContainerDocumentsCard'
 import {
-  capacityOf,
+  fillOfLines,
   emptyValues,
   fromContainerLine,
   lastFreeDay,
@@ -238,7 +239,7 @@ export function ContainerPage() {
 
   const readOnly = !perm.create || (container !== null && !container.canEdit)
   const values = form.values
-  const capacity = capacityOf(values.maxUnits, lines)
+  const fill = fillOfLines(lines)
   const totalOil = lines.reduce((sum, line) => sum + lineOil(line), 0)
   const type = types.find((t) => String(t.id) === values.containerTypeId) ?? null
   const freeDay = lastFreeDay(values.actualPortArrival, values.freeDays)
@@ -337,10 +338,10 @@ export function ContainerPage() {
 
     // Over capacity: a warning, never a block — but confirming it is a right. Without it the save
     // goes as it is and the server's 409 says why.
-    if (capacity.over && !allowOverCapacity && perm.overCapacity) {
+    if (fill.over && !allowOverCapacity && perm.overCapacity) {
       const go = await confirm({
         title: 'Load above capacity?',
-        message: `The container holds ${formatNumber(capacity.maxUnits)} units and ${formatNumber(capacity.allocated)} are allocated (${formatNumber(capacity.utilization, 0)} %). Save it above its capacity?`,
+        message: overCapacityMessage(fill),
         confirmLabel: 'Save over capacity',
       })
       if (!go) return null
@@ -607,13 +608,7 @@ export function ContainerPage() {
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
                 <ViewField label="Container Ref." value={container?.containerRef ?? 'Assigned on save'} dimmed={!container} />
                 {textField('containerNo', 'Container No.', 20, 'MSKU1234567')}
-                {selectField('containerTypeId', 'Container Type', typeOptions, {
-                  required: true,
-                  onPick: (next) => {
-                    const picked = types.find((t) => String(t.id) === next)
-                    if (picked?.maxUnits) form.setFieldValue('maxUnits', picked.maxUnits)
-                  },
-                })}
+                {selectField('containerTypeId', 'Container Type', typeOptions, { required: true })}
                 {textField('sealNo', 'Seal No.', 30)}
                 {textField('customsSealNo', 'Customs Seal No.', 30)}
                 <ViewField label="Status" value={container?.statusName ?? 'Draft (not saved)'} />
@@ -753,15 +748,7 @@ export function ContainerPage() {
 
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Stack gap="md">
-            <ContainerCapacityCard
-              typeLabel={type ? `${type.typeCode} - ${type.typeName}` : null}
-              capacity={capacity}
-              maxUnits={values.maxUnits}
-              onMaxUnitsChange={(next) => form.setFieldValue('maxUnits', next)}
-              typeMaxUnits={type?.maxUnits ?? null}
-              readOnly={readOnly}
-              totalOil={totalOil}
-            />
+            <ContainerCapacityCard typeLabel={type ? `${type.typeCode} - ${type.typeName}` : null} fill={fill} totalOil={totalOil} />
             {container ? <ContainerCostCard container={container} baseCurrencyCode="USD" /> : null}
             {/* Keyed on the movements, so the map reloads when the route changes. */}
             {container ? (

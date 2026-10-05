@@ -19,7 +19,6 @@ interface ContainerTypeFormModalProps {
 interface FormValues {
   typeCode: string
   typeName: string
-  maxUnits: number | string
   maxWeightKg: number | string
   maxVolumeCbm: number | string
   description: string
@@ -56,7 +55,6 @@ export function ContainerTypeFormModal({ mode, containerType, onClose, onSaved }
         if (name.length > MAX_NAME) return `Type Name cannot be longer than ${MAX_NAME} characters.`
         return null
       },
-      maxUnits: (value) => (value !== '' && Number(value) < 1 ? 'Max Units must be at least 1.' : null),
       maxWeightKg: (value) => (value !== '' && Number(value) <= 0 ? 'Max Weight must be greater than zero.' : null),
       maxVolumeCbm: (value) => (value !== '' && Number(value) <= 0 ? 'Max Volume must be greater than zero.' : null),
     },
@@ -66,7 +64,6 @@ export function ContainerTypeFormModal({ mode, containerType, onClose, onSaved }
     return {
       typeCode: values.typeCode.trim().toUpperCase(),
       typeName: values.typeName.trim(),
-      maxUnits: optionalNumber(values.maxUnits),
       maxWeightKg: optionalNumber(values.maxWeightKg),
       maxVolumeCbm: optionalNumber(values.maxVolumeCbm),
       description: values.description.trim() || null,
@@ -129,16 +126,6 @@ export function ContainerTypeFormModal({ mode, containerType, onClose, onSaved }
         <TextInput label="Type Name" placeholder="40ft High Cube" withAsterisk maxLength={MAX_NAME} {...form.getInputProps('typeName')} />
       </Group>
 
-      <NumberInput
-        label="Max Units"
-        description="Capacity in base units (pieces). Copied onto a new container, where it can be changed."
-        placeholder="120"
-        min={1}
-        allowDecimal={false}
-        thousandSeparator=","
-        {...form.getInputProps('maxUnits')}
-      />
-
       <Group grow align="flex-start">
         <NumberInput label="Max Weight (kg)" placeholder="26,500" min={0} decimalScale={3} thousandSeparator="," {...form.getInputProps('maxWeightKg')} />
         <NumberInput label="Max Volume (CBM)" placeholder="76" min={0} decimalScale={3} thousandSeparator="," {...form.getInputProps('maxVolumeCbm')} />
@@ -174,7 +161,6 @@ function toValues(containerType?: ContainerTypeDto): FormValues {
   return {
     typeCode: containerType?.typeCode ?? '',
     typeName: containerType?.typeName ?? '',
-    maxUnits: containerType?.maxUnits ?? '',
     maxWeightKg: containerType?.maxWeightKg ?? '',
     maxVolumeCbm: containerType?.maxVolumeCbm ?? '',
     description: containerType?.description ?? '',

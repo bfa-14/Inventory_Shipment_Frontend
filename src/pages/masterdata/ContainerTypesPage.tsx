@@ -36,7 +36,6 @@ const DASH = '—'
 const GRID_COLUMNS: GridColumnMeta<ContainerTypeDto>[] = [
   { accessor: 'typeCode', summary: 'count' },
   { accessor: 'typeName' },
-  { accessor: 'maxUnits', kind: 'number', text: (r) => (r.maxUnits === null ? DASH : formatNumber(r.maxUnits)) },
   { accessor: 'maxWeightKg', kind: 'number', text: (r) => (r.maxWeightKg === null ? DASH : formatNumber(r.maxWeightKg, 0)) },
   { accessor: 'maxVolumeCbm', kind: 'number', text: (r) => (r.maxVolumeCbm === null ? DASH : formatNumber(r.maxVolumeCbm, 1)) },
   { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
@@ -148,13 +147,6 @@ export function ContainerTypesPage() {
       title: 'Type Name',
     },
     {
-      accessor: 'maxUnits',
-      title: 'Max Units',
-      width: 120,
-      textAlign: 'right',
-      render: (row) => (row.maxUnits === null ? <Text c="dimmed">{DASH}</Text> : formatNumber(row.maxUnits)),
-    },
-    {
       accessor: 'maxWeightKg',
       title: 'Max Weight (kg)',
       width: 150,
@@ -199,7 +191,7 @@ export function ContainerTypesPage() {
     <>
       <PageHeader
         title="Container Types"
-        subtitle="Container sizes and how many units each one holds."
+        subtitle="Container sizes, their weight and volume. How many pieces a container holds is each item's Container unit (Item Definition)."
         actions={
           canManage ? (
             <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>

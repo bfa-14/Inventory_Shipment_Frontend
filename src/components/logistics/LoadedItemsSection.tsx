@@ -5,7 +5,8 @@ import { Link } from 'react-router'
 import { routes } from '../../routes'
 import type { FobSource } from '../../api/logistics/containers'
 import { formatNumber, numberInputValue } from '../format'
-import { lineOil, type LoadLine } from './containerForm'
+import { ContainerFillLine } from './ContainerFillLine'
+import { fillOfLines, lineOil, type LoadLine } from './containerForm'
 
 interface LoadedItemsSectionProps {
   lines: LoadLine[]
@@ -242,6 +243,11 @@ export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems,
           </Table>
         </ScrollArea>
       )}
+      {lines.length > 0 ? (
+        <div style={{ marginTop: 'var(--mantine-spacing-sm)' }}>
+          <ContainerFillLine fill={fillOfLines(lines)} />
+        </div>
+      ) : null}
     </Paper>
   )
 }

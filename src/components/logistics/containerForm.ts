@@ -6,6 +6,7 @@ import type {
   ShippingMethod,
 } from '../../api/logistics/containers'
 import { isoDate } from '../documents/documentKind'
+import { fillOf, type Fill } from './containerFill'
 
 /**
  * The container page's state and the arithmetic on it. Dates are 'YYYY-MM-DD' strings (what the
@@ -38,7 +39,6 @@ export interface ContainerFormValues {
   blNo: string
   blDate: string | null
   blNotes: string
-  maxUnits: number | ''
   branchId: string | null
   warehouseId: string | null
   truckNo: string
@@ -65,9 +65,12 @@ export interface LoadLine {
   purchaseOrderNumber: string | null
   supplierName: string
   poLineNumber: number
+  itemId: number
   itemCode: string
   itemName: string
   model: string | null
+  /** Pieces of the item in a full container (its Container unit, from the API); null when it has none. */
+  pcsPerContainer: number | null
   /** Pieces (base units). */
   quantity: number
   oilIncluded: boolean
@@ -113,7 +116,6 @@ export function emptyValues(branchId: string | null): ContainerFormValues {
     blNo: '',
     blDate: null,
     blNotes: '',
-    maxUnits: '',
     branchId,
     warehouseId: null,
     truckNo: '',
@@ -155,7 +157,6 @@ export function toValues(c: ContainerDto): ContainerFormValues {
     blNo: text(c.blNo),
     blDate: day(c.blDate),
     blNotes: text(c.blNotes),
-    maxUnits: num(c.maxUnits),
     branchId: id(c.branchId),
     warehouseId: id(c.warehouseId),
     truckNo: text(c.truckNo),
@@ -178,9 +179,11 @@ export function fromContainerLine(l: ContainerLineDto): LoadLine {
     purchaseOrderNumber: l.purchaseOrderNumber,
     supplierName: l.supplierName,
     poLineNumber: l.poLineNumber,
+    itemId: l.itemId,
     itemCode: l.itemCode,
     itemName: l.itemName,
     model: l.model,
+    pcsPerContainer: l.pcsPerContainer,
     quantity: l.quantityBase,
     oilIncluded: l.oilIncluded,
     oilQtyPerUnit: l.oilQtyPerUnit,
@@ -201,9 +204,11 @@ export function fromPoLine(l: AvailablePoLineDto, quantity: number, oilIncluded:
     purchaseOrderNumber: l.purchaseOrderNumber,
     supplierName: l.supplierName,
     poLineNumber: l.poLineNumber,
+    itemId: l.itemId,
     itemCode: l.itemCode,
     itemName: l.itemName,
     model: l.model,
+    pcsPerContainer: l.pcPerContainer,
     quantity,
     oilIncluded,
     oilQtyPerUnit: oilIncluded ? oilQtyPerUnit : null,
@@ -218,25 +223,9 @@ export function fromPoLine(l: AvailablePoLineDto, quantity: number, oilIncluded:
 export const lineBase = (line: LoadLine) => line.quantity
 export const lineOil = (line: LoadLine) => (line.oilIncluded ? line.quantity * (line.oilQtyPerUnit ?? 0) : 0)
 
-export interface Capacity {
-  maxUnits: number | null
-  allocated: number
-  remaining: number | null
-  /** 0-100+, null without a capacity. */
-  utilization: number | null
-  over: boolean
-}
-
-export function capacityOf(maxUnits: number | '', lines: LoadLine[]): Capacity {
-  const allocated = lines.reduce((sum, line) => sum + lineBase(line), 0)
-  const max = maxUnits === '' ? null : maxUnits
-  return {
-    maxUnits: max,
-    allocated,
-    remaining: max === null ? null : max - allocated,
-    utilization: max ? (allocated * 100) / max : null,
-    over: max !== null && allocated > max,
-  }
+/** The fill of the lines on the page, from the items' Container units (script 50: no typed capacity any more). */
+export function fillOfLines(lines: LoadLine[]): Fill {
+  return fillOf(lines.map((line) => ({ itemId: line.itemId, itemCode: line.itemCode, quantity: lineBase(line), pcsPerContainer: line.pcsPerContainer })))
 }
 
 /** Port arrival + free days, 'YYYY-MM-DD'; null when either is missing. */
@@ -293,7 +282,6 @@ export function toRequest(
     blNo: optionalText(values.blNo),
     blDate: values.blDate,
     blNotes: optionalText(values.blNotes),
-    maxUnits: optionalNumber(values.maxUnits),
     branchId: Number(values.branchId),
     warehouseId: optionalId(values.warehouseId),
     truckNo: optionalText(values.truckNo),

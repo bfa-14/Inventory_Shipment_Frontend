@@ -250,6 +250,89 @@ export interface ShippedMovementDto {
   rowVersion: string
 }
 
+/**
+ * The containers a movement can take (`GET container-candidates`, script 46), for the From on the page - saved or
+ * not: the ones at that place (the end of their previous movement) and the ones that never moved. A container
+ * starts a movement where its previous movement ends; the server refuses the others on Save (409
+ * CONTAINER_NOT_AT_FROM) and refuses to Start while a previous movement is not completed (409 PREVIOUS_MOVEMENT_OPEN).
+ */
+export interface MovementContainerCandidateQuery {
+  /** Undefined = a new movement. */
+  movementId?: number
+  fromPlaceId: number
+  /** The To and the type on the page (script 49): an Origin-stage movement takes only containers that never moved. */
+  toPlaceId?: number
+  movementTypeId?: number
+  search?: string
+  purchaseOrderId?: number
+  supplierId?: number
+  status?: number
+  /** Also the ones the save would refuse: canAdd false, with the reason. */
+  includeBlocked?: boolean
+  page?: number
+  /** At most 200. */
+  pageSize?: number
+}
+
+export interface MovementContainerCandidateDto {
+  id: number
+  containerRef: string
+  containerNo: string | null
+  sealNo: string | null
+  containerTypeCode: string
+  /** Summaries: "PO-BR-002-000038 +1". */
+  orderNumbers: string | null
+  supplierNames: string | null
+  itemSummary: string | null
+  pieces: number
+  status: number
+  statusName: string
+  eta: string | null
+  /** Where its previous movement ends, or the port of loading of one that never moved (script 49). */
+  placeName: string | null
+  previousMovementNo: string | null
+  portOfLoadingName: string | null
+  canAdd: boolean
+  /** Why it cannot be added: "At Beira (end of MOV-…), not at Durban.", "Not confirmed yet.", "Travelling with movement MOV-…". */
+  reason: string | null
+  /** On the ones that can: "Not moved yet - port of loading: Shanghai.", "On its way here with MOV-…", "Draft: confirm it…". */
+  note: string | null
+}
+
+/** What the place rules judge a container against: the movement (null = new) and its From, To and type on the page. */
+export interface MovementPlaceQuery {
+  movementId: number | null
+  fromPlaceId: number
+  toPlaceId: number | null
+  movementTypeId: number | null
+}
+
+export type ContainerMatchResult = 'Ready' | 'AlreadyOnMovement' | 'NotFound' | 'Ambiguous' | 'Blocked' | 'Duplicate'
+
+/** One number of the list matched for a movement (`POST match-containers`); the container columns are null when none or two matched. */
+export interface MovementContainerMatchDto {
+  /** The position in the numbers sent, from 1 (empty ones get no row). */
+  rowNo: number
+  inputNumber: string
+  result: ContainerMatchResult
+  containerId: number | null
+  containerRef: string | null
+  containerNo: string | null
+  containerTypeCode: string | null
+  status: number | null
+  statusName: string | null
+  orderNumbers: string | null
+  supplierNames: string | null
+  itemSummary: string | null
+  pieces: number | null
+  placeName: string | null
+  previousMovementNo: string | null
+  portOfLoadingName: string | null
+  /** AlreadyOnMovement: set when the saved container no longer passes the checks for this From. */
+  reason: string | null
+  note: string | null
+}
+
 export const movementsApi = {
   list: (query: MovementQuery, signal?: AbortSignal) =>
     request<PagedResult<MovementListDto>>(`${BASE}${toQueryString(query)}`, { signal }),
@@ -278,6 +361,14 @@ export const movementsApi = {
   /** 409 CONTAINER_BUSY names a container travelling with another movement; nothing is created then. */
   shipContainers: (payload: ShipContainersRequest) =>
     request<ShippedMovementDto>(`${BASE}/ship-containers`, { method: 'POST', body: payload }),
+
+  /** 400 VALIDATION "Choose the From first." without fromPlaceId. */
+  containerCandidates: (query: MovementContainerCandidateQuery, signal?: AbortSignal) =>
+    request<PagedResult<MovementContainerCandidateDto>>(`${BASE}/container-candidates${toQueryString(query)}`, { signal }),
+
+  /** Numbers or refs in the order of the file; nothing is saved. 400 without a number or above 500 of them. */
+  matchContainers: (query: MovementPlaceQuery, numbers: string[], signal?: AbortSignal) =>
+    request<MovementContainerMatchDto[]>(`${BASE}/match-containers`, { method: 'POST', body: { ...query, numbers }, signal }),
 
   exportToExcel: async (query: MovementQuery) =>
     saveBlob(await fetchBlob(`${BASE}/export${toQueryString({ ...query, page: undefined, pageSize: undefined })}`), 'Movements.xlsx'),

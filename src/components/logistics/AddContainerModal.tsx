@@ -7,7 +7,6 @@ import {
   Loader,
   Modal,
   NumberInput,
-  Progress,
   ScrollArea,
   Select,
   SimpleGrid,
@@ -22,6 +21,8 @@ import { useMediaQuery } from '@mantine/hooks'
 import { IconBox, IconDeviceFloppy, IconExternalLink } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containersApi, type AvailablePoLineDto, type ContainerDto, type SaveContainerRequest } from '../../api/logistics/containers'
+import { fillOf, overCapacityMessage } from './containerFill'
+import { ContainerFillLine } from './ContainerFillLine'
 import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/masterdata/containerTypes'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import { invoiceContainersApi, type InvoiceContainersCreatedDto } from '../../api/purchase/invoiceContainers'
@@ -39,15 +40,20 @@ export interface ContainerOrder {
 }
 
 /**
- * "Add container…" on an INVOICE shipped in containers (script 43): the order's form for the invoice's pieces outside
- * containers - one item per container, at most those pieces - created on the order and linked to the invoice.
+ * "Add container…" on an INVOICE shipped in containers (scripts 43 and 47): the order's form for ONE quantity of the
+ * invoice's pieces outside containers - at most maxAddQty, the figures of the invoice's state - created on the order
+ * and linked to the invoice. The server checks the same rules again and says which one failed.
  */
 export interface ContainerInvoice {
   id: number
   documentNumber: string | null
   rowVersion: string | null
-  /** The invoice's pieces outside containers, per order line. */
-  unlinkedByPoLine: Record<number, number>
+  /** The most a new container may take: per order line the lesser of the two figures below. */
+  maxAddQty: number
+  notInContainerQty: number
+  orderLinesAvailableQty: number
+  /** The items with pieces outside containers: a choice only on an invoice of several (made before script 45). */
+  items: { itemId: number; itemCode: string; pcsPerContainer: number | null }[]
 }
 
 interface AddContainerModalProps {
@@ -82,9 +88,7 @@ interface LoadRow {
  * reader holds containers.overcapacity; otherwise the server's 409 message is shown.
  */
 export function AddContainerModal({ opened, onClose, order, invoice, canOverCapacity, onSaved, onInvoiceSaved }: AddContainerModalProps) {
-  /** In invoice mode a line takes no more than the invoice's pieces of it outside containers. */
-  const maxOf = (line: AvailablePoLineDto) =>
-    invoice ? Math.min(line.maxHereBase, invoice.unlinkedByPoLine[line.poLineId] ?? 0) : line.maxHereBase
+  const maxOf = (line: AvailablePoLineDto) => line.maxHereBase
   const fullScreen = useMediaQuery('(max-width: 48em)')
 
   const [types, setTypes] = useState<ContainerTypeLookupDto[]>([])
@@ -101,6 +105,12 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
   const [portOfDestinationId, setPortOfDestinationId] = useState<string | null>(null)
   const [eta, setEta] = useState<string | null>(null)
   const [typeError, setTypeError] = useState<string | null>(null)
+  // Invoice mode: one quantity of one item, the oil as the order line has it (when the order is still open).
+  const [qty, setQty] = useState<number | ''>(invoice ? invoice.maxAddQty : '')
+  const [qtyError, setQtyError] = useState<string | null>(null)
+  const [itemId, setItemId] = useState<string | null>(invoice?.items[0] ? String(invoice.items[0].itemId) : null)
+  const [oilIncluded, setOilIncluded] = useState(false)
+  const [oilQtyPerUnit, setOilQtyPerUnit] = useState<number | ''>('')
 
   useEffect(() => {
     if (!opened) return
@@ -112,11 +122,19 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       .availablePoLines({ purchaseOrderId: order.id })
       .then((lines) => {
         if (!live) return
-        // An invoice offers only its order lines with pieces outside containers, prefilled with those pieces.
-        const offered = invoice ? lines.filter((line) => (invoice.unlinkedByPoLine[line.poLineId] ?? 0) > 0) : lines
+        // An invoice takes one quantity: the order lines only give the oil of its item (none once the order is closed).
+        if (invoice) {
+          const ofItem = lines.find((line) => String(line.itemId) === (invoice.items[0] ? String(invoice.items[0].itemId) : null))
+          if (ofItem && (ofItem.itemOilQtyPerUnit ?? 0) > 0) {
+            setOilIncluded(true)
+            setOilQtyPerUnit(ofItem.itemOilQtyPerUnit ?? '')
+          }
+          setRows([])
+          return
+        }
         setRows(
-          offered.map((line) => {
-            const start = invoice ? Math.min(line.availableBase, invoice.unlinkedByPoLine[line.poLineId] ?? 0) : line.availableBase
+          lines.map((line) => {
+            const start = line.availableBase
             return {
               line,
               quantity: start > 0 ? start : '',
@@ -134,24 +152,47 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, order.id])
 
-  const type = types.find((t) => String(t.id) === typeId) ?? null
-  const capacity = type?.maxUnits ?? null
-  const loaded = useMemo(() => (rows ?? []).reduce((sum, row) => sum + Number(row.quantity || 0), 0), [rows])
-  const over = capacity !== null && loaded > capacity
-  const percent = capacity ? (loaded * 100) / capacity : 0
+  const invoiceItem = invoice ? (invoice.items.find((i) => String(i.itemId) === itemId) ?? invoice.items[0] ?? null) : null
+  /** The fill from the items' Container units (the API's pieces per container), as the server will judge it. */
+  const fill = useMemo(
+    () =>
+      invoice
+        ? fillOf(invoiceItem ? [{ itemId: invoiceItem.itemId, itemCode: invoiceItem.itemCode, quantity: Number(qty || 0), pcsPerContainer: invoiceItem.pcsPerContainer }] : [])
+        : fillOf(
+            (rows ?? []).map((row) => ({
+              itemId: row.line.itemId,
+              itemCode: row.line.itemCode,
+              quantity: Number(row.quantity || 0),
+              pcsPerContainer: row.line.pcPerContainer,
+            })),
+          ),
+    [invoice, invoiceItem, qty, rows],
+  )
+  const canFillOne = invoice ? (invoiceItem?.pcsPerContainer ?? 0) > 0 && invoice.maxAddQty > 0 : (rows ?? []).some((row) => (row.line.pcPerContainer ?? 0) > 0)
 
   function patch(poLineId: number, next: Partial<LoadRow>) {
     setRows((current) => current?.map((row) => (row.line.poLineId === poLineId ? { ...row, ...next } : row)) ?? null)
   }
 
-  /** The lines in list order, each up to what is available, until the capacity is used. */
+  /**
+   * The lines in list order, each up to what is available, until the container is full by the items' Container
+   * units (42 of an 84-piece item leave room for 60 of a 120-piece one). Lines of an item without one stay empty.
+   */
   function fillOneContainer() {
-    if (!rows || capacity === null) return
-    let left = capacity
+    if (invoice) {
+      const pcs = invoiceItem?.pcsPerContainer ?? 0
+      if (pcs > 0) setQty(Math.min(pcs, invoice.maxAddQty))
+      setQtyError(null)
+      return
+    }
+    if (!rows) return
+    let used = 0
     setRows(
       rows.map((row) => {
-        const take = Math.max(0, Math.min(invoice ? maxOf(row.line) : row.line.availableBase, left))
-        left -= take
+        const pcs = row.line.pcPerContainer ?? 0
+        const room = pcs > 0 ? Math.floor((1 - used) * pcs + 1e-9) : 0
+        const take = Math.max(0, Math.min(row.line.availableBase, room))
+        if (pcs > 0) used += take / pcs
         return { ...row, quantity: take > 0 ? take : '' }
       }),
     )
@@ -166,8 +207,15 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       notify.error('Order Date is required.')
       return
     }
+    if (invoice) {
+      const wanted = Number(qty || 0)
+      if (wanted < 1 || wanted > invoice.maxAddQty) {
+        setQtyError(`Between 1 and ${formatNumber(invoice.maxAddQty)} pcs.`)
+        return
+      }
+    }
     const picked = (rows ?? []).filter((row) => Number(row.quantity || 0) > 0)
-    if (picked.length === 0) {
+    if (!invoice && picked.length === 0) {
       notify.error('Load at least one line.')
       return
     }
@@ -176,16 +224,12 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       notify.error(`${tooMuch.line.itemCode}: at most ${formatNumber(maxOf(tooMuch.line))} pieces can be loaded.`)
       return
     }
-    if (invoice && new Set(picked.map((row) => row.line.itemId)).size > 1) {
-      notify.error('From an invoice, a container is added for one item at a time.')
-      return
-    }
 
-    if (over && !allowOverCapacity) {
+    if (fill.over && !allowOverCapacity) {
       if (canOverCapacity) {
         const go = await confirm({
           title: 'Load above capacity?',
-          message: `A ${type?.typeCode} holds ${formatNumber(capacity)} pieces and ${formatNumber(loaded)} are loaded. Save it above its capacity?`,
+          message: overCapacityMessage(fill),
           confirmLabel: 'Save over capacity',
         })
         if (!go) return
@@ -198,10 +242,10 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       try {
         const result = await invoiceContainersApi.add(invoice.id, {
           rowVersion: invoice.rowVersion,
-          quantityBase: picked.reduce((sum, row) => sum + Number(row.quantity), 0),
-          itemId: picked[0].line.itemId,
-          oilIncluded: picked[0].oilIncluded,
-          oilQtyPerUnit: picked[0].oilIncluded && picked[0].oilQtyPerUnit !== '' ? Number(picked[0].oilQtyPerUnit) : null,
+          quantityBase: Number(qty),
+          itemId: itemId === null ? null : Number(itemId),
+          oilIncluded,
+          oilQtyPerUnit: oilIncluded && oilQtyPerUnit !== '' ? Number(oilQtyPerUnit) : null,
           containerNo: containerNo.trim() ? containerNo.trim().toUpperCase() : null,
           containerTypeId: Number(typeId),
           sealNo: sealNo.trim() || null,
@@ -212,7 +256,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
           eta,
           allowOverCapacity,
         })
-        notify.success(`Container ${result.created[0]?.containerRef ?? ''} created and linked to the invoice.`)
+        notify.success(`Container ${result.created[0]?.containerRef ?? ''} created and linked to this invoice.`)
         onInvoiceSaved?.(result)
       } catch (err) {
         notify.error(err instanceof ApiError ? err.message : 'The container could not be saved.')
@@ -250,7 +294,6 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       blNo: null,
       blDate: null,
       blNotes: null,
-      maxUnits: null,
       branchId: order.branchId,
       warehouseId: order.warehouseId,
       truckNo: null,
@@ -288,7 +331,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
 
   const typeOptions = types.map((t) => ({
     value: String(t.id),
-    label: `${t.typeCode} - ${t.typeName}${t.maxUnits ? ` (${formatNumber(t.maxUnits)} pcs)` : ''}`,
+    label: `${t.typeCode} - ${t.typeName}`,
   }))
   const portOptions = ports.map((p) => ({ value: String(p.id), label: portLabel(p) }))
 
@@ -351,29 +394,62 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
         </div>
 
         <div>
-          <Group justify="space-between" mb={4} wrap="wrap">
-            <Text fz="sm" fw={600}>
-              Capacity
-            </Text>
-            <Text fz="sm" c={over ? 'orange' : undefined} fw={over ? 700 : 400} data-capacity-label>
-              {capacity === null
-                ? `${formatNumber(loaded)} pcs loaded - pick a type for its capacity`
-                : `${formatNumber(loaded)} / ${formatNumber(capacity)} pcs (${formatNumber(percent, 0)} %)${over ? ' - over capacity' : ''}`}
-            </Text>
-          </Group>
-          <Progress value={Math.min(100, percent)} color={over ? 'orange' : 'blue'} size="lg" radius="xl" />
-        </div>
-
-        <div>
           <Group justify="space-between" mb="xs" wrap="wrap">
             <Title order={6}>{invoice ? 'Pieces of this invoice not in a container yet' : 'Lines of this order'}</Title>
-            <Button size="xs" variant="light" leftSection={<IconBox size={14} />} disabled={capacity === null || !rows?.length} onClick={fillOneContainer}>
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconBox size={14} />}
+              disabled={!canFillOne}
+              onClick={fillOneContainer}
+            >
               Fill one container
             </Button>
           </Group>
-          {loadError ? <Alert color="red">{loadError}</Alert> : null}
-          {rows === null && !loadError ? <Loader size="sm" /> : null}
-          {rows && rows.length === 0 ? (
+          {invoice ? (
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
+              {invoice.items.length > 1 ? (
+                <Select
+                  label="Item"
+                  withAsterisk
+                  data={invoice.items.map((i) => ({ value: String(i.itemId), label: i.itemCode }))}
+                  value={itemId}
+                  onChange={setItemId}
+                  allowDeselect={false}
+                />
+              ) : null}
+              <NumberInput
+                label="Quantity (pcs)"
+                withAsterisk
+                min={1}
+                max={invoice.maxAddQty}
+                clampBehavior="strict"
+                allowDecimal={false}
+                allowNegative={false}
+                thousandSeparator=","
+                value={qty}
+                onChange={(next) => {
+                  setQty(numberInputValue(next) ?? '')
+                  setQtyError(null)
+                }}
+                error={qtyError}
+                description={`At most ${formatNumber(invoice.maxAddQty)} pcs: ${formatNumber(invoice.notInContainerQty)} not in a container on this invoice, the order allows ${formatNumber(invoice.orderLinesAvailableQty)} more.`}
+                inputWrapperOrder={['label', 'input', 'description', 'error']}
+              />
+              <Checkbox label="Oil included" mt={{ base: 0, md: 30 }} checked={oilIncluded} onChange={(e) => setOilIncluded(e.currentTarget.checked)} />
+              <NumberInput
+                label="Oil qty/unit"
+                min={0}
+                decimalScale={2}
+                disabled={!oilIncluded}
+                value={oilQtyPerUnit}
+                onChange={(next) => setOilQtyPerUnit(numberInputValue(next) ?? '')}
+              />
+            </SimpleGrid>
+          ) : null}
+          {loadError && !invoice ? <Alert color="red">{loadError}</Alert> : null}
+          {rows === null && !loadError && !invoice ? <Loader size="sm" /> : null}
+          {rows && rows.length === 0 && !invoice ? (
             <Text fz="sm" c="dimmed" ta="center" py="md">
               Nothing is left to load on this order.
             </Text>
@@ -453,6 +529,11 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
                 </Table.Tbody>
               </Table>
             </ScrollArea>
+          ) : null}
+          {invoice || (rows && rows.length > 0) ? (
+            <div style={{ marginTop: 'var(--mantine-spacing-sm)' }} data-capacity-label>
+              <ContainerFillLine fill={fill} />
+            </div>
           ) : null}
         </div>
 

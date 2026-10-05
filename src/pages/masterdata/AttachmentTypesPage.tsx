@@ -1,9 +1,15 @@
-import { useCallback, useMemo, useState } from 'react'
-import { Alert, Button, Paper, Select, Text, TextInput } from '@mantine/core'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import { IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
-import { appliesToLabel, ATTACHMENT_CATEGORIES, attachmentTypesApi, type AttachmentTypeDto } from '../../api/masterdata/attachmentTypes'
+import type { AttachmentDocumentKind } from '../../api/documentFiles'
+import {
+  ATTACHMENT_CATEGORIES,
+  attachmentTypesApi,
+  type AttachmentDocumentKindDto,
+  type AttachmentTypeDto,
+} from '../../api/masterdata/attachmentTypes'
 import { useAuth } from '../../auth/useAuth'
 import { formatNumber } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
@@ -23,21 +29,24 @@ interface Filters {
   search: string
   category: string | null
   isActive: string | null
+  documentKind: AttachmentDocumentKind | null
 }
 
-const NO_FILTERS: Filters = { search: '', category: null, isActive: null }
+const NO_FILTERS: Filters = { search: '', category: null, isActive: null, documentKind: null }
 
 /**
  * What each column IS, for the grid engine: its kind (so a number compares as a number), what it
  * shows, and whether the footer totals it. How a cell LOOKS stays in the column definitions below.
  */
-const GRID_COLUMNS: GridColumnMeta<AttachmentTypeDto>[] = [
-  { accessor: 'category', summary: 'count' },
-  { accessor: 'subType' },
-  { accessor: 'appliesTo', kind: 'list', text: (r) => appliesToLabel(r.appliesTo) },
-  { accessor: 'sortOrder', kind: 'number', text: (r) => formatNumber(r.sortOrder) },
-  { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
-]
+function gridColumns(kindName: (code: string) => string): GridColumnMeta<AttachmentTypeDto>[] {
+  return [
+    { accessor: 'category', summary: 'count' },
+    { accessor: 'subType' },
+    { accessor: 'usedFor', text: (r) => r.usedFor.map(kindName).join(', ') },
+    { accessor: 'sortOrder', kind: 'number', text: (r) => formatNumber(r.sortOrder) },
+    { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
+  ]
+}
 
 type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTypeDto } | null
 
@@ -45,7 +54,18 @@ type Dialog = { kind: 'create' } | { kind: 'edit'; attachmentType: AttachmentTyp
 export function AttachmentTypesPage() {
   const { hasPermission } = useAuth()
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [kinds, setKinds] = useState<AttachmentDocumentKindDto[]>([])
   const canManage = hasPermission(PERMISSIONS.attachmentTypesManage)
+
+  useEffect(() => {
+    attachmentTypesApi
+      .documentKinds()
+      .then(setKinds)
+      .catch(() => notify.error('The document kinds could not be loaded.'))
+  }, [])
+
+  const kindName = useCallback((code: string) => kinds.find((k) => k.code === code)?.name ?? code, [kinds])
+  const columnsMeta = useMemo(() => gridColumns(kindName), [kindName])
 
   const grid = useGridQuery<Filters, AttachmentTypeDto, AllRows<AttachmentTypeDto>>({
     initialFilters: NO_FILTERS,
@@ -62,6 +82,7 @@ export function AttachmentTypesPage() {
               search: filters.search.trim() || undefined,
               category: filters.category ?? undefined,
               isActive: filters.isActive === null ? undefined : filters.isActive === 'true',
+              documentKind: filters.documentKind ?? undefined,
               page,
               pageSize,
             },
@@ -80,7 +101,7 @@ export function AttachmentTypesPage() {
      loaded; the grid's own column filters narrow what is loaded. */
   const engine = useDataGrid({
     rows,
-    columns: GRID_COLUMNS,
+    columns: columnsMeta,
     storeKey: 'masterdata.attachmentTypes',
     sort: [{ accessor: 'sortOrder', direction: 'asc' }],
   })
@@ -141,10 +162,17 @@ export function AttachmentTypesPage() {
       title: 'Sub Type',
     },
     {
-      accessor: 'appliesTo',
-      title: 'Used on',
-      width: 130,
-      render: (row) => appliesToLabel(row.appliesTo),
+      accessor: 'usedFor',
+      title: 'Used for',
+      render: (row) => (
+        <Group gap={4}>
+          {row.usedFor.map((code) => (
+            <Badge key={code} size="sm" variant="light" color="gray" radius="sm" tt="none">
+              {kindName(code)}
+            </Badge>
+          ))}
+        </Group>
+      ),
     },
     {
       accessor: 'sortOrder',
@@ -179,7 +207,7 @@ export function AttachmentTypesPage() {
     <>
       <PageHeader
         title="Attachment Types"
-        subtitle="The kinds of document a container file or a customer receipt can be filed as."
+        subtitle="What a file can be filed as, and the documents whose upload dialogs offer it."
         actions={
           canManage ? (
             <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
@@ -190,7 +218,7 @@ export function AttachmentTypesPage() {
       />
 
       <FilterBar>
-        <FilterBar.Col span={5}>
+        <FilterBar.Col span={3}>
           <TextInput
             placeholder="Category or sub type"
             leftSection={<IconSearch size={16} />}
@@ -204,6 +232,16 @@ export function AttachmentTypesPage() {
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Category" placeholder="All categories" data={ATTACHMENT_CATEGORIES} value={filters.category} onChange={(value) => setFilter('category', value)} clearable />
+        </FilterBar.Col>
+        <FilterBar.Col span={2}>
+          <Select
+            label="Used for"
+            placeholder="Every document"
+            data={kinds.map((k) => ({ value: k.code, label: k.name }))}
+            value={filters.documentKind}
+            onChange={(value) => setFilter('documentKind', value as AttachmentDocumentKind | null)}
+            clearable
+          />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />

@@ -3,7 +3,6 @@ import type {
   AutoPlanDto,
   CreatedContainerDto,
   CreateContainersFromPlanRequest,
-  ItemCapacity,
 } from '../logistics/containers'
 
 /**
@@ -40,16 +39,42 @@ export interface InvoiceLinkedContainerDto {
   itemId: number
   itemCode: string
   quantityBase: number
-  maxUnits: number | null
-  /** The invoice's pieces / the container's max units, in %. */
+  /** The item's pieces in a full container (its Container unit); null when it has none. */
+  pcsPerContainer: number | null
+  /** The invoice's pieces / the item's pieces per container, in % (script 50); null without a Container unit. */
   shareOfContainerPct: number | null
   /** Draft or Confirmed only. */
   canUnlink: boolean
 }
 
+/**
+ * What the invoice can do with containers now, and why not (script 47). The rules: 1 a purchase invoice, draft or
+ * posted; 2 created from a purchase order; 3 one item (a draft); 4 shipped in containers; 5 its order approved or
+ * closed; 6 pieces not in a container; 7 the order lines still allow pieces; 8 at most maxAddQty in a new container;
+ * 9 the reader's permissions. The reasons are the server's sentences - the add and the link refuse with the same.
+ */
+export interface InvoiceContainerStateDto {
+  canAddContainers: boolean
+  reason: string | null
+  /** 1-9; null when every rule holds. */
+  failedRule: number | null
+  /** A draft with "Shipped in containers" off that may turn it on (the save of the invoice). */
+  canTurnOnShipped: boolean
+  notInContainerQty: number
+  /** What the order lines still allow: ordered - invoiced outside containers - loaded in containers. */
+  orderLinesAvailableQty: number
+  /** The most a new container may take. */
+  maxAddQty: number
+  pcsPerContainer: number | null
+  canLink: boolean
+  linkReason: string | null
+}
+
 export interface InvoiceContainerSummaryDto {
   items: InvoiceContainerItemDto[]
   containers: InvoiceLinkedContainerDto[]
+  /** Set on every answer of the API. */
+  state: InvoiceContainerStateDto | null
 }
 
 /** A container line of the invoice's order the invoice can be linked to (Draft or Confirmed, not fully invoiced). */
@@ -93,7 +118,6 @@ export interface AddInvoiceContainerRequest {
 export interface InvoiceAutoPlanRequest {
   containerTypeId: number
   mixRemainders: boolean
-  capacities?: ItemCapacity[]
 }
 
 export type InvoiceContainersFromPlanRequest = Omit<CreateContainersFromPlanRequest, 'purchaseOrderId'> & {

@@ -891,9 +891,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         opened={attachmentsOpen}
         onClose={() => setAttachmentsOpen(false)}
         documentId={document?.id ?? null}
-        files={document?.files ?? []}
+        documentKind={kind.code}
         onChanged={() => void reload()}
         canEdit={canCreate}
+        api={stockDocumentsApi.files}
       />
 
       <CancelReasonModal

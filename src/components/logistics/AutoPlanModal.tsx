@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import {
   ActionIcon,
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -28,10 +30,8 @@ import {
   containersApi,
   type AutoPlanDto,
   type AutoPlanRequest,
-  type CapacitySource,
   type CreateContainersFromPlanRequest,
   type CreatedContainerDto,
-  type ItemCapacity,
   type PlanOrderLineDto,
 } from '../../api/logistics/containers'
 import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/masterdata/containerTypes'
@@ -87,27 +87,15 @@ interface PlanBox {
   lines: PlanLine[]
 }
 
-/** The proposal being edited, with the capacities it was made from: the create call sends those again. */
+/** The proposal being edited, and the mixing it was made with. */
 interface Proposal {
   boxes: PlanBox[]
-  capacities: ItemCapacity[]
   mix: boolean
-}
-
-/** Where an item's pieces per container came from before the reader typed anything. */
-interface ItemOrigin {
-  source: CapacitySource
-  value: number | null
 }
 
 const DEFAULT_TYPE_CODE = '40HC'
 
-const SOURCE_BADGE: Record<CapacitySource, { label: string; colour: string }> = {
-  Entered: { label: 'Typed', colour: 'blue' },
-  Item: { label: 'Item unit', colour: 'teal' },
-  Type: { label: 'Container type', colour: 'gray' },
-  None: { label: 'Not set', colour: 'red' },
-}
+const ITEMS_ROUTE = '/inventory/items'
 
 /** "Container 3 of 30: …" → 3; the row numbered 3 in the table is that container. */
 function containerInError(message: string): number | null {
@@ -129,11 +117,9 @@ function qty(line: PlanLine): number {
  * "Auto-plan containers…" on an approved purchase order: every container of the order in one go
  * (an order of 30 containers is 30 dialogs otherwise).
  *
- * 1. PIECES PER CONTAINER PER ITEM. Prefilled from the order lines (the item's container unit, else
- *    the container type's capacity); the badge says where the number comes from, "Typed" once the
- *    reader changes it. "Propose" sends the capacity of EVERY item and keeps that array: the create
- *    call sends it again unchanged, because the server recomputes each container's Max units from it
- *    (without it an 84-piece item would get the type's 120).
+ * 1. PIECES PER CONTAINER PER ITEM: the item's Container unit (Item Definition), nothing else since
+ *    script 50 - no typed number, no container type capacity. A line whose item has none says so in red
+ *    with a link to the item, and the plan cannot be proposed until every item has one.
  * 2. THE PROPOSAL IS A DRAFT IN THE BROWSER. Containers can be edited (quantities, lines added or
  *    removed), removed or added empty. Fill = Σ quantity ÷ pieces per container, over capacity only
  *    above the SQL's tolerance, shown to one decimal. The footer compares what is planned with what
@@ -155,7 +141,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
             autoPlan: (payload: AutoPlanRequest, signal?: AbortSignal) =>
               invoiceContainersApi.autoPlan(
                 invoiceId,
-                { containerTypeId: payload.containerTypeId, mixRemainders: payload.mixRemainders ?? true, capacities: payload.capacities },
+                { containerTypeId: payload.containerTypeId, mixRemainders: payload.mixRemainders ?? true },
                 signal,
               ),
             createFromPlan: async (payload: CreateContainersFromPlanRequest) => {
@@ -185,8 +171,6 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
 
   // items
   const [orderLines, setOrderLines] = useState<PlanOrderLineDto[] | null>(null)
-  const [origins, setOrigins] = useState<Map<number, ItemOrigin>>(new Map())
-  const [typed, setTyped] = useState<Record<number, number | ''>>({})
   const [linesError, setLinesError] = useState<string | null>(null)
   const [itemsError, setItemsError] = useState<string | null>(null)
 
@@ -219,17 +203,13 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
     }
   }, [order.branchId, order.warehouseId])
 
-  // The order lines and their default pieces per container, for the chosen type (the "Container type"
-  // default is that type's capacity). Asked without capacities, so the answer says where each comes from.
+  // The order lines and the pieces per container of their items (their Container units), for the chosen type.
   useEffect(() => {
     if (!typeId) return
     const controller = new AbortController()
     planner
       .autoPlan({ purchaseOrderId: order.id, containerTypeId: Number(typeId), mixRemainders: true }, controller.signal)
-      .then((plan) => {
-        setOrderLines(plan.orderLines)
-        setOrigins(new Map(plan.orderLines.map((line) => [line.itemId, { source: line.capacitySource, value: line.pcsPerContainer }])))
-      })
+      .then((plan) => setOrderLines(plan.orderLines))
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setOrderLines([])
@@ -238,7 +218,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
     return () => controller.abort()
   }, [order.id, typeId, planner])
 
-  /** Another type: the lines are asked again (its capacity is a default) and the proposal is dropped. */
+  /** Another type: the lines are asked again and the proposal is dropped. */
   function changeType(next: string | null) {
     if (next === typeId) return
     setTypeId(next)
@@ -248,25 +228,16 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
     setEditingKey(null)
   }
 
-  function pcsOf(itemId: number): number | '' {
-    if (typed[itemId] !== undefined) return typed[itemId]
-    return origins.get(itemId)?.value ?? ''
-  }
-
-  function badgeOf(itemId: number): { label: string; colour: string } {
-    const origin = origins.get(itemId)
-    const value = pcsOf(itemId)
-    if (typed[itemId] !== undefined && value !== (origin?.value ?? '')) return SOURCE_BADGE.Entered
-    return SOURCE_BADGE[origin?.source ?? 'None']
-  }
-
   /* ── the proposal ────────────────────────────────────────────────────────────────────────── */
 
   const lineById = useMemo(() => new Map((orderLines ?? []).map((line) => [line.poLineId, line])), [orderLines])
+  /** The pieces per container of every item: its Container unit, from the API. */
   const capacityOf = useMemo(
-    () => new Map((proposal?.capacities ?? []).map((c) => [c.itemId, c.pcsPerContainer])),
-    [proposal],
+    () => new Map((orderLines ?? []).filter((line) => (line.pcsPerContainer ?? 0) > 0).map((line) => [line.itemId, line.pcsPerContainer as number])),
+    [orderLines],
   )
+  /** A line still to load whose item has no Container unit: no plan until it has one. */
+  const blockedLine = (orderLines ?? []).find((line) => line.availableBase > 0 && !(line.pcsPerContainer ?? 0))
 
   /** Every container with its figures; `number` is its place among the non-empty ones (1..N). */
   const boxes = useMemo(() => {
@@ -308,27 +279,11 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
   const partial = toCreate.length - full - mixed
   const pieces = toCreate.reduce((sum, b) => sum + b.units, 0)
 
-  /** Every item of the order once, with the pieces per container on screen. */
-  const currentCapacities = new Map<number, number | ''>()
-  for (const line of orderLines ?? []) if (!currentCapacities.has(line.itemId)) currentCapacities.set(line.itemId, pcsOf(line.itemId))
-
-  const stale =
-    proposal !== null &&
-    (proposal.mix !== mix ||
-      proposal.capacities.some((c) => currentCapacities.get(c.itemId) !== c.pcsPerContainer))
+  const stale = proposal !== null && proposal.mix !== mix
 
   async function propose() {
-    if (!typeId || !orderLines) return
-    const missing = orderLines.find((line) => line.availableBase > 0 && Number(pcsOf(line.itemId) || 0) <= 0)
-    if (missing) {
-      setItemsError(`Pieces per container is required for ${missing.itemCode}.`)
-      return
-    }
+    if (!typeId || !orderLines || blockedLine) return
     setItemsError(null)
-    const capacities: ItemCapacity[] = []
-    for (const [itemId, value] of currentCapacities) {
-      if (Number(value || 0) > 0) capacities.push({ itemId, pcsPerContainer: Number(value) })
-    }
 
     setProposing(true)
     setError(null)
@@ -339,11 +294,15 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
         purchaseOrderId: order.id,
         containerTypeId: Number(typeId),
         mixRemainders: mix,
-        capacities,
       })
       setOrderLines(plan.orderLines)
+      if (plan.message) {
+        // An item lost its Container unit since the dialog opened: no proposal, the lines say which one.
+        setProposal(null)
+        setItemsError(plan.message)
+        return
+      }
       setProposal({
-        capacities,
         mix,
         boxes: plan.containers.map((container) => ({
           key: `box-${nextKey.current++}`,
@@ -425,7 +384,6 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
           seq: b.number ?? 0,
           lines: b.loaded.map((line) => ({ poLineId: line.poLineId, quantityBase: qty(line) })),
         })),
-        capacities: proposal.capacities,
         allowOverCapacity,
         confirm: canConfirm && confirmAfter,
       })
@@ -450,7 +408,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
 
   const typeOptions = types.map((t) => ({
     value: String(t.id),
-    label: `${t.typeCode} - ${t.typeName}${t.maxUnits ? ` (${formatNumber(t.maxUnits)} pcs)` : ''}`,
+    label: `${t.typeCode} - ${t.typeName}`,
   }))
   const portOptions = ports.map((p) => ({ value: String(p.id), label: portLabel(p) }))
   const warehouseOptions = warehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
@@ -510,9 +468,19 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
         <Paper withBorder radius="lg" p="md">
           <Group justify="space-between" mb="xs" wrap="wrap">
             <Title order={6}>Items</Title>
-            <Button leftSection={<IconWand size={16} />} onClick={() => void propose()} loading={proposing} disabled={!typeId || !orderLines || orderLines.length === 0} data-propose>
-              Propose
-            </Button>
+            <Tooltip label="Set the Container unit of every item in Item Definition first." disabled={!blockedLine} withArrow>
+              <Button
+                leftSection={<IconWand size={16} />}
+                onClick={(event) => (blockedLine ? event.preventDefault() : void propose())}
+                loading={proposing}
+                disabled={!typeId || !orderLines || orderLines.length === 0}
+                data-disabled={blockedLine ? true : undefined}
+                aria-disabled={blockedLine ? true : undefined}
+                data-propose
+              >
+                Propose
+              </Button>
+            </Tooltip>
           </Group>
           {!typeId ? (
             <Text fz="sm" c="dimmed">
@@ -530,14 +498,13 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
                     <Table.Th>Model</Table.Th>
                     <Table.Th ta="right">Ordered</Table.Th>
                     <Table.Th ta="right">Available</Table.Th>
-                    <Table.Th w={290}>Pieces per container</Table.Th>
+                    <Table.Th w={320}>Pieces per container</Table.Th>
                     <Table.Th ta="right">Containers needed</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {orderLines.map((line) => {
-                    const pcs = pcsOf(line.itemId)
-                    const badge = badgeOf(line.itemId)
+                    const pcs = line.pcsPerContainer ?? 0
                     return (
                       <Table.Tr key={line.poLineId}>
                         <Table.Td>
@@ -553,25 +520,28 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
                         <Table.Td ta="right" fw={600}>
                           {formatNumber(line.availableBase)}
                         </Table.Td>
-                        <Table.Td>
-                          <Group gap={6} wrap="nowrap">
-                            <NumberInput
-                              size="xs"
-                              w={110}
-                              min={1}
-                              allowDecimal={false}
-                              allowNegative={false}
-                              thousandSeparator=","
-                              value={pcs}
-                              onChange={(next) => setTyped((current) => ({ ...current, [line.itemId]: numberInputValue(next) ?? '' }))}
-                              aria-label={`Pieces per container of ${line.itemCode}`}
-                            />
-                            <Badge size="sm" variant="light" color={badge.colour} style={{ flexShrink: 0 }}>
-                              {badge.label}
-                            </Badge>
-                          </Group>
+                        <Table.Td data-plan-pcs={line.itemCode}>
+                          {pcs > 0 ? (
+                            <Text fz="sm">
+                              {formatNumber(pcs)} per container{' '}
+                              <Text span c="dimmed" fz="xs">
+                                (Item Definition)
+                              </Text>
+                            </Text>
+                          ) : line.availableBase > 0 ? (
+                            <Text fz="sm" c="red.7">
+                              {line.capacityMessage ?? `Line ${line.poLineNumber} (${line.itemCode}): set its Container unit in Item Definition first.`}{' '}
+                              <Anchor component={Link} to={`${ITEMS_ROUTE}/${line.itemId}`} target="_blank" fz="sm" fw={600}>
+                                Open {line.itemCode}
+                              </Anchor>
+                            </Text>
+                          ) : (
+                            <Text fz="sm" c="dimmed">
+                              —
+                            </Text>
+                          )}
                         </Table.Td>
-                        <Table.Td ta="right">{Number(pcs || 0) > 0 ? formatNumber(line.availableBase / Number(pcs), 2) : '—'}</Table.Td>
+                        <Table.Td ta="right">{pcs > 0 ? formatNumber(line.availableBase / pcs, 2) : '—'}</Table.Td>
                       </Table.Tr>
                     )
                   })}
@@ -603,7 +573,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
             </Group>
             {stale ? (
               <Alert color="yellow" mb="sm">
-                The pieces per container or the mixing changed since this proposal. Propose again to use them; Create sends the proposal as it is.
+                The mixing changed since this proposal. Propose again to use it; Create sends the proposal as it is.
               </Alert>
             ) : null}
 
@@ -648,7 +618,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
                             {b.loaded.length > 0 ? (
                               <Group gap={6} wrap="nowrap">
                                 <Progress value={Math.min(100, b.pct)} color={fillColour(b.pct)} size="lg" radius="xl" style={{ flex: 1 }} />
-                                <Text fz="xs" fw={600} c={isOverFull(b.fill) ? 'orange' : undefined} w={56} ta="right">
+                                <Text fz="xs" fw={600} c={isOverFull(b.fill) ? 'red.7' : undefined} w={56} ta="right">
                                   {fillLabel(b.pct)}
                                 </Text>
                               </Group>

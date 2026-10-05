@@ -12,8 +12,6 @@ export interface ContainerTypeDto {
   id: number
   typeCode: string
   typeName: string
-  /** Capacity in base units (pieces). */
-  maxUnits: number | null
   maxWeightKg: number | null
   maxVolumeCbm: number | null
   description: string | null
@@ -29,7 +27,6 @@ export interface ContainerTypeLookupDto {
   id: number
   typeCode: string
   typeName: string
-  maxUnits: number | null
   maxWeightKg: number | null
   maxVolumeCbm: number | null
   isActive: boolean
@@ -47,7 +44,6 @@ export interface ContainerTypeQuery {
 export interface SaveContainerTypeRequest {
   typeCode: string
   typeName: string
-  maxUnits: number | null
   maxWeightKg: number | null
   maxVolumeCbm: number | null
   description: string | null

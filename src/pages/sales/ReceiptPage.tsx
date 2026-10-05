@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { Alert, Anchor, Button, Group, Loader, Stack } from '@mantine/core'
 import { IconPrinter } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { attachmentTypesApi, type AttachmentTypeLookupDto } from '../../api/masterdata/attachmentTypes'
 import { branchesApi } from '../../api/masterdata/branches'
 import { cashBankAccountsApi, type CashBankAccountLookupDto } from '../../api/masterdata/cashBankAccounts'
 import { currenciesApi } from '../../api/masterdata/currencies'
@@ -91,7 +90,6 @@ export function ReceiptPage() {
   const [currencies, setCurrencies] = useState<CurrencyLookupDto[]>([])
   const [methods, setMethods] = useState<PaymentMethodLookupDto[]>([])
   const [accounts, setAccounts] = useState<CashBankAccountLookupDto[]>([])
-  const [attachmentTypes, setAttachmentTypes] = useState<AttachmentTypeLookupDto[]>([])
 
   const [header, setHeader] = useState<ReceiptHeaderForm>(EMPTY_HEADER)
   const [errors, setErrors] = useState<ReceiptHeaderErrors>({})
@@ -215,7 +213,6 @@ export function ReceiptPage() {
       .catch(() => notify.error('Currencies could not be loaded.'))
     paymentMethodsApi.lookup(false).then(setMethods).catch(() => notify.error('Payment methods could not be loaded.'))
     cashBankAccountsApi.lookup({ activeOnly: false }).then(setAccounts).catch(() => notify.error('Cash and bank accounts could not be loaded.'))
-    attachmentTypesApi.lookup(true, undefined, 'Receipt').then(setAttachmentTypes).catch(() => {})
     // isNew comes from the route; it does not change without a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -774,8 +771,6 @@ export function ReceiptPage() {
       <div ref={attachmentsRef}>
         <ReceiptAttachmentsCard
           receiptId={receipt?.id ?? null}
-          files={receipt?.files ?? []}
-          types={attachmentTypes}
           canAdd={canCreate && status !== 'Reversed'}
           canRemove={canCreate && status === 'Draft'}
           onChanged={() => void reload()}

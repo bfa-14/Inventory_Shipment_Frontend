@@ -58,7 +58,6 @@ import { OrderActionButton } from '../../components/purchase/OrderActionButton'
 import { newOrderAbilities, orderAbilities, type OrderAbility } from '../../components/purchase/orderAbilities'
 import { OrderApprovalCard } from '../../components/purchase/OrderApprovalCard'
 import { InvoiceContainerChargesCard } from '../../components/purchase/InvoiceContainerChargesCard'
-import { InvoiceContainersCard } from '../../components/purchase/InvoiceContainersCard'
 import { ShippedInvoiceContainersCard } from '../../components/purchase/ShippedInvoiceContainersCard'
 import { OrderContainersCard } from '../../components/purchase/OrderContainersCard'
 import { PostedInvoiceChargesCard } from '../../components/purchase/PostedInvoiceChargesCard'
@@ -233,7 +232,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
      order shipped in containers is received at the offload of the containers it is linked to, now or later. */
   const shipped = kind.code === 'PINV' && header.receiptMode === '2'
   const savedShipped = kind.code === 'PINV' && document?.shippedInContainers === true
-  const showShippedCard = kind.code === 'PINV' && document != null && document.sourceDocumentId !== null && (shipped || savedShipped)
+  /* The Containers card is on EVERY saved purchase invoice for a reader of containers (script 47): what it can do with
+     containers - and why not - is the server's state, shown in the card, never a card that silently is not there. */
+  const showContainersCard = kind.code === 'PINV' && document != null && hasPermission(PERMISSIONS.containersView)
   const editable = !readOnly && (isNew ? canCreate : canCreate && document?.canEdit === true)
   const fromSource = document?.sourceDocumentId != null
   /* A SUPPLIER INVOICE HOLDS ONE ITEM: the item of its first line, which every other line must share. */
@@ -785,28 +786,29 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     return true
   }
 
-  function toRequest(): SavePurchaseDocumentRequest {
+  /** h = the header to save: the page's, or a copy with one field changed (the switch turned on from the card). */
+  function toRequest(h: typeof header = header): SavePurchaseDocumentRequest {
     return {
       documentTypeCode: kind.code,
-      documentDate: header.documentDate,
-      expectedDate: header.expectedDate,
-      branchId: Number(header.branchId),
+      documentDate: h.documentDate,
+      expectedDate: h.expectedDate,
+      branchId: Number(h.branchId),
       // Omitted on purpose: the warehouse is a LINE's now, and the server keeps the first one.
       warehouseId: null,
-      supplierId: Number(header.supplierId),
-      currencyId: Number(header.currencyId),
-      rateType: header.rateType,
-      exchangeRate: isBaseCurrency ? null : header.exchangeRate,
-      supplierReference: header.supplierReference.trim() || null,
+      supplierId: Number(h.supplierId),
+      currencyId: Number(h.currencyId),
+      rateType: h.rateType,
+      exchangeRate: isBaseCurrency ? null : h.exchangeRate,
+      supplierReference: h.supplierReference.trim() || null,
       ...(kind.code === 'PINV'
         ? {
-            exporterReference: header.exporterReference.trim() || null,
-            commercialInvoiceNo: header.commercialInvoiceNo.trim() || null,
-            receiptMode: Number(header.receiptMode) as ReceiptMode,
-            shippedInContainers: header.receiptMode === '2',
+            exporterReference: h.exporterReference.trim() || null,
+            commercialInvoiceNo: h.commercialInvoiceNo.trim() || null,
+            receiptMode: Number(h.receiptMode) as ReceiptMode,
+            shippedInContainers: h.receiptMode === '2',
           }
         : {}),
-      notes: header.notes.trim() || null,
+      notes: h.notes.trim() || null,
       sourceDocumentId: document?.sourceDocumentId ?? null,
       rowVersion: document?.rowVersion ?? null,
       lines: lines.map((line, index) => ({
@@ -858,12 +860,12 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     if (error.code === 'CONCURRENCY') void reload()
   }
 
-  async function saveDraft(): Promise<PurchaseDocumentDto | null> {
+  async function saveDraft(h: typeof header = header): Promise<PurchaseDocumentDto | null> {
     if (!validate()) return null
     setSaving(true)
     try {
       const oldLineIds = allocationTargets.map((t) => t.id)
-      const saved = documentId === null ? await purchaseDocumentsApi.create(toRequest()) : await purchaseDocumentsApi.update(documentId, toRequest())
+      const saved = documentId === null ? await purchaseDocumentsApi.create(toRequest(h)) : await purchaseDocumentsApi.update(documentId, toRequest(h))
       const newLineIds = saved.lines.map((l) => l.id)
 
       /* THE LINES FIRST, THEN THE CHARGES. A manual allocation points at line ids, and a new
@@ -890,6 +892,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  /** "Turn on 'Shipped in containers'" from the Containers card: the draft saved as the page holds it, with the switch on. */
+  async function turnOnShipped() {
+    const next = { ...header, receiptMode: '2' as const }
+    setHeader(next)
+    await saveDraft(next)
   }
 
   async function saveAndPost() {
@@ -1495,10 +1504,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         />
       )}
 
-      {showShippedCard && document && (
+      {showContainersCard && document && (
         <ShippedInvoiceContainersCard
           invoice={document}
-          pendingSwitch={!savedShipped}
+          pendingSwitch={shipped && !savedShipped}
           canLink={hasPermission(PURCHASE_INVOICE.permissions.create) && (status === 'Draft' || (status === 'Posted' && savedShipped))}
           canAddContainers={hasPermission(PERMISSIONS.containersCreate)}
           canOverCapacity={canOverCapacity}
@@ -1509,6 +1518,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             return false
           }}
           onChanged={() => void refreshQuietly()}
+          onTurnOnShipped={editable ? turnOnShipped : undefined}
         />
       )}
 
@@ -1648,7 +1658,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               canPostInvoices={kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.post)}
               onPosted={() => void refreshQuietly()}
             />
-            {kind.code === 'PINV' && document && !showShippedCard ? <InvoiceContainersCard containers={document.containers} /> : null}
           </Stack>
         </Grid.Col>
       </Grid>
@@ -1657,10 +1666,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         opened={attachmentsOpen}
         onClose={() => setAttachmentsOpen(false)}
         documentId={document?.id ?? null}
-        files={document?.files ?? []}
+        documentKind={kind.code}
         onChanged={() => void reload()}
         canEdit={canCreate}
-        api={purchaseDocumentsApi}
+        api={purchaseDocumentsApi.files}
       />
 
       <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={documentLabel} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />

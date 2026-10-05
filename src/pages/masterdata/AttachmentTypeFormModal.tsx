@@ -1,12 +1,12 @@
-import { useState } from 'react'
-import { Alert, Anchor, Autocomplete, Group, NumberInput, Select, Switch, TextInput } from '@mantine/core'
+import { useEffect, useState } from 'react'
+import { Alert, Anchor, Autocomplete, Group, MultiSelect, NumberInput, Switch, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
+import type { AttachmentDocumentKind } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
 import {
-  ATTACHMENT_APPLIES_TO,
   ATTACHMENT_CATEGORIES,
   attachmentTypesApi,
-  type AttachmentAppliesTo,
+  type AttachmentDocumentKindDto,
   type AttachmentTypeDto,
   type SaveAttachmentTypeRequest,
 } from '../../api/masterdata/attachmentTypes'
@@ -22,7 +22,7 @@ interface AttachmentTypeFormModalProps {
 interface FormValues {
   category: string
   subType: string
-  appliesTo: AttachmentAppliesTo
+  usedFor: AttachmentDocumentKind[]
   sortOrder: number | string
   isActive: boolean
 }
@@ -35,12 +35,18 @@ export function AttachmentTypeFormModal({ mode, attachmentType, onClose, onSaved
   const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [kinds, setKinds] = useState<AttachmentDocumentKindDto[]>([])
+
+  useEffect(() => {
+    attachmentTypesApi.documentKinds().then(setKinds).catch(() => setFormError('The document kinds could not be loaded.'))
+  }, [])
 
   const form = useForm<FormValues>({
     initialValues: toValues(attachmentType),
     validate: {
       category: (value) => (value.trim() ? null : 'Category is required.'),
       subType: (value) => (value.trim() ? null : 'Sub Type is required.'),
+      usedFor: (value) => (value.length > 0 ? null : 'Choose at least one kind of document.'),
     },
   })
 
@@ -51,7 +57,7 @@ export function AttachmentTypeFormModal({ mode, attachmentType, onClose, onSaved
     const payload: SaveAttachmentTypeRequest = {
       category: values.category.trim(),
       subType: values.subType.trim(),
-      appliesTo: values.appliesTo,
+      usedFor: values.usedFor,
       sortOrder: values.sortOrder === '' ? 0 : Number(values.sortOrder),
       isActive: values.isActive,
       ...(mode === 'edit' ? { rowVersion } : {}),
@@ -113,12 +119,14 @@ export function AttachmentTypeFormModal({ mode, attachmentType, onClose, onSaved
         <TextInput label="Sub Type" placeholder="Bill of Lading" withAsterisk maxLength={MAX_SUBTYPE} {...form.getInputProps('subType')} />
       </Group>
 
-      <Select
-        label="Used on"
-        description="Container types are offered when a container file is attached; receipt types on the customer receipt page. The two lists never mix."
-        allowDeselect={false}
-        data={ATTACHMENT_APPLIES_TO}
-        {...form.getInputProps('appliesTo')}
+      <MultiSelect
+        label="Used for"
+        description="The upload dialogs that offer this type: a purchase order's, a container's, a receipt's..."
+        placeholder={form.values.usedFor.length === 0 ? 'Pick the kinds of document' : undefined}
+        withAsterisk
+        searchable
+        data={kinds.map((k) => ({ value: k.code, label: k.name }))}
+        {...form.getInputProps('usedFor')}
       />
 
       <NumberInput
@@ -156,7 +164,7 @@ function toValues(attachmentType?: AttachmentTypeDto): FormValues {
   return {
     category: attachmentType?.category ?? '',
     subType: attachmentType?.subType ?? '',
-    appliesTo: attachmentType?.appliesTo ?? 'Logistics',
+    usedFor: attachmentType?.usedFor ?? [],
     sortOrder: attachmentType?.sortOrder ?? 0,
     isActive: attachmentType?.isActive ?? true,
   }

@@ -1,4 +1,5 @@
-import { fetchBlob, postForm, request } from '../http'
+import { documentFilesApi } from '../documentFiles'
+import { request } from '../http'
 import type { PagedResult } from '../types'
 
 /**
@@ -318,26 +319,6 @@ export const receiptsApi = {
   /** Drafts only. */
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 
-  addFile: (id: number, file: File, attachmentTypeId: number | null, note: string | null) => {
-    const form = new FormData()
-    form.append('file', file, file.name)
-    if (attachmentTypeId !== null) form.append('attachmentTypeId', String(attachmentTypeId))
-    if (note?.trim()) form.append('note', note.trim())
-    return postForm<{ id: number }>(`${BASE}/${id}/files`, form)
-  },
-
-  downloadFile: async (id: number, fileId: number, fileName: string) => saveBlob(await fetchBlob(`${BASE}/${id}/files/${fileId}`), fileName),
-
-  removeFile: (id: number, fileId: number) => request<void>(`${BASE}/${id}/files/${fileId}`, { method: 'DELETE' }),
-}
-
-function saveBlob(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = fileName
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  /** The files with their type, date and note (script 48): list, upload, edit, download, delete. */
+  files: documentFilesApi(BASE),
 }

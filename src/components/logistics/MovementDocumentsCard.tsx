@@ -1,16 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { ActionIcon, Anchor, Button, Group, Paper, ScrollArea, Table, Text, Title, Tooltip } from '@mantine/core'
-import { IconDownload, IconTrash, IconUpload } from '@tabler/icons-react'
+import { ActionIcon, Anchor, Button, Group, Paper, ScrollArea, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
+import { IconDownload, IconPencil, IconTrash, IconUpload } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { containersApi } from '../../api/logistics/containers'
-import type { MovementAttachmentDto, MovementDto } from '../../api/logistics/movements'
+import { containersApi, type ContainerAttachmentDto } from '../../api/logistics/containers'
+import type { MovementDto } from '../../api/logistics/movements'
+import { AttachmentEditDialog } from '../attachments/AttachmentEditDialog'
+import { AttachmentUploadDialog } from '../attachments/AttachmentUploadDialog'
+import { formatBytes } from '../attachments/attachmentRules'
+import { AttachmentTypeBadge } from '../attachments/AttachmentsPanel'
+import { chooseRemoval } from '../attachments/chooseRemoval'
 import { dateLabel, stamp } from '../documents/documentKind'
 import { formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
-import { AttachmentUploadModal } from './AttachmentUploadModal'
-import { RemoveAttachmentModal } from './ContainerDocumentsCard'
 
 interface MovementDocumentsCardProps {
   movement: MovementDto
@@ -22,33 +25,67 @@ interface MovementDocumentsCardProps {
 /** One stored file and the containers of this movement that hold it. */
 interface FileLine {
   fileId: number
-  first: MovementAttachmentDto
-  rows: MovementAttachmentDto[]
+  first: ContainerAttachmentDto
+  rows: ContainerAttachmentDto[]
 }
 
 /**
  * The paperwork of one leg - the bill of lading, the T1, the delivery note. The API answers one row
- * per container; a file uploaded for the whole movement is shown ONCE with the containers it is on.
+ * per container; a file uploaded for the whole movement is shown ONCE with the containers it is on, and
+ * its type / date / note are changed on all of them together. The upload and edit dialogs are the shared
+ * ones: a type used for containers is required.
  */
 export function MovementDocumentsCard({ movement, canManage, onChanged }: MovementDocumentsCardProps) {
+  const [rows, setRows] = useState<ContainerAttachmentDto[]>([])
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [removing, setRemoving] = useState<FileLine | null>(null)
-  const [removeBusy, setRemoveBusy] = useState(false)
+  const [editing, setEditing] = useState<FileLine | null>(null)
+
+  const reloadKey = movement.attachments.map((a) => `${a.id}.${a.attachmentTypeId ?? 0}`).join(',')
+  const load = useCallback(async () => {
+    try {
+      const next = await containersApi.listAttachments({ movementId: movement.id })
+      setRows(next)
+    } catch (err) {
+      notify.error(err instanceof ApiError ? err.message : 'The documents could not be loaded.')
+    }
+  }, [movement.id])
+
+  // A chain rather than load(): the answer of a movement left behind must not land on the next one.
+  useEffect(() => {
+    let alive = true
+    containersApi
+      .listAttachments({ movementId: movement.id })
+      .then((next) => alive && setRows(next))
+      .catch((err) => notify.error(err instanceof ApiError ? err.message : 'The documents could not be loaded.'))
+    return () => {
+      alive = false
+    }
+  }, [movement.id, reloadKey])
 
   const lines = useMemo(() => {
     const map = new Map<number, FileLine>()
-    for (const row of movement.attachments) {
+    for (const row of rows) {
       const line = map.get(row.fileId) ?? { fileId: row.fileId, first: row, rows: [] }
       line.rows.push(row)
       map.set(row.fileId, line)
     }
     return [...map.values()]
-  }, [movement.attachments])
+  }, [rows])
 
   const containerOptions = useMemo(
-    () => movement.containers.map((c) => ({ value: String(c.containerId), label: c.containerNo ? `${c.containerRef} - ${c.containerNo}` : c.containerRef })),
+    () =>
+      movement.containers.map((c) => ({
+        value: String(c.containerId),
+        label: c.containerNo ? `${c.containerRef} - ${c.containerNo}` : c.containerRef,
+      })),
     [movement.containers],
   )
+
+  async function changed(message: string) {
+    notify.success(message)
+    await load()
+    onChanged()
+  }
 
   async function download(line: FileLine) {
     try {
@@ -58,36 +95,36 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
     }
   }
 
-  /** all = from every container holding the file, beyond this movement too. */
-  async function remove(line: FileLine, all: boolean) {
-    setRemoveBusy(true)
+  async function askRemove(line: FileLine) {
+    let all = false
+    if (line.rows.length > 1) {
+      const pick = await chooseRemoval({
+        title: `Delete ${line.first.fileName}`,
+        message: `${line.first.fileName} is on ${formatNumber(line.rows.length)} containers of ${movement.movementNo}. Delete it from this movement's containers only, or from every container holding it?`,
+        onlyLabel: "This movement's containers",
+        allLabel: 'All containers',
+      })
+      if (pick === null) return
+      all = pick === 'all'
+    } else {
+      const go = await confirm({
+        title: 'Delete document',
+        message: `Delete ${line.first.fileName} from ${line.first.containerRef ?? 'its container'}?`,
+        confirmLabel: 'Delete',
+        danger: true,
+      })
+      if (!go) return
+    }
     try {
       if (all) await containersApi.removeAttachment(line.first.id, true)
       else for (const row of line.rows) await containersApi.removeAttachment(row.id, false)
-      notify.success(`${line.first.fileName} deleted.`)
-      setRemoving(null)
-      onChanged()
+      await changed(`${line.first.fileName} deleted.`)
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The file could not be deleted.')
       // Some rows may be gone already; the reload shows what is left.
+      await load()
       onChanged()
-    } finally {
-      setRemoveBusy(false)
     }
-  }
-
-  async function askRemove(line: FileLine) {
-    if (line.rows.length > 1) {
-      setRemoving(line)
-      return
-    }
-    const go = await confirm({
-      title: 'Delete document',
-      message: `Delete ${line.first.fileName} from ${line.first.containerRef}?`,
-      confirmLabel: 'Delete',
-      danger: true,
-    })
-    if (go) await remove(line, false)
   }
 
   return (
@@ -109,11 +146,13 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
 
       {lines.length === 0 ? (
         <Text c="dimmed" fz="sm" ta="center" py="sm">
-          {movement.containers.length === 0 ? 'Add containers to the movement to file its documents.' : 'No document yet.'}
+          {movement.containers.length === 0
+            ? 'Add containers to the movement to file its documents.'
+            : 'No document yet.'}
         </Text>
       ) : (
         <ScrollArea type="auto">
-          <Table miw={820} verticalSpacing={4}>
+          <Table miw={860} verticalSpacing={6}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Type</Table.Th>
@@ -129,17 +168,43 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
               {lines.map((line) => (
                 <Table.Tr key={line.fileId}>
                   <Table.Td>
-                    <Text fz="sm">{[line.first.category, line.first.subType].filter(Boolean).join(' / ') || '—'}</Text>
+                    <Stack gap={4} align="flex-start">
+                      <AttachmentTypeBadge
+                        category={line.first.category}
+                        subType={line.first.subType}
+                        isOther={line.first.isOther}
+                      />
+                      {canManage && line.first.isOther ? (
+                        <Button
+                          size="compact-xs"
+                          variant="light"
+                          color="orange"
+                          leftSection={<IconPencil size={12} />}
+                          onClick={() => setEditing(line)}
+                        >
+                          Choose a type
+                        </Button>
+                      ) : null}
+                    </Stack>
                   </Table.Td>
                   <Table.Td>
-                    <Text fz="sm" style={{ wordBreak: 'break-all' }}>
+                    <Text fz="sm" style={{ overflowWrap: 'anywhere' }}>
                       {line.first.fileName}
+                    </Text>
+                    <Text fz="xs" c="dimmed">
+                      {formatBytes(line.first.sizeBytes)}
                     </Text>
                   </Table.Td>
                   <Table.Td>
                     <Group gap={6}>
                       {line.rows.map((row) => (
-                        <Anchor key={row.id} component={Link} to={`/logistics/containers/${row.containerId}`} fz="sm" style={{ whiteSpace: 'nowrap' }}>
+                        <Anchor
+                          key={row.id}
+                          component={Link}
+                          to={`/logistics/containers/${row.containerId}`}
+                          fz="sm"
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
                           {row.containerRef}
                         </Anchor>
                       ))}
@@ -147,24 +212,46 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
                   </Table.Td>
                   <Table.Td style={{ whiteSpace: 'nowrap' }}>{dateLabel(line.first.documentDate)}</Table.Td>
                   <Table.Td>
-                    <Text fz="sm">{line.first.note ?? '—'}</Text>
+                    <Text fz="sm" c={line.first.note ? undefined : 'dimmed'}>
+                      {line.first.note ?? '—'}
+                    </Text>
                   </Table.Td>
                   <Table.Td>
                     <Text fz="sm">{line.first.createdByName ?? '—'}</Text>
-                    <Text fz="xs" c="dimmed">
+                    <Text fz="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
                       {stamp(line.first.createdAtUtc)}
                     </Text>
                   </Table.Td>
                   <Table.Td>
                     <Group gap={4} justify="flex-end" wrap="nowrap">
                       <Tooltip label="Download" withArrow>
-                        <ActionIcon variant="subtle" aria-label={`Download ${line.first.fileName}`} onClick={() => void download(line)}>
+                        <ActionIcon
+                          variant="subtle"
+                          aria-label={`Download ${line.first.fileName}`}
+                          onClick={() => void download(line)}
+                        >
                           <IconDownload size={16} />
                         </ActionIcon>
                       </Tooltip>
                       {canManage ? (
+                        <Tooltip label="Edit type, date and note" withArrow>
+                          <ActionIcon
+                            variant="subtle"
+                            aria-label={`Edit ${line.first.fileName}`}
+                            onClick={() => setEditing(line)}
+                          >
+                            <IconPencil size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
+                      {canManage ? (
                         <Tooltip label="Delete" withArrow>
-                          <ActionIcon variant="subtle" color="red" aria-label={`Delete ${line.first.fileName}`} onClick={() => void askRemove(line)}>
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            aria-label={`Delete ${line.first.fileName}`}
+                            onClick={() => void askRemove(line)}
+                          >
                             <IconTrash size={16} />
                           </ActionIcon>
                         </Tooltip>
@@ -178,30 +265,43 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
         </ScrollArea>
       )}
 
-      <AttachmentUploadModal
+      <AttachmentUploadDialog
         opened={uploadOpen}
+        documentKind="CONTAINER"
+        filing={{
+          containerIds: [],
+          otherContainers: containerOptions,
+          defaultAlsoAttach: containerOptions.map((o) => o.value),
+          movementOptions: [{ value: String(movement.id), label: `${movement.movementNo} - ${movement.typeName}` }],
+          defaultMovementId: String(movement.id),
+        }}
+        onUpload={(file, fields, filed) =>
+          containersApi.addAttachment({
+            file,
+            containerIds: filed.containerIds,
+            movementId: filed.movementId,
+            ...fields,
+          })
+        }
         onClose={() => setUploadOpen(false)}
-        containerIds={[]}
-        otherContainers={containerOptions}
-        defaultAlsoAttach={containerOptions.map((o) => o.value)}
-        movementOptions={[{ value: String(movement.id), label: `${movement.movementNo} - ${movement.typeName}` }]}
-        defaultMovementId={String(movement.id)}
-        onUploaded={() => {
+        onUploaded={(fileName) => {
           setUploadOpen(false)
-          onChanged()
+          void changed(`${fileName} attached.`)
         }}
       />
 
-      <RemoveAttachmentModal
-        opened={removing !== null}
-        fileName={removing?.first.fileName ?? ''}
-        message={`${removing?.first.fileName ?? 'This file'} is on ${formatNumber(removing?.rows.length ?? 0)} containers of ${movement.movementNo}. Delete it from this movement's containers only, or from every container holding it?`}
-        onlyLabel="This movement's containers"
-        allLabel="All containers"
-        busy={removeBusy}
-        onClose={() => setRemoving(null)}
-        onPick={(all) => {
-          if (removing) void remove(removing, all)
+      <AttachmentEditDialog
+        file={editing?.first ?? null}
+        documentKind="CONTAINER"
+        onSave={async (fields) => {
+          // One file, one type: every container of this movement holding it changes together.
+          for (const row of editing?.rows ?? []) await containersApi.updateAttachment(row.id, fields)
+        }}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          const name = editing?.first.fileName ?? 'The document'
+          setEditing(null)
+          void changed(`${name} updated.`)
         }}
       />
     </Paper>

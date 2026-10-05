@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Anchor, Badge, Checkbox, Group, Paper, Progress, ScrollArea, Table, Text, Title, Tooltip } from '@mantine/core'
+import { Anchor, Badge, Checkbox, Group, Paper, Progress, ScrollArea, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
 import { containersApi, containerStatusColour, containerStatusLabel, type ContainerListDto } from '../../api/logistics/containers'
 import type { PurchaseInvoiceContainerDto } from '../../api/purchase/documents'
 import { dateLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
-import { fillColour, fillLabel } from '../logistics/containerFill'
+import { fillColour } from '../logistics/containerFill'
+import { ContainerFillCell } from '../logistics/ContainerFillLine'
 import { ContainerSelectionBar } from '../logistics/ContainerSelectionBar'
 import { refreshSelection } from '../logistics/containerSelection'
 
@@ -111,7 +112,7 @@ export function OrderContainersCard({
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th ta="right">Loaded (this order)</Table.Th>
-                  <Table.Th w={190}>Units / Max</Table.Th>
+                  <Table.Th w={150}>Fill</Table.Th>
                   <Table.Th ta="right">Invoiced</Table.Th>
                   <Table.Th ta="right">Received</Table.Th>
                   <Table.Th>Current location</Table.Th>
@@ -150,16 +151,12 @@ export function OrderContainersCard({
                       <Table.Td ta="right">{formatNumber(c.allocatedBase)}</Table.Td>
                       <Table.Td>
                         {row ? (
-                          <Tooltip label={`${fillLabel(row.utilizationPct)} of the container's capacity`} withArrow disabled={row.utilizationPct === null}>
-                            <div>
-                              <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>
-                                {formatNumber(row.totalQtyBase)} / {row.maxUnits === null ? '—' : formatNumber(row.maxUnits)}
-                              </Text>
-                              {row.utilizationPct !== null ? (
-                                <Progress value={Math.min(100, row.utilizationPct)} color={fillColour(row.utilizationPct)} size="sm" radius="xl" mt={2} />
-                              ) : null}
-                            </div>
-                          </Tooltip>
+                          <div data-container-fill-cell>
+                            <ContainerFillCell fillPct={row.fillPct} missingItems={row.missingContainerUnitItems} />
+                            {row.fillPct !== null ? (
+                              <Progress value={Math.min(100, row.fillPct)} color={fillColour(row.fillPct)} size="sm" radius="xl" mt={2} />
+                            ) : null}
+                          </div>
                         ) : (
                           '—'
                         )}
