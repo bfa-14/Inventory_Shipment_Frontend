@@ -443,25 +443,30 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }, [kind.code, document])
 
+  /* A LINE MAY RECEIVE INTO A WAREHOUSE OF ANY BRANCH, so every active warehouse is offered on the
+     lines. Only the seed for new rows follows the header: the branch's main warehouse. */
   useEffect(() => {
-    if (header.branchId === null) return
     let cancelled = false
     warehousesApi
-      .lookup(true, Number(header.branchId))
+      .lookup(true)
       .then((rows) => {
-        if (cancelled) return
-        setWarehouses(rows)
-        setDefaultWarehouseId((current) => {
-          if (current !== null) return current
-          const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? main.id : null
-        })
+        if (!cancelled) setWarehouses(rows)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [header.branchId])
+  }, [])
+
+  useEffect(() => {
+    if (header.branchId === null) return
+    setDefaultWarehouseId((current) => {
+      if (current !== null) return current
+      const own = warehouses.filter((w) => w.branchId === Number(header.branchId))
+      const main = own.find((w) => w.isMainWarehouse) ?? own[0]
+      return main ? main.id : null
+    })
+  }, [header.branchId, warehouses])
 
   /* The rate follows the currency, the type and the date — but overwrites a loaded document's own
      rate only once the reader changed one of the three. */
@@ -510,13 +515,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       if (chosen !== null) next.currencyId = String(chosen)
     }
     if (next.currencyId !== undefined || next.rateType !== undefined || next.documentDate !== undefined) rateDirty.current = true
-    /* A BRANCH CHANGE INVALIDATES EVERY LINE'S WAREHOUSE: warehouses belong to one branch, so
-       a row still holding the old one would be refused on save. Clearing them shows the gap. */
-    if (next.branchId !== undefined) {
-      setWarehouses([])
-      setDefaultWarehouseId(null)
-      setLines((current) => current.map((line) => ({ ...line, warehouseId: null, onHandBase: null })))
-    }
+    /* A branch change keeps the lines' warehouses (a line may use any branch's); only the seed for
+       new rows moves to the new branch's main warehouse. */
+    if (next.branchId !== undefined) setDefaultWarehouseId(null)
     setErrors({})
     setHeader((current) => ({ ...current, ...next }))
   }
@@ -1425,7 +1426,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
+          warehouses={warehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseName} (${w.branchName})` }))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => void unitChosen(key, unit)}
           onUnitsNeeded={(key) => void loadUnits(key)}

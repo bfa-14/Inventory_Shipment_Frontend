@@ -102,7 +102,7 @@ interface PurchaseLinesGridProps {
    */
   onlyItemId?: number | null
   readOnly: boolean
-  /** The warehouses of the document's branch, for the per-line Warehouse select. */
+  /** Every active warehouse, of any branch, for the per-line Warehouse select. */
   warehouses: { value: string; label: string }[]
 }
 
@@ -279,7 +279,7 @@ export function PurchaseLinesGrid({
                     <Select
                       data={warehouses}
                       value={line.warehouseId === null ? null : String(line.warehouseId)}
-                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      placeholder={warehouses.length === 0 ? 'No active warehouses' : 'Warehouse'}
                       disabled={warehouses.length === 0}
                       searchable
                       /* On Hand is this item IN THIS WAREHOUSE, so the figure beside it goes stale

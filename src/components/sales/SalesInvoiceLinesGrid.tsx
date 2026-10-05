@@ -65,7 +65,7 @@ interface SalesInvoiceLinesGridProps {
   priceListName: string
   /** Only a holder of the price override may type a price; with PriceList pricing it is otherwise read-only. */
   priceEditable: boolean
-  /** The warehouses of the invoice's branch, for the per-line Warehouse select. */
+  /** Every active warehouse, of any branch, for the per-line Warehouse select. */
   warehouses: { value: string; label: string }[]
   readOnly: boolean
 }
@@ -250,7 +250,7 @@ export function SalesInvoiceLinesGrid({
                     <Select
                       data={warehouses}
                       value={line.warehouseId === null ? null : String(line.warehouseId)}
-                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      placeholder={warehouses.length === 0 ? 'No active warehouses' : 'Warehouse'}
                       disabled={warehouses.length === 0}
                       searchable
                       /* On Hand is this item IN THIS WAREHOUSE, so the figure beside it goes stale
