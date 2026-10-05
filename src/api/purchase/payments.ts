@@ -1,4 +1,4 @@
-import { fetchBlob, postForm, request } from '../http'
+import { fetchBlob, postForm, putForm, request } from '../http'
 import type { PagedResult } from '../types'
 
 /**
@@ -357,6 +357,20 @@ export const paymentsApi = {
     if (attachmentTypeId !== null) form.append('attachmentTypeId', String(attachmentTypeId))
     if (note?.trim()) form.append('note', note.trim())
     return postForm<{ id: number }>(`${BASE}/${id}/files`, form)
+  },
+
+  /** New details, and a new version of the file when one is given; it keeps its place. */
+  updateFile: (
+    id: number,
+    fileId: number,
+    update: { fileName: string; attachmentTypeId: number | null; note: string | null; file?: File | null },
+  ) => {
+    const form = new FormData()
+    form.append('fileName', update.fileName)
+    if (update.attachmentTypeId !== null) form.append('attachmentTypeId', String(update.attachmentTypeId))
+    if (update.note?.trim()) form.append('note', update.note.trim())
+    if (update.file) form.append('file', update.file, update.file.name)
+    return putForm<void>(`${BASE}/${id}/files/${fileId}`, form)
   },
 
   downloadFile: async (id: number, fileId: number, fileName: string) => saveBlob(await fetchBlob(`${BASE}/${id}/files/${fileId}`), fileName),

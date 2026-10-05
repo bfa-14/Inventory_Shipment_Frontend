@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { ActionIcon, Badge, Box, Card, Center, Group, Stack, Table, Text, Tooltip } from '@mantine/core'
-import { IconDownload, IconFileText, IconTrash, IconUpload } from '@tabler/icons-react'
+import { IconDownload, IconFileText, IconPencil, IconTrash, IconUpload } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import type { ItemFileDto } from '../../api/types'
+import { EditAttachmentModal, type AttachmentEdit } from '../../components/documents/EditAttachmentModal'
 import { formatDateTime } from '../../components/format'
 import { notify } from '../../components/ui/notify'
 import { ATTACHMENT_ACCEPT, fileRejection, formatBytes, MAX_FILE_BYTES } from './itemFiles'
@@ -18,6 +19,8 @@ interface ItemAttachmentsTabProps {
   editable: boolean
   onPick(files: File[]): void
   onDiscardPending(index: number): void
+  /** Renames the file, or replaces it with a new version; a throw keeps the dialog open. */
+  onEdit(file: ItemFileDto, edit: AttachmentEdit): Promise<void>
   onDelete(file: ItemFileDto): Promise<void>
 }
 
@@ -28,11 +31,13 @@ export function ItemAttachmentsTab({
   editable,
   onPick,
   onDiscardPending,
+  onEdit,
   onDelete,
 }: ItemAttachmentsTabProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [editing, setEditing] = useState<ItemFileDto | null>(null)
 
   /** Keeps the files that pass; each rejection is named so the reader knows which one and why. */
   function accept(candidates: File[]) {
@@ -219,6 +224,18 @@ export function ItemAttachmentsTab({
                           </ActionIcon>
                         </Tooltip>
                         {editable ? (
+                          <Tooltip label="Edit" withArrow position="top">
+                            <ActionIcon
+                              variant="subtle"
+                              aria-label={`Edit ${file.fileName}`}
+                              disabled={busyId === file.id}
+                              onClick={() => setEditing(file)}
+                            >
+                              <IconPencil size={17} />
+                            </ActionIcon>
+                          </Tooltip>
+                        ) : null}
+                        {editable ? (
                           <Tooltip label="Delete" withArrow position="top">
                             <ActionIcon
                               variant="subtle"
@@ -240,6 +257,17 @@ export function ItemAttachmentsTab({
           </Table.ScrollContainer>
         )}
       </Card>
+
+      <EditAttachmentModal
+        opened={editing !== null}
+        fileName={editing?.fileName ?? ''}
+        accept={ATTACHMENT_ACCEPT}
+        check={(file) => fileRejection(file, 'attachment')}
+        onClose={() => setEditing(null)}
+        onSave={async (edit) => {
+          if (editing) await onEdit(editing, edit)
+        }}
+      />
     </Stack>
   )
 }

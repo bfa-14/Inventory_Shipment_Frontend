@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { ActionIcon, Anchor, Button, Group, Paper, ScrollArea, Table, Text, Title, Tooltip } from '@mantine/core'
-import { IconDownload, IconTrash, IconUpload } from '@tabler/icons-react'
+import { IconDownload, IconPencil, IconTrash, IconUpload } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containersApi } from '../../api/logistics/containers'
 import type { MovementAttachmentDto, MovementDto } from '../../api/logistics/movements'
@@ -9,7 +9,7 @@ import { dateLabel, stamp } from '../documents/documentKind'
 import { formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
-import { AttachmentUploadModal } from './AttachmentUploadModal'
+import { AttachmentEditModal, AttachmentUploadModal } from './AttachmentUploadModal'
 import { RemoveAttachmentModal } from './ContainerDocumentsCard'
 
 interface MovementDocumentsCardProps {
@@ -34,6 +34,7 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
   const [uploadOpen, setUploadOpen] = useState(false)
   const [removing, setRemoving] = useState<FileLine | null>(null)
   const [removeBusy, setRemoveBusy] = useState(false)
+  const [editing, setEditing] = useState<FileLine | null>(null)
 
   const lines = useMemo(() => {
     const map = new Map<number, FileLine>()
@@ -163,6 +164,13 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
                         </ActionIcon>
                       </Tooltip>
                       {canManage ? (
+                        <Tooltip label="Edit" withArrow>
+                          <ActionIcon variant="subtle" aria-label={`Edit ${line.first.fileName}`} onClick={() => setEditing(line)}>
+                            <IconPencil size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
+                      {canManage ? (
                         <Tooltip label="Delete" withArrow>
                           <ActionIcon variant="subtle" color="red" aria-label={`Delete ${line.first.fileName}`} onClick={() => void askRemove(line)}>
                             <IconTrash size={16} />
@@ -191,6 +199,9 @@ export function MovementDocumentsCard({ movement, canManage, onChanged }: Moveme
           onChanged()
         }}
       />
+
+      {/* One upload, one edit: the line's first row with allShared reaches every container holding it. */}
+      <AttachmentEditModal attachment={editing?.first ?? null} onClose={() => setEditing(null)} onSaved={onChanged} />
 
       <RemoveAttachmentModal
         opened={removing !== null}

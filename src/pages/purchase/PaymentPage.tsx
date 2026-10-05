@@ -879,7 +879,8 @@ export function PaymentPage() {
           files={payment?.files ?? []}
           types={attachmentTypes}
           canAdd={canCreate && status !== 'Reversed'}
-          canRemove={canCreate && status === 'Draft'}
+          canRemove={canCreate && status !== 'Reversed'}
+          canEdit={canCreate && status !== 'Reversed'}
           onChanged={() => void reload()}
         />
       </div>

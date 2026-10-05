@@ -30,6 +30,7 @@ const ACTION_COLOURS: Record<string, string> = {
   Recalculated: 'violet',
   POCreated: 'teal',
   FileAdded: 'gray',
+  FileUpdated: 'gray',
   FileDeleted: 'gray',
 }
 

@@ -746,7 +746,7 @@ export function ContainerPage() {
             </Section>
 
             {container ? (
-              <ContainerDocumentsCard container={container} canManage={perm.attachments && container.status !== 8} onChanged={() => void load()} />
+              <ContainerDocumentsCard container={container} canManage={perm.attachments} onChanged={() => void load()} />
             ) : null}
           </Stack>
         </Grid.Col>

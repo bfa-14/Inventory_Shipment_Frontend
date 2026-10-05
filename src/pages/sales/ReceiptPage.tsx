@@ -777,7 +777,8 @@ export function ReceiptPage() {
           files={receipt?.files ?? []}
           types={attachmentTypes}
           canAdd={canCreate && status !== 'Reversed'}
-          canRemove={canCreate && status === 'Draft'}
+          canRemove={canCreate && status !== 'Reversed'}
+          canEdit={canCreate && status !== 'Reversed'}
           onChanged={() => void reload()}
         />
       </div>

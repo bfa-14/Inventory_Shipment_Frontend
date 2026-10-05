@@ -1,14 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
 import { ActionIcon, Alert, Button, FileButton, Group, Paper, Select, Table, Text, TextInput, Title, Tooltip } from '@mantine/core'
-import { IconDownload, IconPaperclip, IconTrash } from '@tabler/icons-react'
+import { IconDownload, IconPaperclip, IconPencil, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../../api/http'
 import type { AttachmentTypeLookupDto } from '../../../api/masterdata/attachmentTypes'
 import { receiptsApi, type ReceiptFileDto } from '../../../api/sales/receipts'
 import { stamp } from '../../documents/documentKind'
+import { EditAttachmentModal } from '../../documents/EditAttachmentModal'
 import { confirm } from '../../ui/confirm'
 import { notify } from '../../ui/notify'
 
 const MAX_BYTES = 10 * 1024 * 1024
+const ACCEPT = '.pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg,.gif,.webp'
 
 interface ReceiptAttachmentsCardProps {
   /** Null until the receipt has been saved once: there is nothing to attach a file to before that. */
@@ -17,9 +19,15 @@ interface ReceiptAttachmentsCardProps {
   types: AttachmentTypeLookupDto[]
   /** Adding is allowed on a posted receipt too — the cheque photo often arrives after the cash. */
   canAdd: boolean
-  /** Removing is for drafts only; a posted receipt's evidence stays. */
+  /** Until the receipt is reversed; a reversed receipt's evidence stays as it was. */
   canRemove: boolean
+  canEdit: boolean
   onChanged: () => void
+}
+
+/** Why a file cannot be attached, or null when it can. */
+function rejection(file: File): string | null {
+  return file.size > MAX_BYTES ? 'That file is larger than 10 MB.' : null
 }
 
 /**
@@ -29,20 +37,45 @@ interface ReceiptAttachmentsCardProps {
  * attachment types master data filtered to Receipt, so the container paperwork list and this one are
  * kept apart and a cashier is not offered "Bill of Lading".
  */
-export function ReceiptAttachmentsCard({ receiptId, files, types, canAdd, canRemove, onChanged }: ReceiptAttachmentsCardProps) {
+export function ReceiptAttachmentsCard({ receiptId, files, types, canAdd, canRemove, canEdit, onChanged }: ReceiptAttachmentsCardProps) {
   const [category, setCategory] = useState<string | null>(null)
   const [subTypeId, setSubTypeId] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const resetRef = useRef<() => void>(null)
+  const [editing, setEditing] = useState<ReceiptFileDto | null>(null)
+  const [editCategory, setEditCategory] = useState<string | null>(null)
+  const [editSubTypeId, setEditSubTypeId] = useState<string | null>(null)
+  const [editNote, setEditNote] = useState('')
 
   const categories = useMemo(() => [...new Set(types.map((t) => t.category))], [types])
   const subTypes = useMemo(() => types.filter((t) => t.category === category), [types, category])
+  const editSubTypes = useMemo(() => types.filter((t) => t.category === editCategory), [types, editCategory])
+
+  function openEdit(file: ReceiptFileDto) {
+    setEditing(file)
+    setEditCategory(file.category)
+    setEditSubTypeId(file.attachmentTypeId === null ? null : String(file.attachmentTypeId))
+    setEditNote(file.note ?? '')
+  }
+
+  async function update(file: ReceiptFileDto, fileName: string, replacement: File | null) {
+    if (receiptId === null) return
+    await receiptsApi.updateFile(receiptId, file.id, {
+      fileName,
+      attachmentTypeId: editSubTypeId === null ? null : Number(editSubTypeId),
+      note: editNote,
+      file: replacement,
+    })
+    notify.success('File updated.')
+    onChanged()
+  }
 
   async function upload(file: File | null) {
     if (!file || receiptId === null) return
-    if (file.size > MAX_BYTES) {
-      notify.error('That file is larger than 10 MB.')
+    const rejected = rejection(file)
+    if (rejected) {
+      notify.error(rejected)
       resetRef.current?.()
       return
     }
@@ -117,7 +150,7 @@ export function ReceiptAttachmentsCard({ receiptId, files, types, canAdd, canRem
             <FileButton
               resetRef={resetRef}
               onChange={(file) => void upload(file)}
-              accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg,.gif,.webp"
+              accept={ACCEPT}
             >
               {(props) => (
                 <Button {...props} variant="default" leftSection={<IconPaperclip size={16} />} loading={busy}>
@@ -138,7 +171,7 @@ export function ReceiptAttachmentsCard({ receiptId, files, types, canAdd, canRem
               <Table.Th>Note</Table.Th>
               <Table.Th>File</Table.Th>
               <Table.Th>Date</Table.Th>
-              <Table.Th w={80} />
+              <Table.Th w={110} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -166,6 +199,13 @@ export function ReceiptAttachmentsCard({ receiptId, files, types, canAdd, canRem
                         <IconDownload size={16} />
                       </ActionIcon>
                     </Tooltip>
+                    {canEdit && (
+                      <Tooltip label="Edit" withArrow>
+                        <ActionIcon variant="subtle" aria-label={`Edit ${file.fileName}`} onClick={() => openEdit(file)}>
+                          <IconPencil size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    )}
                     {canRemove && (
                       <Tooltip label="Remove" withArrow>
                         <ActionIcon variant="subtle" color="red" aria-label={`Remove ${file.fileName}`} onClick={() => void remove(file)}>
@@ -180,6 +220,41 @@ export function ReceiptAttachmentsCard({ receiptId, files, types, canAdd, canRem
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+
+      <EditAttachmentModal
+        opened={editing !== null}
+        fileName={editing?.fileName ?? ''}
+        accept={ACCEPT}
+        check={rejection}
+        onClose={() => setEditing(null)}
+        onSave={async (edit) => {
+          if (editing) await update(editing, edit.fileName, edit.file)
+        }}
+      >
+        <Group grow align="flex-start">
+          <Select
+            label="Type"
+            placeholder="Type"
+            data={categories}
+            value={editCategory}
+            onChange={(next) => {
+              setEditCategory(next)
+              setEditSubTypeId(null)
+            }}
+            clearable
+          />
+          <Select
+            label="Sub type"
+            placeholder="Sub type"
+            data={editSubTypes.map((t) => ({ value: String(t.id), label: t.subType }))}
+            value={editSubTypeId}
+            onChange={setEditSubTypeId}
+            disabled={editCategory === null}
+            clearable
+          />
+        </Group>
+        <TextInput label="Note" placeholder="Optional" maxLength={300} value={editNote} onChange={(event) => setEditNote(event.currentTarget.value)} />
+      </EditAttachmentModal>
     </Paper>
   )
 }

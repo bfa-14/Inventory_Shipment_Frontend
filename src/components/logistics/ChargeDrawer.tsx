@@ -26,13 +26,14 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
-import { IconCopy, IconDeviceFloppy, IconDownload, IconSend, IconTrash, IconUpload, IconX } from '@tabler/icons-react'
+import { IconCopy, IconDeviceFloppy, IconDownload, IconPencil, IconSend, IconTrash, IconUpload, IconX } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
   ALLOCATION_METHODS,
   chargeStatusColour,
   containerChargesApi,
   type AllocationMethod,
+  type ContainerChargeAttachmentDto,
   type ContainerChargeDto,
 } from '../../api/logistics/containerCharges'
 import { containersApi } from '../../api/logistics/containers'
@@ -50,6 +51,7 @@ import { currencyLabel, formatMoney, formatNumber, numberInputValue } from '../f
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { ApplyChargeModal } from './ApplyChargeModal'
+import { AttachmentEditModal } from './AttachmentUploadModal'
 
 interface ChargeDrawerProps {
   chargeId: number | null
@@ -153,6 +155,7 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
   const [busy, setBusy] = useState<'save' | 'post' | 'cancel' | 'delete' | 'upload' | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
+  const [editing, setEditing] = useState<ContainerChargeAttachmentDto | null>(null)
   const [rateLoading, setRateLoading] = useState(false)
 
   const adopt = useCallback((next: ContainerChargeDto) => {
@@ -384,6 +387,25 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
       await containersApi.downloadAttachment(id, fileName)
     } catch (err) {
       fail(err, 'The document could not be downloaded.')
+    }
+  }
+
+  // The charge's upload went to the whole group, so it leaves the whole group.
+  async function removeDocument(file: ContainerChargeAttachmentDto) {
+    const go = await confirm({
+      title: 'Delete document',
+      message: `Delete ${file.fileName}${others.length > 0 ? ` from all ${formatNumber(others.length + 1)} containers of the group` : ''}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!go) return
+    try {
+      await containersApi.removeAttachment(file.id, true)
+      notify.success('Document deleted.')
+      void load()
+      onChanged()
+    } catch (err) {
+      fail(err, 'The document could not be deleted.')
     }
   }
 
@@ -678,11 +700,27 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
                     {[file.category, file.documentDate ? dateLabel(file.documentDate) : null, fileSize(file.sizeBytes)].filter(Boolean).join(' · ')}
                   </Text>
                 </div>
-                <Tooltip label="Download" withArrow>
-                  <ActionIcon variant="subtle" aria-label={`Download ${file.fileName}`} onClick={() => void download(file.id, file.fileName)}>
-                    <IconDownload size={16} />
-                  </ActionIcon>
-                </Tooltip>
+                <Group gap={4} wrap="nowrap">
+                  <Tooltip label="Download" withArrow>
+                    <ActionIcon variant="subtle" aria-label={`Download ${file.fileName}`} onClick={() => void download(file.id, file.fileName)}>
+                      <IconDownload size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                  {mayAttach && (
+                    <>
+                      <Tooltip label="Edit" withArrow>
+                        <ActionIcon variant="subtle" aria-label={`Edit ${file.fileName}`} onClick={() => setEditing(file)}>
+                          <IconPencil size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Delete" withArrow>
+                        <ActionIcon variant="subtle" color="red" aria-label={`Delete ${file.fileName}`} onClick={() => void removeDocument(file)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </>
+                  )}
+                </Group>
               </Group>
             ))}
           </Stack>
@@ -754,6 +792,16 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
           }}
         />
       )}
+
+      {/* The charge's upload went to the whole group, so its edit does too. */}
+      <AttachmentEditModal
+        attachment={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          void load()
+          onChanged()
+        }}
+      />
 
       <CancelReasonModal
         opened={cancelOpen}

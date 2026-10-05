@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ActionIcon, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
-import { IconDownload, IconTrash, IconUpload } from '@tabler/icons-react'
+import { IconDownload, IconPencil, IconTrash, IconUpload } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containersApi, type ContainerAttachmentDto, type ContainerDto } from '../../api/logistics/containers'
 import { movementsApi } from '../../api/logistics/movements'
@@ -8,7 +8,7 @@ import { dateLabel, stamp } from '../documents/documentKind'
 import { formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
-import { AttachmentUploadModal } from './AttachmentUploadModal'
+import { AttachmentEditModal, AttachmentUploadModal } from './AttachmentUploadModal'
 
 interface ContainerDocumentsCardProps {
   container: ContainerDto
@@ -35,7 +35,7 @@ function groupOf(row: ContainerAttachmentDto): { key: string; title: string; ord
 /**
  * The container's paperwork, filed where it belongs: general papers, the documents of each leg of the
  * route, the invoices behind each charge. A file uploaded once for several containers is ONE file;
- * the badge says so, and deleting it asks whether it goes from this container or from all of them.
+ * the badge says so, and editing or deleting it asks whether that is for this container or all of them.
  */
 export function ContainerDocumentsCard({ container, canManage, onChanged }: ContainerDocumentsCardProps) {
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -43,6 +43,7 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
   const [opening, setOpening] = useState(false)
   const [removing, setRemoving] = useState<ContainerAttachmentDto | null>(null)
   const [removeBusy, setRemoveBusy] = useState(false)
+  const [editing, setEditing] = useState<ContainerAttachmentDto | null>(null)
 
   const groups = useMemo(() => {
     const map = new Map<string, DocGroup & { order: number }>()
@@ -187,6 +188,13 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
                               </ActionIcon>
                             </Tooltip>
                             {canManage ? (
+                              <Tooltip label="Edit" withArrow>
+                                <ActionIcon variant="subtle" aria-label={`Edit ${row.fileName}`} onClick={() => setEditing(row)}>
+                                  <IconPencil size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                            ) : null}
+                            {canManage ? (
                               <Tooltip label="Delete" withArrow>
                                 <ActionIcon variant="subtle" color="red" aria-label={`Delete ${row.fileName}`} onClick={() => void askRemove(row)}>
                                   <IconTrash size={16} />
@@ -215,6 +223,13 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
           setUploadOpen(false)
           onChanged()
         }}
+      />
+
+      <AttachmentEditModal
+        attachment={editing}
+        sharedCount={(editing?.sharedWith ?? 0) + 1}
+        onClose={() => setEditing(null)}
+        onSaved={onChanged}
       />
 
       <RemoveAttachmentModal

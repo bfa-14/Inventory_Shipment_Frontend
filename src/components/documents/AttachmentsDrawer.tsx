@@ -11,17 +11,26 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core'
-import { IconDownload, IconTrash } from '@tabler/icons-react'
+import { IconDownload, IconPencil, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { stockDocumentsApi } from '../../api/inventory/stockDocuments'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { stamp } from './documentKind'
+import { EditAttachmentModal } from './EditAttachmentModal'
 
 const MAX_BYTES = 10 * 1024 * 1024
 
 /** What may be attached. Anything else is a file somebody meant to send elsewhere. */
 const ALLOWED = ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.png', '.jpg', '.jpeg', '.gif', '.webp']
+
+/** Why the file cannot be attached, or null when it can. */
+function rejection(file: File): string | null {
+  const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+  if (!ALLOWED.includes(extension)) return 'Only PDF, Excel, Word and image files can be attached.'
+  if (file.size > MAX_BYTES) return `${file.name} is larger than ${MAX_BYTES / (1024 * 1024)} MB.`
+  return null
+}
 
 /** What every family's file row carries; the sales and purchase DTOs satisfy it as they are. */
 export interface DocumentFile {
@@ -32,10 +41,11 @@ export interface DocumentFile {
   createdByName: string | null
 }
 
-/** The three calls the drawer makes — each family's API module has them under these names. */
+/** The four calls the drawer makes — each family's API module has them under these names. */
 export interface DocumentFilesApi {
   addFile(id: number, file: File): Promise<unknown>
   downloadFile(id: number, fileId: number, fileName: string): Promise<void>
+  updateFile(id: number, fileId: number, update: { fileName: string; file?: File | null }): Promise<void>
   removeFile(id: number, fileId: number): Promise<void>
 }
 
@@ -73,18 +83,15 @@ export function AttachmentsDrawer({
 }: AttachmentsDrawerProps) {
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [editing, setEditing] = useState<DocumentFile | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function upload(file: File | null) {
     if (!file || documentId === null) return
 
-    const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
-    if (!ALLOWED.includes(extension)) {
-      notify.error('Only PDF, Excel, Word and image files can be attached.')
-      return
-    }
-    if (file.size > MAX_BYTES) {
-      notify.error(`${file.name} is larger than ${MAX_BYTES / (1024 * 1024)} MB.`)
+    const rejected = rejection(file)
+    if (rejected) {
+      notify.error(rejected)
       return
     }
 
@@ -107,6 +114,13 @@ export function AttachmentsDrawer({
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The file could not be downloaded.')
     }
+  }
+
+  async function update(file: DocumentFile, fileName: string, replacement: File | null) {
+    if (documentId === null) return
+    await api.updateFile(documentId, file.id, { fileName, file: replacement })
+    notify.success(`${fileName} updated.`)
+    onChanged()
   }
 
   async function remove(file: DocumentFile) {
@@ -190,7 +204,7 @@ export function AttachmentsDrawer({
                   <Table.Tr>
                     <Table.Th>File</Table.Th>
                     <Table.Th w={90} ta="right">Size</Table.Th>
-                    <Table.Th w={70} />
+                    <Table.Th w={100} />
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -214,6 +228,13 @@ export function AttachmentsDrawer({
                             </ActionIcon>
                           </Tooltip>
                           {canEdit && (
+                            <Tooltip label="Edit" withArrow>
+                              <ActionIcon variant="subtle" onClick={() => setEditing(file)}>
+                                <IconPencil size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                          )}
+                          {canEdit && (
                             <Tooltip label="Delete" withArrow>
                               <ActionIcon variant="subtle" color="red" onClick={() => void remove(file)}>
                                 <IconTrash size={16} />
@@ -230,6 +251,17 @@ export function AttachmentsDrawer({
           </>
         )}
       </Stack>
+
+      <EditAttachmentModal
+        opened={editing !== null}
+        fileName={editing?.fileName ?? ''}
+        accept={ALLOWED.join(',')}
+        check={rejection}
+        onClose={() => setEditing(null)}
+        onSave={async (edit) => {
+          if (editing) await update(editing, edit.fileName, edit.file)
+        }}
+      />
     </Drawer>
   )
 }

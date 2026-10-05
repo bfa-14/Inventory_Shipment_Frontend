@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, FileInput, MultiSelect, Select, SimpleGrid, Textarea } from '@mantine/core'
+import { Alert, FileInput, MultiSelect, SegmentedControl, Select, SimpleGrid, Textarea } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconPaperclip } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containersApi, type AttachmentCreatedDto } from '../../api/logistics/containers'
 import { attachmentTypesApi, type AttachmentTypeLookupDto } from '../../api/masterdata/attachmentTypes'
+import { EditAttachmentModal, type AttachmentEdit } from '../documents/EditAttachmentModal'
 import { formatNumber } from '../format'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
@@ -170,5 +171,104 @@ function UploadForm({
 
       {formError ? <Alert color="red">{formError}</Alert> : null}
     </FormModal>
+  )
+}
+
+interface AttachmentEditModalProps {
+  /** The row being edited; null = closed. */
+  attachment: {
+    id: number
+    fileName: string
+    attachmentTypeId: number | null
+    note: string | null
+    documentDate: string | null
+  } | null
+  /** Containers holding the file, this one included; above one the reader picks how far the change goes. */
+  sharedCount?: number
+  onClose: () => void
+  /** After a successful save; the caller reloads. */
+  onSaved: () => void
+}
+
+/**
+ * A filed document's type, note and date, and optionally a new version of the file. A shared file is
+ * changed on every container holding it unless the reader keeps the change to this one.
+ */
+export function AttachmentEditModal({ attachment, ...rest }: AttachmentEditModalProps) {
+  return attachment ? <EditForm attachment={attachment} {...rest} /> : null
+}
+
+function EditForm({
+  attachment,
+  sharedCount = 1,
+  onClose,
+  onSaved,
+}: AttachmentEditModalProps & { attachment: NonNullable<AttachmentEditModalProps['attachment']> }) {
+  const [types, setTypes] = useState<AttachmentTypeLookupDto[]>([])
+  const [typeId, setTypeId] = useState<string | null>(attachment.attachmentTypeId === null ? null : String(attachment.attachmentTypeId))
+  const [documentDate, setDocumentDate] = useState<string | null>(attachment.documentDate?.slice(0, 10) ?? null)
+  const [note, setNote] = useState(attachment.note ?? '')
+  const [allShared, setAllShared] = useState(true)
+
+  useEffect(() => {
+    attachmentTypesApi.lookup(true).then(setTypes).catch(() => {})
+  }, [])
+
+  async function save(edit: AttachmentEdit) {
+    await containersApi.updateAttachment(attachment.id, allShared, {
+      fileName: edit.fileName,
+      attachmentTypeId: typeId === null ? null : Number(typeId),
+      note: note.trim() || null,
+      documentDate,
+      file: edit.file,
+    })
+    notify.success(`${edit.fileName} updated.`)
+    onSaved()
+  }
+
+  return (
+    <EditAttachmentModal
+      opened
+      fileName={attachment.fileName}
+      accept={ACCEPT}
+      check={(file) => (file.size > MAX_BYTES ? `The file is ${formatNumber(file.size / 1024 / 1024, 1)} MB; the limit is 20 MB.` : null)}
+      onClose={onClose}
+      onSave={save}
+    >
+      {sharedCount > 1 ? (
+        <SegmentedControl
+          fullWidth
+          data={[
+            { value: 'one', label: 'This container only' },
+            { value: 'all', label: `All ${formatNumber(sharedCount)} containers` },
+          ]}
+          value={allShared ? 'all' : 'one'}
+          onChange={(next) => setAllShared(next === 'all')}
+        />
+      ) : null}
+
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+        <Select
+          label="Attachment type"
+          placeholder="Pick a type"
+          data={types.map((t) => ({ value: String(t.id), label: t.displayName }))}
+          value={typeId}
+          onChange={setTypeId}
+          searchable
+          clearable
+          nothingFoundMessage="No type matches"
+        />
+        <DateInput
+          label="Document date"
+          placeholder="Date on the document"
+          valueFormat="DD/MM/YYYY"
+          value={documentDate}
+          onChange={(next) => setDocumentDate(next ? String(next).slice(0, 10) : null)}
+          clearable
+        />
+      </SimpleGrid>
+
+      <Textarea label="Note" autosize minRows={2} maxLength={300} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
+    </EditAttachmentModal>
   )
 }

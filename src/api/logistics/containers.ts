@@ -1,4 +1,4 @@
-import { fetchBlob, postForm, request } from '../http'
+import { fetchBlob, postForm, putForm, request } from '../http'
 import type { PagedResult } from '../types'
 
 /**
@@ -718,6 +718,14 @@ export interface AttachmentUpload {
   documentDate?: string | null
 }
 
+export interface AttachmentUpdate {
+  fileName: string
+  attachmentTypeId?: number | null
+  note?: string | null
+  documentDate?: string | null
+  file?: File | null
+}
+
 /** A record the upload created: one per container, the same fileId on all. */
 export interface AttachmentCreatedDto {
   id: number
@@ -949,6 +957,17 @@ export const containersApi = {
   /** allShared = the file from every container holding it. */
   removeAttachment: (attachmentId: number, allShared: boolean) =>
     request<void>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, { method: 'DELETE' }),
+
+  /** allShared = the change reaches every container holding the file; a new file is optional. */
+  updateAttachment: (attachmentId: number, allShared: boolean, update: AttachmentUpdate) => {
+    const form = new FormData()
+    form.append('fileName', update.fileName)
+    if (update.attachmentTypeId) form.append('attachmentTypeId', String(update.attachmentTypeId))
+    if (update.note) form.append('note', update.note)
+    if (update.documentDate) form.append('documentDate', update.documentDate)
+    if (update.file) form.append('file', update.file, update.file.name)
+    return putForm<void>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, form)
+  },
 
   /** The proposed containers of an approved order for one container type; nothing is saved. */
   autoPlan: (payload: AutoPlanRequest, signal?: AbortSignal) =>

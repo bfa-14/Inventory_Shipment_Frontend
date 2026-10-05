@@ -1,5 +1,5 @@
 import type { BulkActionItemResult, BulkActionResult, ImportCreateLine, ImportCreateResult } from '../documents'
-import { fetchBlob, postForm, request } from '../http'
+import { fetchBlob, postForm, putForm, request } from '../http'
 import type { SalesRateType } from '../sales/invoices'
 import type { PurchaseChargeDto, SetPurchaseChargesRequest } from './landedCostAdjustments'
 import type { PagedResult } from '../types'
@@ -529,6 +529,14 @@ export const purchaseDocumentsApi = {
     const form = new FormData()
     form.append('file', file, file.name)
     return postForm<{ id: number }>(`${BASE}/${id}/files`, form)
+  },
+
+  /** New details, and a new version of the file when one is given; it keeps its place. */
+  updateFile: (id: number, fileId: number, update: { fileName: string; file?: File | null }) => {
+    const form = new FormData()
+    form.append('fileName', update.fileName)
+    if (update.file) form.append('file', update.file, update.file.name)
+    return putForm<void>(`${BASE}/${id}/files/${fileId}`, form)
   },
 
   downloadFile: async (id: number, fileId: number, fileName: string) =>

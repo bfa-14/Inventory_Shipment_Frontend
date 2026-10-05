@@ -674,6 +674,14 @@ function ItemDetails() {
     }
   }
 
+  /** Throws on failure: the edit dialog stays open and says why. */
+  async function editAttachment(file: { id: number }, edit: { fileName: string; file: File | null }) {
+    if (!item) return
+    await itemsApi.updateFile(item.id, file.id, edit)
+    await load(item.id)
+    notify.success('Attachment updated.')
+  }
+
   async function deleteAttachment(file: { id: number; fileName: string }) {
     if (!item) return
     const confirmed = await confirm({
@@ -1328,6 +1336,7 @@ function ItemDetails() {
               editable={editable}
               onPick={(picked) => void pickAttachments(picked)}
               onDiscardPending={(index) => setPendingAttachments((cur) => cur.filter((_, i) => i !== index))}
+              onEdit={editAttachment}
               onDelete={deleteAttachment}
             />
           </Tabs.Panel>
