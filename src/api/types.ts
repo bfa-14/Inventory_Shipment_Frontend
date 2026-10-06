@@ -957,3 +957,42 @@ export interface ItemStockBalanceDto {
   totalOnHandBase: number
   totalInventoryValue: number
 }
+
+/** One movement on an item's stock statement, with the balance after it. */
+export interface ItemStockMovementDto {
+  id: number
+  movementDate: string
+  /** Inventory | Sales | Purchase - with the type and id, what the row links to. */
+  documentFamily: string
+  documentTypeCode: string
+  documentTypeName: string | null
+  documentId: number
+  documentNumber: string | null
+  /** The movement written back when its document was cancelled. */
+  isReversal: boolean
+  reasonCode: string | null
+  expiryDate: string | null
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  branchName: string
+  quantityIn: number
+  quantityOut: number
+  balance: number
+  unitCostBase: number | null
+  /** The client of a sale or the supplier of a purchase. */
+  counterparty: string | null
+  createdByName: string | null
+}
+
+/** An item's stock statement: brought forward, the movements, and what is left. */
+export interface ItemStockStatementDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  openingBase: number
+  totalIn: number
+  totalOut: number
+  closingBase: number
+  movements: ItemStockMovementDto[]
+}

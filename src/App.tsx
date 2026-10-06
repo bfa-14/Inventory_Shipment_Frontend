@@ -15,6 +15,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
 import { ItemStockBalancePage } from './pages/inventory/ItemStockBalancePage'
+import { ItemStockMovementsPage } from './pages/inventory/ItemStockMovementsPage'
 import { ItemsPage } from './pages/inventory/ItemsPage'
 import { ShortageDocumentPage } from './pages/inventory/ShortageDocumentPage'
 import { ShortagePrintPage } from './pages/inventory/ShortagePrintPage'
@@ -169,6 +170,7 @@ export default function App() {
                 <Route path="/inventory/items" element={<ItemsPage />} />
                 <Route path="/inventory/items/:id" element={<ItemDetailsPage />} />
                 <Route path="/inventory/items/:id/stock-balance" element={<ItemStockBalancePage />} />
+                <Route path="/inventory/items/:id/stock-movements" element={<ItemStockMovementsPage />} />
               </Route>
               {/* The two document families. Create and edit sit behind the view permission as well:
                   the page itself refuses to save without the create one, and a user who may not read

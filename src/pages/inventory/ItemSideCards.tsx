@@ -99,10 +99,10 @@ export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
 /** The links that lead somewhere yet; the rest wait for their pages. */
 const LIVE_LINKS = [
   { label: 'Stock Balance', icon: IconScale, to: (itemId: number) => `/inventory/items/${itemId}/stock-balance` },
+  { label: 'Stock Movement', icon: IconArrowsExchange, to: (itemId: number) => `/inventory/items/${itemId}/stock-movements` },
 ]
 
 const QUICK_LINKS = [
-  { label: 'Stock Movement', icon: IconArrowsExchange },
   { label: 'Purchase Orders', icon: IconShoppingCart },
   { label: 'Containers', icon: IconTruck },
   { label: 'Documents', icon: IconFiles },
