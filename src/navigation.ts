@@ -246,8 +246,6 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Supplier Payments', to: '/purchase/payments', permission: PERMISSIONS.paymentsView, icon: 'wallet' },
       // Charges that arrive after the goods: they move value, not stock, so they are their own document.
       { label: 'Landed Cost Adjustments', to: '/purchase/landed-cost-adjustments', permission: PERMISSIONS.landedCostsView, icon: 'price' },
-      // Defining the charge types is setup; entering a charge is not. Both live where they are used.
-      { label: 'Charge Types', to: '/purchase/charge-types', permission: PERMISSIONS.chargeTypesManage, icon: 'settings' },
     ],
   },
   {
@@ -302,7 +300,6 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
           { label: 'Unit Types', to: '/setup/master-data/unit-types', permission: PERMISSIONS.unitTypesView },
           // The lists the container pages pick from.
-          { label: 'Container Types', to: '/setup/master-data/container-types', permission: PERMISSIONS.containerTypesManage },
           { label: 'Ports', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
           { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
@@ -341,6 +338,10 @@ export const NAVIGATION: NavSection[] = [
         permission: PERMISSIONS.documentTypesManage,
         icon: 'settings',
       },
+      // Set up once and left alone, like the document types: the charge kinds a purchase or a container
+      // can carry, and the container sizes. Their pages keep their addresses; only the menu moved.
+      { label: 'Charge Types', to: '/purchase/charge-types', permission: PERMISSIONS.chargeTypesManage, icon: 'coins' },
+      { label: 'Container Types', to: '/setup/master-data/container-types', permission: PERMISSIONS.containerTypesManage, icon: 'truck' },
       {
         // Settings, one page each: the global switches (each setting a row, drawn by one page), the mail
         // server and its log, and who approves purchase orders.
