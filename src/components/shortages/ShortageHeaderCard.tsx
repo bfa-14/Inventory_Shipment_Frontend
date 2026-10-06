@@ -5,6 +5,7 @@ import { dateLabel, fromIsoDate, isoDate, stamp } from '../documents/documentKin
 import { formatNumber, numberInputValue } from '../format'
 import { supplierLabel } from '../purchase/purchaseKind'
 import { SHORTAGE_STATUS_COLOURS } from './shortageMath'
+import { warehouseOptions } from '../../pages/inventory/lookups'
 
 /** What the plan's header holds. The page owns the state; this card draws it and reports changes. */
 export interface ShortageHeader {
@@ -130,9 +131,10 @@ export function ShortageHeaderCard({
             <Select
               label="Warehouse"
               withAsterisk
-              description="Where the quantities are counted"
+              description="Where the quantities are counted - a parent counts every warehouse under it"
               placeholder="Choose a warehouse"
-              data={warehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseName} (${w.branchName})` }))}
+              /* The tree, parents included: a plan for a parent warehouse covers its whole tree. */
+              data={warehouseOptions(warehouses, { keepId: value.warehouseId ? Number(value.warehouseId) : null })}
               value={value.warehouseId}
               onChange={(next) => onChange({ warehouseId: next })}
               error={errors.warehouseId}
