@@ -27,7 +27,16 @@ interface FormValues {
   isSalesUnit: boolean
   isPurchaseUnit: boolean
   isBaseUnit: boolean
+  /** Empty while not recorded. */
+  lengthCm: number | ''
+  widthCm: number | ''
+  heightCm: number | ''
+  weightKg: number | ''
 }
+
+/** A measurement is optional; one that is typed must be above zero. */
+const positive = (label: string) => (value: number | '') => (value === '' || value > 0 ? null : `${label} must be greater than zero.`)
+const orNull = (value: number | '') => (value === '' ? null : value)
 
 const MAX_SKU = 50
 const MAX_BARCODE = 50
@@ -51,6 +60,10 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
       isSalesUnit: unit?.isSalesUnit ?? true,
       isPurchaseUnit: unit?.isPurchaseUnit ?? true,
       isBaseUnit: unit?.isBaseUnit ?? forceBase,
+      lengthCm: unit?.lengthCm ?? '',
+      widthCm: unit?.widthCm ?? '',
+      heightCm: unit?.heightCm ?? '',
+      weightKg: unit?.weightKg ?? '',
     },
     validate: {
       unitTypeId: (value) => (value ? null : 'Unit Type is required.'),
@@ -68,6 +81,10 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
         }
         return null
       },
+      lengthCm: positive('Length'),
+      widthCm: positive('Width'),
+      heightCm: positive('Height'),
+      weightKg: positive('Weight'),
       barcode: (value) =>
         value.trim().length > MAX_BARCODE ? `Barcode cannot be longer than ${MAX_BARCODE} characters.` : null,
     },
@@ -94,6 +111,10 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
         isSalesUnit: values.isSalesUnit,
         isPurchaseUnit: values.isPurchaseUnit,
         isBaseUnit: values.isBaseUnit,
+        lengthCm: orNull(values.lengthCm),
+        widthCm: orNull(values.widthCm),
+        heightCm: orNull(values.heightCm),
+        weightKg: orNull(values.weightKg),
         ...(editing ? { rowVersion: unit.rowVersion } : {}),
       })
     } catch (error) {
@@ -208,6 +229,14 @@ export function ItemUnitFormModal({ unitTypes, unit, siblings, forceBase, onSave
         maxLength={MAX_BARCODE}
         {...form.getInputProps('barcode')}
       />
+
+      {/* The unit's own outside size and weight - one box, one pallet - for packing and loading. */}
+      <Group grow align="flex-start">
+        <NumberInput label="Length (cm)" placeholder="Optional" min={0} decimalScale={2} allowNegative={false} {...form.getInputProps('lengthCm')} />
+        <NumberInput label="Width (cm)" placeholder="Optional" min={0} decimalScale={2} allowNegative={false} {...form.getInputProps('widthCm')} />
+        <NumberInput label="Height (cm)" placeholder="Optional" min={0} decimalScale={2} allowNegative={false} {...form.getInputProps('heightCm')} />
+      </Group>
+      <NumberInput label="Weight (kg)" placeholder="Optional" min={0} decimalScale={3} allowNegative={false} {...form.getInputProps('weightKg')} />
 
       <Stack gap="xs">
         <Switch label="Sales Unit" {...form.getInputProps('isSalesUnit', { type: 'checkbox' })} />

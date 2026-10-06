@@ -730,6 +730,11 @@ export interface ItemUnitDto {
   isSalesUnit: boolean
   isPurchaseUnit: boolean
   isBaseUnit: boolean
+  /** The unit's outside size in centimetres and its weight in kilograms; null = not recorded. */
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  weightKg: number | null
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
   rowVersion: string
 }
@@ -785,6 +790,11 @@ export interface SaveItemUnitRequest {
   isSalesUnit: boolean
   isPurchaseUnit: boolean
   isBaseUnit: boolean
+  /** Centimetres and kilograms; null = not recorded. */
+  lengthCm?: number | null
+  widthCm?: number | null
+  heightCm?: number | null
+  weightKg?: number | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }

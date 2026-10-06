@@ -32,6 +32,13 @@ function Flag({ on, label }: { on: boolean; label: string }) {
 }
 
 /** The item's packing units: what it is bought, stored and sold in, and how they convert. */
+/** L × W × H in centimetres, with '?' for a side not recorded; null when none is. */
+function sizeOf(unit: ItemUnitDto): string | null {
+  const sides = [unit.lengthCm, unit.widthCm, unit.heightCm]
+  if (sides.every((v) => v === null)) return null
+  return sides.map((v) => (v === null ? '?' : String(Number(v)))).join(' × ')
+}
+
 export function ItemUnitsCard({
   units,
   editable,
@@ -83,7 +90,7 @@ export function ItemUnitsCard({
         </Text>
       ) : (
         // A narrow screen scrolls the table sideways rather than crushing eight columns into 390px.
-        <Table.ScrollContainer minWidth={720}>
+        <Table.ScrollContainer minWidth={900}>
           <Table verticalSpacing="sm" highlightOnHover>
             <Table.Thead>
               <Table.Tr>
@@ -91,6 +98,8 @@ export function ItemUnitsCard({
                 <Table.Th ta="right">Packing Formula</Table.Th>
                 <Table.Th>SKU Code</Table.Th>
                 <Table.Th>Barcode</Table.Th>
+                <Table.Th>Size L × W × H (cm)</Table.Th>
+                <Table.Th ta="right">Weight (kg)</Table.Th>
                 <Table.Th ta="center">Sales</Table.Th>
                 <Table.Th ta="center">Purchase</Table.Th>
                 <Table.Th ta="center">Base</Table.Th>
@@ -126,6 +135,12 @@ export function ItemUnitsCard({
                         —
                       </Text>
                     )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text fz="sm" c={sizeOf(unit) ? undefined : 'dimmed'}>{sizeOf(unit) ?? '—'}</Text>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text fz="sm" c={unit.weightKg === null ? 'dimmed' : undefined}>{unit.weightKg === null ? '—' : String(Number(unit.weightKg))}</Text>
                   </Table.Td>
                   <Table.Td ta="center">
                     <Flag on={unit.isSalesUnit} label="Sales unit" />
