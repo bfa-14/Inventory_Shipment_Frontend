@@ -359,6 +359,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         containerStatus: line.containerStatus,
         estimatedLandedCostBase: line.estimatedLandedCostBase,
         savedQuantityBase: line.quantityBase,
+        shippedBase: line.shippedQuantityBase,
         transitBase: line.transitBase,
         fobCostBase: line.fobCostBase,
         allocatedChargesBase: line.allocatedChargesBase,
