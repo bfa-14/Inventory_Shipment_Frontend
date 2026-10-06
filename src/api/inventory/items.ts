@@ -1,5 +1,6 @@
 import { fetchBlob, putForm, request, uploadFile } from '../http'
 import type {
+  ItemContainersDto,
   ItemPurchaseOrdersDto,
   ItemStockBalanceDto,
   ItemStockStatementDto,
@@ -49,6 +50,9 @@ export const itemsApi = {
 
   /** The item's on hand in every warehouse that has held it, with the totals. */
   stockBalance: (id: number, signal?: AbortSignal) => request<ItemStockBalanceDto>(`${BASE}/${id}/stock-balance`, { signal }),
+
+  /** The containers carrying the item, and what is still on the way. Needs containers.view. */
+  containers: (id: number, signal?: AbortSignal) => request<ItemContainersDto>(`${BASE}/${id}/containers`, { signal }),
 
   /** The purchase orders with the item on them, and what is still on order. Needs purchase.orders.view. */
   purchaseOrders: (id: number, signal?: AbortSignal) => request<ItemPurchaseOrdersDto>(`${BASE}/${id}/purchase-orders`, { signal }),

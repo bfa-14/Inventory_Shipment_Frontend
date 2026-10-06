@@ -108,10 +108,15 @@ const LIVE_LINKS: { label: string; icon: typeof IconScale; to: (itemId: number) 
     to: (itemId: number) => `/inventory/items/${itemId}/purchase-orders`,
     permission: PERMISSIONS.purchaseOrdersView,
   },
+  {
+    label: 'Containers',
+    icon: IconTruck,
+    to: (itemId: number) => `/inventory/items/${itemId}/containers`,
+    permission: PERMISSIONS.containersView,
+  },
 ]
 
 const QUICK_LINKS = [
-  { label: 'Containers', icon: IconTruck },
   { label: 'Documents', icon: IconFiles },
 ]
 

@@ -14,6 +14,7 @@ import { SettingsPage } from './pages/configuration/SettingsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
+import { ItemContainersPage } from './pages/inventory/ItemContainersPage'
 import { ItemPurchaseOrdersPage } from './pages/inventory/ItemPurchaseOrdersPage'
 import { ItemStockBalancePage } from './pages/inventory/ItemStockBalancePage'
 import { ItemStockMovementsPage } from './pages/inventory/ItemStockMovementsPage'
@@ -175,6 +176,9 @@ export default function App() {
                 {/* suppliers, prices and quantities on order: the purchase orders' own permission as well */}
                 <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseOrdersView} />}>
                   <Route path="/inventory/items/:id/purchase-orders" element={<ItemPurchaseOrdersPage />} />
+                </Route>
+                <Route element={<ProtectedRoute permission={PERMISSIONS.containersView} />}>
+                  <Route path="/inventory/items/:id/containers" element={<ItemContainersPage />} />
                 </Route>
               </Route>
               {/* The two document families. Create and edit sit behind the view permission as well:

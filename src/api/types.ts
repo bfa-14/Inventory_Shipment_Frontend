@@ -1029,3 +1029,37 @@ export interface ItemPurchaseOrdersDto {
   receivedBase: number
   orders: ItemPurchaseOrderDto[]
 }
+
+/** One container carrying the item, and how much of it it holds. */
+export interface ItemContainerDto {
+  containerId: number
+  containerRef: string
+  containerNo: string | null
+  /** 1 Draft ... 8 Cancelled - see containerStatusLabel. */
+  statusCode: number
+  containerTypeName: string | null
+  orderDate: string | null
+  dispatchDate: string | null
+  eta: string | null
+  offloadedDate: string | null
+  branchName: string | null
+  warehouseName: string | null
+  purchaseOrderId: number | null
+  purchaseOrderNumber: string | null
+  loadedBase: number
+  receivedBase: number
+  /** Loaded less received, from Confirmed to Cleared only. */
+  onTheWayBase: number
+}
+
+/** The item card's Containers: the containers carrying it and what is on the way. */
+export interface ItemContainersDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  containersOnTheWay: number
+  onTheWayBase: number
+  loadedBase: number
+  receivedBase: number
+  containers: ItemContainerDto[]
+}
