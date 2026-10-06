@@ -1,5 +1,6 @@
 import { fetchBlob, putForm, request, uploadFile } from '../http'
 import type {
+  ItemPurchaseOrdersDto,
   ItemStockBalanceDto,
   ItemStockStatementDto,
   ItemDetailsDto,
@@ -48,6 +49,9 @@ export const itemsApi = {
 
   /** The item's on hand in every warehouse that has held it, with the totals. */
   stockBalance: (id: number, signal?: AbortSignal) => request<ItemStockBalanceDto>(`${BASE}/${id}/stock-balance`, { signal }),
+
+  /** The purchase orders with the item on them, and what is still on order. Needs purchase.orders.view. */
+  purchaseOrders: (id: number, signal?: AbortSignal) => request<ItemPurchaseOrdersDto>(`${BASE}/${id}/purchase-orders`, { signal }),
 
   /** The item's stock statement across every warehouse, optionally for a date range (yyyy-MM-dd). */
   stockMovements: (id: number, filter: { from: string | null; to: string | null }, signal?: AbortSignal) => {

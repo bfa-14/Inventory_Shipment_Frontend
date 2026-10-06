@@ -996,3 +996,36 @@ export interface ItemStockStatementDto {
   closingBase: number
   movements: ItemStockMovementDto[]
 }
+
+/** One purchase order with the item on it, and what it asks for of that item. */
+export interface ItemPurchaseOrderDto {
+  documentId: number
+  documentNumber: string | null
+  documentDate: string
+  expectedDate: string | null
+  statusCode: number
+  /** Draft | PendingApproval | Posted | Closed | Cancelled. */
+  status: string
+  supplierCode: string
+  supplierName: string
+  branchName: string
+  currencyCode: string
+  decimalPlaces: number
+  orderedBase: number
+  receivedBase: number
+  /** Still to come: on an open (Posted) order only. */
+  outstandingBase: number
+  amount: number
+}
+
+/** The item card's Purchase Orders: the orders it is on and what is still on order. */
+export interface ItemPurchaseOrdersDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  openOrders: number
+  outstandingBase: number
+  orderedBase: number
+  receivedBase: number
+  orders: ItemPurchaseOrderDto[]
+}

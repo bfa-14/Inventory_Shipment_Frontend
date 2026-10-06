@@ -2,6 +2,8 @@ import { Badge, Card, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core
 import { Link } from 'react-router'
 import { IconArrowsExchange, IconFiles, IconScale, IconShoppingCart, IconTruck } from '@tabler/icons-react'
 import type { ItemDetailsDto } from '../../api/types'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import { formatDateOnly, formatDateTime, formatNumber } from '../../components/format'
 
 /** Label above, value below - the read-only shape the side cards repeat. */
@@ -96,14 +98,19 @@ export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
   )
 }
 
-/** The links that lead somewhere yet; the rest wait for their pages. */
-const LIVE_LINKS = [
+/** The links that lead somewhere yet; the rest wait for their pages. A permission, when set, is the target page's. */
+const LIVE_LINKS: { label: string; icon: typeof IconScale; to: (itemId: number) => string; permission?: string }[] = [
   { label: 'Stock Balance', icon: IconScale, to: (itemId: number) => `/inventory/items/${itemId}/stock-balance` },
   { label: 'Stock Movement', icon: IconArrowsExchange, to: (itemId: number) => `/inventory/items/${itemId}/stock-movements` },
+  {
+    label: 'Purchase Orders',
+    icon: IconShoppingCart,
+    to: (itemId: number) => `/inventory/items/${itemId}/purchase-orders`,
+    permission: PERMISSIONS.purchaseOrdersView,
+  },
 ]
 
 const QUICK_LINKS = [
-  { label: 'Purchase Orders', icon: IconShoppingCart },
   { label: 'Containers', icon: IconTruck },
   { label: 'Documents', icon: IconFiles },
 ]
@@ -112,24 +119,30 @@ const QUICK_LINKS = [
  * Where else this item can be looked at. A link needs a saved item; on a new one it waits.
  */
 export function ItemQuickLinksCard({ itemId }: { itemId: number | null }) {
+  const { hasPermission } = useAuth()
+
   return (
     <Card radius="lg" p="lg" withBorder>
       <Text fw={600} fz="md" mb="xs">
         Quick Links
       </Text>
       <Stack gap={2}>
-        {LIVE_LINKS.map(({ label, icon: Icon, to }) => (
-          <Tooltip key={label} label="Save the item first" withArrow position="left" disabled={itemId !== null}>
-            <NavLink
-              component={Link}
-              to={itemId === null ? '#' : to(itemId)}
-              label={label}
-              leftSection={<Icon size={17} stroke={1.6} />}
-              disabled={itemId === null}
-              styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
-            />
-          </Tooltip>
-        ))}
+        {LIVE_LINKS.map(({ label, icon: Icon, to, permission }) => {
+          const allowed = permission === undefined || hasPermission(permission)
+          const why = itemId === null ? 'Save the item first' : !allowed ? 'You do not have access to this page' : null
+          return (
+            <Tooltip key={label} label={why} withArrow position="left" disabled={why === null}>
+              <NavLink
+                component={Link}
+                to={itemId === null || !allowed ? '#' : to(itemId)}
+                label={label}
+                leftSection={<Icon size={17} stroke={1.6} />}
+                disabled={why !== null}
+                styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
+              />
+            </Tooltip>
+          )
+        })}
         {QUICK_LINKS.map(({ label, icon: Icon }) => (
           <Tooltip key={label} label="Coming soon" withArrow position="left">
             <NavLink
