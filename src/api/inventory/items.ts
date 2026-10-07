@@ -1,6 +1,9 @@
 import { fetchBlob, putForm, request, uploadFile } from '../http'
 import type {
+  ItemContainersDto,
+  ItemPurchaseOrdersDto,
   ItemStockBalanceDto,
+  ItemStockStatementDto,
   ItemDetailsDto,
   ItemFileDto,
   ItemListDto,
@@ -47,6 +50,21 @@ export const itemsApi = {
 
   /** The item's on hand in every warehouse that has held it, with the totals. */
   stockBalance: (id: number, signal?: AbortSignal) => request<ItemStockBalanceDto>(`${BASE}/${id}/stock-balance`, { signal }),
+
+  /** The containers carrying the item, and what is still on the way. Needs containers.view. */
+  containers: (id: number, signal?: AbortSignal) => request<ItemContainersDto>(`${BASE}/${id}/containers`, { signal }),
+
+  /** The purchase orders with the item on them, and what is still on order. Needs purchase.orders.view. */
+  purchaseOrders: (id: number, signal?: AbortSignal) => request<ItemPurchaseOrdersDto>(`${BASE}/${id}/purchase-orders`, { signal }),
+
+  /** The item's stock statement across every warehouse, optionally for a date range (yyyy-MM-dd). */
+  stockMovements: (id: number, filter: { from: string | null; to: string | null }, signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    if (filter.from) params.set('from', filter.from)
+    if (filter.to) params.set('to', filter.to)
+    const query = params.toString()
+    return request<ItemStockStatementDto>(`${BASE}/${id}/stock-movements${query ? `?${query}` : ''}`, { signal })
+  },
 
   /** Items for a dropdown, each with the SKU of its base unit. */
   /**

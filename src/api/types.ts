@@ -730,6 +730,11 @@ export interface ItemUnitDto {
   isSalesUnit: boolean
   isPurchaseUnit: boolean
   isBaseUnit: boolean
+  /** The unit's outside size in centimetres and its weight in kilograms; null = not recorded. */
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  weightKg: number | null
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
   rowVersion: string
 }
@@ -785,6 +790,11 @@ export interface SaveItemUnitRequest {
   isSalesUnit: boolean
   isPurchaseUnit: boolean
   isBaseUnit: boolean
+  /** Centimetres and kilograms; null = not recorded. */
+  lengthCm?: number | null
+  widthCm?: number | null
+  heightCm?: number | null
+  weightKg?: number | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }
@@ -956,4 +966,110 @@ export interface ItemStockBalanceDto {
   warehouses: ItemStockBalanceRowDto[]
   totalOnHandBase: number
   totalInventoryValue: number
+}
+
+/** One movement on an item's stock statement, with the balance after it. */
+export interface ItemStockMovementDto {
+  id: number
+  movementDate: string
+  /** Inventory | Sales | Purchase - with the type and id, what the row links to. */
+  documentFamily: string
+  documentTypeCode: string
+  documentTypeName: string | null
+  documentId: number
+  documentNumber: string | null
+  /** The movement written back when its document was cancelled. */
+  isReversal: boolean
+  reasonCode: string | null
+  expiryDate: string | null
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  branchName: string
+  quantityIn: number
+  quantityOut: number
+  balance: number
+  unitCostBase: number | null
+  /** The client of a sale or the supplier of a purchase. */
+  counterparty: string | null
+  createdByName: string | null
+}
+
+/** An item's stock statement: brought forward, the movements, and what is left. */
+export interface ItemStockStatementDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  openingBase: number
+  totalIn: number
+  totalOut: number
+  closingBase: number
+  movements: ItemStockMovementDto[]
+}
+
+/** One purchase order with the item on it, and what it asks for of that item. */
+export interface ItemPurchaseOrderDto {
+  documentId: number
+  documentNumber: string | null
+  documentDate: string
+  expectedDate: string | null
+  statusCode: number
+  /** Draft | PendingApproval | Posted | Closed | Cancelled. */
+  status: string
+  supplierCode: string
+  supplierName: string
+  branchName: string
+  currencyCode: string
+  decimalPlaces: number
+  orderedBase: number
+  receivedBase: number
+  /** Still to come: on an open (Posted) order only. */
+  outstandingBase: number
+  amount: number
+}
+
+/** The item card's Purchase Orders: the orders it is on and what is still on order. */
+export interface ItemPurchaseOrdersDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  openOrders: number
+  outstandingBase: number
+  orderedBase: number
+  receivedBase: number
+  orders: ItemPurchaseOrderDto[]
+}
+
+/** One container carrying the item, and how much of it it holds. */
+export interface ItemContainerDto {
+  containerId: number
+  containerRef: string
+  containerNo: string | null
+  /** 1 Draft ... 8 Cancelled - see containerStatusLabel. */
+  statusCode: number
+  containerTypeName: string | null
+  orderDate: string | null
+  dispatchDate: string | null
+  eta: string | null
+  offloadedDate: string | null
+  branchName: string | null
+  warehouseName: string | null
+  purchaseOrderId: number | null
+  purchaseOrderNumber: string | null
+  loadedBase: number
+  receivedBase: number
+  /** Loaded less received, from Confirmed to Cleared only. */
+  onTheWayBase: number
+}
+
+/** The item card's Containers: the containers carrying it and what is on the way. */
+export interface ItemContainersDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  containersOnTheWay: number
+  onTheWayBase: number
+  loadedBase: number
+  receivedBase: number
+  containers: ItemContainerDto[]
 }

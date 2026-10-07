@@ -14,7 +14,10 @@ import { SettingsPage } from './pages/configuration/SettingsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
+import { ItemContainersPage } from './pages/inventory/ItemContainersPage'
+import { ItemPurchaseOrdersPage } from './pages/inventory/ItemPurchaseOrdersPage'
 import { ItemStockBalancePage } from './pages/inventory/ItemStockBalancePage'
+import { ItemStockMovementsPage } from './pages/inventory/ItemStockMovementsPage'
 import { ItemsPage } from './pages/inventory/ItemsPage'
 import { ShortageDocumentPage } from './pages/inventory/ShortageDocumentPage'
 import { ShortagePrintPage } from './pages/inventory/ShortagePrintPage'
@@ -169,6 +172,14 @@ export default function App() {
                 <Route path="/inventory/items" element={<ItemsPage />} />
                 <Route path="/inventory/items/:id" element={<ItemDetailsPage />} />
                 <Route path="/inventory/items/:id/stock-balance" element={<ItemStockBalancePage />} />
+                <Route path="/inventory/items/:id/stock-movements" element={<ItemStockMovementsPage />} />
+                {/* suppliers, prices and quantities on order: the purchase orders' own permission as well */}
+                <Route element={<ProtectedRoute permission={PERMISSIONS.purchaseOrdersView} />}>
+                  <Route path="/inventory/items/:id/purchase-orders" element={<ItemPurchaseOrdersPage />} />
+                </Route>
+                <Route element={<ProtectedRoute permission={PERMISSIONS.containersView} />}>
+                  <Route path="/inventory/items/:id/containers" element={<ItemContainersPage />} />
+                </Route>
               </Route>
               {/* The two document families. Create and edit sit behind the view permission as well:
                   the page itself refuses to save without the create one, and a user who may not read

@@ -376,6 +376,10 @@ function ItemDetails() {
       isSalesUnit: unit.isSalesUnit,
       isPurchaseUnit: unit.isPurchaseUnit,
       isBaseUnit: unit.isBaseUnit,
+      lengthCm: unit.lengthCm,
+      widthCm: unit.widthCm,
+      heightCm: unit.heightCm,
+      weightKg: unit.weightKg,
     }
   }
 
@@ -565,6 +569,10 @@ function ItemDetails() {
         isSalesUnit: payload.isSalesUnit,
         isPurchaseUnit: payload.isPurchaseUnit,
         isBaseUnit: payload.isBaseUnit,
+        lengthCm: payload.lengthCm ?? null,
+        widthCm: payload.widthCm ?? null,
+        heightCm: payload.heightCm ?? null,
+        weightKg: payload.weightKg ?? null,
         rowVersion: '',
       }
 

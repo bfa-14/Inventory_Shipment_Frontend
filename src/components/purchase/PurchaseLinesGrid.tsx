@@ -41,7 +41,9 @@ export interface PurchaseLine {
   sourceLineId: number | null
   /** What that source line still allows, in base units. Null on a line without a source. */
   sourceRemainingBase: number | null
-  /** Orders: shipped by the supplier and not yet received, in base units. Null on a line not saved yet. */
+  /** Orders: what the supplier was recorded as having shipped ("Mark as shipped"), in base units. Null on a line not saved yet. */
+  shippedBase?: number | null
+  /** Orders: loaded in containers that are in transit, at port or cleared, and not yet received, in base units. Null on a line not saved yet. */
   transitBase?: number | null
   /** Posted invoices: what the supplier charged per base unit, before the charges around it. */
   fobCostBase?: number | null
@@ -84,7 +86,7 @@ interface PurchaseLinesGridProps {
   warnOnOverdraw: boolean
   /** True on a document made from another: the item and unit are the source's and cannot change. */
   linesFromSource: boolean
-  /** True on a purchase order: the grid shows what is in transit (recorded with "Mark as shipped"). */
+  /** True on a purchase order: the grid shows what was marked shipped and what is in transit in containers. */
   showTransit?: boolean
   /** True on a POSTED purchase invoice: the three cost columns the charges produced. */
   showCosts?: boolean
@@ -139,7 +141,7 @@ export function PurchaseLinesGrid({
   readOnly,
   warehouses,
 }: PurchaseLinesGridProps) {
-  const columnCount = 12 + (showTransit ? 1 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
+  const columnCount = 12 + (showTransit ? 2 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
 
   const itemOptions = items.map((i) => ({
     value: String(i.id),
@@ -148,7 +150,7 @@ export function PurchaseLinesGrid({
   }))
 
   return (
-    <Table.ScrollContainer minWidth={1340 + (showTransit ? 100 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
+    <Table.ScrollContainer minWidth={1340 + (showTransit ? 200 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -159,6 +161,7 @@ export function PurchaseLinesGrid({
             <Table.Th w={190}>Warehouse</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={110} ta="right">Qty</Table.Th>
+            {showTransit && <Table.Th w={100} ta="right">Shipped</Table.Th>}
             {showTransit && <Table.Th w={100} ta="right">In transit</Table.Th>}
             <Table.Th w={150} ta="right">Unit Cost</Table.Th>
             <Table.Th w={90} ta="right">Disc %</Table.Th>
@@ -325,11 +328,23 @@ export function PurchaseLinesGrid({
                 </Table.Td>
 
                 {showTransit && (
+                  <Table.Td ta="right" data-line-shipped={line.key}>
+                    {line.shippedBase == null || line.shippedBase === 0 ? (
+                      <Text fz="sm" c="dimmed">{line.shippedBase === 0 ? '0' : '—'}</Text>
+                    ) : (
+                      <Tooltip label="Recorded as shipped by the supplier (Mark as shipped), base units" withArrow>
+                        <Text fz="sm" fw={600}>{formatNumber(line.shippedBase)}</Text>
+                      </Tooltip>
+                    )}
+                  </Table.Td>
+                )}
+
+                {showTransit && (
                   <Table.Td ta="right" data-line-transit={line.key}>
                     {line.transitBase == null || line.transitBase === 0 ? (
                       <Text fz="sm" c="dimmed">{line.transitBase === 0 ? '0' : '—'}</Text>
                     ) : (
-                      <Tooltip label="Shipped by the supplier, not yet received (base units)" withArrow>
+                      <Tooltip label="In containers that are in transit, at port or cleared, not yet received (base units)" withArrow>
                         <Text fz="sm" fw={600} c="blue">{formatNumber(line.transitBase)}</Text>
                       </Tooltip>
                     )}
