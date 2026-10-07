@@ -116,4 +116,10 @@ Tokens are kept in `sessionStorage` (cleared when the tab closes). For a hardene
 
 ## Production build
 
-`npm run build` writes static files to `dist/`. Host them behind the same reverse proxy as the API (so `/api` is same-origin), or set `VITE_API_BASE_URL` in `.env.production` to the API's public URL and add that site to the API's `Cors:AllowedOrigins`.
+`npm run build` writes static files to `dist/`. The app calls `/api` on its own origin (`VITE_API_BASE_URL` is
+empty in `.env.production`), so it must be served behind the same address as the API.
+
+That is what the `Dockerfile` here does: it builds `dist/` and serves it with [Caddy](https://caddyserver.com),
+which also forwards `/api` and `/health` to the API and gets the HTTPS certificate (`Caddyfile`). The image is
+built and run by `deploy/docker-compose.yml` in the **Inventory_Shipment** repository: see `deploy/README.md`
+there to put the whole application on a server.

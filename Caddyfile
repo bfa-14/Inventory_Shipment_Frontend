@@ -1,0 +1,70 @@
+# The web container's configuration (see Dockerfile).
+#
+# Serves the React app from /srv, forwards /api and /health to the API, and gets and renews the
+# HTTPS certificate for DOMAIN from Let's Encrypt (plain http:// is redirected to https://).
+# DOMAIN, ACME_EMAIL and API_UPSTREAM come from the environment: deploy/.env through docker-compose.
+#
+# The same app is also served over plain HTTP on port 8080 for an SSH tunnel; docker-compose publishes
+# that port on the server's 127.0.0.1 only (see "Open the app through SSH" in deploy/README.md).
+{
+	email {$ACME_EMAIL}
+}
+
+# Headers for the pages and files of the app. The API's responses carry their own (it is stricter,
+# and Cache-Control: no-store), so these are not applied to /api.
+#
+# style-src needs 'unsafe-inline': Mantine writes its CSS variables in a <style> element and many
+# components set style="". Images come from the app itself, data: URIs (small bundled images) and
+# blob: URLs (item pictures, downloads read through the API).
+(app_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		-Server
+	}
+}
+
+# The app: the API routes, the bundles and the single-page app. One copy, served by both sites below.
+(app) {
+	encode zstd gzip
+
+	# The API: everything under /api, and the health probe.
+	@api path /api /api/* /health
+	handle @api {
+		reverse_proxy {$API_UPSTREAM:api:8080}
+	}
+
+	# Vite's bundles have a content hash in their names: cached for a year, and a name that does not
+	# exist (a tab still open on the previous version) is a 404 rather than index.html.
+	handle /assets/* {
+		import app_headers
+		header Cache-Control "public, max-age=31536000, immutable"
+		root * /srv
+		file_server
+	}
+
+	# Everything else is the single-page app: the file when there is one (favicon.svg), otherwise
+	# index.html, so a deep link - a bookmarked page, an approval link in an email - opens that page.
+	# no-cache makes the browser check for a new index.html, i.e. a new version, on every load.
+	handle {
+		import app_headers
+		header Cache-Control "no-cache"
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+{$DOMAIN} {
+	import app
+}
+
+# For an SSH tunnel only (ssh -L 8080:localhost:8080 ...): never published beyond the server's 127.0.0.1,
+# so it works before the firewall lets 80/443 through, and never offers plain HTTP to the internet.
+http://:8080 {
+	import app
+}

@@ -313,11 +313,14 @@ function defaultMessage(status: number, problem: ProblemDetails | null): string 
     // API: the Vite proxy (dev) or the reverse proxy (production) had nothing to forward to. Saying
     // "the server ran into a problem" here sends the reader hunting for a bug in an API that is not
     // even running. The dev proxy answers 503 with its own detail, which the first line returns; this
-    // is the fallback for every other gateway that does not.
+    // is the fallback for every other gateway that does not. On the server the reader cannot start
+    // anything, and the usual cause is the API restarting during an update: say so, not localhost.
     case 502:
     case 503:
     case 504:
-      return 'The API is not reachable. Make sure Inventory_Shipment.API is running (https://localhost:7089).'
+      return import.meta.env.DEV
+        ? 'The API is not reachable. Make sure Inventory_Shipment.API is running (https://localhost:7089).'
+        : 'The server is not reachable right now - it may be restarting. Please try again in a minute.'
     default:
       return status >= 500
         ? 'The server ran into a problem. Please try again.'
