@@ -128,9 +128,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
    *
    * The warehouse belongs to each line now, but typing one on every row would be a step backwards
    * for the common document that never leaves one warehouse. So the branch's main warehouse seeds
-   * new rows and the row's own cell overrides it. Nothing but new rows reads this.
+   * new rows and the row's own cell overrides it. Nothing but new rows reads this. The import may
+   * switch it (chosenDefaultWarehouseId); a branch change puts it back to the branch's main one.
    */
-  const [defaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
+  const [chosenDefaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
   const [reasons, setReasons] = useState<StockReasonDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
   /* THE TYPE CONFIGURATION DECIDES the numbering, the reason and — since the configuration page —
@@ -283,31 +284,45 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
     void reload()
   }, [reload])
 
-  /* Only the fetch lives here. The warehouse list is emptied by whatever CHANGED the branch — the
-     header card's own handler — because that is an event, not something to derive by re-rendering. */
+  /* EVERY ACTIVE WAREHOUSE, WHATEVER THE BRANCH. The header's branch numbers the document and says
+     where it was made; it does not limit where its lines take or put stock (script 64), so a line
+     may name a warehouse of another branch. The list is read once. */
   useEffect(() => {
-    if (header.branchId === null) return
-
     let cancelled = false
     warehousesApi
-      .lookup(true, Number(header.branchId))
+      .lookup(true)
       .then((rows) => {
-        if (cancelled) return
-        setWarehouses(rows)
-        setDefaultWarehouseId((current) => {
-          if (current !== null) return current
-          const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? main.id : null
-        })
+        if (!cancelled) setWarehouses(rows)
       })
       .catch(() => {
         /* the per-line warehouse selects are then empty and the form refuses to save, which is correct */
       })
-
     return () => {
       cancelled = true
     }
-  }, [header.branchId])
+  }, [])
+
+  const headerBranchId = header.branchId === null ? null : Number(header.branchId)
+  const defaultWarehouseId = useMemo(() => {
+    if (chosenDefaultWarehouseId !== null) return chosenDefaultWarehouseId
+    if (headerBranchId === null) return null
+    const ofBranch = warehouses.filter((w) => w.branchId === headerBranchId)
+    return (ofBranch.find((w) => w.isMainWarehouse) ?? ofBranch[0])?.id ?? null
+  }, [chosenDefaultWarehouseId, headerBranchId, warehouses])
+
+  /* The header branch's warehouses first, then the others with their branch named, so the common
+     choice is at the top and a warehouse of another branch is never mistaken for a local one. */
+  const warehouseOptions = useMemo(
+    () =>
+      [...warehouses]
+        .sort((a, b) => Number(b.branchId === headerBranchId) - Number(a.branchId === headerBranchId)
+          || a.branchName.localeCompare(b.branchName) || a.warehouseName.localeCompare(b.warehouseName))
+        .map((w) => ({
+          value: String(w.id),
+          label: w.branchId === headerBranchId ? w.warehouseName : `${w.warehouseName} (${w.branchName})`,
+        })),
+    [warehouses, headerBranchId],
+  )
 
   /* ── line editing ─────────────────────────────────────────────────────────────────────────── */
 
@@ -801,14 +816,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         value={header}
         onChange={(patch) => {
           markDirty()
-          /* A BRANCH CHANGE INVALIDATES EVERY LINE'S WAREHOUSE, not just a header field: warehouses
-             belong to one branch, so a row still holding the old branch's warehouse would be
-             refused on save with a message about a row the reader never touched. Clearing them puts
-             the empty cells in plain sight instead. */
+          /* A branch change leaves the lines alone: their warehouses may be of any branch. Only the
+             warehouse NEW lines start in goes back to the new branch's main one. */
           if (patch.branchId !== undefined) {
-            setWarehouses([])
             setDefaultWarehouseId(null)
-            setLines((current) => current.map((line) => ({ ...line, warehouseId: null, onHandBase: null })))
           }
           setHeader((current) => ({ ...current, ...patch }))
         }}
@@ -864,7 +875,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
+          warehouses={warehouseOptions}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           currencyCode={document?.currencyCode ?? 'USD'}
           costIsEditable={costIsEditable}
