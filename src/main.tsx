@@ -6,6 +6,7 @@ import { Notifications } from '@mantine/notifications'
 
 // Mantine styles first, then mantine-datatable, then the app's own CSS so it can override.
 import '@mantine/core/styles.css'
+import '@mantine/charts/styles.css'
 import '@mantine/notifications/styles.css'
 import '@mantine/dates/styles.css'
 import '@mantine/spotlight/styles.css'
