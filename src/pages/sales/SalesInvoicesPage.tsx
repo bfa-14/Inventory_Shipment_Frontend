@@ -170,7 +170,7 @@ export function SalesInvoicesPage() {
     if (!go) return
     try {
       // Out of stock: warned here, before posting, with the real figures; a refusal is explained instead of attempted.
-      const decision = await decideOutOfStock(row.id)
+      const decision = await decideOutOfStock(row.id, hasPermission(PERMISSIONS.goodsReceiptsView))
       if (!decision.proceed) return
       await salesInvoicesApi.post(row.id, row.rowVersion, decision.acknowledge)
       notify.success('Invoice posted.')

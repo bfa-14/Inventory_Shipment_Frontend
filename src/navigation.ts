@@ -95,6 +95,13 @@ export const PERMISSIONS = {
   purchaseReturnsPost: 'purchase.returns.post',
   purchaseReturnsCancel: 'purchase.returns.cancel',
   purchaseReturnsDelete: 'purchase.returns.delete',
+  // Goods receipts (GRN): the only way supplier goods enter the stock. Never "receipts" alone: sales.receipts.* are
+  // customer payments.
+  goodsReceiptsView: 'purchase.goodsreceipts.view',
+  goodsReceiptsCreate: 'purchase.goodsreceipts.create',
+  goodsReceiptsPost: 'purchase.goodsreceipts.post',
+  goodsReceiptsCancel: 'purchase.goodsreceipts.cancel',
+  goodsReceiptsDelete: 'purchase.goodsreceipts.delete',
   chargeTypesManage: 'purchase.chargetypes.manage',
   settingsManage: 'configuration.settings.manage',
   emailsView: 'messaging.emails.view',
@@ -156,7 +163,7 @@ export interface NavItem {
    */
   requires?: 'canApproveInApp'
   /** A live count shown in red beside the label (see NavFacts), hidden at 0: what waits for the reader. */
-  countOf?: 'pendingApprovals'
+  countOf?: 'pendingApprovals' | 'draftGoodsReceipts'
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
   /**
@@ -177,6 +184,8 @@ export interface NavItem {
 export interface NavFacts {
   canApproveInApp: boolean
   pendingApprovals: number
+  /** Draft goods receipts waiting to be posted (GET api/purchase/goods-receipts/waiting, useGoodsReceiptsWaiting). */
+  draftGoodsReceipts: number
 }
 
 export interface NavSection {
@@ -232,8 +241,9 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
-    // BUYING, IN THE ORDER IT HAPPENS: an order is confirmed, the supplier invoices it (stock in,
-    // costs set), and what is wrong goes back on a return. One page serves all three.
+    // BUYING, IN THE ORDER IT HAPPENS: an order is confirmed, the goods are received (stock in, costs
+    // set) and invoiced, and what is wrong goes back on a return. Orders, invoices and returns share one
+    // page; goods receipts have their own (no prices, currency or approval).
     title: 'PURCHASE',
     breadcrumb: 'Purchase',
     items: [
@@ -246,6 +256,15 @@ export const NAVIGATION: NavSection[] = [
         requires: 'canApproveInApp',
         countOf: 'pendingApprovals',
         icon: 'approval',
+      },
+      // Goods entering the stock: from containers when their delivery is completed, from orders and invoices for
+      // local goods. The count is the drafts waiting to be posted - the goods are not in stock until they are.
+      {
+        label: 'Goods Receipts',
+        to: '/purchase/goods-receipts',
+        permission: PERMISSIONS.goodsReceiptsView,
+        countOf: 'draftGoodsReceipts',
+        icon: 'inbox',
       },
       { label: 'Purchase Invoices', to: '/purchase/invoices', permission: PERMISSIONS.purchaseInvoicesView, icon: 'invoice' },
       { label: 'Purchase Returns', to: '/purchase/returns', permission: PERMISSIONS.purchaseReturnsView, icon: 'movement' },

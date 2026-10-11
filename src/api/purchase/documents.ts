@@ -2,6 +2,13 @@ import type { BulkActionItemResult, BulkActionResult, ImportCreateLine, ImportCr
 import { documentFilesApi } from '../documentFiles'
 import { fetchBlob, request } from '../http'
 import type { SalesRateType } from '../sales/invoices'
+import {
+  goodsReceiptsApi,
+  type GoodsReceiptCostCause,
+  type GoodsReceiptSourceKind,
+  type GoodsReceiptStatusCode,
+  type GoodsReceiptSwitchDto,
+} from './goodsReceipts'
 import type { PurchaseChargeDto, SetPurchaseChargesRequest } from './landedCostAdjustments'
 import type { PagedResult } from '../types'
 
@@ -11,6 +18,10 @@ import type { PagedResult } from '../types'
  * THE KIND IS A FIELD, NOT A ROUTE: `api/purchase/documents` serves all three and every document
  * says which it is in `documentTypeCode`. The permission the API checks follows that code
  * (purchase.orders.* / purchase.invoices.* / purchase.returns.*), and a 403 names the one missing.
+ *
+ * GOODS RECEIPTS (scripts 64-65): a supplier invoice posted since the switch moves no stock - the goods enter with a
+ * goods receipt (`goodsReceipts.ts`) and the invoice adjusts the cost of what was received. An invoice says which rule
+ * it was posted under in `usesGoodsReceipts`; one posted before keeps its old behaviour (`receiptMode`).
  */
 const BASE = '/api/purchase/documents'
 
@@ -116,7 +127,7 @@ export interface SavePurchaseDocumentRequest {
   /** Null = resolved from the exchange rates for the document date. */
   exchangeRate: number | null
   supplierReference: string | null
-  /** 1 on posting, 2 at the container offload; null = unchanged. Invoices send shippedInContainers instead. */
+  /** 1 local, 2 shipped in containers (received with its containers); null = unchanged. Invoices send shippedInContainers instead. */
   receiptMode?: ReceiptMode | null
   /** Invoices: "Shipped in containers" (receipt mode 2). Refused off while a line is linked (409 RECEIPT_MODE_LOCKED). */
   shippedInContainers?: boolean | null
@@ -133,12 +144,15 @@ export interface SavePurchaseDocumentRequest {
   rowVersion?: string | null
 }
 
-/** When a purchase invoice puts its goods into stock: 1 on posting (local), 2 on container offload (imports). */
+/**
+ * How a purchase invoice's goods arrive: 1 local (received with Receive goods…), 2 shipped in containers (received with
+ * their containers). Before goods receipts it was when the stock entered: 1 on posting, 2 at the container offload.
+ */
 export type ReceiptMode = 1 | 2
 
 export const RECEIPT_MODE_LABELS: Record<ReceiptMode, string> = {
-  1: 'On posting',
-  2: 'On container offload',
+  1: 'Received with Receive goods…',
+  2: 'Received with its containers',
 }
 
 /** A container of the document: for an order the containers carrying its lines, for an invoice its containers. */
@@ -204,8 +218,18 @@ export interface PurchaseDocumentListDto {
   totalAmountBase: number
   sourceDocumentId: number | null
   sourceDocumentNumber: string | null
-  /** Orders only: how much of the ordered quantity has been invoiced, 0–100. */
+  /**
+   * Orders only: how much of the ordered quantity has been RECEIVED by goods receipts, 0–100 (script 65; before goods
+   * receipts this column carried the invoiced share).
+   */
   receivedPercent: number | null
+  /** Orders only: how much of the ordered quantity has been invoiced, 0–100. */
+  invoicedPercent?: number | null
+  /** Supplier invoices: the pieces received (goods receipts matched to it) and invoiced, for the Received progress. */
+  receivedBase?: number | null
+  quantityBase?: number | null
+  /** Supplier invoices: posted since the switch to goods receipts (its stock comes from goods receipts). */
+  usesGoodsReceipts?: boolean
   /** Supplier invoices: the item it holds (the one of its first line); null for orders and returns. */
   itemId: number | null
   itemCode: string | null
@@ -243,6 +267,10 @@ export interface PurchaseDocumentQuery {
   status?: PurchaseDocumentStatus
   dateFrom?: string
   dateTo?: string
+  /** Orders: posted or closed orders with something still to receive (outstanding > 0). */
+  toReceive?: boolean
+  /** Supplier invoices: posted invoices whose received pieces are fewer than the invoiced ones. */
+  notFullyReceived?: boolean
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number
@@ -278,10 +306,30 @@ export interface PurchaseDocumentLineDto {
   fobCostBase: number | null
   /** The charges this line took, in the base currency. */
   allocatedChargesBase: number
+  /**
+   * Orders: INVOICED (the name is older than goods receipts). Invoices: RECEIVED - the goods receipts matched to the
+   * line (since script 65; an invoice posted before keeps what its posting or its container's offload set).
+   */
   receivedQuantityBase: number
   returnedQuantityBase: number
-  /** Orders: still to receive; invoices: still returnable; returns: null. Base units. */
+  /** Orders: still to invoice; invoices: still returnable; returns: null. Base units. */
   remainingBase: number | null
+  /* Goods receipts (script 65), base units. Orders: what was received, settled short ("Nothing more will come", or short
+     on a container's receipt), is in containers not received yet and in draft receipts; outstanding = ordered − received
+     − settled short (invoiced − … on a closed order). Invoices: toReceiveBase only. */
+  goodsReceivedBase?: number
+  goodsShortBase?: number
+  inContainersBase?: number
+  inDraftReceiptsBase?: number
+  /** Orders: ordered − received − settled − in containers − in drafts; invoices: invoiced − received − in drafts. */
+  toReceiveBase?: number
+  /** Orders: the posting cap of a receipt outside containers (ordered − received − in containers). */
+  maxOutsideBase?: number
+  outstandingBase?: number
+  /** Orders: invoiced, received and on draft receipts OUTSIDE containers (what invoicedDirectBase is the larger of). */
+  invoicedOutsideBase?: number
+  receivedOutsideBase?: number
+  inDraftReceiptsOutsideBase?: number
   /** Orders: what the supplier has shipped so far, recorded with "Mark as shipped". Base units. */
   shippedQuantityBase: number
   /** Invoices: loaded on containers in transit / at port / cleared and not yet received — what the shortage plan counts as Transit. Base units. */
@@ -300,7 +348,7 @@ export interface PurchaseDocumentLineDto {
   containerStatus: number | null
   /** The posted container charges that fall on this line (base). */
   containerChargesBase: number | null
-  /** FOB + container charges per unit; final once the container is offloaded. */
+  /** FOB + container charges per unit; final once the goods are received. */
   estimatedLandedCostBase: number | null
   importRowNumber: number | null
   notes: string | null
@@ -341,6 +389,88 @@ export interface LinkedPurchaseDocumentDto {
   currencyCode: string
 }
 
+/** A goods receipt of the order or of the invoice, for Linked Documents (oldest first, drafts included). */
+export interface PurchaseDocumentGoodsReceiptDto {
+  id: number
+  /** Null on a draft. */
+  documentNumber: string | null
+  documentDate: string
+  status: GoodsReceiptStatusCode
+  statusName: string
+  sourceKind: GoodsReceiptSourceKind
+  /** Created by the completion of a Delivery movement. */
+  isAuto: boolean
+  containerId: number | null
+  containerRef: string | null
+  warehouseId: number | null
+  warehouseCode: string | null
+  warehouseName: string | null
+  /** Every piece the receipt holds. */
+  receivedBase: number
+  /** Its pieces that concern THIS document: on the order's lines, or matched to (or received from) the invoice's. */
+  hereBase: number
+  /** The value at receipt, fixed when it is posted (0 on a draft). */
+  valueAtReceiptBase: number
+  postedAtUtc: string | null
+  createdAtUtc: string
+}
+
+/**
+ * One cost adjustment of received goods this invoice caused (rule 10): a goods receipt line brought to its new cost
+ * when the invoice (or its landed cost adjustment) was posted or cancelled. Amount = to stock + to cost of sales.
+ */
+export interface PurchaseDocumentCostAdjustmentDto {
+  id: number
+  changedAtUtc: string
+  /** PINV, PINVCANCEL, LCA or LCACANCEL here. */
+  causeKind: GoodsReceiptCostCause
+  causeId: number | null
+  causeNumber: string | null
+  goodsReceiptLineId: number
+  goodsReceiptId: number
+  goodsReceiptNumber: string | null
+  itemId: number
+  itemCode: string
+  itemName: string
+  /** The pieces received on the line, and the share of them still in stock used for the split. */
+  receivedBase: number
+  inStockBase: number
+  fobBefore: number | null
+  fobAfter: number | null
+  unitCostBefore: number | null
+  unitCostAfter: number | null
+  amountBase: number
+  /** The part still in stock: it changed the average cost. */
+  inventoryBase: number
+  /** The part already sold: it went to the cost of sales. */
+  cogsBase: number
+}
+
+/**
+ * What posting did besides posting (only on the answer to POST …/{id}/post): "Posted: PINV-BR-002-000011. Cost of
+ * received goods adjusted by +60.00 USD (stock 40.00, cost of sales 20.00). Goods received: GRN-BR-002-000004.", and
+ * with "Receive the goods now" the receipt made - or why not, the invoice posted either way.
+ */
+export interface PurchasePostResultDto {
+  documentNumber: string | null
+  message: string
+  /** The cost of received goods brought to this invoice's price (amount = to stock + to cost of sales); 0 when nothing moved. */
+  costAdjustedBase: number
+  costAdjustedInventoryBase: number
+  costAdjustedCogsBase: number
+  /** The goods receipt lines whose cost moved. */
+  costAdjustedLines: number
+  baseCurrencyCode: string | null
+  /** "Receive the goods now" was asked (a supplier invoice only). */
+  receiveRequested: boolean
+  /** The goods receipt created and posted with the invoice; null when not asked, or when it failed. */
+  goodsReceiptId: number | null
+  goodsReceiptNumber: string | null
+  /** "Invoice posted; the goods receipt was not: {reason}. Use Receive goods…" - null when nothing failed. */
+  receiveWarning: string | null
+  warnings: string[]
+}
+
 export interface PurchaseDocumentDto {
   id: number
   documentTypeId: number
@@ -376,10 +506,26 @@ export interface PurchaseDocumentDto {
   /** Invoices: the exporter's reference and the supplier's commercial invoice number. */
   exporterReference: string | null
   commercialInvoiceNo: string | null
-  /** Invoices: 1 = stock on posting, 2 = stock on container offload (forced once in a container). */
+  /** Invoices: 1 local, 2 shipped in containers (forced once in a container). */
   receiptMode: ReceiptMode
-  /** Invoices: "Shipped in containers" = receipt mode 2 - the goods enter the stock at the container offload. */
+  /** Invoices: "Shipped in containers" = receipt mode 2 - the goods are received with their containers. */
   shippedInContainers: boolean
+  /**
+   * Invoices (script 65): posted since the switch to goods receipts - its posting moved no stock, its goods come with
+   * goods receipts. False on a draft (marked when it is posted) and on an invoice posted before the switch.
+   */
+  usesGoodsReceipts?: boolean
+  /** When the application switched to goods receipts (purchase.GoodsReceiptSwitch); null before. */
+  goodsReceiptsSinceUtc?: string | null
+  /** Orders (posted or closed) and posted invoices: "Receive goods…" can be used, else why not. */
+  canReceive?: boolean
+  receiveBlockedReason?: string | null
+  /** The goods receipts of the order's or the invoice's lines (drafts included). */
+  goodsReceipts?: PurchaseDocumentGoodsReceiptDto[]
+  /** Invoices: the cost adjustments of received goods the invoice caused ("Cost of received goods"). */
+  costAdjustments?: PurchaseDocumentCostAdjustmentDto[]
+  /** Only on the answer to Post: what the posting did (read it through `purchaseDocumentsApi.post`). */
+  postResult?: PurchasePostResultDto | null
   notes: string | null
   status: PurchaseDocumentStatus
   /** Invoices created from containers: the exporter reference is required to post. */
@@ -482,6 +628,34 @@ export interface ImportCreatePurchaseDocumentsRequest {
   onePerItem?: OnePerItemChoice
 }
 
+/**
+ * What posting answers, read from the document's `postResult`: the document, the sentence to show when the posting did
+ * more than post (the cost of goods already received adjusted, the goods received with "Receive the goods now"), and
+ * the receipt made - or why it was not (the invoice stays posted either way).
+ */
+export interface PostPurchaseDocumentResult {
+  document: PurchaseDocumentDto
+  /** Null when the posting did nothing more than post: the page's own "posted" notification says it all. */
+  message: string | null
+  /** "Receive the goods now" (rule 15a): the posted receipt; null when none was asked for or it failed. */
+  goodsReceipt: { id: number; documentNumber: string | null } | null
+  /** "Invoice posted; the goods receipt was not: {reason}. Use Receive goods…" - null when nothing failed. */
+  receiveWarning: string | null
+}
+
+/** The posting's answer: the document re-read, with what the posting did in `postResult`. */
+function toPostResult(answer: PurchaseDocumentDto): PostPurchaseDocumentResult {
+  const result = answer.postResult ?? null
+  const didMore =
+    result !== null && (result.costAdjustedLines > 0 || result.costAdjustedBase !== 0 || result.goodsReceiptId !== null)
+  return {
+    document: answer,
+    message: didMore ? result.message || null : null,
+    goodsReceipt: result?.goodsReceiptId ? { id: result.goodsReceiptId, documentNumber: result.goodsReceiptNumber } : null,
+    receiveWarning: result?.receiveWarning ?? result?.warnings?.[0] ?? null,
+  }
+}
+
 export const purchaseDocumentsApi = {
   get: (id: number) => request<PurchaseDocumentDto>(`${BASE}/${id}`),
 
@@ -494,6 +668,8 @@ export const purchaseDocumentsApi = {
     if (query.status) params.set('status', query.status)
     if (query.dateFrom) params.set('dateFrom', query.dateFrom)
     if (query.dateTo) params.set('dateTo', query.dateTo)
+    if (query.toReceive) params.set('toReceive', 'true')
+    if (query.notFullyReceived) params.set('notFullyReceived', 'true')
     if (query.sortBy) params.set('sortBy', query.sortBy)
     if (query.sortDir) params.set('sortDir', query.sortDir)
     if (query.page !== undefined) params.set('page', String(query.page))
@@ -506,8 +682,15 @@ export const purchaseDocumentsApi = {
   update: (id: number, payload: SavePurchaseDocumentRequest) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}`, { method: 'PUT', body: payload }),
 
-  post: (id: number, rowVersion: string | null) =>
-    request<PurchaseDocumentDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion } }),
+  /**
+   * Posts a draft. `receiveNow` (local supplier invoices, rule 15a): the API then creates and posts the goods receipt of
+   * the invoice's lines in a second transaction; when that fails the invoice stays posted and `message` says why.
+   */
+  post: async (id: number, rowVersion: string | null, receiveNow = false): Promise<PostPurchaseDocumentResult> =>
+    toPostResult(await request<PurchaseDocumentDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion, receiveNow } })),
+
+  /** When the switch to goods receipts happened (any signed-in user; served by the goods receipts). */
+  goodsReceiptsSwitch: (signal?: AbortSignal): Promise<GoodsReceiptSwitchDto> => goodsReceiptsApi.switchDate(signal),
 
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),

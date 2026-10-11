@@ -4,7 +4,10 @@ import { Link } from 'react-router'
 import { routes } from '../../routes'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
-import { purchaseDocumentsApi, type LinkedPurchaseDocumentDto } from '../../api/purchase/documents'
+import { goodsReceiptStatusColour, goodsReceiptStatusLabel, toGoodsReceiptStatus } from '../../api/purchase/goodsReceipts'
+import { purchaseDocumentsApi, type LinkedPurchaseDocumentDto, type PurchaseDocumentGoodsReceiptDto } from '../../api/purchase/documents'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import { BulkResultsModal } from '../documents/BulkResultsModal'
 import { dateLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber } from '../format'
@@ -21,16 +24,21 @@ interface LinkedDocumentsCardProps {
   canPostInvoices?: boolean
   /** After "Post selected": the page reads the order again, so the card shows the new numbers. */
   onPosted?: () => void
+  /** The goods receipts of the order's or the invoice's lines: where its goods came in. */
+  goodsReceipts?: PurchaseDocumentGoodsReceiptDto[]
 }
 
 /**
  * The chain this document sits in: what it came from, and what was made from it.
  *
- * AN ORDER'S INVOICES AND AN INVOICE'S RETURNS ARE WHERE THE STOCK WENT, so they are one click away
- * rather than a search. Each is named with its kind and its status, because a cancelled invoice
- * under an order means the order is open again and a reader should see that here.
+ * AN ORDER'S INVOICES, ITS GOODS RECEIPTS AND AN INVOICE'S RETURNS ARE WHERE THE GOODS WENT, so they are one click
+ * away rather than a search. Each is named with its kind and its status, because a cancelled invoice under an order
+ * means the order is open again and a reader should see that here. A goods receipt is a link only for a reader who may
+ * open goods receipts.
  */
-export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted }: LinkedDocumentsCardProps) {
+export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted, goodsReceipts = [] }: LinkedDocumentsCardProps) {
+  const { hasPermission } = useAuth()
+  const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
   const source = linked.filter((l) => l.relation === 'Source')
   const children = linked.filter((l) => l.relation === 'Child')
   const postable = (doc: LinkedPurchaseDocumentDto) =>
@@ -101,6 +109,33 @@ export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted 
     )
   }
 
+  const receiptRow = (receipt: PurchaseDocumentGoodsReceiptDto) => {
+    const status = toGoodsReceiptStatus(receipt.status)
+    const label = receipt.documentNumber ?? `Goods receipt draft #${receipt.id}`
+    const where = [receipt.containerRef, receipt.warehouseCode ?? receipt.warehouseName].filter(Boolean).join(' · ')
+    return (
+      <Group key={`grn-${receipt.id}`} justify="space-between" wrap="nowrap" gap="xs" data-linked-goods-receipt={receipt.id}>
+        <div style={{ minWidth: 0 }}>
+          {canViewReceipts ? (
+            <Anchor component={Link} to={routes.goodsReceipt(receipt.id)} fz="sm" fw={500}>
+              {label}
+            </Anchor>
+          ) : (
+            <Text fz="sm" fw={500}>
+              {label}
+            </Text>
+          )}
+          <Text fz="xs" c="dimmed">
+            Goods receipt · {dateLabel(receipt.documentDate)} · {formatNumber(receipt.hereBase ?? receipt.receivedBase)} pcs{where ? ` · ${where}` : ''}
+          </Text>
+        </div>
+        <Badge color={goodsReceiptStatusColour(status)} variant="light" style={{ flexShrink: 0 }}>
+          {goodsReceiptStatusLabel(status)}
+        </Badge>
+      </Group>
+    )
+  }
+
   return (
     <Paper radius="lg" p="md" withBorder data-linked-documents>
       <Group justify="space-between" mb="sm" gap="xs">
@@ -112,7 +147,7 @@ export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted 
         ) : null}
       </Group>
 
-      {linked.length === 0 ? (
+      {linked.length === 0 && goodsReceipts.length === 0 ? (
         <Text fz="sm" c="dimmed">
           Nothing is linked to this document yet.
         </Text>
@@ -132,6 +167,14 @@ export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted 
                 Created from this document
               </Text>
               <Stack gap="xs">{children.map(row)}</Stack>
+            </div>
+          )}
+          {goodsReceipts.length > 0 && (
+            <div data-linked-goods-receipts>
+              <Text fz="xs" c="dimmed" tt="uppercase" fw={600} mb={4}>
+                Goods receipts
+              </Text>
+              <Stack gap="xs">{goodsReceipts.map(receiptRow)}</Stack>
             </div>
           )}
         </Stack>

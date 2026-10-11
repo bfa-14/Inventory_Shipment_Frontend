@@ -437,3 +437,15 @@
 [data-mantine-color-scheme='dark'] .app-grid .app-grid__group:hover > td {
   background: var(--mantine-color-dark-5);
 }
+
+/* ── A choice that is a whole card (the "+ New" chooser of Goods Receipts) ─────────────────────────
+   The card is the button: it says so on hover and on keyboard focus, which an UnstyledButton does not. */
+.app-choice {
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.app-choice-button:hover > .app-choice,
+.app-choice-button:focus-visible > .app-choice {
+  border-color: var(--mantine-color-brand-4);
+  background-color: var(--mantine-color-brand-0);
+}

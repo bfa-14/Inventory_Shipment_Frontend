@@ -14,7 +14,10 @@ export type SalesProfitGrouping =
 export const SALES_PROFIT_GROUPINGS: SalesProfitGrouping[] =
   ['Invoice', 'Item', 'Family', 'Brand', 'Client', 'Salesman', 'Branch', 'Month', 'All']
 
-/** The groupings a landed cost adjustment can be attributed to: it knows its item and its date, never its invoice. */
+/**
+ * The groupings a cost adjustment (a late charge, an invoice price difference) can be attributed to: it knows its item and
+ * its date, never the sales invoice.
+ */
 const GROUPINGS_WITH_ADJUSTMENTS = new Set<SalesProfitGrouping>(['All', 'Month', 'Branch', 'Item', 'Family', 'Brand'])
 
 export const showsCogsAdjustments = (grouping: SalesProfitGrouping) => GROUPINGS_WITH_ADJUSTMENTS.has(grouping)

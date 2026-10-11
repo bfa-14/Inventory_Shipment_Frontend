@@ -15,6 +15,7 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
@@ -81,8 +82,8 @@ interface LoadRow {
  * "Add Container…" on an approved purchase order: a container of a type, loaded with the order's
  * lines in PIECES.
  *
- * THE AVAILABLE QUANTITY IS THE SERVER'S: ordered − invoiced without a container − loaded in other
- * containers (available-po-lines). Every row starts at what is available; "Fill one container" takes
+ * THE AVAILABLE QUANTITY IS THE SERVER'S: ordered − outside containers (the larger of invoiced, and received + on
+ * draft goods receipts, outside containers) − loaded in other containers (available-po-lines). Every row starts at what is available; "Fill one container" takes
  * the lines in list order until the type's capacity is reached. Over capacity the bar turns orange —
  * a warning, never a block: saving asks for confirmation and sends allowOverCapacity only when the
  * reader holds containers.overcapacity; otherwise the server's 409 message is shown.
@@ -463,7 +464,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
                     <Table.Th>Model</Table.Th>
                     <Table.Th ta="right">Ordered</Table.Th>
                     <Table.Th ta="right">Loaded elsewhere</Table.Th>
-                    <Table.Th ta="right">Invoiced w/o container</Table.Th>
+                    <Table.Th ta="right">Outside containers</Table.Th>
                     <Table.Th ta="right">Available</Table.Th>
                     <Table.Th w={140}>Load qty (pcs)</Table.Th>
                     <Table.Th>Oil</Table.Th>
@@ -487,7 +488,17 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
                         <Table.Td>{row.line.model ?? '—'}</Table.Td>
                         <Table.Td ta="right">{formatNumber(row.line.orderedBase)}</Table.Td>
                         <Table.Td ta="right">{formatNumber(row.line.loadedElsewhereBase)}</Table.Td>
-                        <Table.Td ta="right">{formatNumber(row.line.invoicedDirectBase)}</Table.Td>
+                        <Table.Td ta="right">
+                          {/* The larger of its parts counts: Ordered − Loaded elsewhere − this = what may go in containers. */}
+                          <Tooltip
+                            withArrow
+                            label={`Invoiced ${formatNumber(row.line.invoicedOutsideBase ?? 0)} · received ${formatNumber(row.line.receivedOutsideBase ?? 0)} · on draft receipts ${formatNumber(row.line.inDraftReceiptsOutsideBase ?? 0)} pcs (the larger counts)`}
+                          >
+                            <Text span fz="sm">
+                              {formatNumber(row.line.invoicedDirectBase)}
+                            </Text>
+                          </Tooltip>
+                        </Table.Td>
                         <Table.Td ta="right" fw={600}>
                           {formatNumber(row.line.availableBase)}
                         </Table.Td>

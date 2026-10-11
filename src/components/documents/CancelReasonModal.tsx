@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button, Group, Modal, Stack, Text, Textarea } from '@mantine/core'
 
 interface CancelReasonModalProps {
@@ -16,6 +16,8 @@ interface CancelReasonModalProps {
   title?: string
   /** The reason box's hint, for the same reason. */
   placeholder?: string
+  /** What else the cancellation takes with it (a list, an Alert), shown under the description. */
+  children?: ReactNode
 }
 
 const DEFAULT_DESCRIPTION =
@@ -42,6 +44,7 @@ export function CancelReasonModal({
   description = DEFAULT_DESCRIPTION,
   title,
   placeholder,
+  children,
 }: CancelReasonModalProps) {
   /*
    * THE FORM IS A CHILD SO THAT CLOSING FORGETS IT. Mantine unmounts a modal's children when it
@@ -50,7 +53,9 @@ export function CancelReasonModal({
    */
   return (
     <Modal opened={opened} onClose={onClose} title={title ?? `Cancel ${documentLabel}`} centered>
-      <ReasonForm onClose={onClose} busy={busy} onConfirm={onConfirm} confirmLabel={confirmLabel} description={description} placeholder={placeholder ?? 'Why is this being cancelled?'} />
+      <ReasonForm onClose={onClose} busy={busy} onConfirm={onConfirm} confirmLabel={confirmLabel} description={description} placeholder={placeholder ?? 'Why is this being cancelled?'}>
+        {children}
+      </ReasonForm>
     </Modal>
   )
 }
@@ -62,7 +67,8 @@ function ReasonForm({
   confirmLabel,
   description,
   placeholder,
-}: Pick<CancelReasonModalProps, 'onClose' | 'busy' | 'onConfirm'> & { confirmLabel: string; description: string; placeholder: string }) {
+  children,
+}: Pick<CancelReasonModalProps, 'onClose' | 'busy' | 'onConfirm' | 'children'> & { confirmLabel: string; description: string; placeholder: string }) {
   const [reason, setReason] = useState('')
   const ready = reason.trim().length > 0
 
@@ -70,6 +76,7 @@ function ReasonForm({
     <>
       <Stack>
         <Text size="sm">{description}</Text>
+        {children}
 
         <Textarea
           label="Reason"

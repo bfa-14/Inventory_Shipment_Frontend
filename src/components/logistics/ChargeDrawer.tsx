@@ -326,7 +326,7 @@ function ChargeBody({
       title: 'Post charge',
       message:
         dto.containerStatus === OFFLOADED
-          ? 'Post this charge? The container is offloaded: the item costs will be adjusted.'
+          ? 'Post this charge? The goods are received: the item costs will be adjusted.'
           : 'Post this charge? It is locked once posted and counts in the item costs.',
       confirmLabel: 'Post',
     })
@@ -427,7 +427,7 @@ function ChargeBody({
         </Anchor>
         {dto.containerNo && <Text c="dimmed" fz="sm">{dto.containerNo}</Text>}
         <Badge variant="light" color={chargeStatusColour(dto.status)}>{dto.statusName}</Badge>
-        {dto.adjustedAfterOffload && <Badge variant="light" color="orange" size="sm">after offload</Badge>}
+        {dto.adjustedAfterOffload && <Badge variant="light" color="orange" size="sm">after receipt</Badge>}
         {!dto.includeInLandedCost && <Badge variant="light" color="gray" size="sm">not in cost</Badge>}
       </Group>
 
@@ -777,7 +777,7 @@ function ChargeBody({
         confirmLabel="Cancel charge"
         description={
           dto.containerStatus === OFFLOADED
-            ? 'The container is already offloaded: the item costs will be adjusted back. The charge stays as a record. It cannot be undone.'
+            ? 'The goods are already received: the item costs will be adjusted back. The charge stays as a record. It cannot be undone.'
             : 'The charge stops counting in the item costs and stays as a record. It cannot be undone.'
         }
         onConfirm={(reason) => void cancelCharge(reason)}

@@ -18,7 +18,7 @@ export const MOVEMENT_STAGES: { value: MovementStage; label: string; explanation
   { value: 'Port', label: 'Port', explanation: 'At port (port arrival).' },
   { value: 'Border', label: 'Border', explanation: 'In transit, records the border crossing date.' },
   { value: 'Customs', label: 'Customs', explanation: 'Cleared when completed (customs release date).' },
-  { value: 'Delivery', label: 'Delivery', explanation: 'Cleared - on its way to the warehouse.' },
+  { value: 'Delivery', label: 'Delivery', explanation: 'Cleared - on its way to the warehouse; completing it creates the draft goods receipts.' },
 ]
 
 export function stageExplanation(stage: string): string {

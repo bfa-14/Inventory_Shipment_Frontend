@@ -1,7 +1,7 @@
 import { fetchBlob, postForm, putForm, request } from './http'
 
 /**
- * The files of a document - purchase, sales and stock documents, customer receipts, supplier payments, and the
+ * The files of a document - purchase, sales and stock documents, goods receipts, customer receipts, supplier payments, and the
  * documents of an item definition (script 67) - with their type, date and note. Every family answers the same routes
  * under its own base: GET / POST {id}/files, GET / PUT / DELETE {id}/files/{fileId}. The containers keep their own
  * routes (containersApi) and the same fields. An item's PICTURE is not one of these files: it keeps its own upload
@@ -26,6 +26,8 @@ export type AttachmentDocumentKind =
   | 'INV_IN'
   | 'INV_OUT'
   | 'BIV_OUT'
+  /** Goods receipts (scripts 64-65): the delivery note, the packing list, the signed count sheet. */
+  | 'GRN'
 
 export interface DocumentFileDto {
   id: number

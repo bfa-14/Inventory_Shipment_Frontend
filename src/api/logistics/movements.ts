@@ -1,12 +1,18 @@
 import { fetchBlob, request } from '../http'
+import type { MovementReceiptResultDto } from '../purchase/goodsReceipts'
 import type { PagedResult } from '../types'
-import { saveBlob, toQueryString } from './containers'
+import { saveBlob, toQueryString, type ContainerReceiptRef } from './containers'
 
 /**
  * Shipment movements (`api/logistics/movements`, MOV-yyyy-nnnnnn): one leg of the route carrying
  * one or more containers. Starting and completing a movement moves the containers' status, dates and
  * location by the stage of its type. Reading needs containers.view, the rest
  * containers.movements.manage. Every action answers with the movement re-read.
+ *
+ * COMPLETING A DELIVERY-STAGE MOVEMENT creates a DRAFT goods receipt for each eligible container (status 2-5, no open
+ * receipt), after the completion is committed: the answer carries what happened per container (`goodsReceipts`), and
+ * a failure there is a warning, never a failed completion. Cancelling a completed Delivery deletes the automatic
+ * drafts it created (edited ones too); a draft made by hand is kept.
  */
 const BASE = '/api/logistics/movements'
 
@@ -72,7 +78,7 @@ export interface MovementListDto extends MovementFlags {
   rowVersion: string
 }
 
-export interface MovementContainerDto {
+export interface MovementContainerDto extends MovementContainerReceiptInfo {
   containerId: number
   containerRef: string
   containerNo: string | null
@@ -88,6 +94,22 @@ export interface MovementContainerDto {
   draftChargesBase: number | null
   attachmentCount: number
   containerRowVersion: string
+}
+
+/**
+ * What a movement says about a container's goods receipt: the open one (draft or posted) and the container's own
+ * warehouse, which an automatic draft proposes when it is active and in the container's branch.
+ */
+export interface MovementContainerReceiptInfo extends ContainerReceiptRef {
+  /** The container's "Warehouse (offloading destination)". */
+  warehouseCode?: string | null
+  /** The warehouse is active and belongs to the container's branch: the automatic draft takes it. */
+  warehouseInBranch?: boolean | null
+  /** The open receipt is a DRAFT made by the completion of THIS movement: cancelling the movement deletes it (rule 22). */
+  autoDraftOfThisMovement?: boolean
+  /** Set when the draft was changed after it was created (null when never edited): who and when, for the cancel dialog. */
+  goodsReceiptUpdatedAtUtc?: string | null
+  goodsReceiptUpdatedByName?: string | null
 }
 
 export interface MovementChargeDto {
@@ -175,6 +197,18 @@ export interface MovementDto extends MovementFlags {
   containers: MovementContainerDto[]
   charges: MovementChargeDto[]
   attachments: MovementAttachmentDto[]
+  /**
+   * Only on the answer to Complete of a Delivery-stage movement: per container, the draft goods receipt created, or
+   * why none was (it already has one, not confirmed...).
+   */
+  goodsReceipts?: MovementReceiptResultDto[] | null
+  /** The same, in one sentence: "Draft goods receipts created: KTG-2026-0031 (warehouse to choose). Not created: …". */
+  goodsReceiptsMessage?: string | null
+  /**
+   * The drafts that could not be created (the movement IS completed): the whole call failed ("…were not created: {reason}.
+   * Use Receive goods… on each container."), or one container's row ("{ref}: the draft goods receipt was not created…").
+   */
+  warnings?: string[]
 }
 
 export interface SaveMovementRequest {
@@ -348,10 +382,14 @@ export const movementsApi = {
   start: (id: number, date: string | null, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/start`, { method: 'POST', body: { date, rowVersion } }),
 
-  /** date = end date (default today). */
+  /**
+   * date = end date (default today). On a Delivery-stage movement the answer also carries `goodsReceipts` (the drafts
+   * created and the containers skipped), `goodsReceiptsMessage` and, when creating them failed, `warnings`.
+   */
   complete: (id: number, date: string | null, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/complete`, { method: 'POST', body: { date, rowVersion } }),
 
+  /** A completed Delivery: its automatic draft goods receipts are deleted with it. */
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
 

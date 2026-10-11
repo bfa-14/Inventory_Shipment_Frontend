@@ -53,8 +53,8 @@ export function ItemAuditCard({ item }: { item: ItemDetailsDto }) {
 /**
  * On hand and the cost figures, as the ledger and the postings keep them.
  *
- * READ-ONLY BY DESIGN. The average is a moving average written by every posting that adds stock,
- * the last cost and supplier by the last receipt; a box that let somebody type over them would let
+ * READ-ONLY BY DESIGN. The average is a moving average written by every posting that adds stock and by
+ * every cost adjustment, the last cost and supplier by the last goods receipt; a box that let somebody type over them would let
  * the same stock leave at a value it never entered at.
  */
 export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
@@ -70,17 +70,17 @@ export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
         <Row
           label="FOB Purchase Cost"
           value={money(item?.fobCost)}
-          hint="What the supplier charged per base unit on the last posted invoice, before freight, customs and the rest."
+          hint="What the supplier charged per base unit on the last goods receipt (the order price until the invoice is posted), before freight, customs and the rest."
         />
         <Row
           label="Last Cost (landed)"
           value={money(item?.lastCost)}
-          hint="The last posted purchase, FOB plus every charge allocated to it. An Inventory In does not touch it."
+          hint="The last goods receipt, FOB plus every charge allocated to it. An Inventory In does not touch it."
         />
         <Row
           label="Average Cost"
           value={money(item?.averageCost)}
-          hint="The moving weighted average, moved only by the postings that add stock. What a sale is costed at."
+          hint="The moving weighted average, moved by the postings that add stock and by cost adjustments (late charges, invoice price differences). What a sale is costed at."
         />
         <Row
           label="Inventory Value"

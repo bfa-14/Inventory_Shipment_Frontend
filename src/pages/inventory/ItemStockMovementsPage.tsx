@@ -9,19 +9,29 @@ import type { ItemStockMovementDto, ItemStockStatementDto } from '../../api/type
 import { fromIsoDate, isoDate } from '../../components/documents/documentKind'
 import { formatDateTime, formatNumber } from '../../components/format'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
+import { routes } from '../../routes'
 
-/** Where a movement's document opens. A type without a page of its own shows its number only. */
-function documentRoute(m: ItemStockMovementDto): string | null {
+/**
+ * Where a movement's document opens, for a reader who may view that kind of document. A type without a page of its
+ * own - or one the reader may not open (the statement needs only the item's view) - shows its number only, as the
+ * source link beside it does: a link must never lead to the Forbidden page.
+ */
+function documentRoute(m: ItemStockMovementDto, can: (permission: string) => boolean): string | null {
+  const gated = (permission: string, route: string) => (can(permission) ? route : null)
   switch (m.documentTypeCode) {
-    case 'INV_IN': return `/inventory/stock-in/${m.documentId}`
-    case 'INV_OUT': return `/inventory/stock-out/${m.documentId}`
-    case 'BIV_OUT': return `/inventory/bivac-out/${m.documentId}`
-    case 'SINV': return `/sales/invoices/${m.documentId}`
-    case 'PO': return `/purchase/orders/${m.documentId}`
-    case 'PINV': return `/purchase/invoices/${m.documentId}`
-    case 'PRET': return `/purchase/returns/${m.documentId}`
-    // container offloading receives the goods against the container
-    case 'CNT': return `/logistics/containers/${m.documentId}`
+    case 'INV_IN': return gated(PERMISSIONS.stockInView, `/inventory/stock-in/${m.documentId}`)
+    case 'INV_OUT': return gated(PERMISSIONS.stockOutView, `/inventory/stock-out/${m.documentId}`)
+    case 'BIV_OUT': return gated(PERMISSIONS.bivacOutView, `/inventory/bivac-out/${m.documentId}`)
+    case 'SINV': return gated(PERMISSIONS.invoicesView, `/sales/invoices/${m.documentId}`)
+    case 'PO': return gated(PERMISSIONS.purchaseOrdersView, `/purchase/orders/${m.documentId}`)
+    case 'PINV': return gated(PERMISSIONS.purchaseInvoicesView, `/purchase/invoices/${m.documentId}`)
+    case 'PRET': return gated(PERMISSIONS.purchaseReturnsView, `/purchase/returns/${m.documentId}`)
+    // goods receipts (scripts 64-65): the goods enter the stock with the receipt, whatever brought them
+    case 'GRN': return gated(PERMISSIONS.goodsReceiptsView, routes.goodsReceipt(m.documentId))
+    // container offloading (before goods receipts) received the goods against the container
+    case 'CNT': return gated(PERMISSIONS.containersView, `/logistics/containers/${m.documentId}`)
     default: return null
   }
 }
@@ -39,6 +49,17 @@ function documentRoute(m: ItemStockMovementDto): string | null {
 export function ItemStockMovementsPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { hasPermission } = useAuth()
+  const canViewContainers = hasPermission(PERMISSIONS.containersView)
+  const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
+  const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
+  /** Where a goods receipt row's source opens: its container, else its order, else its invoice (with the view right). */
+  const sourceRoute = (m: ItemStockMovementDto): string | null => {
+    if (m.sourceContainerId) return canViewContainers ? routes.container(m.sourceContainerId) : null
+    if (m.sourcePurchaseOrderId) return canViewOrders ? `/purchase/orders/${m.sourcePurchaseOrderId}` : null
+    if (m.sourceInvoiceId) return canViewInvoices ? `/purchase/invoices/${m.sourceInvoiceId}` : null
+    return null
+  }
   const itemId = Number(id)
   const [params, setParams] = useSearchParams()
   const from = params.get('from')
@@ -169,7 +190,7 @@ export function ItemStockMovementsPage() {
                     <Table.Td colSpan={2} />
                   </Table.Tr>
                   {data.movements.map((m) => {
-                    const route = documentRoute(m)
+                    const route = documentRoute(m, hasPermission)
                     return (
                       <Table.Tr key={m.id}>
                         <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(m.movementDate)}</Table.Td>
@@ -177,11 +198,24 @@ export function ItemStockMovementsPage() {
                           <Group gap={6} wrap="nowrap">
                             <div>
                               <Text fz="xs" c="dimmed">{m.documentTypeName ?? m.documentTypeCode}</Text>
-                              {route ? (
-                                <Anchor component={Link} to={route} fz="sm" fw={500}>{m.documentNumber ?? `#${m.documentId}`}</Anchor>
-                              ) : (
-                                <Text fz="sm" fw={500}>{m.documentNumber ?? `#${m.documentId}`}</Text>
-                              )}
+                              <Group gap={4} wrap="nowrap">
+                                {route ? (
+                                  <Anchor component={Link} to={route} fz="sm" fw={500}>{m.documentNumber ?? `#${m.documentId}`}</Anchor>
+                                ) : (
+                                  <Text fz="sm" fw={500}>{m.documentNumber ?? `#${m.documentId}`}</Text>
+                                )}
+                                {/* A goods receipt names what brought the goods: "GRN-BR-002-000001 · KTG-2026-0031", both links. */}
+                                {m.sourceReference ? (
+                                  <>
+                                    <Text fz="sm" c="dimmed">·</Text>
+                                    {sourceRoute(m) ? (
+                                      <Anchor component={Link} to={sourceRoute(m)!} fz="sm">{m.sourceReference}</Anchor>
+                                    ) : (
+                                      <Text fz="sm">{m.sourceReference}</Text>
+                                    )}
+                                  </>
+                                ) : null}
+                              </Group>
                             </div>
                             {m.isReversal && <Badge size="xs" color="orange" variant="light">Cancelled</Badge>}
                           </Group>

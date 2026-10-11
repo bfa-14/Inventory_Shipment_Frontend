@@ -868,7 +868,7 @@ export function SalesInvoicePage() {
     try {
       /* THE OUT-OF-STOCK GATE. Asked of the server now, so the warning names the real figures and a refusal
          is explained before anything is attempted. The warning is shown even where the setting allows the sale. */
-      const decision = await decideOutOfStock(saved.id)
+      const decision = await decideOutOfStock(saved.id, hasPermission(PERMISSIONS.goodsReceiptsView))
       if (!decision.proceed) return
       applyInvoice(await salesInvoicesApi.post(saved.id, saved.rowVersion, decision.acknowledge))
       notify.success('Invoice posted.')

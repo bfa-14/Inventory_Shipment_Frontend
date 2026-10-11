@@ -151,7 +151,7 @@ function FactsPanel({ container }: { container: TrackingContainerDto }) {
       <Fact label="ETA">{day(container.eta)}</Fact>
       <Fact label="Port arrival">{day(container.actualPortArrival)}</Fact>
       <Fact label="Customs release">{day(container.customsReleaseDate)}</Fact>
-      <Fact label="Offloaded">{day(container.offloadedDate)}</Fact>
+      <Fact label="Received">{day(container.offloadedDate)}</Fact>
       <Fact label="Last free day">
         <Text span inherit c={freeTimeOver(container) ? 'red' : undefined}>
           {day(container.lastFreeDay)}

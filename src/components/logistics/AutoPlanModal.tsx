@@ -46,6 +46,7 @@ import { supplierLabel } from '../purchase/purchaseKind'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { fillColour, fillLabel, FULL_TOLERANCE, isOverFull } from './containerFill'
+import { WAREHOUSE_PROPOSED_HINT } from './containerReceipt'
 
 /** The approved order the containers are planned for. */
 export interface AutoPlanOrder {
@@ -449,7 +450,15 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
               value={fromIsoDate(orderDate)}
               onChange={(next) => setOrderDate(next ? isoDate(next) : null)}
             />
-            <Select label="Offloading warehouse" data={warehouseOptions} value={warehouseId} onChange={setWarehouseId} searchable />
+            <Select
+              label="Offloading warehouse"
+              description={WAREHOUSE_PROPOSED_HINT}
+              inputWrapperOrder={['label', 'input', 'description', 'error']}
+              data={warehouseOptions}
+              value={warehouseId}
+              onChange={setWarehouseId}
+              searchable
+            />
             <Select label="Port of loading" data={portOptions} value={portOfLoadingId} onChange={setPortOfLoadingId} searchable clearable />
             <Select label="Port of destination" data={portOptions} value={portOfDestinationId} onChange={setPortOfDestinationId} searchable clearable />
             <Select label="Final destination" data={portOptions} value={finalDestinationId} onChange={setFinalDestinationId} searchable clearable />

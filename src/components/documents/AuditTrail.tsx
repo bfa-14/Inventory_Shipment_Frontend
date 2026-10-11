@@ -29,6 +29,8 @@ const ACTION_COLOURS: Record<string, string> = {
   // Shortage plans: the live figures were refreshed; a purchase order was created from the plan.
   Recalculated: 'violet',
   POCreated: 'teal',
+  // Goods receipts: the cost of received goods moved after they were received (an invoice, an adjustment).
+  CostAdjusted: 'violet',
   FileAdded: 'gray',
   FileUpdated: 'gray',
   FileDeleted: 'gray',

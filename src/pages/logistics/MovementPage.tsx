@@ -47,6 +47,8 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber, todayDateOnly } from '../../components/format'
+import { DeliveryCancelDrafts, DeliveryCompletePreview } from '../../components/logistics/DeliveryReceipts'
+import { showDeliveryResult } from '../../components/logistics/deliveryNotification'
 import { MovementContainersCard } from '../../components/logistics/MovementContainersCard'
 import { MovementDocumentsCard } from '../../components/logistics/MovementDocumentsCard'
 import { fromSaved, type CardContainer } from '../../components/logistics/movementContainers'
@@ -55,8 +57,12 @@ import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
 import { MOVEMENTS_ROUTE } from './MovementsPage'
+
+/** The stage whose completion brings the containers to the warehouse: a draft goods receipt for each (rule 5). */
+const DELIVERY = 'Delivery'
 
 const CONTAINERS_ROUTE = '/logistics/containers'
 
@@ -144,6 +150,11 @@ function auditOf(dto: MovementDto): AuditEntry[] {
  * completing it is what moves the containers' status, dates and location - by the STAGE of its type -
  * so after either the page says which containers changed and to what.
  *
+ * A DELIVERY-STAGE MOVEMENT BRINGS THE GOODS TO THE WAREHOUSE: its Complete dialog lists the draft goods
+ * receipt each container will get, the notification afterwards names the drafts created (linked) and the
+ * containers that got none with the reason, and cancelling it once completed lists the automatic drafts
+ * deleted with it, naming the ones edited since.
+ *
  * Planned and in-progress movements are forms; completed and cancelled ones are records, every field
  * text. Every action answers with the movement re-read, so the page never guesses where it went.
  */
@@ -156,6 +167,7 @@ export function MovementPage() {
   const { hasPermission } = useAuth()
   const canManage = hasPermission(PERMISSIONS.movementsManage)
   const canAddCharge = hasPermission(PERMISSIONS.containerChargesCreate)
+  const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
 
   const [movement, setMovement] = useState<MovementDto | null>(null)
   const [loading, setLoading] = useState(!isNew)
@@ -444,6 +456,14 @@ export function MovementPage() {
         .filter((c) => before.has(c.containerId) && before.get(c.containerId) !== c.containerStatusName)
         .map((c) => `${c.containerRef}: ${before.get(c.containerId)} -> ${c.containerStatusName}`)
       if (changes.length > 0) notify.info(changes.join('; '))
+      // A Delivery: the drafts created, linked, and the containers that got none, with the reason (rule 5).
+      if (kind === 'complete' && (result.goodsReceipts?.length || result.warnings?.length)) {
+        showDeliveryResult(result.goodsReceipts, result.warnings, {
+          canViewReceipts,
+          navigate: (to) => void navigate(to),
+        })
+        void refreshGoodsReceiptsWaiting()
+      }
     } catch (err) {
       fail(err, kind === 'start' ? 'The movement could not be started.' : 'The movement could not be completed.')
     } finally {
@@ -454,11 +474,14 @@ export function MovementPage() {
   async function cancelMovement(reason: string) {
     if (!movement) return
     setBusyAction('cancel')
+    const deliveredBefore = movement.status === 3 && movement.stage === DELIVERY
     try {
       const result = await movementsApi.cancel(movement.id, reason, movement.rowVersion)
       show(result)
       setCancelOpen(false)
       notify.success(`${result.movementNo} cancelled.`)
+      // Its automatic draft goods receipts went with it: the menu count follows.
+      if (deliveredBefore) void refreshGoodsReceiptsWaiting()
     } catch (err) {
       fail(err, 'The movement could not be cancelled.')
     } finally {
@@ -736,7 +759,7 @@ export function MovementPage() {
       {dateDialog && movement ? (
         <StatusDateModal
           kind={dateDialog}
-          movementNo={movement.movementNo}
+          movement={movement}
           busy={busyAction === dateDialog}
           onClose={() => setDateDialog(null)}
           onConfirm={(date) => void changeStatus(dateDialog, date)}
@@ -751,7 +774,11 @@ export function MovementPage() {
         onConfirm={(reason) => void cancelMovement(reason)}
         confirmLabel="Cancel movement"
         description="The movement is kept as a cancelled record and can no longer be started or changed. It cannot be undone."
-      />
+      >
+        {cancelOpen && movement && movement.status === 3 && movement.stage === DELIVERY ? (
+          <DeliveryCancelDrafts movement={movement} canViewReceipts={canViewReceipts} />
+        ) : null}
+      </CancelReasonModal>
 
       {movement ? (
         <NewChargeModal
@@ -835,31 +862,46 @@ function ChargesTable({ movement }: { movement: MovementDto }) {
   )
 }
 
-/** The date a movement started or ended - today unless the reader says otherwise. */
+/**
+ * The date a movement started or ended - today unless the reader says otherwise. Completing a movement of the Delivery
+ * stage also says what happens to each container's goods: a draft goods receipt (rule 5).
+ */
 function StatusDateModal({
   kind,
-  movementNo,
+  movement,
   busy,
   onClose,
   onConfirm,
 }: {
   kind: 'start' | 'complete'
-  movementNo: string
+  movement: MovementDto
   busy: boolean
   onClose: () => void
   onConfirm: (date: string) => void
 }) {
   const [date, setDate] = useState<string | null>(todayDateOnly())
   const starting = kind === 'start'
+  const delivery = !starting && movement.stage === DELIVERY
 
   return (
-    <Modal opened onClose={onClose} title={`${starting ? 'Start' : 'Complete'} ${movementNo}`} closeOnClickOutside={!busy} withCloseButton={!busy}>
+    <Modal
+      opened
+      onClose={onClose}
+      title={`${starting ? 'Start' : 'Complete'} ${movement.movementNo}`}
+      size={delivery ? 'lg' : 'md'}
+      closeOnClickOutside={!busy}
+      withCloseButton={!busy}
+    >
       <Stack>
-        <Text fz="sm">
-          {starting
-            ? 'The containers on the movement set off: their status, dates and location follow the stage of the movement type.'
-            : 'The containers arrive: their status, dates and location follow the stage of the movement type.'}
-        </Text>
+        {delivery ? (
+          <DeliveryCompletePreview movement={movement} />
+        ) : (
+          <Text fz="sm">
+            {starting
+              ? 'The containers on the movement set off: their status, dates and location follow the stage of the movement type.'
+              : 'The containers arrive: their status, dates and location follow the stage of the movement type.'}
+          </Text>
+        )}
         <DateInput
           label={starting ? 'Start date' : 'End date'}
           withAsterisk

@@ -30,8 +30,8 @@ const COLUMNS = 10
 /**
  * The "Charges" card of the container page: every charge on the container and, under each one,
  * what it adds to every item — the split the real cost is made of. Posted charges count in the
- * item costs; drafts are an estimate; a charge posted after the offload is badged, because it
- * adjusted costs that had already been fixed.
+ * item costs; drafts are an estimate; a charge posted after the goods were received (the container Offloaded) is
+ * badged, because it adjusted costs that had already been fixed.
  */
 export function ContainerChargesCard({ container, onChanged, onDocumentsChanged }: ContainerChargesCardProps) {
   const { hasPermission } = useAuth()
@@ -47,7 +47,7 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
       title: 'Post charge',
       message:
         container.status === OFFLOADED
-          ? `Post ${row.chargeName}? The container is offloaded: the item costs will be adjusted.`
+          ? `Post ${row.chargeName}? The goods are received: the item costs will be adjusted.`
           : `Post ${row.chargeName}? It is locked once posted and counts in the item costs.`,
       confirmLabel: 'Post',
     })
@@ -147,7 +147,7 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
                             {row.status === 1 ? 'Draft' : row.status === 2 ? 'Posted' : 'Cancelled'}
                           </Badge>
                           {row.adjustedAfterOffload && (
-                            <Badge variant="light" color="orange" size="xs">after offload</Badge>
+                            <Badge variant="light" color="orange" size="xs">after receipt</Badge>
                           )}
                         </Group>
                       </Table.Td>

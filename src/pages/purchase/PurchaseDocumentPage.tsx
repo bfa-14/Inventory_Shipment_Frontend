@@ -10,6 +10,7 @@ import {
   IconFileInvoice,
   IconLock,
   IconMail,
+  IconPackageImport,
   IconPlus,
   IconRefresh,
   IconSend,
@@ -29,6 +30,7 @@ import { warehousesApi } from '../../api/masterdata/warehouses'
 import {
   purchaseDocumentsApi,
   type CreatedPurchaseInvoiceDto,
+  type PostPurchaseDocumentResult,
   type PurchaseDocumentDto,
   type PurchaseRateResolutionDto,
   type ReceiptMode,
@@ -59,6 +61,9 @@ import { OrderActionButton } from '../../components/purchase/OrderActionButton'
 import { newOrderAbilities, orderAbilities, type OrderAbility } from '../../components/purchase/orderAbilities'
 import { OrderApprovalCard } from '../../components/purchase/OrderApprovalCard'
 import { InvoiceContainerChargesCard } from '../../components/purchase/InvoiceContainerChargesCard'
+import { InvoiceReceiptCostCard } from '../../components/purchase/InvoiceReceiptCostCard'
+import { askInvoicePost } from '../../components/purchase/invoicePostQuestion'
+import { ReceiveGoodsModal } from '../../components/purchase/goodsReceipts/ReceiveGoodsModal'
 import { ShippedInvoiceContainersCard } from '../../components/purchase/ShippedInvoiceContainersCard'
 import { OrderContainersCard } from '../../components/purchase/OrderContainersCard'
 import { PostedInvoiceChargesCard } from '../../components/purchase/PostedInvoiceChargesCard'
@@ -74,7 +79,14 @@ import {
   type ChargeLine,
 } from '../../components/purchase/purchaseCharges'
 import { PurchaseHeaderCard, type PurchaseHeader, type PurchaseHeaderErrors } from '../../components/purchase/PurchaseHeaderCard'
-import { PURCHASE_INVOICE, PURCHASE_RETURN, type PurchaseKind } from '../../components/purchase/purchaseKind'
+import {
+  invoicePostedBanner,
+  invoiceReceiveReason,
+  LEGACY_INVOICE_TEXTS,
+  PURCHASE_INVOICE,
+  PURCHASE_RETURN,
+  type PurchaseKind,
+} from '../../components/purchase/purchaseKind'
 import { defaultPurchasePrice, lineMaximum, purchaseUnitOf } from '../../components/purchase/purchaseLines'
 import { PurchaseLinesGrid, type PurchaseLine } from '../../components/purchase/PurchaseLinesGrid'
 import { SendToSupplierModal } from '../../components/purchase/SendToSupplierModal'
@@ -84,6 +96,7 @@ import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { refreshApprovalsMe, useApprovalsMe } from '../../hooks/useApprovalsMe'
+import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
@@ -144,6 +157,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
   const canOverCapacity = hasPermission(PERMISSIONS.containersOverCapacity)
   const canConfirmContainers = hasPermission(PERMISSIONS.containersConfirm)
+  /* GOODS RECEIPTS (scripts 64-65): the goods of an order or an invoice enter the stock with "Receive goods…", and a
+     local invoice's post confirmation may receive them at once (create + post of goods receipts). */
+  const canReceiveGoods = hasPermission(PERMISSIONS.goodsReceiptsCreate)
+  const canPostReceipts = hasPermission(PERMISSIONS.goodsReceiptsPost)
 
   const { byCode } = useDocumentTypes()
   const documentType = byCode(kind.code)
@@ -204,6 +221,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [invoiceCandidates, setInvoiceCandidates] = useState(0)
   /* An imported invoice's "Add charge": the container charge dialog, on the invoice's containers. */
   const [containerChargeOpen, setContainerChargeOpen] = useState(false)
+  /* "Receive goods…" on an approved order or a posted invoice: the shared ReceiveGoodsModal. */
+  const [receiveOpen, setReceiveOpen] = useState(false)
 
   /* AN ORDER'S APPROVAL, as the server answers it for this reader: who may decide, what waits, the
      history. Read again after every change of the order — every approval action ends in one. */
@@ -248,6 +267,28 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const invoiceItemId = oneItemOnly ? (lines.find((line) => line.itemId !== null)?.itemId ?? null) : null
   /* The items of the saved draft: one of one item saved with several (made before that rule) is split before it is posted. */
   const savedItemCount = kind.code === 'PINV' && document ? new Set(document.lines.map((line) => line.itemId)).size : 0
+  /* AN OLD LOCAL INVOICE (posted before goods receipts, not "Shipped in containers") keeps its old texts: its posting
+     brought the stock in. An older "Shipped in containers" one is not: its goods came in with their containers, which
+     may still be travelling and are then received with goods receipts (spec 7.1), so it gets "Received so far" like a
+     new one (its received pieces count the old offloads too). A draft is never one: it follows the new rule when it is
+     posted (the server marks it then). */
+  const legacyInvoice =
+    kind.code === 'PINV' && document != null && document.status !== 'Draft' && document.usesGoodsReceipts !== true && document.receiptMode === 1
+  /* WHAT CANCELLING DOES, said in its dialog (decision 3). An invoice that brought no stock of its own (posted since goods
+     receipts, or shipped in containers) moves no stock when cancelled: its received pieces go back to the order price
+     (the server's PINVCANCEL true-up). An order never moves stock. Only an old local invoice reverses its stock rows,
+     which is the dialog's default sentence. */
+  const cancelDescription =
+    kind.code === 'PINV' && document != null && (document.usesGoodsReceipts === true || document.receiptMode === 2)
+      ? 'Cancelling makes the amount no longer payable and leaves the invoice in place as a record. The stock does not change: goods already received go back to the order price (goods without an order keep their cost at receipt), and the difference is booked to the stock value and the cost of sales. It cannot be undone.'
+      : kind.code === 'PO'
+        ? 'Cancelling leaves the order in place as a record: it no longer counts as incoming stock, and nothing can be received or invoiced against it. The stock does not change. It cannot be undone.'
+        : undefined
+  /* The gray "Posted before goods receipts" hint: an old local invoice, and an older "Shipped in containers" one whose
+     containers were all offloaded the old way - the server gives exactly that reason for "Receive goods…" then. */
+  const legacyHint =
+    legacyInvoice ||
+    (kind.code === 'PINV' && document != null && document.canReceive === false && document.receiveBlockedReason === LEGACY_INVOICE_TEXTS.hint)
 
   /* ── loading ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -371,6 +412,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         fobCostBase: line.fobCostBase,
         allocatedChargesBase: line.allocatedChargesBase,
         landedCostBase: line.landedCostBase,
+        /* What came in. An order line's receivedQuantityBase is what was INVOICED; an invoice line's is what was received. */
+        receivedBase: doc.documentTypeCode === 'PO' ? (line.goodsReceivedBase ?? null) : line.receivedQuantityBase,
+        invoicedBase: doc.documentTypeCode === 'PO' ? line.receivedQuantityBase : null,
+        shortBase: doc.documentTypeCode === 'PO' ? (line.goodsShortBase ?? null) : null,
       })),
     )
     /* The server stores a manual split but its read does not return it per line, so the page keeps
@@ -933,21 +978,55 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     // The save re-reads the source for the caps; let that finish before posting rather than have
     // the read and the posting fight over the same order rows at the same moment.
     await loadSourceRemaining(saved)
-    const go = await confirm({
-      title: `${kind.postVerb} this ${kind.noun}?`,
-      message: kind.postConfirm(saved.warehouseName),
-      confirmLabel: kind.postVerb,
-    })
-    if (!go) return
+    let receiveNow = false
+    if (kind.code === 'PINV') {
+      // A supplier invoice moves no stock: the question says so, estimates what it does to the goods already received,
+      // and may receive the goods at once (rule 15a).
+      const answer = await askInvoicePost(saved, canReceiveGoods && canPostReceipts)
+      if (!answer.post) return
+      receiveNow = answer.receiveNow
+    } else {
+      const go = await confirm({
+        title: `${kind.postVerb} this ${kind.noun}?`,
+        message: kind.postConfirm(saved.warehouseName),
+        confirmLabel: kind.postVerb,
+      })
+      if (!go) return
+    }
     setSaving(true)
     try {
-      applyDocument(await purchaseDocumentsApi.post(saved.id, saved.rowVersion))
+      const result = await purchaseDocumentsApi.post(saved.id, saved.rowVersion, receiveNow)
+      applyDocument(result.document)
       notify.success(kind.code === 'PO' ? 'Purchase order confirmed.' : `${kind.title} posted.`)
+      announcePosting(result, receiveNow)
     } catch (error) {
       showApiError(error)
     } finally {
       setSaving(false)
     }
+  }
+
+  /**
+   * What the posting did besides posting, in the server's words: the cost of goods already received adjusted, and with
+   * "Receive the goods now" the receipt - or why it was not made (the invoice stays posted either way).
+   */
+  function announcePosting(result: PostPurchaseDocumentResult, receiveNow: boolean) {
+    if (!receiveNow) {
+      if (result.message) notify.info(result.message)
+      return
+    }
+    void refreshGoodsReceiptsWaiting()
+    // The receipt was made after the invoice's own transaction: read the invoice again for its Received figures.
+    void refreshQuietly()
+    const receipt = result.goodsReceipt
+    if (receipt) {
+      notify.success(result.message ?? `Goods received: ${receipt.documentNumber ?? ''}`.trim())
+      return
+    }
+    // The API says why in its warning ("Invoice posted; the goods receipt was not: …"); the sentence below only stands
+    // in when it sent none.
+    if (result.message) notify.info(result.message)
+    notify.warning(result.receiveWarning ?? 'Invoice posted; the goods receipt was not created. Use Receive goods…')
   }
 
   async function cancelDocument(reason: string) {
@@ -1254,6 +1333,42 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     disabledReason: ability?.blockedBy ?? undefined,
   })
 
+  /* "RECEIVE GOODS…" (goods receipts): an order decides it in orderAbilities; an invoice by its status, the rule it was
+     posted under and what is left outside containers. Hidden without the goods receipts create permission. */
+  const receiveAbility: OrderAbility =
+    kind.code === 'PO'
+      ? (abilities?.receiveGoods ?? { visible: false, blockedBy: null })
+      : kind.code === 'PINV' && document
+        ? { visible: canReceiveGoods, blockedBy: canReceiveGoods ? invoiceReceiveReason(document) : null }
+        : { visible: false, blockedBy: null }
+  const receiveAction: DocumentAction = {
+    key: 'receive-goods',
+    label: 'Receive goods…',
+    icon: <IconPackageImport size={16} />,
+    variant: 'light',
+    colour: 'teal',
+    ...orderAction(receiveAbility),
+    onClick: () => setReceiveOpen(true),
+  }
+  /* A posted invoice: what has come in so far, against what it invoices (base units). */
+  const invoiceReceived = kind.code === 'PINV' && document ? document.lines.reduce((sum, line) => sum + line.receivedQuantityBase, 0) : 0
+  const invoiceQuantity = kind.code === 'PINV' && document ? document.lines.reduce((sum, line) => sum + line.quantityBase, 0) : 0
+  /* An order's receipts: received and settled short over its lines (null before the API sends them). */
+  const orderReceived =
+    kind.code === 'PO' && document && document.lines.some((line) => line.goodsReceivedBase !== undefined)
+      ? {
+          received: document.lines.reduce((sum, line) => sum + (line.goodsReceivedBase ?? 0), 0),
+          short: document.lines.reduce((sum, line) => sum + (line.goodsShortBase ?? 0), 0),
+        }
+      : null
+  /* Received / Invoiced / Short on an approved order's lines, Received on a posted invoice's. */
+  const lineReceipts =
+    kind.code === 'PO' && (status === 'Posted' || status === 'Closed')
+      ? ('order' as const)
+      : kind.code === 'PINV' && (status === 'Posted' || status === 'Cancelled')
+        ? ('invoice' as const)
+        : null
+
   /* The Documents card: its count scrolls to it; "Add document…" opens its popup (any status, with the create permission). */
   const documentActions: DocumentAction[] = [
     { key: 'documents', label: `Documents (${formatNumber(document?.files.length ?? 0)})`, icon: DocumentIcons.documents, onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
@@ -1265,6 +1380,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         ...documentActions,
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
         { key: 'send-supplier', label: 'Send to supplier...', icon: <IconMail size={16} />, colour: 'indigo', ...orderAction(abilities?.sendToSupplier), onClick: () => setSupplierOpen(true) },
+        receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.createInvoice), loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
         { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
@@ -1276,7 +1392,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         { key: 'import', label: 'Import from Excel', icon: DocumentIcons.import, visible: canImportHere, onClick: () => setImportOpen(true) },
         // An invoice of several items MAY be split into one per item: an optional tool here (one of one item gets the orange Alert).
         { key: 'split', label: 'Split by item', icon: <IconArrowsSplit size={16} />, visible: kind.code === 'PINV' && document !== null && editable && !oneItemOnly && savedItemCount > 1, loading: splitting, onClick: () => void splitByItem() },
-        // A saved draft order shows what comes after its approval, disabled, with the reason.
+        // A saved draft order shows what comes after its approval, disabled, with the reason; a saved draft invoice, that
+        // its goods are received once it is posted.
+        receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, colour: 'green', ...orderAction(abilities?.createInvoice), onClick: () => void createFromThis() },
         { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
         { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
@@ -1337,10 +1455,14 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       {document && status === 'Posted' && (
         <Alert color={kind.colour} title={`${kind.code === 'PO' ? 'Confirmed' : 'Posted'} — ${document.documentNumber}`}>
           {kind.code === 'PO' ? 'Confirmed' : 'Posted'} by {document.postedByName ?? 'unknown'} on {stamp(document.postedAtUtc)}.{' '}
-          {kind.code === 'PINV' && document.receiptMode === 2
-            ? 'The item costs are set; the stock enters when the containers carrying it are offloaded. This invoice can no longer be edited.'
-            : kind.postedBanner}
+          {/* An invoice says what has come in; only an old local invoice keeps its old sentence (its posting added the stock). */}
+          {kind.code !== 'PINV' || legacyInvoice ? kind.postedBanner : invoicePostedBanner(invoiceReceived, invoiceQuantity)}
           {approvalState?.sentToSupplierAtUtc ? ` Sent to the supplier on ${stamp(approvalState.sentToSupplierAtUtc)}.` : ''}
+          {legacyHint && (
+            <Text fz="sm" c="dimmed" mt={4} data-legacy-invoice-hint>
+              {LEGACY_INVOICE_TEXTS.hint}
+            </Text>
+          )}
         </Alert>
       )}
       {approvalState?.supplierNotEmailed && (status === 'Posted' || status === 'Closed') && (
@@ -1350,7 +1472,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       )}
       {document && status === 'Closed' && (
         <Alert color="teal" title={`Closed — ${document.documentNumber}`}>
-          Closed by {document.closedByName ?? 'unknown'} on {stamp(document.closedAtUtc)}.{document.closeReason ? ` Reason: ${document.closeReason}` : ''} Nothing more will be received against this order.
+          Closed by {document.closedByName ?? 'unknown'} on {stamp(document.closedAtUtc)}.{document.closeReason ? ` Reason: ${document.closeReason}` : ''}{' '}
+          {kind.code === 'PO' ? 'No more invoices will be made from it; goods already invoiced and not yet received can still be received.' : ''}
         </Alert>
       )}
       {document && status === 'Cancelled' && (
@@ -1376,7 +1499,19 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       {kind.code === 'PO' && document && document.status !== 'Draft' && document.orderedBase !== null ? (
         <Paper radius="lg" p="md" withBorder data-order-progress>
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+          <SimpleGrid cols={{ base: 1, sm: orderReceived ? 3 : 2 }} spacing="lg">
+            {orderReceived && (
+              <div>
+                <Group justify="space-between" mb={4}>
+                  <Text fz="sm" fw={600}>Received</Text>
+                  <Text fz="sm" data-order-received>
+                    {formatNumber(orderReceived.received)} / {formatNumber(document.orderedBase)} pcs
+                    {orderReceived.short > 0 ? ` (+${formatNumber(orderReceived.short)} short)` : ''}
+                  </Text>
+                </Group>
+                <Progress value={document.orderedBase ? (orderReceived.received * 100) / document.orderedBase : 0} color="teal" radius="xl" />
+              </div>
+            )}
             <div>
               <Group justify="space-between" mb={4}>
                 <Text fz="sm" fw={600}>Invoiced</Text>
@@ -1425,6 +1560,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               : null
         }
         exporterRequired={containerBound || shipped}
+        legacyReceipt={legacyInvoice}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -1484,6 +1620,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           showEstimatedLanded={containerBound}
           allowAdd={!containerBound}
           onlyItemId={invoiceItemId}
+          receipts={lineReceipts}
           baseCurrencyCode={baseCode}
           readOnly={!editable}
         />
@@ -1554,6 +1691,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           }}
           onChanged={() => void refreshQuietly()}
           onTurnOnShipped={editable ? turnOnShipped : undefined}
+          legacy={legacyHint}
         />
       )}
 
@@ -1603,6 +1741,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onCurrencyChosen={(key, currencyId) => void chargeCurrencyChosen(key, currencyId)}
           readOnly={!editable}
         />
+      )}
+
+      {/* What this invoice did to the cost of goods already received (goods receipts, rule 10). */}
+      {kind.code === 'PINV' && document && (document.costAdjustments?.length ?? 0) > 0 && (
+        <InvoiceReceiptCostCard adjustments={document.costAdjustments ?? []} currencyCode={baseCode} />
       )}
 
       <DocumentAttachmentsCard
@@ -1701,6 +1844,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
             <LinkedDocumentsCard
               linked={document?.linked ?? []}
+              goodsReceipts={document?.goodsReceipts ?? []}
               canPostInvoices={kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.post)}
               onPosted={() => void refreshQuietly()}
             />
@@ -1708,7 +1852,14 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         </Grid.Col>
       </Grid>
 
-      <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={documentLabel} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
+      <CancelReasonModal
+        opened={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        documentLabel={documentLabel}
+        busy={cancelBusy}
+        onConfirm={(reason) => void cancelDocument(reason)}
+        description={cancelDescription}
+      />
 
 
       {kind.code === 'PO' && document && addContainerOpen && (
@@ -1815,6 +1966,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             onSend={(payload) => void sendToSupplier(payload)}
           />
         </>
+      )}
+
+      {/* "Receive goods…": the shared dialog; the new receipt opens once it is made. */}
+      {document && (kind.code === 'PO' || kind.code === 'PINV') && (
+        <ReceiveGoodsModal
+          opened={receiveOpen}
+          source={receiveOpen ? { kind: kind.code === 'PO' ? 'order' : 'invoice', id: document.id, documentNumber: document.documentNumber } : null}
+          onClose={() => setReceiveOpen(false)}
+        />
       )}
 
       <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />

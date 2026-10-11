@@ -217,7 +217,7 @@ export function ContainerChargesPage() {
       title: 'Post charge',
       message:
         row.containerStatus === 6
-          ? `Post ${row.chargeName} on ${row.containerRef}? The container is offloaded: the item costs will be adjusted.`
+          ? `Post ${row.chargeName} on ${row.containerRef}? The goods are received: the item costs will be adjusted.`
           : `Post ${row.chargeName} on ${row.containerRef}? It is locked once posted.`,
       confirmLabel: 'Post',
     })
@@ -324,7 +324,7 @@ export function ContainerChargesPage() {
         render: (row) => (
           <Group gap={4} wrap="nowrap">
             <Badge variant="light" color={chargeStatusColour(row.status)}>{row.statusName}</Badge>
-            {row.adjustedAfterOffload && <Badge variant="light" color="orange" size="xs">after offload</Badge>}
+            {row.adjustedAfterOffload && <Badge variant="light" color="orange" size="xs">after receipt</Badge>}
           </Group>
         ),
       },

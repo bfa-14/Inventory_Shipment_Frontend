@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { routes } from '../../routes'
-import { Alert, Anchor, Badge, Button, Group, Paper, Progress, Select, Text, TextInput, Tooltip } from '@mantine/core'
+import { Alert, Anchor, Badge, Button, Checkbox, Group, Paper, Progress, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
-import { IconArrowBackUp, IconEye, IconFileInvoice, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
+import { IconArrowBackUp, IconEye, IconFileInvoice, IconFilterOff, IconInfoCircle, IconPackageImport, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
@@ -19,6 +19,7 @@ import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
 import { CreateInvoiceFromOrderModal } from '../../components/purchase/CreateInvoiceFromOrderModal'
+import { ReceiveGoodsModal, type ReceiveGoodsSource } from '../../components/purchase/goodsReceipts/ReceiveGoodsModal'
 import {
   PURCHASE_INVOICE,
   PURCHASE_ORDER,
@@ -38,6 +39,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
+import { PERMISSIONS } from '../../navigation'
 import { paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { useGridQuery } from '../../hooks/useGridQuery'
 
@@ -48,9 +50,41 @@ interface Filters {
   status: string | null
   dateFrom: string | null
   dateTo: string | null
+  /** Orders "To receive" / invoices "Not fully received" (goods receipts). */
+  toReceive: boolean
 }
 
-const NO_FILTERS: Filters = { search: '', branchId: null, supplierId: null, status: null, dateFrom: null, dateTo: null }
+const NO_FILTERS: Filters = { search: '', branchId: null, supplierId: null, status: null, dateFrom: null, dateTo: null, toReceive: false }
+
+/** The invoice list's banner, once per viewer: remembered in this browser, per user, when it is closed. */
+const switchBannerKey = (userId: number | undefined) => `inventory_shipment.purchaseInvoices.goodsReceiptsBannerClosed.${userId ?? 0}`
+
+function bannerClosed(userId: number | undefined): boolean {
+  try {
+    return window.localStorage.getItem(switchBannerKey(userId)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function closeBanner(userId: number | undefined): void {
+  try {
+    window.localStorage.setItem(switchBannerKey(userId), '1')
+  } catch {
+    /* Storage refused (a private window): the banner comes back next time, which is harmless. */
+  }
+}
+
+/** An invoice's received share of its invoiced pieces, 0–100; null before the API sends the figures (or on a draft). */
+function invoiceReceivedPercent(row: PurchaseDocumentListDto): number | null {
+  if (row.status === 'Draft' || row.receivedBase == null || !row.quantityBase) return null
+  return Math.min(100, (row.receivedBase * 100) / row.quantityBase)
+}
+
+/** "45%" for the grid's text and CSV; blank when there is no figure. */
+function percentText(value: number | null | undefined): string {
+  return value == null ? '' : `${formatNumber(value, 0)}%`
+}
 
 /** "FC 750,000.00 CDF" — the symbol and the code, because a symbol alone is ambiguous across currencies. */
 function documentTotal(row: PurchaseDocumentListDto): string {
@@ -73,7 +107,10 @@ const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
   { accessor: 'totalItems', kind: 'number' },
   { accessor: 'totalAmount', kind: 'number', text: documentTotal },
   { accessor: 'totalAmountBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalAmountBase, 2) },
-  { accessor: 'receivedPercent', kind: 'number', text: (r) => (r.receivedPercent === null ? '' : `${formatNumber(r.receivedPercent, 0)}%`) },
+  /* Orders: received (goods receipts) and invoiced, each a share of the ordered quantity; invoices: received of invoiced. */
+  { accessor: 'receivedPercent', kind: 'number', text: (r) => percentText(r.receivedPercent) },
+  { accessor: 'invoicedPercent', kind: 'number', value: (r) => r.invoicedPercent ?? null, text: (r) => percentText(r.invoicedPercent) },
+  { accessor: 'invoiceReceived', kind: 'number', value: invoiceReceivedPercent, text: (r) => percentText(invoiceReceivedPercent(r)) },
   { accessor: 'status', kind: 'list' },
   { accessor: 'paymentStatus', kind: 'list', text: (r) => (r.paymentStatus ? paymentStatusLabel(r.paymentStatus) : '') },
   { accessor: 'outstandingAmount', kind: 'number', text: (r) => (r.outstandingAmount === null ? '' : formatNumber(r.outstandingAmount, r.decimalPlaces)) },
@@ -101,7 +138,7 @@ function sourceKindOf(kind: PurchaseKind): PurchaseKind | null {
 export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
 
   const highlight = ((location.state as { highlight?: number[] } | null)?.highlight) ?? []
 
@@ -111,7 +148,27 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   const canDelete = hasPermission(kind.permissions.delete)
   const canCreateInvoice = kind.code === 'PO' && hasPermission(PURCHASE_INVOICE.permissions.create)
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
+  /* Goods receipts: "Receive goods" on an approved order's row. */
+  const canReceiveGoods = kind.code === 'PO' && hasPermission(PERMISSIONS.goodsReceiptsCreate)
   const sourceKind = sourceKindOf(kind)
+
+  /* SINCE GOODS RECEIPTS, posting an invoice adds no stock: said once to the people who post invoices, until they close
+     it (remembered in this browser). The date is the server's; without it the sentence goes without a date. */
+  const [switchBanner, setSwitchBanner] = useState(() => kind.code === 'PINV' && canPost && !bannerClosed(user?.id))
+  const [switchedAt, setSwitchedAt] = useState<string | null>(null)
+  useEffect(() => {
+    if (!switchBanner) return
+    const controller = new AbortController()
+    purchaseDocumentsApi
+      .goodsReceiptsSwitch(controller.signal)
+      .then((answer) => setSwitchedAt(answer.switchedAtUtc ?? null))
+      .catch(() => {
+        /* No date: the banner says the rule without it. */
+      })
+    return () => controller.abort()
+  }, [switchBanner])
+
+  const [receiving, setReceiving] = useState<ReceiveGoodsSource | null>(null)
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
@@ -145,6 +202,8 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
               status: (filters.status as PurchaseDocumentStatus | null) ?? undefined,
               dateFrom: filters.dateFrom ?? undefined,
               dateTo: filters.dateTo ?? undefined,
+              toReceive: kind.code === 'PO' && filters.toReceive ? true : undefined,
+              notFullyReceived: kind.code === 'PINV' && filters.toReceive ? true : undefined,
               sortBy: 'DocumentDate',
               sortDir: 'desc',
               page,
@@ -187,8 +246,10 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
     })
     if (!go) return
     try {
-      await purchaseDocumentsApi.post(row.id, row.rowVersion)
+      const result = await purchaseDocumentsApi.post(row.id, row.rowVersion)
       notify.success(`${kind.title} ${kind.postVerb.toLowerCase()}ed.`.replace('Confirmed', 'confirmed').replace('confirmed.', 'confirmed.'))
+      // What the posting did besides (an invoice: the cost of goods already received adjusted), in the server's words.
+      if (result.message) notify.info(result.message)
       await load()
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : `The ${kind.noun} could not be ${kind.postVerb.toLowerCase()}ed.`)
@@ -372,16 +433,23 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
             title: 'Received',
             width: 130,
             render: (row) =>
-              row.receivedPercent === null || row.status === 'Draft' ? (
-                <Text fz="sm" c="dimmed">—</Text>
-              ) : (
-                <Tooltip label={`${formatNumber(row.receivedPercent, 1)}% of the ordered quantity invoiced`} withArrow>
-                  <Group gap={6} wrap="nowrap">
-                    <Progress value={row.receivedPercent} size="sm" w={70} color={row.receivedPercent >= 100 ? 'teal' : 'blue'} aria-label="Received" />
-                    <Text fz="xs" style={{ whiteSpace: 'nowrap' }}>{formatNumber(row.receivedPercent, 0)}%</Text>
-                  </Group>
-                </Tooltip>
-              ),
+              progressCell(row.status === 'Draft' ? null : row.receivedPercent, 'Received', 'teal', '% of the ordered quantity received (goods receipts)'),
+          } as DataTableColumn<PurchaseDocumentListDto>,
+          {
+            accessor: 'invoicedPercent',
+            title: 'Invoiced',
+            width: 130,
+            render: (row) => progressCell(row.status === 'Draft' ? null : (row.invoicedPercent ?? null), 'Invoiced', 'green', '% of the ordered quantity invoiced'),
+          } as DataTableColumn<PurchaseDocumentListDto>,
+        ]
+      : []),
+    ...(kind.code === 'PINV'
+      ? [
+          {
+            accessor: 'invoiceReceived',
+            title: 'Received',
+            width: 130,
+            render: (row) => progressCell(invoiceReceivedPercent(row), 'Received', 'teal', '% of the invoiced quantity received (goods receipts)'),
           } as DataTableColumn<PurchaseDocumentListDto>,
         ]
       : []),
@@ -423,7 +491,31 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
           custom={[
             { icon: <IconEye size={16} />, tooltip: 'View', onClick: () => void navigate(routes.purchaseDocument(kind.code, row.id)) },
             { icon: <IconSend size={16} />, tooltip: kind.postVerb, visible: canPost && row.status === 'Draft', onClick: () => void post(row) },
-            { icon: <IconFileInvoice size={16} />, tooltip: 'Create invoice', color: 'green', visible: canCreateInvoice && row.status === 'Posted', onClick: () => void createFrom(row) },
+            {
+              icon: <IconPackageImport size={16} />,
+              tooltip: 'Receive goods…',
+              color: 'teal',
+              // An approved order, open or closed (a closed one may still have invoiced goods to receive). A hint only:
+              // the percentages are rounded, and the dialog says why when the rest travels in containers (rule 14).
+              // An order closed by hand expects only what was invoiced, so it is done once that is received.
+              visible: canReceiveGoods && (row.status === 'Posted' || row.status === 'Closed'),
+              disabled:
+                (row.receivedPercent ?? 0) >= 100 ||
+                (row.status === 'Closed' && (row.invoicedPercent ?? 0) <= (row.receivedPercent ?? 0)),
+              disabledReason: 'Everything ordered is already received.',
+              onClick: () => setReceiving({ kind: 'order', id: row.id, documentNumber: row.documentNumber }),
+            },
+            {
+              icon: <IconFileInvoice size={16} />,
+              tooltip: 'Create invoice',
+              color: 'green',
+              // Since goods receipts a fully invoiced order stays open until its goods are received: nothing is left to
+              // invoice on it (a hint from the rounded percentage; the dialog checks the order's own lines).
+              visible: canCreateInvoice && row.status === 'Posted',
+              disabled: (row.invoicedPercent ?? 0) >= 100,
+              disabledReason: 'Everything ordered is already invoiced.',
+              onClick: () => void createFrom(row),
+            },
             { icon: <IconArrowBackUp size={16} />, tooltip: 'Create return', color: 'orange', visible: canCreateReturn && row.status === 'Posted', onClick: () => void createFrom(row) },
             { icon: <IconFilterOff size={16} />, tooltip: `Cancel ${kind.noun}`, color: 'red', visible: canCancel && (row.status === 'Posted' || row.status === 'Closed'), onClick: () => setCancelling(row) },
           ]}
@@ -432,6 +524,22 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
       ),
     },
   ]
+
+  /**
+   * A share as a short bar and its figure, its meaning on hover ("45.0% of the ordered quantity invoiced"); a dash when
+   * there is none (a draft, or no figure from the API yet).
+   */
+  function progressCell(value: number | null, label: string, colour: string, meaning: string) {
+    if (value === null) return <Text fz="sm" c="dimmed">—</Text>
+    return (
+      <Tooltip label={`${formatNumber(value, 1)}${meaning}`} withArrow>
+        <Group gap={6} wrap="nowrap">
+          <Progress value={value} size="sm" w={70} color={value >= 100 ? 'teal' : colour} aria-label={label} />
+          <Text fz="xs" style={{ whiteSpace: 'nowrap' }}>{formatNumber(value, 0)}%</Text>
+        </Group>
+      </Tooltip>
+    )
+  }
 
   return (
     <div>
@@ -465,7 +573,38 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
         <FilterBar.Col span={1}>
           <DateInput label="To" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
+        {kind.code !== 'PRET' && (
+          <FilterBar.Col span={2}>
+            {/* Goods receipts: an approved order with something still to receive; a posted invoice not all received. */}
+            <Checkbox
+              mb={8}
+              label={kind.code === 'PO' ? 'To receive' : 'Not fully received'}
+              checked={filters.toReceive}
+              onChange={(event) => setFilter('toReceive', event.currentTarget.checked)}
+              data-to-receive-filter
+            />
+          </FilterBar.Col>
+        )}
       </FilterBar>
+
+      {switchBanner && (
+        <Alert
+          color="blue"
+          icon={<IconInfoCircle size={18} />}
+          mb="md"
+          withCloseButton
+          closeButtonLabel="Close"
+          onClose={() => {
+            closeBanner(user?.id)
+            setSwitchBanner(false)
+          }}
+          data-goods-receipts-banner
+        >
+          {switchedAt
+            ? `Since ${dateLabel(isoDate(new Date(switchedAt)))}, posting a supplier invoice no longer adds stock: receive the goods with Receive goods…`
+            : 'Posting a supplier invoice no longer adds stock: receive the goods with Receive goods…'}
+        </Alert>
+      )}
 
       {error && (
         <Alert color="red" mb="md">
@@ -525,6 +664,8 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
           onGoToOrder={() => void navigate(routes.purchaseOrder(createdInvoices.orderId))}
         />
       ) : null}
+
+      <ReceiveGoodsModal opened={receiving !== null} source={receiving} onClose={() => setReceiving(null)} />
 
       <CancelReasonModal opened={cancelling !== null} onClose={() => setCancelling(null)} documentLabel={cancelling ? label(cancelling) : ''} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
     </div>

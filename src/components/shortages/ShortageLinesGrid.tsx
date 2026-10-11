@@ -114,7 +114,7 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
     {
       accessor: 'transitBase',
       title: (
-        <Tooltip label="Quantity on containers in transit, at port or cleared, not yet offloaded" multiline w={260} withArrow>
+        <Tooltip label="Quantity on containers in transit, at port or cleared, not yet received" multiline w={260} withArrow>
           <span>Transit Qty</span>
         </Tooltip>
       ),

@@ -51,6 +51,9 @@ import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
 import { LandedCostAdjustmentPage } from './pages/purchase/LandedCostAdjustmentPage'
 import { LandedCostAdjustmentsPage } from './pages/purchase/LandedCostAdjustmentsPage'
+import { GoodsReceiptPage } from './pages/purchase/GoodsReceiptPage'
+import { GoodsReceiptPrintPage } from './pages/purchase/GoodsReceiptPrintPage'
+import { GoodsReceiptsPage } from './pages/purchase/GoodsReceiptsPage'
 import { PaymentPage } from './pages/purchase/PaymentPage'
 import { PaymentPrintPage } from './pages/purchase/PaymentPrintPage'
 import { PaymentsPage } from './pages/purchase/PaymentsPage'
@@ -96,6 +99,10 @@ export default function App() {
             </Route>
             <Route element={<ProtectedRoute permission={PERMISSIONS.paymentsView} />}>
               <Route path="/purchase/payments/:id/print" element={<PaymentPrintPage />} />
+            </Route>
+            {/* The goods receipt on paper, for signing at the gate (a draft prints as the count sheet). */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.goodsReceiptsView} />}>
+              <Route path="/purchase/goods-receipts/:id/print" element={<GoodsReceiptPrintPage />} />
             </Route>
 
             <Route element={<AppShell />}>
@@ -239,6 +246,17 @@ export default function App() {
                 <Route path="/purchase/returns" element={<PurchaseDocumentsPage kind={PURCHASE_RETURN} />} />
                 <Route path="/purchase/returns/new" element={<PurchaseDocumentRoute kind={PURCHASE_RETURN} />} />
                 <Route path="/purchase/returns/:id" element={<PurchaseDocumentRoute kind={PURCHASE_RETURN} />} />
+              </Route>
+
+              {/* Goods receipts (GRN): the only way supplier goods enter the stock. The list and the receipt sit behind
+                  the view permission; "new" (a receipt without an order) also needs the create one, which the page
+                  checks itself: kept under the same route as /:id so the first save turns /new into /:id without
+                  remounting the page in the middle of a "Post". Posting, cancelling and deleting are checked on the
+                  page (and by the API). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.goodsReceiptsView} />}>
+                <Route path="/purchase/goods-receipts" element={<GoodsReceiptsPage />} />
+                <Route path="/purchase/goods-receipts/new" element={<GoodsReceiptPage />} />
+                <Route path="/purchase/goods-receipts/:id" element={<GoodsReceiptPage />} />
               </Route>
 
               {/* Charge types are setup — one permission for the lot. Landed cost adjustments are
