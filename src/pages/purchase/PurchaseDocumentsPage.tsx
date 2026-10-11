@@ -79,8 +79,9 @@ const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
   { accessor: 'outstandingAmount', kind: 'number', text: (r) => (r.outstandingAmount === null ? '' : formatNumber(r.outstandingAmount, r.decimalPlaces)) },
 ]
 
-/** A supplier invoice's item, "code - name": it holds one (a draft made before that rule may hold more). */
+/** A supplier invoice's item, "code - name"; "3 items" for an invoice of several items (script 63). */
 function itemText(row: PurchaseDocumentListDto): string {
+  if ((row.itemCount ?? 0) > 1) return `${formatNumber(row.itemCount)} items`
   return row.itemCode ? `${row.itemCode} - ${row.itemName ?? ''}` : ''
 }
 
@@ -319,16 +320,23 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
             accessor: 'itemCode',
             title: 'Item',
             width: 230,
+            /* ONE ITEM: "code - name". SEVERAL ITEMS: "3 items" — an invoice made to hold several, or (orange) an invoice
+               of one item saved with several before that rule, which is split before posting. */
             render: (row) =>
-              row.itemCode ? (
-                <Group gap={6} wrap="nowrap">
-                  <Text fz="sm" lineClamp={1} style={{ minWidth: 0 }}>{itemText(row)}</Text>
-                  {(row.itemCount ?? 0) > 1 ? (
-                    <Tooltip label="Made before one item per invoice: split it before posting.">
-                      <Badge color="orange" variant="light" size="sm" style={{ flexShrink: 0 }}>{formatNumber(row.itemCount)} items</Badge>
-                    </Tooltip>
-                  ) : null}
-                </Group>
+              (row.itemCount ?? 0) > 1 ? (
+                row.oneItemOnly === true && row.status === 'Draft' ? (
+                  <Tooltip label="An invoice of one item made before that rule: split it before posting.">
+                    <Badge color="orange" variant="light" size="sm" data-item-count={row.itemCount}>
+                      {itemText(row)}
+                    </Badge>
+                  </Tooltip>
+                ) : (
+                  <Text fz="sm" data-item-count={row.itemCount}>
+                    {itemText(row)}
+                  </Text>
+                )
+              ) : row.itemCode ? (
+                <Text fz="sm" lineClamp={1} style={{ minWidth: 0 }}>{itemText(row)}</Text>
               ) : (
                 <Text fz="sm" c="dimmed">—</Text>
               ),

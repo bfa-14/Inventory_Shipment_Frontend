@@ -14,7 +14,7 @@ import type { PagedResult } from '../types'
  */
 const BASE = '/api/purchase/documents'
 
-/** Copied to every invoice a create makes (one per item). Blank = none. */
+/** Copied to every invoice a create makes. Blank = none. */
 export interface InvoiceReferences {
   exporterReference?: string | null
   commercialInvoiceNo?: string | null
@@ -27,7 +27,10 @@ function referencesBody(references?: InvoiceReferences) {
   }
 }
 
-/** One supplier invoice a create or a split made: a supplier invoice holds ONE item. */
+/**
+ * One supplier invoice a create or a split made. One invoice per item (the setting, or the dialog's switch on):
+ * the item it holds; one invoice for several items: the item of its first line.
+ */
 export interface CreatedPurchaseInvoiceDto {
   id: number
   itemId: number | null
@@ -38,7 +41,7 @@ export interface CreatedPurchaseInvoiceDto {
   totalAmount: number
 }
 
-/** "Create invoice" from an order or its containers: one draft per item. `id` = `firstId`. */
+/** "Create invoice" from an order or its containers: one draft per item, or one for every item. `id` = `firstId`. */
 export interface CreatedPurchaseInvoicesDto {
   firstId: number
   id: number
@@ -46,6 +49,12 @@ export interface CreatedPurchaseInvoicesDto {
   /** "3 invoices created, one per item" or "Invoice created". */
   message: string
 }
+
+/**
+ * "One invoice per item" of the Create Invoice dialogs (script 63): true = one draft per item (each holds one item),
+ * false = one draft holding every item, null = as the setting Purchase.OneItemPerInvoice says.
+ */
+export type OnePerItemChoice = boolean | null
 
 export interface SplitByItemResultDto {
   invoices: CreatedPurchaseInvoiceDto[]
@@ -113,6 +122,11 @@ export interface SavePurchaseDocumentRequest {
   shippedInContainers?: boolean | null
   exporterReference?: string | null
   commercialInvoiceNo?: string | null
+  /**
+   * A NEW supplier invoice (script 63): true = it holds one item, false = it may hold several, null = as the
+   * setting Purchase.OneItemPerInvoice says. Kept by the invoice: an update leaves it as it was created.
+   */
+  oneItemOnly?: boolean | null
   notes: string | null
   sourceDocumentId?: number | null
   lines: SavePurchaseDocumentLine[]
@@ -196,8 +210,14 @@ export interface PurchaseDocumentListDto {
   itemId: number | null
   itemCode: string | null
   itemName: string | null
-  /** Supplier invoices: how many items it holds — more than 1 only on a draft made before one item per invoice. */
+  /** Supplier invoices: how many items it holds — more than 1 on an invoice of several items. */
   itemCount: number | null
+  /**
+   * Supplier invoices (script 63, usp_PurchaseDocument_Search): holds one item (true) or may hold several (false), as
+   * it was created; an older invoice follows the setting. True with itemCount > 1 = a draft of one item saved with
+   * several before that rule, which Post refuses (65029) until it is split. Null for orders and returns.
+   */
+  oneItemOnly: boolean | null
   /* Supplier payments (script 47) - posted purchase invoices only, null otherwise. */
   paidAmount: number | null
   returnedAmount: number | null
@@ -364,6 +384,12 @@ export interface PurchaseDocumentDto {
   status: PurchaseDocumentStatus
   /** Invoices created from containers: the exporter reference is required to post. */
   isContainerBound: boolean
+  /**
+   * Supplier invoices (script 63): true = it holds ONE item (its lines can only be the item of its first line and a
+   * draft of several items is split before posting); false = it may hold several items. Set when the invoice is
+   * created; an invoice made before follows the setting Purchase.OneItemPerInvoice.
+   */
+  oneItemOnly: boolean
   /** Orders: containers carrying its lines; invoices: its containers. */
   containerCount: number
   /** Invoices: containers its pieces fill, summed over its items (null when no item has a Container unit). */
@@ -449,6 +475,11 @@ export interface ImportCreatePurchaseDocumentsRequest {
   notes: string | null
   lines: ImportCreateLine[]
   postImmediately: boolean
+  /**
+   * Supplier invoices (script 63): true = one invoice per item of the file, each holding one item; false = one invoice
+   * holding every item; null = the setting Purchase.OneItemPerInvoice. Ignored for orders and returns.
+   */
+  onePerItem?: OnePerItemChoice
 }
 
 export const purchaseDocumentsApi = {
@@ -501,28 +532,37 @@ export const purchaseDocumentsApi = {
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 
-  /** Purchase invoice drafts holding what remains to receive on the posted order: ONE PER ITEM. */
-  createInvoice: (id: number, documentDate?: string | null, references?: InvoiceReferences) =>
+  /** Purchase invoice drafts holding what remains to receive on the posted order: one per item, or one for every item. */
+  createInvoice: (id: number, documentDate?: string | null, references?: InvoiceReferences, onePerItem: OnePerItemChoice = null) =>
     request<CreatedPurchaseInvoicesDto>(`${BASE}/${id}/create-invoice`, {
       method: 'POST',
-      body: { documentDate: documentDate ?? null, ...referencesBody(references) },
+      body: { documentDate: documentDate ?? null, ...referencesBody(references), onePerItem },
     }),
 
-  /** A purchase return draft holding what can still be returned from the posted invoice. */
-  /** Draft invoices from container lines of the order, ONE PER ITEM; no lines = everything loaded and not yet invoiced. */
-  invoiceFromContainers: (orderId: number, documentDate?: string | null, lines?: ContainerLineQuantity[], references?: InvoiceReferences) =>
+  /**
+   * Draft invoices from container lines of the order: one per item, or one for every item (`onePerItem`);
+   * no lines = everything loaded and not yet invoiced.
+   */
+  invoiceFromContainers: (
+    orderId: number,
+    documentDate?: string | null,
+    lines?: ContainerLineQuantity[],
+    references?: InvoiceReferences,
+    onePerItem: OnePerItemChoice = null,
+  ) =>
     request<CreatedPurchaseInvoicesDto>(`${BASE}/${orderId}/invoice-from-containers`, {
       method: 'POST',
-      body: { documentDate: documentDate ?? null, lines: lines ?? [], ...referencesBody(references) },
+      body: { documentDate: documentDate ?? null, lines: lines ?? [], ...referencesBody(references), onePerItem },
     }),
 
-  /** A draft invoice holding several items (made before one item per invoice) into one invoice per item; the original first. */
+  /** A draft invoice holding several items into one invoice per item, the original first; each then holds one item. */
   splitByItem: (id: number, rowVersion: string | null) =>
     request<SplitByItemResultDto>(`${BASE}/${id}/split-by-item`, { method: 'POST', body: { rowVersion } }),
 
   /** Posts each draft purchase invoice on its own, in order: one refusal does not stop the others. */
   postMany: (ids: number[]) => request<BulkActionItemResult[]>(`${BASE}/post-many`, { method: 'POST', body: { ids } }),
 
+  /** A purchase return draft holding what can still be returned from the posted invoice. */
   createReturn: (id: number, documentDate?: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/create-return`, { method: 'POST', body: { documentDate: documentDate ?? null } }),
 

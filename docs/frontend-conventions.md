@@ -768,20 +768,40 @@ in **cost mode**:
     links in one transaction.
   - Linking rewrites the invoice's lines, so the card refuses while the page has unsaved changes.
   - The lines are grouped by container, the rest under "Not in a container yet".
-- **One item per supplier invoice (script 45)**: a purchase invoice holds one item, over any number of lines.
+- **One item per supplier invoice (script 45, optional since script 63)**: an invoice of one item holds one item,
+  over any number of lines; an invoice of several items holds any.
+  - The setting **Purchase.OneItemPerInvoice** (Configuration > Settings > General, public, on by default) is the
+    default. Each invoice keeps the mode it was created with: `oneItemOnly` on the purchase document (an older
+    invoice follows the setting). A new invoice sends `oneItemOnly` = what the page applied (the setting); an
+    update never sends it. Read the setting with `useOneItemPerInvoice()` (`components/purchase/onePerItem.ts`): it
+    is on while loading or unreadable, and `known` says whether it was really read. **The browser never sends its
+    guess**: while the setting is not known, every request carries null for the mode (`oneItemOnly`, `onePerItem`;
+    `onePerItemToSend()`), and the server applies the setting it has.
   - "Create Purchase Invoice" (`CreateInvoiceFromOrderModal`, order page and order list) and "Create Invoice from
-    Containers…" say "One invoice per item: n invoices will be created (codes)" and take the exporter's ref. and
-    the commercial invoice no., copied to every invoice. One invoice opens as before; several are listed in
-    `CreatedInvoicesModal` (Open links, "Go to the order's invoices").
-  - On an invoice with a line, the item select offers only that item (`PurchaseLinesGrid` `onlyItemId`) and the
-    quick search refuses another, with `ONE_ITEM_HINT`. A draft holding several items (made before) shows an
-    orange Alert and **Split by item**, which lists the invoices in the same modal.
+    Containers…" have a **One invoice per item** Switch, starting from the setting and chosen for this creation
+    (`onePerItem` in the request; null = the setting, sent while the reader has not flipped it and the setting is not
+    known; when it could not be read, the switch's description says the server's setting decides). The preview says
+    "One invoice per item: n invoices will be created (codes)", or off "One invoice with n items" ("One invoice per
+    order: …" for lines of several orders).
+    Both take the exporter's ref. and the commercial invoice no., copied to every invoice. One invoice opens as
+    before; several are listed in `CreatedInvoicesModal` (Open links, "Go to the order's invoices"; `onePerItem`
+    false shows Lines instead of Item).
+  - On an invoice of one item with a line, the item select offers only that item (`PurchaseLinesGrid`
+    `onlyItemId`) and the quick search refuses another, with `ONE_ITEM_HINT`. Such a draft holding several items
+    (made before) shows an orange Alert and **Split by item**, which lists the invoices in the same modal. An
+    invoice of several items shows its lines normally; **Split by item** is an optional action in its action bar
+    (each resulting invoice then holds one item).
   - The order's Linked Documents card ticks its draft invoices and posts them with **Post selected** (`post-many`,
     one refusal does not stop the others, results in `BulkResultsModal`).
-  - The invoice list has an Item column (code - name; an orange "n items" badge on an old multi-item draft) and
-    its search matches the item code.
-  - The Excel import on an invoice (`onePerItem`): a file of several items, or of another item than the open
-    invoice's, becomes one new invoice per item through `import-create`; the result lists each with an Open link.
+  - The invoice list has an Item column: code - name for an invoice of one item, "n items" for one of several
+    (an orange badge on a draft whose row says `oneItemOnly` true with `itemCount` > 1: one item, saved with several
+    before that rule, to split); its search matches the item code.
+  - The Excel import follows the open invoice's mode: the wizard gets `onePerItem` = its `oneItemOnly`, and the page
+    sends the same `onePerItem` to `import-create`, so the server creates what the wizard announced whatever the
+    setting (a new invoice whose setting is not known sends null). On an invoice of one item, a file of several
+    items, or of another item than the open invoice's, becomes new invoices, one per item; the result lists each with
+    an Open link. On an invoice of several items the rows are appended (a file of several warehouses becomes one new
+    invoice of every item).
 - **API**: `src/api/purchase/documents.ts` — one module for the three kinds; every 403 from it names the
   permission that was missing (`code: FORBIDDEN`).
 

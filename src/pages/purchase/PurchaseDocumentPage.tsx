@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
 import {
   IconArrowBackUp,
+  IconArrowsSplit,
   IconBox,
   IconBoxMultiple,
   IconCheck,
@@ -53,7 +54,7 @@ import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
 import { CreateInvoiceFromOrderModal } from '../../components/purchase/CreateInvoiceFromOrderModal'
 import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
-import { ONE_ITEM_HINT } from '../../components/purchase/onePerItem'
+import { ONE_ITEM_HINT, useOneItemPerInvoice } from '../../components/purchase/onePerItem'
 import { OrderActionButton } from '../../components/purchase/OrderActionButton'
 import { newOrderAbilities, orderAbilities, type OrderAbility } from '../../components/purchase/orderAbilities'
 import { OrderApprovalCard } from '../../components/purchase/OrderApprovalCard'
@@ -237,9 +238,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const showContainersCard = kind.code === 'PINV' && document != null && hasPermission(PERMISSIONS.containersView)
   const editable = !readOnly && (isNew ? canCreate : canCreate && document?.canEdit === true)
   const fromSource = document?.sourceDocumentId != null
-  /* A SUPPLIER INVOICE HOLDS ONE ITEM: the item of its first line, which every other line must share. */
-  const invoiceItemId = kind.code === 'PINV' ? (lines.find((line) => line.itemId !== null)?.itemId ?? null) : null
-  /* A draft saved with several items before that rule: it is split before it can be posted. */
+  /* ONE ITEM PER SUPPLIER INVOICE IS THE INVOICE'S OWN MODE (script 63): set when it was created and kept by it; a new
+     invoice takes the setting Purchase.OneItemPerInvoice. An invoice of several items has none of the rules below. */
+  const oneItemSetting = useOneItemPerInvoice()
+  const oneItemOnly = kind.code === 'PINV' && (document ? document.oneItemOnly : oneItemSetting.value)
+  /* AN INVOICE OF ONE ITEM: the item of its first line, which every other line must share. Null = any item. */
+  const invoiceItemId = oneItemOnly ? (lines.find((line) => line.itemId !== null)?.itemId ?? null) : null
+  /* The items of the saved draft: one of one item saved with several (made before that rule) is split before it is posted. */
   const savedItemCount = kind.code === 'PINV' && document ? new Set(document.lines.map((line) => line.itemId)).size : 0
 
   /* ── loading ──────────────────────────────────────────────────────────────────────────────── */
@@ -576,8 +581,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   const addScanned = useCallback(
     async (item: ItemListDto) => {
-      const held = kind.code === 'PINV' ? (lines.find((line) => line.itemId !== null)?.itemId ?? null) : null
-      if (held !== null && held !== item.id) {
+      // An invoice of one item refuses another; one of several items takes any.
+      if (invoiceItemId !== null && invoiceItemId !== item.id) {
         notify.error(ONE_ITEM_HINT)
         return
       }
@@ -608,7 +613,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       void refreshOnHand(key, details.id, defaultWarehouseId)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
     },
-    [kind.code, lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId],
+    [invoiceItemId, lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId],
   )
 
   async function loadUnits(key: string) {
@@ -808,6 +813,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             commercialInvoiceNo: h.commercialInvoiceNo.trim() || null,
             receiptMode: Number(h.receiptMode) as ReceiptMode,
             shippedInContainers: h.receiptMode === '2',
+            // A NEW invoice is created in the mode the page applied; null while the setting is not read (loading, or
+            // unreadable: the page then applies one item, which the server's mode always accepts) = the server's
+            // setting. An update keeps the mode the invoice was created with.
+            ...(documentId === null ? { oneItemOnly: oneItemSetting.known ? oneItemOnly : null } : {}),
           }
         : {}),
       notes: h.notes.trim() || null,
@@ -980,7 +989,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   }
 
   /**
-   * A draft invoice holding several items (saved before one item per invoice) into one invoice per item.
+   * A draft invoice holding several items into one invoice per item, each then of one item: required on an invoice of
+   * one item saved with several (made before that rule), an optional tool on an invoice of several items.
    * It works on the SAVED invoice, so unsaved changes are saved or discarded first.
    */
   async function splitByItem() {
@@ -1243,6 +1253,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     : [
         { key: 'attachments', label: `Attachments (${document?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
         { key: 'import', label: 'Import from Excel', icon: DocumentIcons.import, visible: canImportHere, onClick: () => setImportOpen(true) },
+        // An invoice of several items MAY be split into one per item: an optional tool here (one of one item gets the orange Alert).
+        { key: 'split', label: 'Split by item', icon: <IconArrowsSplit size={16} />, visible: kind.code === 'PINV' && document !== null && editable && !oneItemOnly && savedItemCount > 1, loading: splitting, onClick: () => void splitByItem() },
         // A saved draft order shows what comes after its approval, disabled, with the reason.
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, colour: 'green', ...orderAction(abilities?.createInvoice), onClick: () => void createFromThis() },
         { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
@@ -1325,11 +1337,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           Cancelled by {document.cancelledByName ?? 'unknown'} on {stamp(document.cancelledAtUtc)}.{document.cancelReason ? ` Reason: ${document.cancelReason}` : ''}
         </Alert>
       )}
-      {kind.code === 'PINV' && document && status === 'Draft' && savedItemCount > 1 && (
+      {oneItemOnly && document && status === 'Draft' && savedItemCount > 1 && (
         <Alert color="orange" title={`This invoice holds ${savedItemCount} items: split it before posting`} data-multi-item-invoice>
           <Group justify="space-between" align="center" wrap="wrap" gap="sm">
             <Text fz="sm">
-              A supplier invoice holds one item. Split by item keeps the item of the first line on this invoice and moves every
+              This supplier invoice holds one item. Split by item keeps the item of the first line on this invoice and moves every
               other item to a new draft invoice with the same header.
             </Text>
             {editable && (
@@ -1813,6 +1825,10 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
               supplierReference: header.supplierReference.trim() || null,
               notes: header.notes.trim() || null,
               postImmediately,
+              /* The mode the wizard was given (onePerItem below), so the server creates what it announced: one invoice
+                 per item for an invoice of one item, one invoice of every item otherwise - not the setting. A new invoice
+                 whose setting is not read sends null: the server's setting, never the page's guess. */
+              onePerItem: kind.code === 'PINV' && (document != null || oneItemSetting.known) ? oneItemOnly : null,
               lines: imported.map((line) => ({
                 warehouseId: line.warehouseId,
                 itemId: line.itemId,
@@ -1827,7 +1843,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
             })
           }
           documentRoute={(docId) => routes.purchaseDocument(kind.code, docId)}
-          onePerItem={kind.code === 'PINV'}
+          onePerItem={oneItemOnly}
           heldItemId={invoiceItemId}
           onDocumentsCreated={(created) => {
             dirty.current = false
