@@ -116,7 +116,7 @@ export function ShortageHeaderCard({
               label="Date"
               withAsterisk
               value={fromIsoDate(value.documentDate)}
-              onChange={(next) => onChange({ documentDate: next ? isoDate(new Date(next)) : '' })}
+              onChange={(next) => onChange({ documentDate: next ? isoDate(next) : '' })}
               error={errors.documentDate}
               valueFormat="DD/MM/YYYY"
               disabled={disabled}

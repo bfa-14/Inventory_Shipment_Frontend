@@ -456,7 +456,7 @@ export function LandedCostAdjustmentPage() {
                 maxDate={new Date()}
                 onChange={(next) => {
                   markDirty()
-                  setDocumentDate(next ? isoDate(new Date(next)) : '')
+                  setDocumentDate(next ? isoDate(next) : '')
                 }}
                 error={errors.documentDate}
                 valueFormat="DD/MM/YYYY"

@@ -143,7 +143,7 @@ function TypedBox({
               placeholder="From"
               valueFormat="DD/MM/YYYY"
               value={fromIsoDate(value?.a ?? null)}
-              onChange={(next) => apply({ ...rest, op, a: next ? isoDate(new Date(next)) : undefined, b: value?.b })}
+              onChange={(next) => apply({ ...rest, op, a: next ? isoDate(next) : undefined, b: value?.b })}
               clearable
               leftSection={menu}
               style={{ flex: 1, minWidth: 0 }}
@@ -170,7 +170,7 @@ function TypedBox({
             value={twoOperands ? dayB : dayA}
             disabled={noOperand}
             onChange={(next) => {
-              const iso = next ? isoDate(new Date(next)) : undefined
+              const iso = next ? isoDate(next) : undefined
               apply(twoOperands ? { ...rest, op, a: value?.a, b: iso } : { ...rest, op, a: iso })
             }}
             clearable

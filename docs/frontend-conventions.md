@@ -54,7 +54,8 @@ under **Environments (Production / Testing)**.
 - `brand` colour tuple built around **#2563EB**, `primaryColor: 'brand'`, `primaryShade: 6`.
 - `defaultRadius: 'md'`, `fontFamily: '"Segoe UI", Inter, system-ui, sans-serif'`, headings `fontWeight: 700`.
 - Component defaults: Button/TextInput/Textarea/Select/NumberInput/PasswordInput radius `md`, Paper radius
-  `lg`, Modal radius `lg` + centered + overlay blur 2, Badge radius `xl`, Table `highlightOnHover`.
+  `lg`, Modal radius `lg` + centered + overlay blur 2, Badge radius `xl`, Table `highlightOnHover`, DateInput
+  `dateParser: parseTypedDate` (see **Dates**).
 - `CONTENT_BG` (`#EDF1F9`) is the shell's content background — a tint of the sign-in navy, so cards and grids
   read as white panels **on** something rather than as slightly different whites.
 - `KATANGA` carries the sign-in screen's palette (`navy` #013596, `navyDeep` #01235a, `navyGlow` #0a2e6e,
@@ -1011,6 +1012,36 @@ Every quantity and amount the app shows goes through `formatNumber` / `formatMon
 **14,020,800.00**, whatever the browser locale. `money()` in `documentKind.ts` is the same thing with the
 currency code. A `NumberInput` that holds a quantity or an amount carries `thousandSeparator=","`.
 Counts (items, rows) go through `formatNumber` too; a bare `{value}` of a number in JSX is a bug.
+
+## Dates
+
+A typed date is read **day first**, and strictly, in every `DateInput`: the people using the app write 05/10/2026
+for 5 October. The theme gives every `DateInput` the one parser, `parseTypedDate` (`src/components/typedDate.ts`);
+a field never passes its own `dateParser`, and its `valueFormat` (`"DD/MM/YYYY"`, a few `"DD MMM YYYY"`) only says
+how the date is shown. Mantine's own parser ignored the format (dayjs has no `customParseFormat` here, so
+`dayjs(text, format)` ignores the format too: never parse with it) and fell back to `new Date(text)`, which read
+05/10/2026 as 10 May and turned half-typed text into dates of 2001.
+
+- **Accepted:** day, month, year with `/`, `-`, `.` or a space (the same one twice), one or two digits for the day
+  and the month: `5/10/2026`, `05.10.2026`, `5 10 2026`; a two-digit year is 20YY (`5-10-26`); an English month name
+  of three letters or more instead of the number, any case: `5 Oct 2026`, `05-oct-26`, `5 October 2026`; year first,
+  as pasted, `YYYY-MM-DD` with two digits for the month and the day (any of the four separators): `2026-10-05`.
+- **Refused** (null) - everything else: a day the month does not have (31/02/2026, 00/10/2026), month 13, text, no
+  year, a year outside 1900-2099, a year first with one-digit parts (`2026-1-5`). The field then keeps the last date
+  it read and shows it again on blur (an empty field stays empty).
+- **No half-typed text is a date.** Mantine parses at every key and keeps the last result that was not null, so the
+  beginning of a longer text must never parse: otherwise 29/02/2027 (no such day) would stop at "29/02/20" and save
+  29 February 2020. So the two-digit years **19 and 20 are refused** (type 2019 / 2020 in full): every accepted
+  four-digit year starts with them. Keep this in mind before accepting a new shape.
+- It returns `"YYYY-MM-DD"`, the string a click in the calendar gives, so a page's `onChange` handles both alike.
+- **Keep that string as it is: never `new Date(next)`.** `new Date('2026-10-05')` is midnight UTC, still 4 October
+  west of Greenwich, so a page that rebuilt the day from it saved the day before there (a typed date and a pick
+  alike). Store it with `isoDate(next)` (`documentKind.ts`, which takes the string or a Date) or `String(next)`, and
+  give the field back the string (`value={filters.dateFrom}`) or `fromIsoDate(...)`, a Date at local midnight.
+- `DatePickerInput` and `MonthPickerInput` are picked from a calendar, never typed: nothing to parse.
+- Shown outside an input, a document date reads `DD/MM/YYYY` through `dateLabel`; a moment goes through
+  `formatDateTime` (see `format.ts`).
+
 ## Document pages
 
 Inventory In and Inventory Out are the first **document family** (BIVAC Out is a third kind on the same
@@ -1124,8 +1155,16 @@ no documents: the provider's invoice of a late charge goes on the purchase invoi
 
 - **One list: `AttachmentsPanel`** (`src/components/attachments/`). Each file shows its type badge ("Purchase ›
   Proforma Invoice"), its name and size, the date written on it, the note, who added it and when, with Download,
-  Edit and Delete, and an "Every type" filter above the list. A table on a desktop, one small card per file below
-  48em; `layout="cards"` asks for the cards everywhere (the charge drawer). Where it sits:
+  Edit and Delete, and an "Every type" filter above the list. **Table or cards by the width the panel really gets**
+  (`useElementSize` on the panel, not the screen): a table from 1,000 px (`TABLE_WIDTH`; once shown it stays down to
+  960, so a page scrollbar coming and going cannot flip it), one small card per file below - the type badge, the name
+  on its own line, "date · size · who · when", the note, and Download / Edit / Delete on the right. At 1440 px that gives
+  the table on document pages and the item's tab (about 1,130 px) and the cards in the left column of a container page
+  and in a movement's Documents tab (about 740 px, where the table squeezed names to a few letters a line and hid
+  Delete behind a scroll), and on a phone. `layout="cards"` asks for the cards whatever the width (the charge drawer).
+  A long name wraps between its words: `FileName` puts a `<wbr>` after every "_" and "." (a 90-character name takes
+  two lines of a card at 1440 px instead of breaking after "TEST-" and then mid-word), and the audit trail wraps the
+  name in "Attachment added: ..." rather than widening the page. Where it sits:
   - document pages: `DocumentAttachmentsCard` (`src/components/documents/`), a **"Documents" card on the page**, below
     the lines (and the charges), above the audit trail. The supplier payment numbers it "4 · Documents". No drawer;
   - containers: `ContainerDocumentsCard`, grouped General / each movement / each charge;

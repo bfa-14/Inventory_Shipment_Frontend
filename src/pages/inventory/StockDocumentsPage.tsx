@@ -444,8 +444,8 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
             label="From"
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
-            value={filters.dateFrom ? new Date(filters.dateFrom) : null}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)}
+            value={filters.dateFrom}
+            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
             clearable
           />
         </FilterBar.Col>
@@ -454,8 +454,8 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
             label="To"
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
-            value={filters.dateTo ? new Date(filters.dateTo) : null}
-            onChange={(next) => setFilter('dateTo', next ? isoDate(new Date(next)) : null)}
+            value={filters.dateTo}
+            onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)}
             clearable
           />
         </FilterBar.Col>

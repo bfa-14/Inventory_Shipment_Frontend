@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ActionIcon,
   Alert,
@@ -16,7 +16,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { useMediaQuery } from '@mantine/hooks'
+import { useElementSize, useMediaQuery } from '@mantine/hooks'
 import { IconDownload, IconPaperclip, IconPencil, IconTrash } from '@tabler/icons-react'
 import type { AttachmentDocumentKind, DocumentFileEdit, DocumentFileFields } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
@@ -32,6 +32,28 @@ import {
   type ContainerFilingValue,
 } from './AttachmentUploadDialog'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_HINT, attachmentTypeLabel, formatBytes } from './attachmentRules'
+
+/**
+ * The width the panel's table needs to read cleanly: a file name on one or two lines and Download / Edit / Delete in
+ * view without scrolling. Its fixed columns (type, date, added by, the actions) take about 680 px, which leaves the
+ * file name and the note about 160 px each at this width. Below it the panel shows one card per file instead.
+ */
+const TABLE_WIDTH = 1000
+
+/**
+ * A file name that wraps between its words: a break point after every "_" and ".", which the browser does not see as
+ * places to break. Without them a long name such as "TEST-DATES_Bill_of_Lading_MSKU1234565.pdf" broke after "TEST-"
+ * and then in the middle of a word. <wbr> adds nothing to the text: what is copied or searched is the name itself.
+ */
+function FileName({ name }: { name: string }) {
+  const parts = name.split(/(?<=[_.])/)
+  return parts.map((part, index) => (
+    <Fragment key={index}>
+      {part}
+      {index < parts.length - 1 ? <wbr /> : null}
+    </Fragment>
+  ))
+}
 
 /** "Purchase › Proforma Invoice" in blue, a file still typed "Other" in orange. Wraps rather than cuts the name. */
 export function AttachmentTypeBadge({
@@ -131,8 +153,9 @@ interface AttachmentsPanelProps<R extends AttachmentRow> {
   /** In a Paper card (a page) or bare (a drawer). */
   card?: boolean
   /**
-   * 'auto' (default): a table, one small card per file below 48em. 'cards': always one card per file - for a narrow
-   * place such as a drawer, where the table does not fit whatever the screen.
+   * 'auto' (default): a table where the panel itself is at least TABLE_WIDTH wide, else one small card per file (a
+   * phone, the left column of a container page, a movement's Documents tab). 'cards': always one card per file - for
+   * a place such as a drawer, where the table never fits.
    */
   layout?: 'auto' | 'cards'
   /**
@@ -181,9 +204,18 @@ export function AttachmentsPanel<R extends AttachmentRow>({
   const rootRef = useRef<HTMLDivElement>(null)
   // An upload asked for by the page (openUpload): once it is in, the panel scrolls into view.
   const revealAfterUpload = useRef(false)
-  // A phone gets one small card per file: the table does not fit in 390 px. A drawer asks for them anyway.
+  // One small card per file wherever the table would be cramped. Measured on the panel itself, not read from the
+  // screen: at 1440 px the panel gets about 1,100 px on a document page but about 740 in the left column of a
+  // container page and in a movement's Documents tab, where the table squeezed file names to a few letters per line
+  // and hid Delete behind a scroll. Once it shows the table it keeps it down to 40 px under TABLE_WIDTH, so a page
+  // scrollbar coming and going cannot flip it back and forth. Until the first measure, a phone gets the cards.
+  // A drawer asks for the cards anyway.
   const phone = useMediaQuery('(max-width: 48em)')
-  const narrow = layout === 'cards' || phone
+  const { ref: widthRef, width } = useElementSize()
+  const [wide, setWide] = useState<boolean | null>(null)
+  const nextWide = width > 0 ? width >= (wide ? TABLE_WIDTH - 40 : TABLE_WIDTH) : wide
+  if (nextWide !== wide) setWide(nextWide)
+  const narrow = layout === 'cards' || (wide === null ? phone : !wide)
 
   // The source is rebuilt by its page on every render; the rows follow reloadKey, not its identity. The ref is
   // brought up to date before the effects below read it (effects run in the order they are declared).
@@ -382,7 +414,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
   )
 
   const body = (
-    <Stack gap="sm">
+    <Stack gap="sm" ref={widthRef}>
       {!hasSource ? (
         <Alert color="blue" variant="light">
           {unsavedText}
@@ -466,7 +498,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
                           <Stack gap={4} align="flex-start" style={{ minWidth: 0 }}>
                             <AttachmentTypeBadge category={row.category} subType={row.subType} isOther={row.isOther} />
                             <Text fz="sm" fw={500} style={{ overflowWrap: 'anywhere' }}>
-                              {row.fileName}
+                              <FileName name={row.fileName} />
                             </Text>
                             <Text fz="xs" c="dimmed">
                               {[
@@ -478,7 +510,11 @@ export function AttachmentsPanel<R extends AttachmentRow>({
                                 .filter(Boolean)
                                 .join(' · ')}
                             </Text>
-                            {row.note ? <Text fz="sm">{row.note}</Text> : null}
+                            {row.note ? (
+                              <Text fz="sm" style={{ overflowWrap: 'anywhere' }}>
+                                {row.note}
+                              </Text>
+                            ) : null}
                             {fileExtra?.(row)}
                             {chooseType(row)}
                           </Stack>
@@ -515,7 +551,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
                             </Table.Td>
                             <Table.Td>
                               <Text fz="sm" style={{ overflowWrap: 'anywhere' }}>
-                                {row.fileName}
+                                <FileName name={row.fileName} />
                               </Text>
                               <Group gap={6} mt={2}>
                                 <Text fz="xs" c="dimmed">
@@ -526,7 +562,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
                             </Table.Td>
                             <Table.Td style={{ whiteSpace: 'nowrap' }}>{dateLabel(row.documentDate)}</Table.Td>
                             <Table.Td>
-                              <Text fz="sm" c={row.note ? undefined : 'dimmed'}>
+                              <Text fz="sm" c={row.note ? undefined : 'dimmed'} style={{ overflowWrap: 'anywhere' }}>
                                 {row.note ?? '—'}
                               </Text>
                             </Table.Td>

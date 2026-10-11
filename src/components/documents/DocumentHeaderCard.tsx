@@ -115,7 +115,7 @@ export function DocumentHeaderCard({
               value={fromIsoDate(value.documentDate)}
               // A document cannot be dated into the future: the stock it moves has not moved yet.
               maxDate={new Date()}
-              onChange={(next) => onChange({ documentDate: next ? isoDate(new Date(next)) : '' })}
+              onChange={(next) => onChange({ documentDate: next ? isoDate(next) : '' })}
               error={errors.documentDate}
               valueFormat="DD/MM/YYYY"
             />

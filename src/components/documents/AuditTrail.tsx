@@ -73,7 +73,8 @@ export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
                   {stamp(entry.atUtc)}
                 </Text>
                 {entry.details && (
-                  <Text size="xs" c="dimmed">
+                  // A file name in "Attachment added: ..." is one long word: it wraps rather than widening the page.
+                  <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
                     {entry.details}
                   </Text>
                 )}

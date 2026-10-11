@@ -81,7 +81,7 @@ export function GridFilterPopover({ label, kind, value, options, onApply, close 
         valueFormat="DD/MM/YYYY"
         placeholder={placeholder}
         value={fromIsoDate(text || null)}
-        onChange={(next) => set(next ? isoDate(new Date(next)) : '')}
+        onChange={(next) => set(next ? isoDate(next) : '')}
         clearable
         aria-label={`${label} ${placeholder}`}
       />

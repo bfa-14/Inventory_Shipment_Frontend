@@ -102,7 +102,7 @@ export function ItemStockMovementsPage() {
             valueFormat="DD/MM/YYYY"
             value={fromIsoDate(from)}
             maxDate={to ? (fromIsoDate(to) ?? undefined) : undefined}
-            onChange={(next) => setFilter('from', next ? isoDate(new Date(next)) : null)}
+            onChange={(next) => setFilter('from', next ? isoDate(next) : null)}
             clearable
           />
           <DateInput
@@ -111,7 +111,7 @@ export function ItemStockMovementsPage() {
             valueFormat="DD/MM/YYYY"
             value={fromIsoDate(to)}
             minDate={from ? (fromIsoDate(from) ?? undefined) : undefined}
-            onChange={(next) => setFilter('to', next ? isoDate(new Date(next)) : null)}
+            onChange={(next) => setFilter('to', next ? isoDate(next) : null)}
             clearable
           />
         </SimpleGrid>

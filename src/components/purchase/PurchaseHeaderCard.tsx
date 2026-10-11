@@ -168,7 +168,7 @@ export function PurchaseHeaderCard({
               withAsterisk
               value={fromIsoDate(value.documentDate)}
               maxDate={new Date()}
-              onChange={(next) => onChange({ documentDate: next ? isoDate(new Date(next)) : '' })}
+              onChange={(next) => onChange({ documentDate: next ? isoDate(next) : '' })}
               error={errors.documentDate}
               valueFormat="DD/MM/YYYY"
               disabled={disabled}
@@ -184,7 +184,7 @@ export function PurchaseHeaderCard({
               label={dateLabelText}
               placeholder="Optional"
               value={fromIsoDate(value.expectedDate)}
-              onChange={(next) => onChange({ expectedDate: next ? isoDate(new Date(next)) : null })}
+              onChange={(next) => onChange({ expectedDate: next ? isoDate(next) : null })}
               error={errors.expectedDate}
               valueFormat="DD/MM/YYYY"
               clearable

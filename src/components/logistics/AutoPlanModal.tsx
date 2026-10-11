@@ -447,13 +447,13 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
               label="Order date"
               valueFormat="DD/MM/YYYY"
               value={fromIsoDate(orderDate)}
-              onChange={(next) => setOrderDate(next ? isoDate(new Date(next)) : null)}
+              onChange={(next) => setOrderDate(next ? isoDate(next) : null)}
             />
             <Select label="Offloading warehouse" data={warehouseOptions} value={warehouseId} onChange={setWarehouseId} searchable />
             <Select label="Port of loading" data={portOptions} value={portOfLoadingId} onChange={setPortOfLoadingId} searchable clearable />
             <Select label="Port of destination" data={portOptions} value={portOfDestinationId} onChange={setPortOfDestinationId} searchable clearable />
             <Select label="Final destination" data={portOptions} value={finalDestinationId} onChange={setFinalDestinationId} searchable clearable />
-            <DateInput label="ETA" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(eta)} onChange={(next) => setEta(next ? isoDate(new Date(next)) : null)} />
+            <DateInput label="ETA" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(eta)} onChange={(next) => setEta(next ? isoDate(next) : null)} />
             <Select label="Forwarder" data={forwarderOptions} value={forwarderId} onChange={setForwarderId} searchable clearable nothingFoundMessage="Nothing matches" />
             <TextInput label="Shipping line" maxLength={100} value={shippingLine} onChange={(e) => setShippingLine(e.currentTarget.value)} />
           </SimpleGrid>

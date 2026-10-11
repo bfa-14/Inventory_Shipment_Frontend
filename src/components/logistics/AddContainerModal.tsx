@@ -376,7 +376,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
               withAsterisk
               valueFormat="DD/MM/YYYY"
               value={fromIsoDate(orderDate)}
-              onChange={(next) => setOrderDate(next ? isoDate(new Date(next)) : null)}
+              onChange={(next) => setOrderDate(next ? isoDate(next) : null)}
             />
             <Select label="Port of Loading" data={portOptions} value={portOfLoadingId} onChange={setPortOfLoadingId} searchable clearable />
             <Select label="Port of Destination" data={portOptions} value={portOfDestinationId} onChange={setPortOfDestinationId} searchable clearable />
@@ -385,7 +385,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
               valueFormat="DD/MM/YYYY"
               clearable
               value={fromIsoDate(eta)}
-              onChange={(next) => setEta(next ? isoDate(new Date(next)) : null)}
+              onChange={(next) => setEta(next ? isoDate(next) : null)}
             />
           </SimpleGrid>
           <Text fz="xs" c="dimmed" mt={6}>

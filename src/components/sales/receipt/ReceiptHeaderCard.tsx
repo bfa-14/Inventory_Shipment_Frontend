@@ -81,7 +81,7 @@ export function ReceiptHeaderCard({
             withAsterisk
             valueFormat="DD/MM/YYYY"
             value={fromIsoDate(value.receiptDate)}
-            onChange={(next) => next && onChange({ receiptDate: isoDate(new Date(next)) })}
+            onChange={(next) => next && onChange({ receiptDate: isoDate(next) })}
             error={errors.receiptDate}
             disabled={off}
           />

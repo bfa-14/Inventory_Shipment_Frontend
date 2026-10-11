@@ -116,8 +116,15 @@ export function money(value: number | null | undefined, currencyCode = 'USD'): s
   return formatMoney(value, currencyCode)
 }
 
-/** 'yyyy-MM-dd' for a Date, built from its own parts so no timezone can shift the day. */
-export function isoDate(value: Date): string {
+/**
+ * 'yyyy-MM-dd' for a Date, built from its own parts so no timezone can shift the day.
+ *
+ * A STRING IS ALREADY THE DAY: a DateInput's onChange gives 'YYYY-MM-DD' (typed or picked), so pass it as it comes,
+ * never through `new Date(next)`. `new Date('2026-10-05')` is midnight UTC, which west of Greenwich is still
+ * 4 October, so the day saved would be one too early.
+ */
+export function isoDate(value: Date | string): string {
+  if (typeof value === 'string') return value.slice(0, 10)
   const month = `${value.getMonth() + 1}`.padStart(2, '0')
   const day = `${value.getDate()}`.padStart(2, '0')
   return `${value.getFullYear()}-${month}-${day}`
