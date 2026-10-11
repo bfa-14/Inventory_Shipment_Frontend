@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, useMemo } from 'react'
 import { ActionIcon, Anchor, Badge, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
@@ -143,11 +143,17 @@ export function PurchaseLinesGrid({
 }: PurchaseLinesGridProps) {
   const columnCount = 12 + (showTransit ? 2 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
 
-  const itemOptions = items.map((i) => ({
-    value: String(i.id),
-    label: `${i.itemCode} — ${i.itemName}`,
-    disabled: onlyItemId !== null && i.id !== onlyItemId,
-  }))
+  /* Built once per list: the list is the whole catalogue (no row limit since script 66), and a new array on every
+     render would make each row's Select parse it again. */
+  const itemOptions = useMemo(
+    () =>
+      items.map((i) => ({
+        value: String(i.id),
+        label: `${i.itemCode} — ${i.itemName}`,
+        disabled: onlyItemId !== null && i.id !== onlyItemId,
+      })),
+    [items, onlyItemId],
+  )
 
   return (
     <Table.ScrollContainer minWidth={1340 + (showTransit ? 200 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
@@ -243,6 +249,8 @@ export function PurchaseLinesGrid({
                       value={null}
                       placeholder="Choose an item"
                       searchable
+                      /* The open list shows 100 rows at most; typing searches the whole list. */
+                      limit={100}
                       onChange={(next) => next && onItemChosen(line.key, Number(next))}
                       error={Boolean(line.error)}
                       comboboxProps={{ withinPortal: true }}

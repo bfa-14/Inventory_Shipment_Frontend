@@ -828,6 +828,8 @@ export interface ItemLookupDto {
   itemName: string
   baseUnitSku: string | null
   isActive: boolean
+  /** "BIVAC Item" ticked in Item Definition: the items a BIVAC Out may hold. */
+  isBivac: boolean
 }
 
 // ----- master data: parties -----

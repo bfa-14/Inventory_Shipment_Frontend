@@ -75,10 +75,10 @@ const GRID_COLUMNS: GridColumnMeta<StockDocumentListDto>[] = [
 ]
 
 /**
- * Every document of one kind — Inventory In or Inventory Out, decided by the `kind` prop.
+ * Every document of one kind — Inventory In, Inventory Out or BIVAC Out, decided by the `kind` prop.
  *
- * ONE COMPONENT FOR BOTH, because they are the same list with a different filter and a different
- * set of permissions. Two copies would drift the first time a column was added to one of them.
+ * ONE COMPONENT FOR ALL OF THEM, because they are the same list with a different filter and a different
+ * set of permissions. Copies would drift the first time a column was added to one of them.
  */
 export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   const navigate = useNavigate()

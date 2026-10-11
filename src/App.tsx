@@ -2,7 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/layout/AppShell'
-import { INVENTORY_IN, INVENTORY_OUT } from './components/documents/documentKind'
+import { BIVAC_OUT, INVENTORY_IN, INVENTORY_OUT } from './components/documents/documentKind'
 import { PURCHASE_INVOICE, PURCHASE_ORDER, PURCHASE_RETURN } from './components/purchase/purchaseKind'
 import { PERMISSIONS } from './navigation'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
@@ -181,7 +181,7 @@ export default function App() {
                   <Route path="/inventory/items/:id/containers" element={<ItemContainersPage />} />
                 </Route>
               </Route>
-              {/* The two document families. Create and edit sit behind the view permission as well:
+              {/* The stock documents. Create and edit sit behind the view permission as well:
                   the page itself refuses to save without the create one, and a user who may not read
                   the list has no business on a document from it. */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.stockInView} />}>
@@ -193,6 +193,13 @@ export default function App() {
                 <Route path="/inventory/stock-out" element={<StockDocumentsPage kind={INVENTORY_OUT} />} />
                 <Route path="/inventory/stock-out/new" element={<StockDocumentPage kind={INVENTORY_OUT} />} />
                 <Route path="/inventory/stock-out/:id" element={<StockDocumentPage kind={INVENTORY_OUT} />} />
+              </Route>
+              {/* BIVAC Out: the same pages as Inventory Out, with its own permission; its lines offer
+                  BIVAC items only because its type says so (bivacItemsOnly), not because of its code. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.bivacOutView} />}>
+                <Route path="/inventory/bivac-out" element={<StockDocumentsPage kind={BIVAC_OUT} />} />
+                <Route path="/inventory/bivac-out/new" element={<StockDocumentPage kind={BIVAC_OUT} />} />
+                <Route path="/inventory/bivac-out/:id" element={<StockDocumentPage kind={BIVAC_OUT} />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>

@@ -8,7 +8,7 @@ import { fetchBlob, postForm, putForm, request } from './http'
 
 /** What an attachment type is used for: CONTAINER or a document type code (api/masterdata/attachment-types/document-kinds). */
 export type AttachmentDocumentKind =
-  'CONTAINER' | 'PO' | 'PINV' | 'PRET' | 'SO' | 'SINV' | 'SRET' | 'RCPT' | 'PAY' | 'INV_IN' | 'INV_OUT'
+  'CONTAINER' | 'PO' | 'PINV' | 'PRET' | 'SO' | 'SINV' | 'SRET' | 'RCPT' | 'PAY' | 'INV_IN' | 'INV_OUT' | 'BIV_OUT'
 
 export interface DocumentFileDto {
   id: number

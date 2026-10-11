@@ -15,6 +15,7 @@ function documentRoute(m: ItemStockMovementDto): string | null {
   switch (m.documentTypeCode) {
     case 'INV_IN': return `/inventory/stock-in/${m.documentId}`
     case 'INV_OUT': return `/inventory/stock-out/${m.documentId}`
+    case 'BIV_OUT': return `/inventory/bivac-out/${m.documentId}`
     case 'SINV': return `/sales/invoices/${m.documentId}`
     case 'PO': return `/purchase/orders/${m.documentId}`
     case 'PINV': return `/purchase/invoices/${m.documentId}`

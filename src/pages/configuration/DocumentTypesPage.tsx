@@ -38,14 +38,14 @@ const GRID_COLUMNS: GridColumnMeta<DocumentTypeDto>[] = [
   { accessor: 'requiresReason', kind: 'boolean', text: (t) => yesNo(t.requiresReason) },
   { accessor: 'defaultPricing', text: pricingText },
   { accessor: 'priceEditable', kind: 'boolean', text: (t) => yesNo(t.priceEditable) },
+  { accessor: 'bivacItemsOnly', kind: 'boolean', text: (t) => yesNo(t.bivacItemsOnly) },
   { accessor: 'isActive', kind: 'boolean', text: (t) => (t.isActive ? 'Active' : 'Inactive') },
 ]
 
 /**
- * Configuration › Document Types: the eight kinds of document and how each numbers, prices and
- * behaves.
+ * Configuration › Document Types: every kind of document and how each numbers, prices and behaves.
  *
- * EIGHT ROWS AND NO PAGING. It is a settings table, not a list: everything is on one screen, and a
+ * A DOZEN ROWS AND NO PAGING. It is a settings table, not a list: everything is on one screen, and a
  * reader who wants Inventory Out finds it by reading. What matters is that the columns say, in
  * words, what every document page will do with the type — so a change here can be checked here
  * before the next document proves it.
@@ -60,7 +60,7 @@ export function DocumentTypesPage() {
   const { types, loading, error, refresh } = useDocumentTypes()
   const [editing, setEditing] = useState<DocumentTypeDto | null>(null)
 
-  /** Eight rows held in one place: the engine's filters, sort and totals all work right here. */
+  /** A dozen rows held in one place: the engine's filters, sort and totals all work right here. */
   const engine = useDataGrid({
     rows: types,
     columns: GRID_COLUMNS,
@@ -137,6 +137,8 @@ export function DocumentTypesPage() {
       ),
     },
     flag('priceEditable', 'Price editable', 110),
+    // Read-only like Family and Stock: set by the script that creates the type (BIVAC Out), never in the form.
+    flag('bivacItemsOnly', 'BIVAC items only', 130),
     {
       accessor: 'isActive',
       title: 'Active',

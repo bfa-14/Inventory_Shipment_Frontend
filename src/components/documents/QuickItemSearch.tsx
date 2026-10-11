@@ -10,6 +10,12 @@ interface QuickItemSearchProps {
   disabled?: boolean
   /** Called with the item the operator settled on. The page decides what a line made of it looks like. */
   onPick: (item: ItemListDto) => void
+  /**
+   * Only items with "BIVAC Item" ticked: a document type whose bivacItemsOnly is set (BIVAC Out). The
+   * search itself is narrowed, so a code of another item is "not found" here rather than a line the
+   * server would refuse on saving.
+   */
+  bivacOnly?: boolean
 }
 
 /**
@@ -24,7 +30,7 @@ interface QuickItemSearchProps {
  * barcode belongs to a UNIT, and only the search endpoint matches one. A scanner that could not
  * resolve the barcode on the box would be a scanner nobody uses.
  */
-export function QuickItemSearch({ disabled, onPick }: QuickItemSearchProps) {
+export function QuickItemSearch({ disabled, onPick, bivacOnly = false }: QuickItemSearchProps) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [matches, setMatches] = useState<ItemListDto[]>([])
@@ -37,11 +43,17 @@ export function QuickItemSearch({ disabled, onPick }: QuickItemSearchProps) {
     setBusy(true)
     setMatches([])
     try {
-      const found = await itemsApi.search({ search: term, isActive: true, page: 1, pageSize: 10 })
+      const found = await itemsApi.search({
+        search: term,
+        isActive: true,
+        isBivac: bivacOnly ? true : undefined,
+        page: 1,
+        pageSize: 10,
+      })
       const items = found.items
 
       if (items.length === 0) {
-        notify.error(`Item ${term} not found`)
+        notify.error(bivacOnly ? `No BIVAC item matches ${term}.` : `Item ${term} not found`)
         return
       }
 

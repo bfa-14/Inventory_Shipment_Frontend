@@ -57,6 +57,11 @@ export const PERMISSIONS = {
   stockOutPost: 'inventory.stockout.post',
   stockOutCancel: 'inventory.stockout.cancel',
   stockOutDelete: 'inventory.stockout.delete',
+  bivacOutView: 'inventory.bivacout.view',
+  bivacOutCreate: 'inventory.bivacout.create',
+  bivacOutPost: 'inventory.bivacout.post',
+  bivacOutCancel: 'inventory.bivacout.cancel',
+  bivacOutDelete: 'inventory.bivacout.delete',
   invoicesImport: 'sales.invoices.import',
   invoicesPriceOverride: 'sales.invoices.priceoverride',
   invoicesView: 'sales.invoices.view',
@@ -212,10 +217,12 @@ export const NAVIGATION: NavSection[] = [
         icon: 'price',
         breadcrumb: ['Setup', 'Inventory', 'Price Lists'],
       },
-      // The two document screens sit directly under Item Definition: they are what people open all
+      // The stock document screens sit directly under Item Definition: they are what people open all
       // day, and the read-only stock views below them are answers to questions these documents ask.
       { label: 'Inventory In', to: '/inventory/stock-in', permission: PERMISSIONS.stockInView, icon: 'box' },
       { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
+      // An Inventory Out of BIVAC items only (script 66): its own list, numbers (BIV-) and permissions.
+      { label: 'BIVAC Out', to: '/inventory/bivac-out', permission: PERMISSIONS.bivacOutView, icon: 'box' },
       // What the shelves are worth: the item list with its money shown, behind the same permission.
       { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.itemsView, icon: 'balance' },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },

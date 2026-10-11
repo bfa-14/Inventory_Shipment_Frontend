@@ -574,7 +574,8 @@ for the life of the draft. The wizard resets itself by remounting on `opened`.
 `Configuration › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
 `inventory.documenttypes.manage`) edits the document kinds: name, prefix, number length, number on
 post, number per branch, **year in number** (a checkbox: `SHR-2026-000001`, one sequence per year), requires reason, default pricing (Cost / PriceList / None), price editable, active.
-Code, family and stock direction are read-only — the procedures branch on them.
+Code, family, stock direction and **BIVAC items only** are read-only — the procedures branch on them (see
+**A document type that limits its items**).
 
 Every document page reads the configuration through **`useDocumentTypes()`** (`src/hooks/useDocumentTypes.ts`,
 one cached fetch shared by every reader; the configuration page calls `refresh()` after a save) and
@@ -626,8 +627,8 @@ asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSw
 moves the lines and the seed rather than a header field.
 
 **One document per warehouse** is a choice the reader makes on every import, on the pages whose host
-passes **`allowSplitByWarehouse`**: Sales Invoice and Inventory In (not Inventory Out, purchase or Import
-Sales). Step 3's groups panel then shows a Mantine `Switch` — "One invoice per warehouse" on the sales
+passes **`allowSplitByWarehouse`**: Sales Invoice and Inventory In (not Inventory Out, BIVAC Out, purchase or
+Import Sales). Step 3's groups panel then shows a Mantine `Switch` — "One invoice per warehouse" on the sales
 page, "One document per warehouse" on Inventory In — **off by default**, described "Off: one invoice
 holding every warehouse. On: one invoice per warehouse (2 invoices)." The panel follows it: the alert,
 a **Becomes** column on each warehouse row ("Lines on the one new invoice" / "New invoice 1 of 2"), the
@@ -1012,7 +1013,8 @@ currency code. A `NumberInput` that holds a quantity or an amount carries `thous
 Counts (items, rows) go through `formatNumber` too; a bare `{value}` of a number in JSX is a bug.
 ## Document pages
 
-Inventory In and Inventory Out are the first **document family**. Purchase and Sales will be the same
+Inventory In and Inventory Out are the first **document family** (BIVAC Out is a third kind on the same
+pages: see **A document type that limits its items**). Purchase and Sales will be the same
 shape — a header, editable lines, attachments, an audit trail and a Draft → Posted → Cancelled
 lifecycle — so the pieces live in `src/components/documents/` and are meant to be reused rather than
 copied.
@@ -1054,10 +1056,63 @@ copied.
 
 ### Adding the next family
 
-1. Add a `DocumentKind` for it (title, route, colour, direction, cost rule, five permission codes).
+1. Add a `DocumentKind` for it (title, route, colour, direction, five permission codes, and optionally
+   the Reference No. placeholder). Rules about cost, numbering, the reason and which items a line may
+   hold belong to the document **type** (Configuration › Document Types), not to the kind.
 2. Add the permission codes to `src/navigation.ts` and the menu entries.
 3. Add three routes in `src/App.tsx` pointing at `StockDocumentsPage` / `StockDocumentPage` — or at a
    family-specific page that reuses the same components when its header needs more fields.
+4. Add the code to `StockDocumentTypeCode`, to `AttachmentDocumentKind` (`src/api/documentFiles.ts`) and to
+   the item statement's links (`ItemStockMovementsPage.tsx`).
+
+## A document type that limits its items
+
+**BIVAC Out** (`BIV_OUT`, script 66; Inventory › BIVAC Out, routes `/inventory/bivac-out`, `/new`, `/:id`) is an
+Inventory Out of its own: the same `StockDocumentsPage` / `StockDocumentPage` with the `BIVAC_OUT` kind (grape
+accent, `inventory.bivacout.view / create / post / cancel / delete`, Reference No. placeholder "BIVAC certificate
+or container no."). Numbers `BIV-<branch>-000001` are given at the first save, no reason is required, and the
+units leave stock at the average cost like any Out. There is no link to a shipment: the BIVAC certificate or the
+container number goes in Reference No., and the certificate can be attached. Its lines may hold **only items
+with "BIVAC Item" ticked** in Item Definition.
+
+- **The rule belongs to the type, not to the page.** `DocumentTypeDto.bivacItemsOnly`
+  (`inventory.DocumentTypes.BivacItemsOnly`) says it. The page reads it through `useDocumentTypes()` and never
+  compares the code with `'BIV_OUT'`, so another type given the flag behaves the same with no change here.
+  Configuration › Document Types shows it read-only: a "BIVAC items only" column, and the line "BIVAC items only:
+  Yes: every line must be an item with "BIVAC Item" ticked." in the edit dialog of a type that has it. The
+  script that creates the type sets it.
+- **Both pickers are narrowed.**
+  - The line Item dropdown loads `itemsApi.lookup(true, undefined, undefined, false, true)`
+    (`GET api/inventory/items/lookup?bivacOnly=true`). Its placeholder is "Choose a BIVAC item", and when nothing
+    matches it says "No BIVAC item matches. Tick "BIVAC Item" in Inventory › Item Definition to add one."
+  - The quick search (`<QuickItemSearch bivacOnly />`) sends `isBivac: true` to the item search. A code that
+    matches no BIVAC item gives "No BIVAC item matches {term}."
+  - A gray hint stands beside the quick search: "Only BIVAC items. Tick "BIVAC Item" in Inventory › Item
+    Definition to add one."
+- **The item list waits for the type.** The page loads it once the configuration has answered (cached after the
+  first document page); the quick search stays disabled until then. If the configuration cannot be loaded (or the
+  kind's row is missing), the page says so and offers no items, so a BIVAC Out never offers other items: a red
+  Alert above the lines ("The document types could not be loaded.", or "The {kind} settings could not be loaded.
+  Reload the page."), and the quick search, Save Draft and Save & Post disabled with the same text as tooltip.
+  Inventory In / Out show the same error in that case instead of guessing their rules. A list loaded for another
+  filter is never offered while the right one loads.
+- **A line's own item stays visible on its own line only (never offered on other lines).** `DocumentLinesGrid`
+  gives the row whose item is missing from the list (made inactive, or unticked since the draft was saved) that
+  item as an extra option, first. The cell never goes blank, and the server's refusal points at a code the reader
+  can see, but no other line can pick it.
+- **The server still decides.**
+  - Save and Post refuse any other item with 62000: "Line 2: BAT-12V is not a BIVAC item. A BIVAC Out holds BIVAC
+    items only." It lands on line 2, like every `Line N:` message.
+  - The Excel import (`ImportInvoiceItemsWizard`, unchanged) checks the rows on the server: such a row is an Error,
+    "BAT-12V is not a BIVAC item.". "One document per warehouse" stays Inventory In only.
+- **The item lists have no row limit.** Every page loads `/items/lookup` once and searches it in the browser.
+  The procedure used to return 20 rows by default, which silently cut every line dropdown. Since script 66 it
+  returns every matching item, unless a caller sends `top`. An item dropdown shows at most 100 matches at a time
+  (`limit={100}` on the line Item select of `DocumentLinesGrid`, `SalesInvoiceLinesGrid` and `PurchaseLinesGrid`),
+  and typing narrows them; the options are built once per list (`useMemo`), not on every render.
+- **Around the document.** `BIV_OUT` is an `AttachmentDocumentKind`, and script 66 copied Inventory Out's "Used
+  for" rows to it, so an administrator can add a "BIVAC certificate" type in Master Data › Attachment Types. The
+  item statement (`ItemStockMovementsPage`) links BIV_OUT movements to `/inventory/bivac-out/:id`.
 
 ## Checklist for a new page
 

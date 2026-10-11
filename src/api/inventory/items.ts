@@ -66,15 +66,20 @@ export const itemsApi = {
     return request<ItemStockStatementDto>(`${BASE}/${id}/stock-movements${query ? `?${query}` : ''}`, { signal })
   },
 
-  /** Items for a dropdown, each with the SKU of its base unit. */
   /**
+   * Items for a dropdown, each with the SKU of its base unit: EVERY matching item (no row limit since
+   * script 66), loaded once and searched in the browser.
+   *
    * `salesOnly` keeps only the items with a unit that may be sold, and reports that unit rather
    * than the base one — the sales invoice passes it, because it cannot sell the others.
+   * `bivacOnly` keeps only the items with "BIVAC Item" ticked — a document type whose
+   * `bivacItemsOnly` is set (BIVAC Out) passes it, because the server refuses the others.
    */
-  lookup: (activeOnly = true, includeId?: number, signal?: AbortSignal, salesOnly = false) => {
+  lookup: (activeOnly = true, includeId?: number, signal?: AbortSignal, salesOnly = false, bivacOnly = false) => {
     const params = new URLSearchParams({ activeOnly: String(activeOnly) })
     if (includeId !== undefined) params.set('includeId', String(includeId))
     if (salesOnly) params.set('salesOnly', 'true')
+    if (bivacOnly) params.set('bivacOnly', 'true')
     return request<ItemLookupDto[]>(`${BASE}/lookup?${params.toString()}`, { signal })
   },
 
