@@ -23,6 +23,7 @@ import {
   IconBan,
   IconDots,
   IconEye,
+  IconFileImport,
   IconFileSpreadsheet,
   IconFilterOff,
   IconLock,
@@ -52,6 +53,7 @@ import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { ContainerSelectionBar } from '../../components/logistics/ContainerSelectionBar'
 import { ContainerFillCell } from '../../components/logistics/ContainerFillLine'
+import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
@@ -153,6 +155,7 @@ export function ContainersPage() {
   const canClose = hasPermission(PERMISSIONS.containersClose)
   const canCancel = hasPermission(PERMISSIONS.containersCancel)
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
+  const canImportCharges = hasPermission(PERMISSIONS.containerChargesCreate)
 
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
@@ -163,6 +166,7 @@ export function ContainersPage() {
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
   const [selected, setSelected] = useState<ContainerListDto[]>([])
+  const [importingCharges, setImportingCharges] = useState(false)
 
   const grid = useGridQuery<Filters, ContainerListDto, AllRows<ContainerListDto>>({
     initialFilters: NO_FILTERS,
@@ -505,6 +509,11 @@ export function ContainersPage() {
             <Button variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>
               Print
             </Button>
+            {canImportCharges ? (
+              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => setImportingCharges(true)}>
+                Import charges from Excel…
+              </Button>
+            ) : null}
             {canCreate ? (
               <Button leftSection={<IconPlus size={16} />} onClick={() => void navigate(`${CONTAINERS_ROUTE}/new`)}>
                 New Container
@@ -627,6 +636,13 @@ export function ContainersPage() {
         onConfirm={(reason) => void cancelContainer(reason)}
         confirmLabel="Cancel container"
         description="The container is cancelled and its invoices are free to load elsewhere. No stock moves."
+      />
+
+      {/* One row of the file = one charge on one container; the Charges column changes with what is posted. */}
+      <ImportContainerChargesWizard
+        opened={importingCharges}
+        onClose={() => setImportingCharges(false)}
+        onImported={() => void load()}
       />
     </div>
   )

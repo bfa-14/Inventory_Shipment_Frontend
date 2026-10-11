@@ -238,7 +238,10 @@ export interface SalesInvoiceQuery {
   pageSize?: number
 }
 
-/** An imported file becoming invoices: the header every invoice shares; the server groups the lines by warehouse. */
+/**
+ * An imported file becoming invoices: the header every invoice shares. ONE invoice whose lines keep
+ * their own warehouse, or with splitByWarehouse one invoice per warehouse (the server groups the lines).
+ */
 export interface ImportCreateSalesInvoicesRequest {
   documentDate: string
   dueDate?: string | null
@@ -256,6 +259,8 @@ export interface ImportCreateSalesInvoicesRequest {
   draftReference?: string | null
   lines: ImportCreateLine[]
   postImmediately: boolean
+  /** One invoice per warehouse, each with this header and posted on its own. Absent or false: one invoice. */
+  splitByWarehouse?: boolean
   paymentType?: SalesPaymentType | null
   receiptMethodId?: number | null
   receiptAccountId?: number | null
@@ -487,7 +492,10 @@ export const salesInvoicesApi = {
 
   bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
 
-  /** ONE invoice holding every line, each in the warehouse it names; posted at once when asked. */
+  /**
+   * ONE invoice holding every line, each in the warehouse it names — or, with splitByWarehouse, one
+   * invoice per warehouse, each posted on its own; posted at once when asked.
+   */
   importCreate: (payload: ImportCreateSalesInvoicesRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 

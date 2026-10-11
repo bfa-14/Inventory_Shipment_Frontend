@@ -54,11 +54,16 @@ export function useSetting(settingKey: string): SettingState {
   return state
 }
 
-/** A yes / no setting. `fallback` applies while loading and when the setting cannot be read. */
-export function useSettingBool(settingKey: string, fallback = false): { value: boolean; loading: boolean } {
+/**
+ * A yes / no setting. `fallback` applies while loading and when the setting cannot be read; `known` says which:
+ * true once the server's value was read, false while loading or when it could not be read (a screen that sends
+ * the value on should then send nothing and let the server apply its own).
+ */
+export function useSettingBool(settingKey: string, fallback = false): { value: boolean; loading: boolean; known: boolean } {
   const { value, loading } = useSetting(settingKey)
   return {
     value: value === null ? fallback : ['true', '1', 'yes'].includes(value.toLowerCase()),
     loading,
+    known: value !== null,
   }
 }

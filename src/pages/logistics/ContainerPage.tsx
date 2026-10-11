@@ -142,7 +142,7 @@ export function ContainerPage() {
   const [addItemsOpen, setAddItemsOpen] = useState(false)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
   /** Several invoices made at once (one per item): listed rather than one of them opened. */
-  const [createdInvoices, setCreatedInvoices] = useState<{ invoices: CreatedPurchaseInvoiceDto[]; orderIds: number[] } | null>(null)
+  const [createdInvoices, setCreatedInvoices] = useState<{ invoices: CreatedPurchaseInvoiceDto[]; orderIds: number[]; onePerItem: boolean } | null>(null)
   const [offloadOpen, setOffloadOpen] = useState(false)
   const [offloadError, setOffloadError] = useState<string | null>(null)
   const [reasonDialog, setReasonDialog] = useState<ReasonDialog>(null)
@@ -792,10 +792,10 @@ export function ContainerPage() {
           opened
           onClose={() => setInvoiceOpen(false)}
           containerId={container.id}
-          onCreated={(invoices, orderIds) => {
+          onCreated={(invoices, orderIds, onePerItem) => {
             setInvoiceOpen(false)
             if (invoices.length === 1) void navigate(routes.purchaseInvoice(invoices[0].id))
-            else setCreatedInvoices({ invoices, orderIds })
+            else setCreatedInvoices({ invoices, orderIds, onePerItem })
           }}
         />
       ) : null}
@@ -804,6 +804,7 @@ export function ContainerPage() {
         <CreatedInvoicesModal
           opened
           invoices={createdInvoices.invoices}
+          onePerItem={createdInvoices.onePerItem}
           onClose={() => setCreatedInvoices(null)}
           onGoToOrder={
             createdInvoices.orderIds.length === 1

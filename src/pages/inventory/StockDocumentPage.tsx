@@ -922,8 +922,11 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           mode="stock"
           draftReference={document ? `${kind.code}-${document.id}` : null}
           onImported={appendImported}
-          // A file naming several warehouses becomes ONE document, each line keeping its own.
-          importCreate={(imported, postImmediately) =>
+          // A file naming several warehouses becomes ONE document, each line keeping its own — or, on
+          // Inventory In only (what the business asked for), one document per warehouse when the reader
+          // turns on "One document per warehouse".
+          allowSplitByWarehouse={kind.code === 'INV_IN'}
+          importCreate={(imported, postImmediately, splitByWarehouse) =>
             stockDocumentsApi.importCreate({
               documentTypeCode: kind.code,
               documentDate: header.documentDate,
@@ -932,6 +935,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
               referenceNo: header.referenceNo.trim() || null,
               notes: header.notes.trim() || null,
               postImmediately,
+              splitByWarehouse,
               lines: imported.map((line) => ({
                 warehouseId: line.warehouseId,
                 itemId: line.itemId,

@@ -559,6 +559,8 @@ owns the lines. That is what lets one wizard serve Import Sales, Inventory In an
 | `checkStock` | Invoice mode only. Rows that would overdraw the shelf, cumulatively per item + warehouse, come back as Errors and the preview shows On Hand. |
 | `draftReference` | Your draft id. It goes on the audit row; `usp_InvoiceImport_AttachInvoice` stamps those rows with the real document id once it is saved. |
 | `onImported` | Called once, with the Valid **and** Warning rows. Append them; do not replace. |
+| `importCreate` | Optional `(lines, postImmediately, splitByWarehouse) => Promise<ImportCreateResult>`: a file naming several warehouses becomes new documents instead of being appended (see *Import: one document, or one per warehouse*). |
+| `allowSplitByWarehouse` | Offers the "One document per warehouse" switch in step 3; only for a family whose `import-create` takes `splitByWarehouse`. |
 
 `ImportedLine` carries `itemId / itemCode / itemName / itemUnitId / unitTypeName / packingFormula /
 warehouseId / warehouseCode / quantity / unitPrice / priceSource / discountPercent / expiryDate / notes /
@@ -596,8 +598,9 @@ New rows are seeded from the branch's main warehouse (the page's `defaultWarehou
 ordinary single-warehouse document still needs no picking; the row's own cell overrides it. Changing
 the branch clears every line's warehouse, because warehouses belong to one branch.
 
-The import creates ONE document however many warehouses the file names — see below. Each row keeps
-the warehouse the file gave it.
+The import creates ONE document however many warehouses the file names — or, on Sales Invoice and
+Inventory In when the reader asks for it, one document per warehouse; see below. Each row keeps the
+warehouse the file gave it.
 
 ## Bulk actions
 
@@ -609,7 +612,7 @@ selectable) held by **`useBulkSelection()`** so the selection survives paging. `
 shows **`BulkResultsModal`** (number, result badge, message per document), drops the succeeded rows from
 the selection and reloads the grid. Sales and purchase lists reuse the same three pieces.
 
-## Import: one document, whatever warehouses the file names
+## Import: one document, or one per warehouse
 
 `ImportInvoiceItemsWizard` always sends the hosting page's `documentTypeCode` (the template download uses
 it too, and the preview shows a **Type** column; rows typed for another kind are Errors). When the
@@ -621,6 +624,22 @@ list" calls `onDocumentsCreated`, where the host navigates with `state.highlight
 rows). With one warehouse the lines are appended as before; if it is not the seeded warehouse the wizard
 asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`, which now
 moves the lines and the seed rather than a header field.
+
+**One document per warehouse** is a choice the reader makes on every import, on the pages whose host
+passes **`allowSplitByWarehouse`**: Sales Invoice and Inventory In (not Inventory Out, purchase or Import
+Sales). Step 3's groups panel then shows a Mantine `Switch` — "One invoice per warehouse" on the sales
+page, "One document per warehouse" on Inventory In — **off by default**, described "Off: one invoice
+holding every warehouse. On: one invoice per warehouse (2 invoices)." The panel follows it: the alert,
+a **Becomes** column on each warehouse row ("Lines on the one new invoice" / "New invoice 1 of 2"), the
+"Post immediately" description and the button ("Create 1 invoice" / "Create 2 invoices, one per
+warehouse"). The host's `importCreate(lines, postImmediately, splitByWarehouse)` sends
+`splitByWarehouse` in the request; the server makes one document per warehouse in the file's order, each
+with the shared header, its own line numbers and its own posting, so one refusal never stops the others.
+The result lists every document with its warehouse and a link (it scrolls past a few rows), and each
+refusal starts with the warehouse it concerns. The audit: a sales invoice gets its "Imported" entry from
+the log the wizard writes with its id, so a split writes **one log per invoice**, each counting that
+warehouse's rows; stock documents keep the one log with the draft reference. Off — or a file naming one
+warehouse — is exactly the single document above.
 ## Sales invoice page
 
 `/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are
@@ -749,20 +768,40 @@ in **cost mode**:
     links in one transaction.
   - Linking rewrites the invoice's lines, so the card refuses while the page has unsaved changes.
   - The lines are grouped by container, the rest under "Not in a container yet".
-- **One item per supplier invoice (script 45)**: a purchase invoice holds one item, over any number of lines.
+- **One item per supplier invoice (script 45, optional since script 63)**: an invoice of one item holds one item,
+  over any number of lines; an invoice of several items holds any.
+  - The setting **Purchase.OneItemPerInvoice** (Configuration > Settings > General, public, on by default) is the
+    default. Each invoice keeps the mode it was created with: `oneItemOnly` on the purchase document (an older
+    invoice follows the setting). A new invoice sends `oneItemOnly` = what the page applied (the setting); an
+    update never sends it. Read the setting with `useOneItemPerInvoice()` (`components/purchase/onePerItem.ts`): it
+    is on while loading or unreadable, and `known` says whether it was really read. **The browser never sends its
+    guess**: while the setting is not known, every request carries null for the mode (`oneItemOnly`, `onePerItem`;
+    `onePerItemToSend()`), and the server applies the setting it has.
   - "Create Purchase Invoice" (`CreateInvoiceFromOrderModal`, order page and order list) and "Create Invoice from
-    Containers…" say "One invoice per item: n invoices will be created (codes)" and take the exporter's ref. and
-    the commercial invoice no., copied to every invoice. One invoice opens as before; several are listed in
-    `CreatedInvoicesModal` (Open links, "Go to the order's invoices").
-  - On an invoice with a line, the item select offers only that item (`PurchaseLinesGrid` `onlyItemId`) and the
-    quick search refuses another, with `ONE_ITEM_HINT`. A draft holding several items (made before) shows an
-    orange Alert and **Split by item**, which lists the invoices in the same modal.
+    Containers…" have a **One invoice per item** Switch, starting from the setting and chosen for this creation
+    (`onePerItem` in the request; null = the setting, sent while the reader has not flipped it and the setting is not
+    known; when it could not be read, the switch's description says the server's setting decides). The preview says
+    "One invoice per item: n invoices will be created (codes)", or off "One invoice with n items" ("One invoice per
+    order: …" for lines of several orders).
+    Both take the exporter's ref. and the commercial invoice no., copied to every invoice. One invoice opens as
+    before; several are listed in `CreatedInvoicesModal` (Open links, "Go to the order's invoices"; `onePerItem`
+    false shows Lines instead of Item).
+  - On an invoice of one item with a line, the item select offers only that item (`PurchaseLinesGrid`
+    `onlyItemId`) and the quick search refuses another, with `ONE_ITEM_HINT`. Such a draft holding several items
+    (made before) shows an orange Alert and **Split by item**, which lists the invoices in the same modal. An
+    invoice of several items shows its lines normally; **Split by item** is an optional action in its action bar
+    (each resulting invoice then holds one item).
   - The order's Linked Documents card ticks its draft invoices and posts them with **Post selected** (`post-many`,
     one refusal does not stop the others, results in `BulkResultsModal`).
-  - The invoice list has an Item column (code - name; an orange "n items" badge on an old multi-item draft) and
-    its search matches the item code.
-  - The Excel import on an invoice (`onePerItem`): a file of several items, or of another item than the open
-    invoice's, becomes one new invoice per item through `import-create`; the result lists each with an Open link.
+  - The invoice list has an Item column: code - name for an invoice of one item, "n items" for one of several
+    (an orange badge on a draft whose row says `oneItemOnly` true with `itemCount` > 1: one item, saved with several
+    before that rule, to split); its search matches the item code.
+  - The Excel import follows the open invoice's mode: the wizard gets `onePerItem` = its `oneItemOnly`, and the page
+    sends the same `onePerItem` to `import-create`, so the server creates what the wizard announced whatever the
+    setting (a new invoice whose setting is not known sends null). On an invoice of one item, a file of several
+    items, or of another item than the open invoice's, becomes new invoices, one per item; the result lists each with
+    an Open link. On an invoice of several items the rows are appended (a file of several warehouses becomes one new
+    invoice of every item).
 - **API**: `src/api/purchase/documents.ts` — one module for the three kinds; every 403 from it names the
   permission that was missing (`code: FORBIDDEN`).
 
@@ -841,6 +880,41 @@ Print goes to `/:id/print`, a route **outside the shell** — there is no naviga
 only drops the two buttons (`.no-print`), the page is A4 landscape, and `window.print()` opens once the saved
 plan has loaded (a draft with unsaved changes is asked to save first). Export downloads `Shortage_<number>.xlsx`.
 Both are on the list's row actions and on the document.
+
+## Import container charges from Excel
+
+**Import charges from Excel…** in the Containers page header (`ContainersPage`; shown with
+`containers.charges.create`, hidden without it) opens **`ImportContainerChargesWizard`**
+(`src/components/logistics/`). Every call of the feature is in `src/api/logistics/containerChargeImport.ts`
+(`api/logistics/container-charges/import`: `GET template`, `POST validate` multipart, `POST` the import,
+`POST error-report`), so aligning it with the API is one file.
+
+- **One row = one charge on one container**: the row's whole amount on that container, divided over its items by
+  the row's allocation method (the charge type's when blank; Manual is refused). There is no split over several
+  containers here; that is **Add charge**.
+- **The same three steps and rules as `ImportInvoiceItemsWizard`**, in a component of its own: .xlsx up to 5 MB
+  (the API's limit) checked before the upload, chosen by drag and drop, a click in the drop zone, or its
+  **Choose a file…** button (the way in from the keyboard); the server judges every row (Valid / Warning / Error) and keeps nothing; the wizard
+  holds the judged rows (the import is sent them back as they came, with the file name), and **Download the error
+  report** posts them back too. A Warning (a duplicate, a late charge…) is imported as its own charge, never merged.
+  The reader's today goes with the file (`today`): it is what a blank Charge Date means.
+- **Step 2** shows every row: Container (ref, no. and status; the file's text in red when it matched nothing),
+  Charge Type, Date ("today" under a blank one), Amount (with "≈ 1,630.43 USD" and "rate 0.92 of the date"
+  under another currency), Provider (with "Inv. {no.}", and "One group with row 3" when the rows of one provider
+  invoice share a charge group), Allocation ("the type's default" under a blank one), Status, Message. "Continue
+  with {n} charges"; "Choose another file" starts again.
+- **Step 3** says what will be created (charges, containers, charge groups, totals per currency ≈ base). The
+  **Post the charges** switch (off by default) is offered only with `containers.charges.post`, which the server
+  checks again; without it a line says the charges stay drafts. The button reads "Import {n} charges", or
+  "Import {n}, skip {m}" when rows have errors.
+- **Each row is imported on its own.** The result lists every row with a link to its container: Posted, Draft,
+  "Draft, not posted" (outcome Draft with a message when posting was asked: the draft stays) or Refused (outcome
+  Failed), with the API's reason as it came. **Download the refused rows** (shown only when a row was refused) is
+  the error report of the Refused rows only, with their reasons, to correct and import again. A "Draft, not
+  posted" row is never in it: its charge exists, and importing it again would add a second one (the duplicate
+  check is only a warning); the result says to post it from the container or Logistics › Container Charges. The
+  Containers list reloads as soon as one charge was created.
+- The dialog is 1280 px wide and full screen below 768 px; its tables scroll sideways inside it.
 
 ## Charge types & landed cost
 

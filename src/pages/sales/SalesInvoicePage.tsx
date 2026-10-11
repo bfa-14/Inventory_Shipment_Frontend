@@ -1152,7 +1152,10 @@ export function SalesInvoicePage() {
           checkStock
           draftReference={invoice ? `SINV-${invoice.id}` : draftReference.current}
           onImported={appendImported}
-          importCreate={(imported, postImmediately) =>
+          // A file naming several warehouses becomes ONE invoice, each line keeping its own — or, when
+          // the reader turns on "One invoice per warehouse", one invoice per warehouse.
+          allowSplitByWarehouse
+          importCreate={(imported, postImmediately, splitByWarehouse) =>
             salesInvoicesApi.importCreate({
               documentDate: header.documentDate,
               dueDate: header.dueDate,
@@ -1168,6 +1171,7 @@ export function SalesInvoicePage() {
               notes: header.notes.trim() || null,
               draftReference: draftReference.current,
               postImmediately,
+              splitByWarehouse,
               paymentType: payment.paymentType,
               receiptMethodId: payment.paymentType === 1 && payment.receiptMethodId ? Number(payment.receiptMethodId) : null,
               receiptAccountId: payment.paymentType === 1 && payment.receiptAccountId ? Number(payment.receiptAccountId) : null,
