@@ -63,7 +63,10 @@ export interface UpdateDocumentTypeRequest {
   rowVersion: string | null
 }
 
-/** An imported file becoming stock documents: the shared header and the lines, grouped by warehouse on the server. */
+/**
+ * An imported file becoming stock documents: the shared header and the lines. ONE document whose lines
+ * keep their own warehouse, or with splitByWarehouse one document per warehouse (grouped on the server).
+ */
 export interface ImportCreateStockDocumentsRequest {
   documentTypeCode: StockDocumentTypeCode
   documentDate: string
@@ -73,6 +76,8 @@ export interface ImportCreateStockDocumentsRequest {
   notes?: string | null
   lines: ImportCreateLine[]
   postImmediately: boolean
+  /** One document per warehouse, each with this header and posted on its own. Absent or false: one document. */
+  splitByWarehouse?: boolean
 }
 
 export interface StockReasonDto {
@@ -303,7 +308,10 @@ export const stockDocumentsApi = {
   /** Deletes each draft in its own call; a posted document among the ids fails alone with NOT_DRAFT. */
   bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
 
-  /** ONE document holding every line, each in the warehouse it names; posted at once when asked. */
+  /**
+   * ONE document holding every line, each in the warehouse it names — or, with splitByWarehouse, one
+   * document per warehouse, each posted on its own; posted at once when asked.
+   */
   importCreate: (payload: ImportCreateStockDocumentsRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 

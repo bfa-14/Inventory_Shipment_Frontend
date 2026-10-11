@@ -559,6 +559,8 @@ owns the lines. That is what lets one wizard serve Import Sales, Inventory In an
 | `checkStock` | Invoice mode only. Rows that would overdraw the shelf, cumulatively per item + warehouse, come back as Errors and the preview shows On Hand. |
 | `draftReference` | Your draft id. It goes on the audit row; `usp_InvoiceImport_AttachInvoice` stamps those rows with the real document id once it is saved. |
 | `onImported` | Called once, with the Valid **and** Warning rows. Append them; do not replace. |
+| `importCreate` | Optional `(lines, postImmediately, splitByWarehouse) => Promise<ImportCreateResult>`: a file naming several warehouses becomes new documents instead of being appended (see *Import: one document, or one per warehouse*). |
+| `allowSplitByWarehouse` | Offers the "One document per warehouse" switch in step 3; only for a family whose `import-create` takes `splitByWarehouse`. |
 
 `ImportedLine` carries `itemId / itemCode / itemName / itemUnitId / unitTypeName / packingFormula /
 warehouseId / warehouseCode / quantity / unitPrice / priceSource / discountPercent / expiryDate / notes /
@@ -596,8 +598,9 @@ New rows are seeded from the branch's main warehouse (the page's `defaultWarehou
 ordinary single-warehouse document still needs no picking; the row's own cell overrides it. Changing
 the branch clears every line's warehouse, because warehouses belong to one branch.
 
-The import creates ONE document however many warehouses the file names — see below. Each row keeps
-the warehouse the file gave it.
+The import creates ONE document however many warehouses the file names — or, on Sales Invoice and
+Inventory In when the reader asks for it, one document per warehouse; see below. Each row keeps the
+warehouse the file gave it.
 
 ## Bulk actions
 
@@ -609,7 +612,7 @@ selectable) held by **`useBulkSelection()`** so the selection survives paging. `
 shows **`BulkResultsModal`** (number, result badge, message per document), drops the succeeded rows from
 the selection and reloads the grid. Sales and purchase lists reuse the same three pieces.
 
-## Import: one document, whatever warehouses the file names
+## Import: one document, or one per warehouse
 
 `ImportInvoiceItemsWizard` always sends the hosting page's `documentTypeCode` (the template download uses
 it too, and the preview shows a **Type** column; rows typed for another kind are Errors). When the
@@ -621,6 +624,22 @@ list" calls `onDocumentsCreated`, where the host navigates with `state.highlight
 rows). With one warehouse the lines are appended as before; if it is not the seeded warehouse the wizard
 asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSwitchWarehouse`, which now
 moves the lines and the seed rather than a header field.
+
+**One document per warehouse** is a choice the reader makes on every import, on the pages whose host
+passes **`allowSplitByWarehouse`**: Sales Invoice and Inventory In (not Inventory Out, purchase or Import
+Sales). Step 3's groups panel then shows a Mantine `Switch` — "One invoice per warehouse" on the sales
+page, "One document per warehouse" on Inventory In — **off by default**, described "Off: one invoice
+holding every warehouse. On: one invoice per warehouse (2 invoices)." The panel follows it: the alert,
+a **Becomes** column on each warehouse row ("Lines on the one new invoice" / "New invoice 1 of 2"), the
+"Post immediately" description and the button ("Create 1 invoice" / "Create 2 invoices, one per
+warehouse"). The host's `importCreate(lines, postImmediately, splitByWarehouse)` sends
+`splitByWarehouse` in the request; the server makes one document per warehouse in the file's order, each
+with the shared header, its own line numbers and its own posting, so one refusal never stops the others.
+The result lists every document with its warehouse and a link (it scrolls past a few rows), and each
+refusal starts with the warehouse it concerns. The audit: a sales invoice gets its "Imported" entry from
+the log the wizard writes with its id, so a split writes **one log per invoice**, each counting that
+warehouse's rows; stock documents keep the one log with the draft reference. Off — or a file naming one
+warehouse — is exactly the single document above.
 ## Sales invoice page
 
 `/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are

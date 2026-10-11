@@ -2,7 +2,8 @@
  * Shapes every document family's bulk and import-create endpoints share.
  *
  * ONE SHAPE, THREE FAMILIES. Inventory, sales and purchase each post and delete in bulk and each
- * turn an imported file into ONE document, each line keeping its own warehouse; the answers are the same,
+ * turn an imported file into ONE document, each line keeping its own warehouse — or, for sales invoices
+ * and stock documents asked to split by warehouse, one document per warehouse; the answers are the same,
  * so the list pages and the wizard read one type rather than three that would drift.
  */
 
@@ -42,10 +43,13 @@ export interface ImportCreateLine {
 export interface ImportCreateDocument {
   id: number
   documentNumber: string | null
-  /** The document's own (header) warehouse — the first line's. The lines may name others. */
+  /**
+   * The document's own (header) warehouse: the first line's on a single document, whose lines may name
+   * others; the group's own on a document split by warehouse.
+   */
   warehouseId: number
   warehouseName: string
-  /** How many distinct warehouses the lines name. More than 1 is a mixed document. */
+  /** How many distinct warehouses the lines name. More than 1 is a mixed document; 1 for each document of a split. */
   warehouseCount: number
   lineCount: number
   /** Draft | Posted — Draft when posting was not asked for, or was refused (see failed). */
@@ -57,14 +61,20 @@ export interface ImportCreateDocument {
 }
 
 export interface ImportCreateFailure {
-  /** The document's header warehouse. Null when it was never created and has none. */
+  /**
+   * The document's header warehouse. On a file split by warehouse, the group's warehouse even when its
+   * document was never created; otherwise null when the document was never created and has none.
+   */
   warehouseId: number | null
   warehouseName: string | null
   code: string
   message: string
 }
 
-/** What import-create answers: what was created, what was posted, what was refused. */
+/**
+ * What import-create answers: what was created, what was posted, what was refused. A split by warehouse
+ * lists every document it made, and each refusal names the warehouse whose document it concerns.
+ */
 export interface ImportCreateResult {
   documents: ImportCreateDocument[]
   created: number
