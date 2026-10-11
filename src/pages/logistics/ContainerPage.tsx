@@ -197,6 +197,24 @@ export function ContainerPage() {
     void load()
   }, [load])
 
+  /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
+     files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the
+     rest stays as it is - no loader, a charge's drawer stays open, a draft being edited keeps its changes (a file does
+     not touch the container's row). */
+  const documentsChanged = useCallback(async () => {
+    if (containerId === null) return
+    try {
+      const fresh = await containersApi.get(containerId)
+      setContainer((current) =>
+        current && current.id === fresh.id
+          ? { ...current, attachments: fresh.attachments, audit: fresh.audit, movements: fresh.movements, charges: fresh.charges }
+          : current,
+      )
+    } catch {
+      /* The counts catch up on the next load; the card already shows the files. */
+    }
+  }, [containerId])
+
   useEffect(() => {
     containerTypesApi.lookup(false).then(setTypes).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
@@ -719,7 +737,7 @@ export function ContainerPage() {
               />
             ) : null}
 
-            {container ? <ContainerChargesCard container={container} onChanged={() => void load()} /> : null}
+            {container ? <ContainerChargesCard container={container} onChanged={() => void load()} onDocumentsChanged={() => void documentsChanged()} /> : null}
 
             <Section title="6. Operational information">
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
@@ -741,7 +759,7 @@ export function ContainerPage() {
             </Section>
 
             {container ? (
-              <ContainerDocumentsCard container={container} canManage={perm.attachments} onChanged={() => void load()} />
+              <ContainerDocumentsCard container={container} canManage={perm.attachments} onChanged={() => void documentsChanged()} />
             ) : null}
           </Stack>
         </Grid.Col>

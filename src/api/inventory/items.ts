@@ -1,4 +1,5 @@
-import { fetchBlob, putForm, request, uploadFile } from '../http'
+import { documentFilesApi } from '../documentFiles'
+import { fetchBlob, request, uploadFile } from '../http'
 import type {
   ItemContainersDto,
   ItemPurchaseOrdersDto,
@@ -111,11 +112,18 @@ export const itemsApi = {
   // ----- files -----
 
   /**
-   * Uploads a file as multipart/form-data. With `isItemImage` it becomes the item's picture and
-   * replaces whatever image the item had.
+   * The item's documents (script 67): the same calls, fields and rules as every document's files - a type (only
+   * the types used for items), the date on the document, a note, up to 20 MB - so the Item Definition page lists them
+   * with the shared AttachmentsPanel (kind ITEM). The list never holds the item's picture.
    */
-  addFile: (itemId: number, file: File, isItemImage = false) =>
-    uploadFile<ItemFileDto>(`${BASE}/${itemId}/files?isItemImage=${String(isItemImage)}`, file),
+  files: documentFilesApi(BASE),
+
+  /**
+   * The item's PICTURE (JPEG, PNG or WebP, up to 5 MB, no type): it replaces whatever image the item had. Not one of
+   * the documents - those go through `files.add` - and never in their list.
+   */
+  addImage: (itemId: number, file: File) =>
+    uploadFile<ItemFileDto>(`${BASE}/${itemId}/files?isItemImage=true`, file),
 
   /**
    * The file's bytes. An `<img src>` cannot carry the bearer token, so the caller turns this Blob
@@ -124,14 +132,7 @@ export const itemsApi = {
   fileBlob: (itemId: number, fileId: number, signal?: AbortSignal) =>
     fetchBlob(`${BASE}/${itemId}/files/${fileId}`, signal),
 
-  /** New name, and a new version of the file when one is given; it keeps its place. */
-  updateFile: (itemId: number, fileId: number, update: { fileName: string; file?: File | null }) => {
-    const form = new FormData()
-    form.append('fileName', update.fileName)
-    if (update.file) form.append('file', update.file, update.file.name)
-    return putForm<void>(`${BASE}/${itemId}/files/${fileId}`, form)
-  },
-
+  /** Removes the picture (a document is removed through `files.remove`). */
   removeFile: (itemId: number, fileId: number) =>
     request<void>(`${BASE}/${itemId}/files/${fileId}`, { method: 'DELETE' }),
 }

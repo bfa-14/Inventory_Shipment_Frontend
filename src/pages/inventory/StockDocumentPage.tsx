@@ -16,9 +16,9 @@ import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, ItemListDto, ItemLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
-import { AttachmentsDrawer } from '../../components/documents/AttachmentsDrawer'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { DocumentHeaderCard, type DocumentHeaderValue } from '../../components/documents/DocumentHeaderCard'
@@ -30,6 +30,7 @@ import {
   ImportInvoiceItemsWizard,
   type ImportedLine,
 } from '../../components/sales/ImportInvoiceItemsWizard'
+import { formatNumber } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -170,7 +171,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const [lines, setLines] = useState<EditableLine[]>([])
   const [errors, setErrors] = useState<Partial<Record<keyof DocumentHeaderValue, string>>>({})
 
-  const [attachmentsOpen, setAttachmentsOpen] = useState(false)
+  /** The action bar's "Add document…": each bump opens the Documents card's popup. */
+  const [addDocument, setAddDocument] = useState(0)
+  const documentsRef = useRef<HTMLDivElement>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -319,6 +322,18 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail: those two come from a fresh read,
+     and the header and lines being typed stay as they are (a file does not touch the document's row). */
+  const filesChanged = useCallback(async () => {
+    if (documentId === null) return
+    try {
+      const fresh = await stockDocumentsApi.get(documentId)
+      setDocument((current) => (current && current.id === fresh.id ? { ...current, files: fresh.files, audit: fresh.audit } : current))
+    } catch {
+      /* The count and the trail catch up on the next load; the card already shows the files. */
+    }
+  }, [documentId])
 
   /* Only the fetch lives here. The warehouse list is emptied by whatever CHANGED the branch — the
      header card's own handler — because that is an event, not something to derive by re-rendering. */
@@ -737,14 +752,28 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
     )
   }
 
+  /* The Documents card: its count scrolls to it; "Add document…" opens its popup (any status, with the create permission). */
+  const documentActions: DocumentAction[] = [
+    {
+      key: 'documents',
+      label: `Documents (${formatNumber(document?.files.length ?? 0)})`,
+      icon: DocumentIcons.documents,
+      onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    },
+    {
+      key: 'add-document',
+      label: 'Add document…',
+      icon: DocumentIcons.addDocument,
+      visible: canCreate,
+      disabled: document === null,
+      disabledReason: 'Save the draft first to attach documents.',
+      onClick: () => setAddDocument((n) => n + 1),
+    },
+  ]
+
   const actions: DocumentAction[] = readOnly
     ? [
-        {
-          key: 'attachments',
-          label: `Attachments (${document?.files.length ?? 0})`,
-          icon: DocumentIcons.attachments,
-          onClick: () => setAttachmentsOpen(true),
-        },
+        ...documentActions,
         {
           key: 'export',
           label: 'Export to Excel',
@@ -767,12 +796,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         },
       ]
     : [
-        {
-          key: 'attachments',
-          label: `Attachments (${document?.files.length ?? 0})`,
-          icon: DocumentIcons.attachments,
-          onClick: () => setAttachmentsOpen(true),
-        },
+        ...documentActions,
         {
           key: 'import',
           label: 'Import from File',
@@ -938,6 +962,17 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         />
       </Paper>
 
+      <DocumentAttachmentsCard
+        ref={documentsRef}
+        documentId={document?.id ?? null}
+        documentKind={kind.code}
+        api={stockDocumentsApi.files}
+        canAdd={canCreate}
+        canRemove={canCreate}
+        onChanged={() => void filesChanged()}
+        openUpload={addDocument}
+      />
+
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
           <AuditTrail entries={document?.audit ?? []} />
@@ -951,16 +986,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           />
         </Grid.Col>
       </Grid>
-
-      <AttachmentsDrawer
-        opened={attachmentsOpen}
-        onClose={() => setAttachmentsOpen(false)}
-        documentId={document?.id ?? null}
-        documentKind={kind.code}
-        onChanged={() => void reload()}
-        canEdit={canCreate}
-        api={stockDocumentsApi.files}
-      />
 
       <CancelReasonModal
         opened={cancelOpen}

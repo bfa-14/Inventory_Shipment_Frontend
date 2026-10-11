@@ -645,7 +645,7 @@ warehouse — is exactly the single document above.
 
 `/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are
 the priced document on the same skeleton as Inventory In: a header card, an editable lines grid, the
-summary and audit cards, the sticky action bar, attachments in a drawer, a Draft → Posted → Cancelled
+summary and audit cards, the sticky action bar, a Documents card, a Draft → Posted → Cancelled
 lifecycle where posted and cancelled are read-only text. What is the invoice's own:
 
 - **Header** (`SalesInvoiceHeaderCard`): invoice no. ("Assigned on posting"), invoice date, due date,
@@ -669,8 +669,8 @@ lifecycle where posted and cancelled are read-only text. What is the invoice's o
 - **List**: filters (search, branch, client, salesman, status, dates), bulk Post / Delete on ticked
   drafts, a total in the invoice currency ("$ 5,000.00 USD"), row actions gated by permission and status.
 
-`AttachmentsDrawer` and `AuditTrail` are shared by every family: the drawer takes the family's file
-endpoints through `api` (the stock documents' when left out) and both read structural DTOs.
+`DocumentAttachmentsCard` and `AuditTrail` are shared by every family: the card takes the family's file
+endpoints through `api` (required) and both read structural DTOs (see **Attachments (documents on every page)**).
 ## Purchase documents
 
 `/purchase/orders`, `/purchase/invoices` and `/purchase/returns` (lists, `PurchaseDocumentsPage`) and their
@@ -1030,7 +1030,7 @@ copied.
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
 | `AuditTrail` | What has happened to the document, five entries then the rest on asking. |
 | `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. |
-| `AttachmentsDrawer` | The paperwork behind the document. |
+| `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
 | `CancelReasonModal` | Asks why a posted document is being cancelled. |
 
 ### The rules that are easy to get wrong
@@ -1113,6 +1113,78 @@ with "BIVAC Item" ticked** in Item Definition.
 - **Around the document.** `BIV_OUT` is an `AttachmentDocumentKind`, and script 66 copied Inventory Out's "Used
   for" rows to it, so an administrator can add a "BIVAC certificate" type in Master Data › Attachment Types. The
   item statement (`ItemStockMovementsPage`) links BIV_OUT movements to `/inventory/bivac-out/:id`.
+
+## Attachments (documents on every page)
+
+Every place that keeps files shows them the way the container page always did (prompt 40; scripts 52, 55 and 67):
+purchase orders, invoices and returns, sales invoices and returns, Inventory In / Out / BIVAC Out, customer receipts,
+supplier payments, containers (and their movements and charges) and item definitions. Landed cost adjustments have
+no documents: the provider's invoice of a late charge goes on the purchase invoice. An item's **picture**
+(`ItemImageCard`, `itemsApi.addImage`) is not a document: JPEG, PNG or WebP up to 5 MB, no type, unchanged.
+
+- **One list: `AttachmentsPanel`** (`src/components/attachments/`). Each file shows its type badge ("Purchase ›
+  Proforma Invoice"), its name and size, the date written on it, the note, who added it and when, with Download,
+  Edit and Delete, and an "Every type" filter above the list. A table on a desktop, one small card per file below
+  48em; `layout="cards"` asks for the cards everywhere (the charge drawer). Where it sits:
+  - document pages: `DocumentAttachmentsCard` (`src/components/documents/`), a **"Documents" card on the page**, below
+    the lines (and the charges), above the audit trail. The supplier payment numbers it "4 · Documents". No drawer;
+  - containers: `ContainerDocumentsCard`, grouped General / each movement / each charge;
+  - Logistics › Movements › the **Documents** tab: `MovementDocumentsCard` on the panel, one row per stored file with
+    "On KTG-…" links to the containers holding it;
+  - the container charge drawer: the panel without its card, `layout="cards"`;
+  - Item Definition › the **Documents** tab: kind `ITEM`, `itemsApi.files` (the shared `documentFilesApi`).
+- **One popup to add, one to edit.** `AttachmentUploadDialog` ("Add document", button "Upload") and
+  `AttachmentEditDialog` ("Edit document"): File ("PDF, image or Office file, up to 20 MB"), Attachment type
+  (required, "Pick a type"), Document date ("Date on the document"), Note; the edit can also replace the file
+  ("Replace file (optional)"). Containers add "Link to a movement" ("General - not tied to a movement") and "Also
+  attach to"; a charge's upload says "Filed under this charge on N containers." instead. The edit on a container
+  page offers "Link to a movement" too (cleared = General; `movementId` is sent only when it changed, and the server
+  refuses a movement one of the file's containers is not on); a charge's file stays with its charge.
+- **Nothing is uploaded without a type.** "Add document…" (the card's button, and the action bar of a document
+  page), dropping a file on the drop zone ("Drop a file here, or click to choose one") or clicking it all open the
+  popup, with the file filled in. A page opens it through the panel's `openUpload` counter; once that upload is in,
+  the card scrolls into view.
+- **The types offered are the kind's**: only those whose "Used for" (Master Data › Attachment Types) names the kind
+  (`attachmentTypesApi.forKind`): `CONTAINER`, `ITEM`, `PO`, `PINV`, `PRET`, `SO`, `SINV`, `SRET`, `RCPT`, `PAY`,
+  `INV_IN`, `INV_OUT`, `BIV_OUT` (`GRN` comes with the goods receipts). With none: "No attachment type is used for
+  this kind of document: add one in Master Data › Attachment Types." Missing type: "Choose the attachment type."
+- **20 MB, PDF, image or Office files**, through `attachmentRules.ts` (`ATTACHMENT_ACCEPT`, `ATTACHMENT_HINT`,
+  `attachmentFileError`): "{file} cannot be attached: PDF, image or Office file, up to 20 MB." / "The file is {n}
+  MB; the limit is 20 MB." The API checks it again (`AttachmentRules`). SQL messages are shown as they come.
+- **"Other" asks for a type.** Files from before types existed (and the old item files, script 67) are typed "Other
+  › Other": an orange badge and an orange **"Choose a type"** button that opens the edit, which starts with no type
+  picked and says 'Still typed "Other": choose what this file is.'.
+- **The action bar of a document page** (PO, PINV, PRET, sales invoice / return, Inventory In / Out / BIVAC Out,
+  receipt, payment): **"Documents (n)"** scrolls to the card; **"Add document…"** (with the create permission) opens
+  the popup. On a draft never saved it is disabled with "Save the draft first to attach documents.", which the card
+  says too; a reversed receipt / payment: "This receipt is reversed: its documents stay as they are." / "This
+  payment is reversed: …". A new item's tab says "Save the item first to attach documents."
+- **A file changes only the files.** After an upload, an edit or a delete the page reads the document again and
+  takes only its `files` (the count) and `audit` (`filesChanged`), never the header and lines being typed: a file
+  does not touch the document's row, so its RowVersion still holds. The item page re-counts its documents for the
+  tab's badge; the charge drawer lists the charge's files from a fresh read of the charge.
+- **Who may add, edit and delete** (without it: download only). Nothing ever requires a file to post.
+
+  | Place | Permission | Status |
+  |---|---|---|
+  | Purchase order / invoice / return | `purchase.orders / invoices / returns.create` | any status |
+  | Sales invoice / return | `sales.invoices.create` | any status |
+  | Inventory In / Out / BIVAC Out | `inventory.stockin / stockout / bivacout.create` | any status |
+  | Customer receipt / supplier payment | `sales.receipts.create` / `purchase.payments.create` | not once Reversed (SQL 71005 / 73005) |
+  | Container, movement, charge | `containers.attachments.manage` | a movement needs containers; no new file on a cancelled charge |
+  | Item definition | `inventory.items.edit` | view mode too, like a posted document |
+
+  The panel's `canAdd` covers a new file (the drop zone, "Add document…", `openUpload`); `canEdit` (default
+  `canAdd`) covers Edit and "Choose a type". A cancelled charge passes `canAdd` false and `canEdit` with the
+  permission alone: its files can still be retyped, edited and deleted, and the drawer says "This charge is cancelled:
+  no new document can be added." instead of "An upload goes on every container of the group (N containers)."
+- **Shared container files.** One upload for several containers is one stored file ("shared with N containers").
+  Deleting asks how far ("Only this container" / "All containers"; on a movement "This movement's containers" /
+  "All containers"); a container's edit asks the same when the file is shared. A movement's or a charge's file is
+  always edited on every container holding it.
+- **Inside another form.** The item's Documents tab sits inside the item's `<form>`. A popup's form is rendered in a
+  portal but its submit still bubbles up the React tree, so the item form's `onSubmit` ignores a submit whose target
+  is not itself, and does nothing in view mode. Do the same wherever the panel lands inside a form.
 
 ## Checklist for a new page
 

@@ -23,6 +23,7 @@ import {
 import { useForm } from '@mantine/form'
 import { IconArrowLeft, IconCopy, IconDeviceFloppy, IconInfoCircle, IconPencil } from '@tabler/icons-react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+import type { DocumentFileDto } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -30,6 +31,7 @@ import type { PartyLookupDto } from '../../api/types'
 import { formatNumber, numberInputValue } from '../../components/format'
 import type { ItemDetailsDto, ItemUnitDto, SaveItemRequest, SaveItemUnitRequest } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { AttachmentsPanel, type AttachmentsSource } from '../../components/attachments/AttachmentsPanel'
 import { confirm } from '../../components/ui/confirm'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
@@ -37,7 +39,6 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { COUNTRIES, countryLabel, findCountry } from '../../data/countries'
 import { PERMISSIONS } from '../../navigation'
-import { ItemAttachmentsTab } from './ItemAttachmentsTab'
 import { ItemImageCard } from './ItemImageCard'
 import { ItemAuditCard, ItemQuickLinksCard, ItemStockCard } from './ItemSideCards'
 import { ItemUnitFormModal } from './ItemUnitFormModal'
@@ -165,7 +166,8 @@ function ItemDetails() {
   /** Units of an item that does not exist yet; a saved item's units live on `item`. */
   const [draftUnits, setDraftUnits] = useState<ItemUnitDto[]>(copySource?.units ?? [])
   const [pendingImage, setPendingImage] = useState<File | null>(null)
-  const [pendingAttachments, setPendingAttachments] = useState<File[]>([])
+  /** The documents counted after an upload or a delete, for the item they were counted on (the tab's badge). */
+  const [documentsCounted, setDocumentsCounted] = useState<{ item: ItemDetailsDto; count: number } | null>(null)
   const [unitDialog, setUnitDialog] = useState<{ unit?: ItemUnitDto } | null>(null)
   const [busyUnitId, setBusyUnitId] = useState<number | null>(null)
   const [removingImage, setRemovingImage] = useState(false)
@@ -242,11 +244,13 @@ function ItemDetails() {
   const units = isNew ? draftUnits : (item?.units ?? [])
   const files = item?.files ?? []
   const image = files.find((f) => f.isItemImage)
-  const attachments = files.filter((f) => !f.isItemImage)
+  /* The tab's badge: the item's documents as loaded with it, until the Documents card changes them. */
+  const documentCount =
+    documentsCounted !== null && documentsCounted.item === item
+      ? documentsCounted.count
+      : files.filter((f) => !f.isItemImage).length
 
-  const dirty =
-    editable &&
-    (form.isDirty() || pendingImage !== null || pendingAttachments.length > 0 || (isNew && draftUnits.length > 0))
+  const dirty = editable && (form.isDirty() || pendingImage !== null || (isNew && draftUnits.length > 0))
 
   useEffect(() => {
     dirtyRef.current = dirty
@@ -337,7 +341,6 @@ function ItemDetails() {
       form.resetDirty(toFormValues(item))
     }
     setPendingImage(null)
-    setPendingAttachments([])
     setFormError(null)
     setStale(false)
     setSearchParams({}, { replace: true })
@@ -422,7 +425,6 @@ function ItemDetails() {
         form.resetDirty(values)
         setDraftUnits([])
         setPendingImage(null)
-        setPendingAttachments([])
 
         if (problems.length > 0) {
           notify.error(`Item ${created.itemCode} was created, but some parts were not saved.`)
@@ -441,11 +443,10 @@ function ItemDetails() {
 
       form.resetDirty(values)
       setPendingImage(null)
-      setPendingAttachments([])
       await load(updated.id)
 
       if (problems.length > 0) {
-        notify.error('The item was saved, but some files were not uploaded.')
+        notify.error('The item was saved, but its image was not uploaded.')
         setFormError(problems.join(' '))
         return
       }
@@ -459,7 +460,7 @@ function ItemDetails() {
     }
   }
 
-  /** Units and files for an item that now exists. Returns one sentence per part that did not save. */
+  /** Units and the picture for an item that now exists. Returns one sentence per part that did not save. */
   async function saveChildren(id: number, unitsToAdd: ItemUnitDto[]): Promise<string[]> {
     const problems: string[] = []
 
@@ -475,17 +476,9 @@ function ItemDetails() {
 
     if (pendingImage) {
       try {
-        await itemsApi.addFile(id, pendingImage, true)
+        await itemsApi.addImage(id, pendingImage)
       } catch (error) {
         problems.push(`The image was not uploaded: ${messageOf(error, 'the request failed.')}`)
-      }
-    }
-
-    for (const file of pendingAttachments) {
-      try {
-        await itemsApi.addFile(id, file, false)
-      } catch (error) {
-        problems.push(`${file.name} was not uploaded: ${messageOf(error, 'the request failed.')}`)
       }
     }
 
@@ -627,24 +620,6 @@ function ItemDetails() {
 
   // ----- files -----
 
-  /** On a saved item an attachment uploads at once; on a new one it waits for Save. */
-  async function pickAttachments(picked: File[]) {
-    if (isNew || !item) {
-      setPendingAttachments((current) => [...current, ...picked])
-      return
-    }
-
-    for (const file of picked) {
-      try {
-        await itemsApi.addFile(item.id, file, false)
-      } catch (error) {
-        notify.error(`${file.name} was not uploaded: ${messageOf(error, 'the request failed.')}`)
-      }
-    }
-    await load(item.id)
-    notify.success(picked.length === 1 ? 'Attachment uploaded.' : `${picked.length} attachments uploaded.`)
-  }
-
   async function pickImage(file: File | null) {
     if (isNew || !item || file === null) {
       setPendingImage(file)
@@ -652,7 +627,7 @@ function ItemDetails() {
     }
 
     try {
-      await itemsApi.addFile(item.id, file, true)
+      await itemsApi.addImage(item.id, file)
       await load(item.id)
       notify.success('Item image updated.')
     } catch (error) {
@@ -682,30 +657,31 @@ function ItemDetails() {
     }
   }
 
-  /** Throws on failure: the edit dialog stays open and says why. */
-  async function editAttachment(file: { id: number }, edit: { fileName: string; file: File | null }) {
-    if (!item) return
-    await itemsApi.updateFile(item.id, file.id, edit)
-    await load(item.id)
-    notify.success('Attachment updated.')
-  }
+  /*
+   * THE ITEM'S DOCUMENTS (script 67): the data sheet, the homologation certificate, the user manual - the shared
+   * Documents list with the types used for items, like every document's files. An upload is saved at once, in view
+   * mode as in edit mode: it changes nothing else of the item, so it never waits for Save Item and never touches what
+   * is being typed. The picture is not one of them; it keeps its own card and rules.
+   */
+  const documentSource: AttachmentsSource<DocumentFileDto> | null = item
+    ? {
+        list: () => itemsApi.files.list(item.id),
+        upload: (file, fields) => itemsApi.files.add(item.id, file, fields),
+        update: (row, edit) => itemsApi.files.update(item.id, row.id, edit),
+        download: (row) => itemsApi.files.download(item.id, row.id, row.fileName),
+        remove: (row) => itemsApi.files.remove(item.id, row.id),
+      }
+    : null
 
-  async function deleteAttachment(file: { id: number; fileName: string }) {
+  /** After an upload, an edit or a delete: the tab's count, read again for the item on screen. */
+  async function documentsChanged() {
     if (!item) return
-    const confirmed = await confirm({
-      title: 'Delete attachment',
-      message: `Delete ${file.fileName}? This cannot be undone.`,
-      confirmLabel: 'Delete',
-      danger: true,
-    })
-    if (!confirmed) return
-
+    const counted = item
     try {
-      await itemsApi.removeFile(item.id, file.id)
-      await load(item.id)
-      notify.success('Attachment deleted.')
-    } catch (error) {
-      notify.error(messageOf(error, 'The attachment could not be deleted.'))
+      const rows = await itemsApi.files.list(counted.id)
+      setDocumentsCounted({ item: counted, count: rows.length })
+    } catch {
+      /* The badge catches up on the next load; the card already shows the files. */
     }
   }
 
@@ -736,7 +712,7 @@ function ItemDetails() {
     if (!item) return
     const confirmed = await confirm({
       title: 'Delete item',
-      message: `Delete ${item.itemCode} - ${item.itemName}? Its units and attachments go with it. This cannot be undone.`,
+      message: `Delete ${item.itemCode} - ${item.itemName}? Its units, image and documents go with it. This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
@@ -872,7 +848,7 @@ function ItemDetails() {
           icon={<IconInfoCircle size={18} />}
           title={`Copied from ${copySource.fromItemCode}`}
         >
-          Enter a new Item Code. The packing units came along; the image and attachments did not, and barcodes were
+          Enter a new Item Code. The packing units came along; the image and documents did not, and barcodes were
           cleared because a barcode is unique across the whole system.
         </Alert>
       ) : null}
@@ -892,6 +868,10 @@ function ItemDetails() {
       <form
         onSubmit={(event) => {
           event.preventDefault()
+          /* Only the item's own form saves the item. A popup's form (the Documents card's "Add document" and "Edit
+             document", rendered in a portal) bubbles its submit up the React tree to here; and in view mode there is
+             nothing to save - Enter in the Documents card's type filter must not save the item. */
+          if (event.target !== event.currentTarget || !editable) return
           form.onSubmit(
             (values) => void save(values),
             (errors) => focusFirstInvalid(errors),
@@ -903,16 +883,16 @@ function ItemDetails() {
           <Tabs.List mb="md">
             <Tabs.Tab value="general">General Information</Tabs.Tab>
             <Tabs.Tab
-              value="attachments"
+              value="documents"
               rightSection={
-                attachments.length + pendingAttachments.length > 0 ? (
+                documentCount > 0 ? (
                   <Badge size="xs" variant="light" circle>
-                    {attachments.length + pendingAttachments.length}
+                    {formatNumber(documentCount)}
                   </Badge>
                 ) : null
               }
             >
-              Attachments
+              Documents
             </Tabs.Tab>
           </Tabs.List>
 
@@ -1336,16 +1316,17 @@ function ItemDetails() {
             </Grid>
           </Tabs.Panel>
 
-          <Tabs.Panel value="attachments">
-            <ItemAttachmentsTab
-              itemId={item?.id ?? null}
-              files={attachments}
-              pending={pendingAttachments}
-              editable={editable}
-              onPick={(picked) => void pickAttachments(picked)}
-              onDiscardPending={(index) => setPendingAttachments((cur) => cur.filter((_, i) => i !== index))}
-              onEdit={editAttachment}
-              onDelete={deleteAttachment}
+          <Tabs.Panel value="documents">
+            {/* With the items edit permission, in view mode too, like the files of a posted document. */}
+            <AttachmentsPanel
+              title="Documents"
+              documentKind="ITEM"
+              source={documentSource}
+              reloadKey={item?.id ?? 'new'}
+              unsavedText="Save the item first to attach documents."
+              canAdd={canEdit}
+              canRemove={canEdit}
+              onChanged={() => void documentsChanged()}
             />
           </Tabs.Panel>
         </Tabs>

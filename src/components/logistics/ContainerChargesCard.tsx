@@ -19,6 +19,8 @@ import { NewChargeModal } from './NewChargeModal'
 interface ContainerChargesCardProps {
   container: ContainerDto
   onChanged: () => void
+  /** A charge's file was added, edited or deleted in its drawer (default onChanged): the page's file counts catch up. */
+  onDocumentsChanged?: () => void
 }
 
 const DRAFT = 1
@@ -31,7 +33,7 @@ const COLUMNS = 10
  * item costs; drafts are an estimate; a charge posted after the offload is badged, because it
  * adjusted costs that had already been fixed.
  */
-export function ContainerChargesCard({ container, onChanged }: ContainerChargesCardProps) {
+export function ContainerChargesCard({ container, onChanged, onDocumentsChanged }: ContainerChargesCardProps) {
   const { hasPermission } = useAuth()
   const canCreate = hasPermission(PERMISSIONS.containerChargesCreate)
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
@@ -215,7 +217,7 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
         onCreated={onChanged}
       />
 
-      <ChargeDrawer chargeId={openId} onClose={() => setOpenId(null)} onChanged={onChanged} />
+      <ChargeDrawer chargeId={openId} onClose={() => setOpenId(null)} onChanged={onChanged} onDocumentsChanged={onDocumentsChanged} />
 
       {copying && (
         <ApplyChargeModal

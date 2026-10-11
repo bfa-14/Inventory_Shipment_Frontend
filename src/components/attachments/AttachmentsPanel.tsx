@@ -17,7 +17,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
-import { IconDownload, IconPencil, IconTrash, IconUpload } from '@tabler/icons-react'
+import { IconDownload, IconPaperclip, IconPencil, IconTrash } from '@tabler/icons-react'
 import type { AttachmentDocumentKind, DocumentFileEdit, DocumentFileFields } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
 import { dateLabel, stamp } from '../documents/documentKind'
@@ -25,7 +25,12 @@ import { formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { AttachmentEditDialog } from './AttachmentEditDialog'
-import { AttachmentUploadDialog, type ContainerFiling, type ContainerFilingValue } from './AttachmentUploadDialog'
+import {
+  AttachmentUploadDialog,
+  type AttachmentOption,
+  type ContainerFiling,
+  type ContainerFilingValue,
+} from './AttachmentUploadDialog'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_HINT, attachmentTypeLabel, formatBytes } from './attachmentRules'
 
 /** "Purchase › Proforma Invoice" in blue, a file still typed "Other" in orange. Wraps rather than cuts the name. */
@@ -96,8 +101,15 @@ interface AttachmentsPanelProps<R extends AttachmentRow> {
   source: AttachmentsSource<R> | null
   /** Changes when the rows must be read again: another document, or the page reloaded this one. */
   reloadKey: string | number
+  /** Said instead of the list while source is null. Default "Save the draft first to attach documents." */
   unsavedText?: string
+  /** A new file: the drop zone, the "Add document…" button and openUpload. Edit follows canEdit. */
   canAdd: boolean
+  /**
+   * Edit and the orange "Choose a type" of the files already there. Default canAdd; a page whose adding also depends
+   * on a status (a cancelled charge takes no new file) passes the permission alone, so its files can still be retyped.
+   */
+  canEdit?: boolean
   canRemove: boolean | ((row: R) => boolean)
   /** Container pages only: where the file is filed. A function is asked when the dialog opens. */
   filing?: ContainerFiling | (() => Promise<ContainerFiling>)
@@ -107,34 +119,56 @@ interface AttachmentsPanelProps<R extends AttachmentRow> {
   fileExtra?: (row: R) => ReactNode
   /** Containers holding the row's file, its own included: above one the edit asks how far it goes. */
   sharedCount?: (row: R) => number
+  /**
+   * Container pages only: the movements the edit popup offers under "Link to a movement" for this row; null (a
+   * charge's file, which stays with its charge) or left out = no movement choice in the edit.
+   */
+  movementOptions?: (row: R) => AttachmentOption[] | null | undefined
+  /** Said when nothing is attached yet. Default "No document yet." */
   emptyText?: string
   /** Told after every upload, edit and delete, so the page's own counts and audit trail catch up. */
   onChanged?: () => void
   /** In a Paper card (a page) or bare (a drawer). */
   card?: boolean
+  /**
+   * 'auto' (default): a table, one small card per file below 48em. 'cards': always one card per file - for a narrow
+   * place such as a drawer, where the table does not fit whatever the screen.
+   */
+  layout?: 'auto' | 'cards'
+  /**
+   * A page action's way to open the "Add document" popup: a counter the page bumps (setAddDocument((n) => n + 1)).
+   * Every new value opens the popup with no file, once the panel has a source and canAdd; the value the panel mounts
+   * with opens nothing. After an upload opened this way the panel scrolls into view, so the new row is seen.
+   */
+  openUpload?: number
 }
 
 /**
- * THE attachments list of every document and container: the type badge ("Purchase › Proforma Invoice"), the date
- * written on the document, the note, the size, who added it and when; download, edit (name, type / date / note, and
- * a new version of the file), delete; a filter by type. Dropping or picking a file opens the upload dialog with the file filled in - nothing
- * is uploaded without a type. Files still typed "Other" say so in orange next to their edit button.
+ * THE documents list of every document, container and item definition: the type badge ("Purchase › Proforma
+ * Invoice"), the date written on the document, the note, the size, who added it and when; download, edit (name, type /
+ * date / note, a new version of the file, and a container file's movement), delete; a filter by type. "Add document…",
+ * dropping or picking a file all open the "Add document" popup (with the file filled in) - nothing is uploaded without
+ * a type. Files still typed "Other" say so in orange next to their edit button.
  */
 export function AttachmentsPanel<R extends AttachmentRow>({
   title,
   documentKind,
   source,
   reloadKey,
-  unsavedText = 'Save the draft first to attach files.',
+  unsavedText = 'Save the draft first to attach documents.',
   canAdd,
+  canEdit = canAdd,
   canRemove,
   filing,
   groupOf,
   fileExtra,
   sharedCount,
-  emptyText = 'Nothing attached yet.',
+  movementOptions,
+  emptyText = 'No document yet.',
   onChanged,
   card = true,
+  layout = 'auto',
+  openUpload,
 }: AttachmentsPanelProps<R>) {
   const [rows, setRows] = useState<R[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -144,8 +178,12 @@ export function AttachmentsPanel<R extends AttachmentRow>({
   const [editing, setEditing] = useState<R | null>(null)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  // A phone gets one small card per file: seven columns do not fit in 390 px.
-  const narrow = useMediaQuery('(max-width: 48em)')
+  const rootRef = useRef<HTMLDivElement>(null)
+  // An upload asked for by the page (openUpload): once it is in, the panel scrolls into view.
+  const revealAfterUpload = useRef(false)
+  // A phone gets one small card per file: the table does not fit in 390 px. A drawer asks for them anyway.
+  const phone = useMediaQuery('(max-width: 48em)')
+  const narrow = layout === 'cards' || phone
 
   // The source is rebuilt by its page on every render; the rows follow reloadKey, not its identity. The ref is
   // brought up to date before the effects below read it (effects run in the order they are declared).
@@ -180,7 +218,9 @@ export function AttachmentsPanel<R extends AttachmentRow>({
     onChanged?.()
   }
 
-  async function openUpload(file: File | null) {
+  /** Opens the popup, with the dropped or picked file; reveal = scroll into view once it is uploaded (openUpload). */
+  async function startUpload(file: File | null, reveal = false) {
+    revealAfterUpload.current = reveal
     if (!filing || typeof filing !== 'function') {
       setUpload({ file, filing: filing ?? null })
       return
@@ -195,6 +235,22 @@ export function AttachmentsPanel<R extends AttachmentRow>({
     }
   }
 
+  // The page's "Add document…" (openUpload): each new value of the counter opens the popup, the mount value does not.
+  // The handler is read through a ref so the effect follows the counter alone, never a re-render of the page.
+  const seenOpenRequest = useRef(openUpload)
+  const openRequested = useRef<() => void>(() => {})
+  useEffect(() => {
+    openRequested.current = () => {
+      if (!canAdd || !sourceRef.current) return
+      void startUpload(null, true)
+    }
+  })
+  useEffect(() => {
+    if (openUpload === undefined || openUpload === seenOpenRequest.current) return
+    seenOpenRequest.current = openUpload
+    openRequested.current()
+  }, [openUpload])
+
   async function download(row: R) {
     try {
       await sourceRef.current?.download(row)
@@ -208,7 +264,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
     if (!current) return
     if (!current.asksBeforeRemove) {
       const go = await confirm({
-        title: 'Delete attachment',
+        title: 'Delete document',
         message: `Delete ${row.fileName}? This cannot be undone.`,
         confirmLabel: 'Delete',
         danger: true,
@@ -254,7 +310,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
 
   /** The orange hint of a file still typed "Other": it is the edit button. */
   const chooseType = (row: R) =>
-    canAdd && row.isOther ? (
+    canEdit && row.isOther ? (
       <Button
         size="compact-xs"
         variant="light"
@@ -273,7 +329,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
           <IconDownload size={16} />
         </ActionIcon>
       </Tooltip>
-      {canAdd ? (
+      {canEdit ? (
         <Tooltip label="Edit" withArrow>
           <ActionIcon variant="subtle" aria-label={`Edit ${row.fileName}`} onClick={() => setEditing(row)}>
             <IconPencil size={16} />
@@ -315,11 +371,11 @@ export function AttachmentsPanel<R extends AttachmentRow>({
         <Button
           size="xs"
           variant="light"
-          leftSection={<IconUpload size={14} />}
+          leftSection={<IconPaperclip size={14} />}
           loading={opening}
-          onClick={() => void openUpload(null)}
+          onClick={() => void startUpload(null)}
         >
-          Upload
+          Add document…
         </Button>
       ) : null}
     </Group>
@@ -345,7 +401,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
                 event.preventDefault()
                 setDragging(false)
                 const file = event.dataTransfer.files?.[0]
-                if (file) void openUpload(file)
+                if (file) void startUpload(file)
               }}
               onClick={() => inputRef.current?.click()}
               style={{
@@ -365,7 +421,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
                 onChange={(event) => {
                   const file = event.currentTarget.files?.[0]
                   event.currentTarget.value = ''
-                  if (file) void openUpload(file)
+                  if (file) void startUpload(file)
                 }}
               />
               <Text fz="sm" fw={500}>
@@ -505,7 +561,11 @@ export function AttachmentsPanel<R extends AttachmentRow>({
         onClose={() => setUpload(null)}
         onUploaded={(fileName) => {
           setUpload(null)
-          void changed(`${fileName} attached.`)
+          const reveal = revealAfterUpload.current
+          revealAfterUpload.current = false
+          void changed(`${fileName} attached.`).then(() => {
+            if (reveal) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          })
         }}
       />
 
@@ -513,6 +573,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
         file={editing}
         documentKind={documentKind}
         sharedCount={editing && sharedCount ? sharedCount(editing) : 1}
+        movementOptions={editing && movementOptions ? movementOptions(editing) : null}
         onSave={(edit, allShared) => {
           if (!sourceRef.current || !editing) return Promise.resolve()
           return sourceRef.current.update(editing, edit, allShared)
@@ -529,7 +590,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
 
   if (!card) {
     return (
-      <Stack gap="sm">
+      <Stack gap="sm" ref={rootRef}>
         {toolbar}
         {body}
       </Stack>
@@ -537,7 +598,7 @@ export function AttachmentsPanel<R extends AttachmentRow>({
   }
 
   return (
-    <Paper radius="lg" p="md" withBorder>
+    <Paper radius="lg" p="md" withBorder ref={rootRef}>
       <Group justify="space-between" mb="sm" wrap="wrap" gap="xs">
         <Title order={5}>
           {title}{' '}

@@ -127,6 +127,8 @@ export interface ContainerChargeAttachmentDto {
   attachmentTypeId: number | null
   category: string | null
   subType: string | null
+  /** No type, or typed "Other" (script 67): the drawer asks for a real one, as every attachment list does. */
+  isOther: boolean
   fileId: number
   fileName: string
   contentType: string

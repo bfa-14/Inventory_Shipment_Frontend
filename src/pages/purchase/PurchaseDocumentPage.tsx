@@ -36,9 +36,9 @@ import {
 } from '../../api/purchase/documents'
 import type { BranchLookupDto, CurrencyLookupDto, ItemListDto, ItemLookupDto, ItemUnitDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
-import { AttachmentsDrawer } from '../../components/documents/AttachmentsDrawer'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { isoDate, stamp } from '../../components/documents/documentKind'
@@ -182,7 +182,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const rateDirty = useRef(false)
   const currencyTouched = useRef(false)
 
-  const [attachmentsOpen, setAttachmentsOpen] = useState(false)
+  /** The action bar's "Add document…": each bump opens the Documents card's popup. */
+  const [addDocument, setAddDocument] = useState(0)
+  const documentsRef = useRef<HTMLDivElement>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -416,6 +418,19 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       /* The figures stay as they were; the next full load says what went wrong. */
     }
   }, [documentId, applyDocument])
+
+  /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail. Those two are taken from a fresh
+     read and nothing else: the header and the lines being typed stay as they are (a file does not touch the
+     document's row, so its RowVersion still holds). */
+  const filesChanged = useCallback(async () => {
+    if (documentId === null) return
+    try {
+      const fresh = await purchaseDocumentsApi.get(documentId)
+      setDocument((current) => (current && current.id === fresh.id ? { ...current, files: fresh.files, audit: fresh.audit } : current))
+    } catch {
+      /* The count and the trail catch up on the next load; the card already shows the files. */
+    }
+  }, [documentId])
 
   const loadApproval = useCallback(async (orderId: number) => {
     try {
@@ -1239,9 +1254,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     disabledReason: ability?.blockedBy ?? undefined,
   })
 
+  /* The Documents card: its count scrolls to it; "Add document…" opens its popup (any status, with the create permission). */
+  const documentActions: DocumentAction[] = [
+    { key: 'documents', label: `Documents (${formatNumber(document?.files.length ?? 0)})`, icon: DocumentIcons.documents, onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+    { key: 'add-document', label: 'Add document…', icon: DocumentIcons.addDocument, visible: canCreate, disabled: document === null, disabledReason: 'Save the draft first to attach documents.', onClick: () => setAddDocument((n) => n + 1) },
+  ]
+
   const actions: DocumentAction[] = readOnly
     ? [
-        { key: 'attachments', label: `Attachments (${document?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
+        ...documentActions,
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
         { key: 'send-supplier', label: 'Send to supplier...', icon: <IconMail size={16} />, colour: 'indigo', ...orderAction(abilities?.sendToSupplier), onClick: () => setSupplierOpen(true) },
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.createInvoice), loading: saving, onClick: () => void createFromThis() },
@@ -1251,7 +1272,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
       ]
     : [
-        { key: 'attachments', label: `Attachments (${document?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
+        ...documentActions,
         { key: 'import', label: 'Import from Excel', icon: DocumentIcons.import, visible: canImportHere, onClick: () => setImportOpen(true) },
         // An invoice of several items MAY be split into one per item: an optional tool here (one of one item gets the orange Alert).
         { key: 'split', label: 'Split by item', icon: <IconArrowsSplit size={16} />, visible: kind.code === 'PINV' && document !== null && editable && !oneItemOnly && savedItemCount > 1, loading: splitting, onClick: () => void splitByItem() },
@@ -1584,6 +1605,17 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         />
       )}
 
+      <DocumentAttachmentsCard
+        ref={documentsRef}
+        documentId={document?.id ?? null}
+        documentKind={kind.code}
+        api={purchaseDocumentsApi.files}
+        canAdd={canCreate}
+        canRemove={canCreate}
+        onChanged={() => void filesChanged()}
+        openUpload={addDocument}
+      />
+
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
           {kind.code === 'PO' && document ? (
@@ -1675,16 +1707,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           </Stack>
         </Grid.Col>
       </Grid>
-
-      <AttachmentsDrawer
-        opened={attachmentsOpen}
-        onClose={() => setAttachmentsOpen(false)}
-        documentId={document?.id ?? null}
-        documentKind={kind.code}
-        onChanged={() => void reload()}
-        canEdit={canCreate}
-        api={purchaseDocumentsApi.files}
-      />
 
       <CancelReasonModal opened={cancelOpen} onClose={() => setCancelOpen(false)} documentLabel={documentLabel} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
 

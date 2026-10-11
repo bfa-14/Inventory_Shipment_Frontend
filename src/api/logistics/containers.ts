@@ -958,9 +958,18 @@ export const containersApi = {
   /**
    * The name, type, date and note of one record and optionally a new file (script 55). allShared = every container
    * holding the file; otherwise this record only, and a new name or file becomes its own copy. Answers the record.
+   * With edit.movementId set (null = General) the file is also filed under that movement (script 67: setMovement);
+   * 400 with the SQL message ("Container KTG-… is not part of this movement.") when a container it reaches is not on
+   * it. A charge's file stays with its charge: its edit never sends a movement.
    */
-  updateAttachment: (attachmentId: number, allShared: boolean, edit: DocumentFileEdit) =>
-    putForm<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, attachmentEditForm(edit)),
+  updateAttachment: (attachmentId: number, allShared: boolean, edit: DocumentFileEdit) => {
+    const form = attachmentEditForm(edit)
+    if (edit.movementId !== undefined) {
+      form.append('setMovement', 'true')
+      if (edit.movementId !== null) form.append('movementId', String(edit.movementId))
+    }
+    return putForm<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, form)
+  },
 
   attachmentBlob: (attachmentId: number) => fetchBlob(`${BASE}/attachments/${attachmentId}/download`),
 

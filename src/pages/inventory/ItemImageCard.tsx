@@ -99,7 +99,7 @@ export function ItemImageCard({
     if (inputRef.current) inputRef.current.value = ''
     if (!file) return
 
-    const rejection = fileRejection(file, 'image')
+    const rejection = fileRejection(file)
     if (rejection) {
       notify.error(rejection)
       return

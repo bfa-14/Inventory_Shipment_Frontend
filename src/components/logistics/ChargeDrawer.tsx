@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import {
-  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -9,7 +8,6 @@ import {
   Center,
   Divider,
   Drawer,
-  FileButton,
   Group,
   Loader,
   NumberInput,
@@ -26,7 +24,7 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
-import { IconCopy, IconDeviceFloppy, IconDownload, IconPencil, IconSend, IconTrash, IconUpload, IconX } from '@tabler/icons-react'
+import { IconCopy, IconDeviceFloppy, IconSend, IconTrash, IconX } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
   ALLOCATION_METHODS,
@@ -37,9 +35,7 @@ import {
   type ContainerChargeDto,
 } from '../../api/logistics/containerCharges'
 import { containersApi } from '../../api/logistics/containers'
-import { AttachmentEditDialog } from '../attachments/AttachmentEditDialog'
-import { AttachmentUploadDialog } from '../attachments/AttachmentUploadDialog'
-import { ATTACHMENT_ACCEPT, attachmentTypeLabel, formatBytes } from '../attachments/attachmentRules'
+import { AttachmentsPanel, type AttachmentsSource } from '../attachments/AttachmentsPanel'
 import { movementsApi } from '../../api/logistics/movements'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -59,6 +55,11 @@ interface ChargeDrawerProps {
   chargeId: number | null
   onClose: () => void
   onChanged: () => void
+  /**
+   * A file of the charge was added, edited or deleted (default onChanged). The container page passes a lighter
+   * refresh than its full reload, so the drawer stays open while the page's file counts catch up.
+   */
+  onDocumentsChanged?: () => void
 }
 
 interface Header {
@@ -114,7 +115,7 @@ function round2(value: number): number {
  * THE PROVIDER'S INVOICE IS UPLOADED ONCE FOR THE WHOLE GROUP: the same charge typed for three
  * containers is three drafts, and the file lands on all three containers.
  */
-export function ChargeDrawer({ chargeId, onClose, onChanged }: ChargeDrawerProps) {
+export function ChargeDrawer({ chargeId, onClose, onChanged, onDocumentsChanged }: ChargeDrawerProps) {
   const narrow = useMediaQuery('(max-width: 48em)')
 
   return (
@@ -125,12 +126,30 @@ export function ChargeDrawer({ chargeId, onClose, onChanged }: ChargeDrawerProps
       size={narrow ? '100%' : 'xl'}
       title={<Text fw={700} fz="lg">Container charge</Text>}
     >
-      {chargeId !== null && <ChargeBody key={chargeId} chargeId={chargeId} onClose={onClose} onChanged={onChanged} />}
+      {chargeId !== null && (
+        <ChargeBody
+          key={chargeId}
+          chargeId={chargeId}
+          onClose={onClose}
+          onChanged={onChanged}
+          onDocumentsChanged={onDocumentsChanged ?? onChanged}
+        />
+      )}
     </Drawer>
   )
 }
 
-function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClose: () => void; onChanged: () => void }) {
+function ChargeBody({
+  chargeId,
+  onClose,
+  onChanged,
+  onDocumentsChanged,
+}: {
+  chargeId: number
+  onClose: () => void
+  onChanged: () => void
+  onDocumentsChanged: () => void
+}) {
   const { hasPermission } = useAuth()
   const mayEdit = hasPermission(PERMISSIONS.containerChargesCreate)
   const mayPost = hasPermission(PERMISSIONS.containerChargesPost)
@@ -149,11 +168,8 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
   const [movementOptions, setMovementOptions] = useState<{ value: string; label: string }[]>([])
 
   const [busy, setBusy] = useState<'save' | 'post' | 'cancel' | 'delete' | null>(null)
-  /** The file picked for an upload: the shared dialog asks its type, date and note before it goes. */
-  const [uploading, setUploading] = useState<{ file: File } | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
-  const [editing, setEditing] = useState<ContainerChargeAttachmentDto | null>(null)
   const [rateLoading, setRateLoading] = useState(false)
 
   const adopt = useCallback((next: ContainerChargeDto) => {
@@ -367,33 +383,6 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
   /** Every container of the group: an upload goes on all of them. */
   const groupContainerIds = dto ? Array.from(new Set([dto.containerId, ...dto.group.map((g) => g.containerId)])) : []
 
-  async function download(id: number, fileName: string) {
-    try {
-      await containersApi.downloadAttachment(id, fileName)
-    } catch (err) {
-      fail(err, 'The document could not be downloaded.')
-    }
-  }
-
-  // The charge's upload went to the whole group, so it leaves the whole group.
-  async function removeDocument(file: ContainerChargeAttachmentDto) {
-    const go = await confirm({
-      title: 'Delete document',
-      message: `Delete ${file.fileName}${others.length > 0 ? ` from all ${formatNumber(others.length + 1)} containers of the group` : ''}? This cannot be undone.`,
-      confirmLabel: 'Delete',
-      danger: true,
-    })
-    if (!go) return
-    try {
-      await containersApi.removeAttachment(file.id, true)
-      notify.success('Document deleted.')
-      void load()
-      onChanged()
-    } catch (err) {
-      fail(err, 'The document could not be deleted.')
-    }
-  }
-
   if (loadError) return <Alert color="red">{loadError}</Alert>
   if (!dto || !header) {
     return (
@@ -404,6 +393,30 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
   }
 
   const others = dto.group.filter((g) => g.id !== dto.id)
+
+  /* THE CHARGE'S FILES on the shared list: the provider's invoice went to every container of the group, so its edit
+     and its delete reach the whole group too (allShared); a charge's file stays with its charge (no movement choice).
+     The list is the charge's own read, made again after every upload, edit and delete - so the header being typed
+     stays as it is (a file does not touch the charge's row). */
+  const documentSource: AttachmentsSource<ContainerChargeAttachmentDto> = {
+    list: async () => (await containerChargesApi.get(dto.id)).attachments,
+    upload: (file, fields) =>
+      containersApi.addAttachment({ file, containerIds: groupContainerIds, chargeId: dto.id, movementId: dto.movementId, ...fields }),
+    update: (row, edit) => containersApi.updateAttachment(row.id, true, edit),
+    download: (row) => containersApi.downloadAttachment(row.id, row.fileName),
+    asksBeforeRemove: true,
+    remove: async (row) => {
+      const go = await confirm({
+        title: 'Delete document',
+        message: `Delete ${row.fileName}${others.length > 0 ? ` from all ${formatNumber(others.length + 1)} containers of the group` : ''}? This cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+      })
+      if (!go) return false
+      await containersApi.removeAttachment(row.id, true)
+      return true
+    },
+  }
   const chargeType = chargeTypes.find((t) => String(t.id) === header.chargeTypeId)
 
   return (
@@ -656,60 +669,38 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
       </div>
 
       <div>
-        <Group justify="space-between" mb={4} wrap="wrap">
-          <Title order={5}>Documents</Title>
-          {mayAttach && dto.status !== 3 && (
-            <FileButton accept={ATTACHMENT_ACCEPT} onChange={(file) => file && setUploading({ file })}>
-              {(props) => (
-                <Button {...props} size="xs" variant="default" leftSection={<IconUpload size={14} />}>
-                  Upload
-                </Button>
-              )}
-            </FileButton>
-          )}
-        </Group>
-        {others.length > 0 && mayAttach && (
+        <Title order={5} mb={4}>Documents</Title>
+        {mayAttach && dto.status === 3 ? (
+          <Text fz="xs" c="dimmed" mb={4}>
+            This charge is cancelled: no new document can be added.
+          </Text>
+        ) : others.length > 0 && mayAttach ? (
           <Text fz="xs" c="dimmed" mb={4}>
             An upload goes on every container of the group ({formatNumber(others.length + 1)} containers).
           </Text>
-        )}
-        {dto.attachments.length === 0 ? (
-          <Text fz="sm" c="dimmed">No document yet — the provider's invoice belongs here.</Text>
-        ) : (
-          <Stack gap={4}>
-            {dto.attachments.map((file) => (
-              <Group key={file.id} justify="space-between" wrap="nowrap" gap="xs">
-                <div style={{ minWidth: 0 }}>
-                  <Text fz="sm" truncate>{file.fileName}</Text>
-                  <Text fz="xs" c="dimmed">
-                    {[attachmentTypeLabel(file.category, file.subType), file.documentDate ? dateLabel(file.documentDate) : null, formatBytes(file.sizeBytes)].join(' · ')}
-                  </Text>
-                </div>
-                <Group gap={4} wrap="nowrap">
-                  <Tooltip label="Download" withArrow>
-                    <ActionIcon variant="subtle" aria-label={`Download ${file.fileName}`} onClick={() => void download(file.id, file.fileName)}>
-                      <IconDownload size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                  {mayAttach && (
-                    <>
-                      <Tooltip label="Edit" withArrow>
-                        <ActionIcon variant="subtle" aria-label={`Edit ${file.fileName}`} onClick={() => setEditing(file)}>
-                          <IconPencil size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Delete" withArrow>
-                        <ActionIcon variant="subtle" color="red" aria-label={`Delete ${file.fileName}`} onClick={() => void removeDocument(file)}>
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                    </>
-                  )}
-                </Group>
-              </Group>
-            ))}
-          </Stack>
-        )}
+        ) : null}
+        <AttachmentsPanel
+          card={false}
+          layout="cards"
+          documentKind="CONTAINER"
+          source={documentSource}
+          reloadKey={dto.id}
+          // No new file on a cancelled charge; what it has can still be read, retyped, edited and removed.
+          canAdd={mayAttach && dto.status !== 3}
+          canEdit={mayAttach}
+          canRemove={mayAttach}
+          filing={{
+            containerIds: groupContainerIds,
+            otherContainers: [],
+            movementOptions: [],
+            fixedText:
+              groupContainerIds.length > 1
+                ? `Filed under this charge on ${formatNumber(groupContainerIds.length)} containers.`
+                : `Filed under this charge on ${dto.containerRef}.`,
+          }}
+          emptyText="No document yet — the provider's invoice belongs here."
+          onChanged={onDocumentsChanged}
+        />
       </div>
 
       <Divider />
@@ -765,31 +756,6 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
         )}
       </Group>
 
-      <AttachmentUploadDialog
-        opened={uploading !== null}
-        documentKind="CONTAINER"
-        initialFile={uploading?.file ?? null}
-        filing={{
-          containerIds: groupContainerIds,
-          otherContainers: [],
-          movementOptions: [],
-          fixedText:
-            groupContainerIds.length > 1
-              ? `Filed under this charge on ${formatNumber(groupContainerIds.length)} containers.`
-              : `Filed under this charge on ${dto.containerRef}.`,
-        }}
-        onUpload={(file, fields) =>
-          containersApi.addAttachment({ file, containerIds: groupContainerIds, chargeId: dto.id, movementId: dto.movementId, ...fields })
-        }
-        onClose={() => setUploading(null)}
-        onUploaded={() => {
-          setUploading(null)
-          notify.success(groupContainerIds.length > 1 ? `Document added to ${formatNumber(groupContainerIds.length)} containers.` : 'Document added.')
-          void load()
-          onChanged()
-        }}
-      />
-
       {copyOpen && (
         <ApplyChargeModal
           charge={dto}
@@ -802,20 +768,6 @@ function ChargeBody({ chargeId, onClose, onChanged }: { chargeId: number; onClos
           }}
         />
       )}
-
-      {/* The charge's upload went to the whole group, so its edit does too (allShared). */}
-      <AttachmentEditDialog
-        file={editing ? { ...editing, isOther: editing.attachmentTypeId === null } : null}
-        documentKind="CONTAINER"
-        onSave={(edit) => (editing ? containersApi.updateAttachment(editing.id, true, edit) : Promise.resolve())}
-        onClose={() => setEditing(null)}
-        onSaved={() => {
-          notify.success(`${editing?.fileName ?? 'The document'} updated.`)
-          setEditing(null)
-          void load()
-          onChanged()
-        }}
-      />
 
       <CancelReasonModal
         opened={cancelOpen}

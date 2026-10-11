@@ -229,6 +229,19 @@ export function MovementPage() {
     void load()
   }, [load])
 
+  /* A FILE ADDED, EDITED OR DELETED on the Documents tab changes only the movement's files: they come from a fresh
+     read, and the page stays as it is - no loader, the tab stays open, a movement being edited keeps its changes (a
+     file does not touch the movement's row). */
+  const documentsChanged = useCallback(async () => {
+    if (movementId === null) return
+    try {
+      const fresh = await movementsApi.get(movementId)
+      setMovement((current) => (current && current.id === fresh.id ? { ...current, attachments: fresh.attachments } : current))
+    } catch {
+      /* The count catches up on the next load; the tab already shows the files. */
+    }
+  }, [movementId])
+
   useEffect(() => {
     movementTypesApi.lookup(false).then(setTypes).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
@@ -685,7 +698,7 @@ export function MovementPage() {
                   </Tabs.Panel>
 
                   <Tabs.Panel value="documents">
-                    <MovementDocumentsCard movement={movement} canManage={hasPermission(PERMISSIONS.containerAttachmentsManage)} onChanged={() => void load()} />
+                    <MovementDocumentsCard movement={movement} canManage={hasPermission(PERMISSIONS.containerAttachmentsManage)} onChanged={() => void documentsChanged()} />
                   </Tabs.Panel>
                 </Tabs>
               </Paper>
