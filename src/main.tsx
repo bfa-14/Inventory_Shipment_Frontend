@@ -14,16 +14,22 @@ import './index.css'
 import './styles/app.css'
 
 import App from './App.tsx'
+import { EnvironmentProvider } from './environment/EnvironmentProvider'
 import { theme } from './theme'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ColorSchemeScript defaultColorScheme="light" forceColorScheme="light" />
     <MantineProvider theme={theme} defaultColorScheme="light" forceColorScheme="light">
-      <Notifications position="top-right" />
-      <ModalsProvider>
-        <App />
-      </ModalsProvider>
+      {/* Production or testing, read from /environment.json without holding up this first render. Above
+          Notifications and ModalsProvider: both render their content beside their children, so a
+          toast or a modals.open() body placed below them would only ever see "unknown". */}
+      <EnvironmentProvider>
+        <Notifications position="top-right" />
+        <ModalsProvider>
+          <App />
+        </ModalsProvider>
+      </EnvironmentProvider>
     </MantineProvider>
   </StrictMode>,
 )

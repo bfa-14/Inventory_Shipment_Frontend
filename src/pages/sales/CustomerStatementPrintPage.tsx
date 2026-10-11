@@ -7,6 +7,7 @@ import { receiptsApi, type CustomerStatementDto } from '../../api/sales/receipts
 import { dateLabel, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { STATEMENT_ROUTE } from '../../components/sales/receipt/receiptModel'
+import { TestingMarker } from '../../environment/TestingMarker'
 
 /**
  * The statement on paper. Its own route outside the shell (like the shortage plan), so the screen is
@@ -50,6 +51,7 @@ export function CustomerStatementPrintPage() {
   if (error) {
     return (
       <div className="print-page">
+        <TestingMarker />
         <Alert color="red" mb="md">{error}</Alert>
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
       </div>
@@ -69,6 +71,7 @@ export function CustomerStatementPrintPage() {
 
   return (
     <div className="print-page">
+      <TestingMarker />
       <Group justify="space-between" className="no-print" mb="md">
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
         <Button leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print</Button>

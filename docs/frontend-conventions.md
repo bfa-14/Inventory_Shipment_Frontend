@@ -18,7 +18,9 @@ instead of repeating the rules.
 
 `postcss.config.cjs` runs `postcss-preset-mantine` and `postcss-simple-vars` (breakpoints xs 36em, sm 48em,
 md 62em, lg 75em, xl 88em). `src/main.tsx` imports the stylesheets in this order and wraps the router in
-`MantineProvider` → `Notifications` (top-right) → `ModalsProvider`:
+`MantineProvider` → `EnvironmentProvider` (see **Environments (Production / Testing)**) → `Notifications`
+(top-right) → `ModalsProvider`. `EnvironmentProvider` sits above the other two because they render toasts and
+`modals.open()` bodies beside their children, where a provider below them would not reach:
 
 ```
 @mantine/core/styles.css → @mantine/notifications/styles.css → @mantine/dates/styles.css
@@ -42,6 +44,10 @@ there, never with inline styles on the page. Two details worth knowing before ed
   box is what carries the border, height and radius.
 - its reveal toggle fires on `mousedown`, not `click` — a test that calls `element.click()` will see nothing
   happen and wrongly report a regression.
+
+The Production / Testing switch and the "Testing environment" badge are the one addition to the design; they
+follow the same rule (classes `.login-env-switch` / `.login-env-badge` in `src/index.css`) and are described
+under **Environments (Production / Testing)**.
 
 ## Theme (`src/theme.ts`)
 
@@ -80,6 +86,51 @@ page's master list), and those must keep the default light styling.
   keeps the dashboard switch and the sidebar in step within the tab, so neither needs a provider. Pass the
   flag as `visibleNavigation(hasPermission, showComingSoon)` — it defaults to `true`, so callers that only
   care about permissions are unaffected.
+
+## Environments (Production / Testing)
+
+The application runs twice on the same server: **production** (built from the `production` branch, the real
+database) and **testing** (built from `main`, a database of its own), each at its own address with its own web
+container and API. The app learns which one it is at run time, so the same build serves both.
+
+**`GET /environment.json`** is answered by the web container (the `Caddyfile`, from `APP_ENVIRONMENT` and
+`APP_SWITCH_URL` set by `deploy/docker-compose.yml` in Inventory_Shipment), never by the API, with
+`Cache-Control: no-store`:
+
+```
+{ "environment": "production" | "testing", "switchUrl": "<absolute http(s) address of the other environment, or empty>" }
+```
+
+**`src/environment/`** reads it: `EnvironmentProvider` (in `main.tsx`) fetches it **once** at start-up
+(`cache: 'no-store'`) and never holds up the first render; screens read the answer with `useEnvironment()` →
+`{ environment, switchUrl }`. The parsing is strict: `environment` must be exactly `production` or `testing`,
+and `switchUrl` must be an absolute `http:`/`https:` URL that is not this site, otherwise it is `null`. **Any**
+failure — a 404, a network error, invalid JSON, the Vite dev server answering with `index.html` — leaves both
+`null`, and `null` means *show nothing*: `npm run dev` looks exactly as it always has. Never treat `null` as
+production.
+
+What the reader sees:
+
+| Where | When | What |
+|---|---|---|
+| Sign-in page, below **Sign in** | `environment` known **and** `switchUrl` set | Mantine `Switch` "Test environment" (on = testing, orange), with "Off: Production. On: Testing (test data, safe to try things)." under it. Flipping it — click, or Space from the keyboard — loads `new URL('/login', switchUrl)`: a full page load of the other site, nothing carried across. |
+| Sign-in page, above the logo | `environment === 'testing'` | Orange filled badge "Testing environment". |
+| App header, left of the search box | `environment === 'testing'` | Orange filled `Badge` "TESTING", tooltip "Test environment: test data; emails are not sent to real people". The badge is a tab stop and the tooltip opens on hover, focus and tap. |
+| Pages outside the shell: the print pages (receipt, payment voucher, customer statement, shortage plan) and the emailed approval page | `environment === 'testing'` | `<TestingMarker />` (`src/environment/`): an orange strip "Test environment - test data, not a real document" at the top of the page. It is **not** `.no-print`: it goes onto the paper, colour kept with `print-color-adjust: exact`. A new page outside `AppShell` puts it first. |
+| Browser tab | `environment === 'testing'` | `document.title` prefixed with `TEST · `, kept there if a page sets its own title. |
+
+**The switch always shows where the page is, never where it is going.** The form under it signs in to *this*
+environment, so after a press it stays put, disabled, with "Opening the Testing (or Production) sign-in
+page..." under it until the other page replaces this one. If that load is stopped or stalls, the switch comes
+back after 10 seconds; a page restored from the back-forward cache gets it back at once.
+
+Production shows nothing new anywhere. Orange is the testing colour: do not use a filled orange badge in the
+header for anything else.
+
+On the sign-in page both pieces use space the design leaves empty (the badge is absolutely placed in the
+panel's top margin), so a full-size card looks exactly as approved. The switch does add height, so while it is
+shown the card carries `.login-card--env-switch`: its 1034:772 height becomes a minimum, and on screens of about
+900–1130px, where the scaled-down card would cut the footer off, it grows instead.
 
 ## Finding a page: the menu search and the Spotlight
 
@@ -948,4 +999,6 @@ copied.
 - [ ] `notify` for success, `confirm` for destructive or irreversible actions.
 - [ ] Error codes handled per the table above.
 - [ ] Works at 1440 px and 390 px.
+- [ ] A page routed outside `AppShell` (a print page, a public page) renders `<TestingMarker />` first (see
+      **Environments (Production / Testing)**).
 - [ ] `npm run typecheck`, `npm run lint`, `npm run build` all clean; no `any`, no TODOs, no mock data.

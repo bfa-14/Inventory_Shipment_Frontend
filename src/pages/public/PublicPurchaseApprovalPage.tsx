@@ -25,6 +25,7 @@ import { publicApprovalApi, type PublicApprovalDto, type PublicDecisionResultDto
 import { katangaLogo } from '../../assets'
 import { dateLabel, stamp } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber } from '../../components/format'
+import { TestingMarker } from '../../environment/TestingMarker'
 
 const COMPANY = 'Katanga TVS Motor Company'
 const TOO_MANY = 'Too many attempts, try again in a minute.'
@@ -39,11 +40,15 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback
 }
 
-/** The page's frame: the company, then one card — no menu, no sign-in. */
+/**
+ * The page's frame: the company, then one card — no menu, no sign-in. In the testing environment the
+ * TESTING strip comes first: a test email can lead here, and the order on it is a copy of a real one.
+ */
 function Frame({ children }: { children: ReactNode }) {
   return (
     <Box mih="100vh" bg="gray.0" py={{ base: 'md', sm: 40 }} px={{ base: 'sm', sm: 'md' }}>
       <Stack maw={760} mx="auto" gap="md">
+        <TestingMarker />
         <Group gap="sm" justify="center">
           <Image src={katangaLogo} alt="" h={36} w="auto" fit="contain" />
           <Text fw={700} size="lg">

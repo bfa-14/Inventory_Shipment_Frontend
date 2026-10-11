@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from 'react'
-import { Alert, Button, PasswordInput, TextInput } from '@mantine/core'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Alert, Badge, Button, PasswordInput, Switch, TextInput } from '@mantine/core'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
 import { ApiError } from '../api/http'
 import { bikeWatermark, katangaLogo, loginHero } from '../assets'
 import { safeReturnUrl } from '../auth/returnUrl'
 import { useAuth } from '../auth/useAuth'
+import { useEnvironment } from '../environment/useEnvironment'
 import { landingRoute } from '../navigation'
 
 /*
@@ -17,6 +18,10 @@ import { landingRoute } from '../navigation'
 
 export function LoginPage() {
   const { status, user, login } = useAuth()
+  const { environment, switchUrl } = useEnvironment()
+  // Only when the server says which environment this is AND where the other one lives: nothing in
+  // `npm run dev`, nothing on a server that runs one environment alone.
+  const showEnvironmentSwitch = environment !== null && switchUrl !== null
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -67,12 +72,19 @@ export function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-card">
+      <div className={showEnvironmentSwitch ? 'login-card login-card--env-switch' : 'login-card'}>
         {/* The picture already contains the TVS logo, the headline and the paragraph - nothing is drawn over it. */}
         <img className="login-hero" src={loginHero} alt="Katanga TVS - powering progress in every mile" />
 
         <section className="login-panel">
           <img className="login-panel__watermark" src={bikeWatermark} alt="" aria-hidden="true" />
+
+          {/* Above the logo, in the panel's empty top margin, so the design below it does not move. */}
+          {environment === 'testing' ? (
+            <Badge className="login-env-badge" color="orange" variant="filled" size="lg">
+              Testing environment
+            </Badge>
+          ) : null}
 
           <div className="login-panel__body">
             <img className="login-panel__logo" src={katangaLogo} alt="Katanga TVS Motor Company" />
@@ -146,6 +158,10 @@ export function LoginPage() {
                 {submitting ? 'Signing in...' : 'Sign in'}
               </Button>
             </form>
+
+            {showEnvironmentSwitch ? (
+              <EnvironmentSwitch testing={environment === 'testing'} switchUrl={switchUrl} disabled={submitting} />
+            ) : null}
           </div>
 
           <footer className="login-footer">
@@ -160,6 +176,71 @@ export function LoginPage() {
         </section>
       </div>
     </div>
+  )
+}
+
+/** How long the switch waits for the other environment's page before it is offered again. */
+const LEAVING_TIMEOUT_MS = 10_000
+
+/**
+ * Production / Testing: on means testing. Flipping it opens the OTHER environment's sign-in page - a
+ * full page load, not a route change, because that is another site with its own app, API, database and
+ * sign-in; nothing of this one (the typed username, a session) is carried across.
+ *
+ * IT ALWAYS SAYS WHERE THIS PAGE IS, NEVER WHERE IT IS GOING: the form below signs in HERE, so until the
+ * other page has replaced this one the switch stays put, greyed out, with "Opening the ... sign-in page"
+ * under it. Flipped early, a load that is stopped (Esc) or stalls would leave the production form
+ * looking like the testing one.
+ */
+function EnvironmentSwitch({
+  testing,
+  switchUrl,
+  disabled,
+}: {
+  testing: boolean
+  switchUrl: string
+  disabled: boolean
+}) {
+  const [leaving, setLeaving] = useState(false)
+
+  // Still here a while after the press: the load was stopped or has stalled, so the switch is given
+  // back to be tried again.
+  useEffect(() => {
+    if (!leaving) return
+    const timer = window.setTimeout(() => setLeaving(false), LEAVING_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [leaving])
+
+  // Back from the other environment, the browser may restore this page from its back-forward cache
+  // exactly as it was left - mid-departure - so the switch is given back at once.
+  useEffect(() => {
+    function restore(event: PageTransitionEvent) {
+      if (event.persisted) setLeaving(false)
+    }
+    window.addEventListener('pageshow', restore)
+    return () => window.removeEventListener('pageshow', restore)
+  }, [])
+
+  function handleChange() {
+    if (leaving) return
+    setLeaving(true)
+    window.location.assign(new URL('/login', switchUrl).toString())
+  }
+
+  return (
+    <Switch
+      className="login-env-switch"
+      color="orange"
+      label="Test environment"
+      description={
+        leaving
+          ? `Opening the ${testing ? 'Production' : 'Testing'} sign-in page...`
+          : 'Off: Production. On: Testing (test data, safe to try things).'
+      }
+      checked={testing}
+      onChange={handleChange}
+      disabled={disabled || leaving}
+    />
   )
 }
 

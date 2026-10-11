@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# The web container: the built React app served by Caddy, which also forwards /api and /health to
-# the API container and gets the HTTPS certificate. See Caddyfile, and deploy/README.md in the
-# Inventory_Shipment repository for the whole stack.
+# The web container: the built React app served by Caddy over plain HTTP on port 8080 (see Caddyfile),
+# which also forwards /api and /health to the API. HTTPS and the public address belong to the proxy in
+# Inventory_Shipment/deploy (deploy/README.md there).
 
 FROM node:22-slim AS build
 WORKDIR /src

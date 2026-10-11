@@ -1,14 +1,14 @@
 # The web container's configuration (see Dockerfile).
 #
-# Serves the React app from /srv, forwards /api and /health to the API, and gets and renews the
-# HTTPS certificate for DOMAIN from Let's Encrypt (plain http:// is redirected to https://).
-# DOMAIN, ACME_EMAIL and API_UPSTREAM come from the environment: deploy/.env through docker-compose.
+# Serves the React app from /srv and forwards /api and /health to the API, over plain HTTP on port 8080
+# only. TLS and the public address belong to the edge proxy in Inventory_Shipment/deploy: it answers
+# HTTPS for each environment (production, testing), sends /api and /health straight to that
+# environment's API and everything else here. Port 8080 is what the edge proxy reaches, and what an SSH
+# tunnel reaches too (see "Open the app through SSH" in deploy/README.md); docker-compose publishes it on
+# the server's 127.0.0.1 only, never to the internet.
 #
-# The same app is also served over plain HTTP on port 8080 for an SSH tunnel; docker-compose publishes
-# that port on the server's 127.0.0.1 only (see "Open the app through SSH" in deploy/README.md).
-{
-	email {$ACME_EMAIL}
-}
+# API_UPSTREAM, APP_ENVIRONMENT and APP_SWITCH_URL come from the environment: deploy/.env through
+# docker-compose.
 
 # Headers for the pages and files of the app. The API's responses carry their own (it is stricter,
 # and Cache-Control: no-store), so these are not applied to /api.
@@ -28,14 +28,26 @@
 	}
 }
 
-# The app: the API routes, the bundles and the single-page app. One copy, served by both sites below.
+# The app: the API routes, the bundles and the single-page app.
 (app) {
 	encode zstd gzip
 
-	# The API: everything under /api, and the health probe.
+	# The API: everything under /api, and the health probe. Behind the edge proxy these never get
+	# here (it sends them to the API itself); through the SSH tunnel they do.
 	@api path /api /api/* /health
 	handle @api {
 		reverse_proxy {$API_UPSTREAM:api:8080}
+	}
+
+	# Which environment this copy of the app is, read once by the app at start-up (src/environment/):
+	# the sign-in page's Production / Testing switch goes to switchUrl, and "testing" puts the TESTING
+	# marker on every page. The values are fixed when Caddy starts, so a change needs a restart.
+	# no-store: the answer must never outlive a change of either value.
+	handle /environment.json {
+		import app_headers
+		header Content-Type "application/json"
+		header Cache-Control "no-store"
+		respond `{"environment":"{$APP_ENVIRONMENT:production}","switchUrl":"{$APP_SWITCH_URL:}"}` 200
 	}
 
 	# Vite's bundles have a content hash in their names: cached for a year, and a name that does not
@@ -59,12 +71,7 @@
 	}
 }
 
-{$DOMAIN} {
-	import app
-}
-
-# For an SSH tunnel only (ssh -L 8080:localhost:8080 ...): never published beyond the server's 127.0.0.1,
-# so it works before the firewall lets 80/443 through, and never offers plain HTTP to the internet.
+# The only site: plain HTTP, for the edge proxy and the SSH tunnel (ssh -L 8080:localhost:8080 ...).
 http://:8080 {
 	import app
 }

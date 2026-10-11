@@ -6,6 +6,7 @@ import { ApiError } from '../../api/http'
 import { receiptsApi, type ReceiptDto } from '../../api/sales/receipts'
 import { dateLabel, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
+import { TestingMarker } from '../../environment/TestingMarker'
 
 const ROUTE = '/sales/receipts'
 
@@ -50,6 +51,7 @@ export function ReceiptPrintPage() {
   if (error) {
     return (
       <div className="print-page">
+        <TestingMarker />
         <Alert color="red" mb="md">{error}</Alert>
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
       </div>
@@ -83,6 +85,7 @@ export function ReceiptPrintPage() {
 
   return (
     <div className="print-page">
+      <TestingMarker />
       <Group justify="space-between" className="no-print" mb="md">
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
         <Button leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print</Button>
