@@ -42,6 +42,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
+import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
 
 const ROUTE = '/sales/invoices'
 const TYPE = 'SINV'
@@ -306,8 +307,8 @@ export function SalesInvoicePage() {
     void reload()
   }, [reload])
 
-  /* A LINE MAY SHIP FROM A WAREHOUSE OF ANY BRANCH, so every active warehouse is offered on the lines.
-     Only the seed for new rows follows the header: the branch's main warehouse. */
+  /* A LINE MAY SHIP FROM A WAREHOUSE OF ANY BRANCH, but only from a leaf (see lineWarehouses).
+     Only the seed for new rows follows the header: the branch's main (leaf) warehouse. */
   useEffect(() => {
     let cancelled = false
     warehousesApi
@@ -323,12 +324,7 @@ export function SalesInvoicePage() {
 
   useEffect(() => {
     if (header.branchId === null) return
-    setDefaultWarehouseId((current) => {
-      if (current !== null) return current
-      const own = warehouses.filter((w) => w.branchId === Number(header.branchId))
-      const main = own.find((w) => w.isMainWarehouse) ?? own[0]
-      return main ? main.id : null
-    })
+    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId)))
   }, [header.branchId, warehouses])
 
   /* The rates follow the currency, the price list, the type and the date — but overwrite a loaded
@@ -1071,7 +1067,7 @@ export function SalesInvoicePage() {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={warehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseName} (${w.branchName})` }))}
+          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => {
             markDirty()

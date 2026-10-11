@@ -411,7 +411,10 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
     label: `${t.typeCode} - ${t.typeName}`,
   }))
   const portOptions = ports.map((p) => ({ value: String(p.id), label: portLabel(p) }))
-  const warehouseOptions = warehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
+  // Leaves only: the goods are offloaded into a warehouse at the bottom of the tree (script 65).
+  const warehouseOptions = warehouses
+    .filter((w) => w.childCount === 0 || String(w.id) === warehouseId)
+    .map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
   const forwarderOptions = forwarders.map((p) => ({ value: String(p.id), label: supplierLabel(p) }))
   const createBlocked = creating || proposal === null || toCreate.length === 0 || overLines.length > 0 || (overBoxes.length > 0 && !canOverCapacity)
 

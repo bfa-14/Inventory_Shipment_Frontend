@@ -33,6 +33,7 @@ import {
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
 
 let keySeed = 0
 const nextKey = () => `line-${++keySeed}`
@@ -305,24 +306,11 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const headerBranchId = header.branchId === null ? null : Number(header.branchId)
   const defaultWarehouseId = useMemo(() => {
     if (chosenDefaultWarehouseId !== null) return chosenDefaultWarehouseId
-    if (headerBranchId === null) return null
-    const ofBranch = warehouses.filter((w) => w.branchId === headerBranchId)
-    return (ofBranch.find((w) => w.isMainWarehouse) ?? ofBranch[0])?.id ?? null
+    return defaultLineWarehouseId(warehouses, headerBranchId)
   }, [chosenDefaultWarehouseId, headerBranchId, warehouses])
 
-  /* The header branch's warehouses first, then the others with their branch named, so the common
-     choice is at the top and a warehouse of another branch is never mistaken for a local one. */
-  const warehouseOptions = useMemo(
-    () =>
-      [...warehouses]
-        .sort((a, b) => Number(b.branchId === headerBranchId) - Number(a.branchId === headerBranchId)
-          || a.branchName.localeCompare(b.branchName) || a.warehouseName.localeCompare(b.warehouseName))
-        .map((w) => ({
-          value: String(w.id),
-          label: w.branchId === headerBranchId ? w.warehouseName : `${w.warehouseName} (${w.branchName})`,
-        })),
-    [warehouses, headerBranchId],
-  )
+  /* Leaves of every branch, the header branch's first (see lineWarehouses). */
+  const warehouseOptions = lineWarehouseOptions(warehouses, headerBranchId, lines.map((l) => l.warehouseId))
 
   /* ── line editing ─────────────────────────────────────────────────────────────────────────── */
 

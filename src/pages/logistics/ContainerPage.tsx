@@ -258,7 +258,10 @@ export function ContainerPage() {
     .map((p) => ({ value: String(p.id), label: portLabel(p) }))
   const supplierOptions = suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) }))
   const branchOptions = branches.map((b) => ({ value: String(b.id), label: `${b.branchCode} - ${b.branchName}` }))
-  const branchWarehouses = warehouses.filter((w) => values.branchId !== null && String(w.branchId) === values.branchId)
+  // The offloading warehouse: the container's branch, and a leaf - stock lives only at the bottom of the tree (script 65).
+  const branchWarehouses = warehouses.filter(
+    (w) => values.branchId !== null && String(w.branchId) === values.branchId && (w.childCount === 0 || String(w.id) === values.warehouseId),
+  )
   const warehouseOptions = branchWarehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
   const countryOptions = useMemo(() => COUNTRIES.map((c) => ({ value: c.code, label: countryLabel(c) })), [])
 
@@ -818,7 +821,7 @@ export function ContainerPage() {
           opened
           onClose={() => setOffloadOpen(false)}
           lines={lines}
-          warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId)}
+          warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId && w.childCount === 0)}
           defaultWarehouseId={container.warehouseId}
           busy={busyAction === 'offload'}
           error={offloadError}

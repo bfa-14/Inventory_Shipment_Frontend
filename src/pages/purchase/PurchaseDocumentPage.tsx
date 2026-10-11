@@ -86,6 +86,7 @@ import { refreshApprovalsMe, useApprovalsMe } from '../../hooks/useApprovalsMe'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
+import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
 
 let keySeed = 0
 const nextKey = () => `pur-${++keySeed}`
@@ -445,8 +446,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }, [kind.code, document])
 
-  /* A LINE MAY RECEIVE INTO A WAREHOUSE OF ANY BRANCH, so every active warehouse is offered on the
-     lines. Only the seed for new rows follows the header: the branch's main warehouse. */
+  /* A LINE MAY RECEIVE INTO A WAREHOUSE OF ANY BRANCH, but only into a leaf (see lineWarehouses).
+     Only the seed for new rows follows the header: the branch's main (leaf) warehouse. */
   useEffect(() => {
     let cancelled = false
     warehousesApi
@@ -462,12 +463,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   useEffect(() => {
     if (header.branchId === null) return
-    setDefaultWarehouseId((current) => {
-      if (current !== null) return current
-      const own = warehouses.filter((w) => w.branchId === Number(header.branchId))
-      const main = own.find((w) => w.isMainWarehouse) ?? own[0]
-      return main ? main.id : null
-    })
+    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId)))
   }, [header.branchId, warehouses])
 
   /* The rate follows the currency, the type and the date — but overwrites a loaded document's own
@@ -1436,7 +1432,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={warehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseName} (${w.branchName})` }))}
+          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => void unitChosen(key, unit)}
           onUnitsNeeded={(key) => void loadUnits(key)}
