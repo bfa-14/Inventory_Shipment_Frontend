@@ -881,6 +881,41 @@ only drops the two buttons (`.no-print`), the page is A4 landscape, and `window.
 plan has loaded (a draft with unsaved changes is asked to save first). Export downloads `Shortage_<number>.xlsx`.
 Both are on the list's row actions and on the document.
 
+## Import container charges from Excel
+
+**Import charges from Excel…** in the Containers page header (`ContainersPage`; shown with
+`containers.charges.create`, hidden without it) opens **`ImportContainerChargesWizard`**
+(`src/components/logistics/`). Every call of the feature is in `src/api/logistics/containerChargeImport.ts`
+(`api/logistics/container-charges/import`: `GET template`, `POST validate` multipart, `POST` the import,
+`POST error-report`), so aligning it with the API is one file.
+
+- **One row = one charge on one container**: the row's whole amount on that container, divided over its items by
+  the row's allocation method (the charge type's when blank; Manual is refused). There is no split over several
+  containers here; that is **Add charge**.
+- **The same three steps and rules as `ImportInvoiceItemsWizard`**, in a component of its own: .xlsx up to 5 MB
+  (the API's limit) checked before the upload, chosen by drag and drop, a click in the drop zone, or its
+  **Choose a file…** button (the way in from the keyboard); the server judges every row (Valid / Warning / Error) and keeps nothing; the wizard
+  holds the judged rows (the import is sent them back as they came, with the file name), and **Download the error
+  report** posts them back too. A Warning (a duplicate, a late charge…) is imported as its own charge, never merged.
+  The reader's today goes with the file (`today`): it is what a blank Charge Date means.
+- **Step 2** shows every row: Container (ref, no. and status; the file's text in red when it matched nothing),
+  Charge Type, Date ("today" under a blank one), Amount (with "≈ 1,630.43 USD" and "rate 0.92 of the date"
+  under another currency), Provider (with "Inv. {no.}", and "One group with row 3" when the rows of one provider
+  invoice share a charge group), Allocation ("the type's default" under a blank one), Status, Message. "Continue
+  with {n} charges"; "Choose another file" starts again.
+- **Step 3** says what will be created (charges, containers, charge groups, totals per currency ≈ base). The
+  **Post the charges** switch (off by default) is offered only with `containers.charges.post`, which the server
+  checks again; without it a line says the charges stay drafts. The button reads "Import {n} charges", or
+  "Import {n}, skip {m}" when rows have errors.
+- **Each row is imported on its own.** The result lists every row with a link to its container: Posted, Draft,
+  "Draft, not posted" (outcome Draft with a message when posting was asked: the draft stays) or Refused (outcome
+  Failed), with the API's reason as it came. **Download the refused rows** (shown only when a row was refused) is
+  the error report of the Refused rows only, with their reasons, to correct and import again. A "Draft, not
+  posted" row is never in it: its charge exists, and importing it again would add a second one (the duplicate
+  check is only a warning); the result says to post it from the container or Logistics › Container Charges. The
+  Containers list reloads as soon as one charge was created.
+- The dialog is 1280 px wide and full screen below 768 px; its tables scroll sideways inside it.
+
 ## Charge types & landed cost
 
 The money that turns a supplier's price into what the goods really cost.
