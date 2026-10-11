@@ -1,8 +1,23 @@
-import { ActionIcon, Avatar, Breadcrumbs, Group, Indicator, Kbd, Menu, Stack, Text, TextInput, UnstyledButton } from '@mantine/core'
+import {
+  ActionIcon,
+  Avatar,
+  Badge,
+  Breadcrumbs,
+  Group,
+  Indicator,
+  Kbd,
+  Menu,
+  Stack,
+  Text,
+  TextInput,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core'
 import { spotlight } from '@mantine/spotlight'
 import { IconBell, IconChevronDown, IconKey, IconLogout, IconLogout2, IconSearch } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../auth/useAuth'
+import { useEnvironment } from '../../environment/useEnvironment'
 import { breadcrumbFor, findLeaf } from '../../navigation'
 import { initials } from '../format'
 
@@ -14,6 +29,7 @@ const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navig
 
 export function AppHeader() {
   const { user, logout, logoutEverywhere } = useAuth()
+  const { environment } = useEnvironment()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -49,6 +65,32 @@ export function AppHeader() {
       </Stack>
 
       <Group gap="sm" wrap="nowrap">
+        {/*
+          On every page of the testing environment, so a screen full of test data is never taken for
+          the real thing. Production (and an environment that could not be read) shows nothing here.
+          A tab stop, and the tooltip opens on focus and on a tap as well as on hover, so the note about
+          emails reaches keyboard, touch and screen-reader users too (Mantine describes the badge by
+          the open tooltip); mantine-focus-auto gives it the same focus ring as the buttons.
+        */}
+        {environment === 'testing' ? (
+          <Tooltip
+            label="Test environment: test data; emails are not sent to real people"
+            events={{ hover: true, focus: true, touch: true }}
+            withArrow
+          >
+            <Badge
+              color="orange"
+              variant="filled"
+              size="lg"
+              tabIndex={0}
+              className="mantine-focus-auto"
+              style={{ flexShrink: 0 }}
+            >
+              TESTING
+            </Badge>
+          </Tooltip>
+        ) : null}
+
         {/*
           A door to the Spotlight rather than a box that filters something: it is read-only, so a
           keystroke cannot land in a field that would never act on it, and a click, Enter, Space and

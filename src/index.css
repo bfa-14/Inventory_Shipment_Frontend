@@ -271,6 +271,62 @@ body,
   cursor: not-allowed;
 }
 
+/* ---------- the environment controls (see "Environments" in docs/frontend-conventions.md) ----------
+   Additions to the approved design, both shown only on a server that says which environment it is.
+   They sit in space the design leaves empty - the panel's top margin, the gap above the footer - so on
+   a full-size card nothing it places moves. Orange is the testing colour everywhere in the app. */
+
+/* "Testing environment", centred in the panel's top margin, above the logo. max-content: placed at
+   left: 50%, the badge would otherwise only get the right half of a narrow panel, and Mantine cuts
+   the label short with an ellipsis. */
+.login-env-badge {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 1;
+  width: max-content;
+  transform: translateX(-50%);
+}
+
+/* The Production / Testing switch below the submit button: Mantine's Switch with the form's label
+   type, the subtitle's grey for the line under it, and the fields' navy focus ring. */
+.login-env-switch {
+  margin: 16px 0;
+  text-align: left; /* outside the form, so the panel's centring would reach it */
+  --switch-cursor: pointer;
+}
+
+.login-env-switch .mantine-Switch-labelWrapper:not([data-disabled]) {
+  --label-cursor: pointer;
+}
+
+.login-env-switch .mantine-Switch-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.login-env-switch .mantine-Switch-description {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--katanga-muted);
+}
+
+.login-env-switch .mantine-Switch-input:focus-visible + .mantine-Switch-track {
+  outline-color: var(--katanga-navy);
+}
+
+/* The switch makes the panel up to 90px taller. A full-size card has most of that to spare above the
+   footer, but on a narrower screen (about 900 to 1130px) the card is scaled down with its picture and
+   the overflow: hidden card would cut off the footer. So, with the switch only, the card's height is
+   a MINIMUM rather than fixed: the same 1034:772 height as before (same width, same formula), grown
+   when - and only when - the panel needs more; the picture is object-fit: cover and fills the extra.
+   Wherever everything fitted, the card is exactly as it was. */
+.login-card--env-switch {
+  aspect-ratio: auto;
+  min-height: calc(min(1040px, 92vw) * 772 / 1034);
+}
+
 .login-footer {
   position: relative;
   z-index: 1;
@@ -303,5 +359,15 @@ body,
 
   .login-panel {
     padding: 40px 24px;
+  }
+
+  /* The top margin is 40px here: the badge moves up to stay clear of the logo. */
+  .login-env-badge {
+    top: 8px;
+  }
+
+  /* One column, sized by its content, as without the switch. */
+  .login-card--env-switch {
+    min-height: 0;
   }
 }

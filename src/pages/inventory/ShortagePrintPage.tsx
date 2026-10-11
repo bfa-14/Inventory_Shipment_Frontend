@@ -7,6 +7,7 @@ import { shortagesApi, type ShortageDocumentDto } from '../../api/inventory/shor
 import { dateLabel, stamp, unitLabel } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { SHORTAGES_ROUTE } from '../../components/shortages/shortageMath'
+import { TestingMarker } from '../../environment/TestingMarker'
 
 /**
  * The plan on paper: header block, lines, totals — and nothing else.
@@ -52,6 +53,7 @@ export function ShortagePrintPage() {
   if (error) {
     return (
       <div className="print-page">
+        <TestingMarker />
         <Alert color="red" mb="md">{error}</Alert>
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
       </div>
@@ -85,6 +87,7 @@ export function ShortagePrintPage() {
 
   return (
     <div className="print-page" data-shortage-print>
+      <TestingMarker />
       <Group justify="space-between" className="no-print" mb="md">
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
         <Button leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print</Button>

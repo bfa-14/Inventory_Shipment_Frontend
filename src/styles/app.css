@@ -398,6 +398,26 @@
   }
 }
 
+/* ── The TESTING marker outside the shell (src/environment/TestingMarker.tsx) ─────────────────────
+   The print pages and the emailed approval page, in the testing environment only. Orange, the
+   testing colour, with BLACK text: legible on screen and still legible from a black-and-white
+   printer, where the orange turns light grey. print-color-adjust keeps the orange on paper, where
+   browsers otherwise drop backgrounds. */
+.testing-marker {
+  margin: 0 0 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--mantine-color-orange-6);
+  color: #000;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 /* A group's header row: names the group and carries its own figures, so it reads as a small footer.
    The whole row is the control that collapses it. */
 .app-grid .app-grid__group > td {

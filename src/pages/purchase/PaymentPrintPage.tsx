@@ -7,6 +7,7 @@ import { paymentsApi, type PaymentDto } from '../../api/purchase/payments'
 import { dateLabel, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { PAYMENTS_ROUTE } from '../../components/purchase/payment/paymentModel'
+import { TestingMarker } from '../../environment/TestingMarker'
 
 /**
  * The payment voucher on paper: header, payment details, the documents it paid, signatures.
@@ -48,6 +49,7 @@ export function PaymentPrintPage() {
   if (error) {
     return (
       <div className="print-page">
+        <TestingMarker />
         <Alert color="red" mb="md">{error}</Alert>
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
       </div>
@@ -83,6 +85,7 @@ export function PaymentPrintPage() {
 
   return (
     <div className="print-page">
+      <TestingMarker />
       <Group justify="space-between" className="no-print" mb="md">
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={back}>Back</Button>
         <Button leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print</Button>

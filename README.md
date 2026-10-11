@@ -119,7 +119,11 @@ Tokens are kept in `sessionStorage` (cleared when the tab closes). For a hardene
 `npm run build` writes static files to `dist/`. The app calls `/api` on its own origin (`VITE_API_BASE_URL` is
 empty in `.env.production`), so it must be served behind the same address as the API.
 
-That is what the `Dockerfile` here does: it builds `dist/` and serves it with [Caddy](https://caddyserver.com),
-which also forwards `/api` and `/health` to the API and gets the HTTPS certificate (`Caddyfile`). The image is
-built and run by `deploy/docker-compose.yml` in the **Inventory_Shipment** repository: see `deploy/README.md`
-there to put the whole application on a server.
+That is what the `Dockerfile` here does: it builds `dist/` and serves it with [Caddy](https://caddyserver.com)
+(`Caddyfile`), which also forwards `/api` and `/health` to the API. The container serves **plain HTTP on port
+8080** only: HTTPS and the public addresses belong to the edge proxy in front of it (in `deploy/` of the
+**Inventory_Shipment** repository), and the server runs one such container per environment, production and
+testing. Each container answers `/environment.json` with the environment it is (`APP_ENVIRONMENT`) and the other one's address
+(`APP_SWITCH_URL`), which drive the sign-in page's Production / Testing switch and the TESTING marker - see
+"Environments" in `docs/frontend-conventions.md`. The image is built and run by `deploy/docker-compose.yml` in
+Inventory_Shipment: see `deploy/README.md` there to put the whole application on a server.
