@@ -7,6 +7,7 @@ import { dateLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
 import { fillColour } from '../logistics/containerFill'
 import { ContainerFillCell } from '../logistics/ContainerFillLine'
+import { containerReceiptOf } from '../logistics/containerReceipt'
 import { ContainerSelectionBar } from '../logistics/ContainerSelectionBar'
 import { refreshSelection } from '../logistics/containerSelection'
 
@@ -24,6 +25,16 @@ interface OrderContainersCardProps {
   onChanged(): void
   /** What an empty card says. The default points at Add Container, for a reader who can press it. */
   emptyText?: string
+}
+
+/**
+ * "Received 05/10/2026 into LUB-WH (GRN-BR-002-000001)": the goods of the container are in stock. The GRN number comes
+ * from the container list (a container offloaded before goods receipts has none).
+ */
+function receivedText(date: string, warehouseCode: string | null, row: ContainerListDto | undefined): string {
+  const receipt = row ? containerReceiptOf(row) : null
+  const number = receipt?.status === 2 && receipt.number ? ` (${receipt.number})` : ''
+  return `Received ${dateLabel(date)} into ${warehouseCode ?? '—'}${number}`
 }
 
 /**
@@ -164,7 +175,7 @@ export function OrderContainersCard({
                       <Table.Td ta="right">{formatNumber(c.invoicedBase)}</Table.Td>
                       <Table.Td ta="right">{formatNumber(c.receivedBase)}</Table.Td>
                       <Table.Td>
-                        {c.offloadedDate ? `Offloaded ${dateLabel(c.offloadedDate)} into ${c.warehouseCode ?? '—'}` : (c.currentLocation ?? '—')}
+                        {c.offloadedDate ? receivedText(c.offloadedDate, c.warehouseCode, row) : (c.currentLocation ?? '—')}
                       </Table.Td>
                       <Table.Td>{c.eta ? dateLabel(c.eta) : '—'}</Table.Td>
                     </Table.Tr>

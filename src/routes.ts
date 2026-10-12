@@ -13,6 +13,8 @@ const PURCHASE_LISTS: Record<PurchaseDocumentTypeCode, string> = {
   PRET: '/purchase/returns',
 }
 
+const GOODS_RECEIPTS = '/purchase/goods-receipts'
+
 export const routes = {
   purchaseOrders: PURCHASE_LISTS.PO,
   purchaseOrder: (id: number) => `${PURCHASE_LISTS.PO}/${id}`,
@@ -22,4 +24,15 @@ export const routes = {
   /** A purchase document of a type known only at run time (a linked document, a source). */
   purchaseDocument: (typeCode: PurchaseDocumentTypeCode | string, id: number) =>
     `${PURCHASE_LISTS[typeCode as PurchaseDocumentTypeCode] ?? PURCHASE_LISTS.PO}/${id}`,
+
+  /* GOODS RECEIPTS (GRN): their own family, not a fourth purchase kind - no prices, currency or approval. */
+  goodsReceipts: GOODS_RECEIPTS,
+  goodsReceipt: (id: number) => `${GOODS_RECEIPTS}/${id}`,
+  goodsReceiptPrint: (id: number) => `${GOODS_RECEIPTS}/${id}/print`,
+  /** "+ New › Without an order": a receipt typed by hand, for the supplier chosen in the chooser. */
+  newGoodsReceipt: (supplierId?: number | null) =>
+    `${GOODS_RECEIPTS}/new${supplierId ? `?supplierId=${supplierId}` : ''}`,
+
+  container: (id: number) => `/logistics/containers/${id}`,
+  movement: (id: number) => `/logistics/movements/${id}`,
 }

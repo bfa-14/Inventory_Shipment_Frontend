@@ -1,17 +1,23 @@
 /**
- * A moment from the API in the reader's local time: "2026-10-01T20:26:00Z" reads "10/1/2026, 11:26:00 PM" at UTC+3.
+ * A moment from the API in the reader's local time, day first and 24-hour: "2026-10-11T22:35:40Z" reads
+ * "12/10/2026 01:35" at UTC+3.
  *
  * THE ONE HELPER FOR A TIME. The API sends every *Utc value with its "Z", so the browser converts it to the local
  * time by itself: nothing here adds a zone or an offset - a correction made again would move the time a second
  * time. A date without a time (a document date, "2026-10-01") is not a moment: formatDateOnly / dateLabel show it
  * as it is.
  *
+ * BUILT FROM THE PARTS, NOT toLocaleString(): that follows the browser's language, so an en-US browser printed
+ * "10/12/2026, 1:35:40 AM" next to a typed date "12/10/2026". Day first, like every date the app shows and reads.
+ *
  * @param empty what an absent time reads ("-", or the "—" of the document pages' stamp())
  */
 export function formatDateTime(value: string | null | undefined, empty = '-'): string {
   if (!value) return empty
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 export function initials(name: string | undefined): string {
@@ -99,4 +105,17 @@ export function todayDateOnly(): string {
   const now = new Date()
   const pad = (part: number) => String(part).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/**
+ * " Reason: Fully invoiced and received." - a stored reason as its own sentence, after "Closed by … on ….".
+ *
+ * The full stop is added here because a reason is typed (or set by the database: "Fully invoiced and received",
+ * "Fully received", "Closed manually") without one, and the banner often goes on with another sentence. A reason
+ * that already ends with . ! or ? keeps its own. Empty when there is no reason.
+ */
+export function reasonSentence(reason: string | null | undefined): string {
+  const text = reason?.trim()
+  if (!text) return ''
+  return ` Reason: ${text}${/[.!?]$/.test(text) ? '' : '.'}`
 }

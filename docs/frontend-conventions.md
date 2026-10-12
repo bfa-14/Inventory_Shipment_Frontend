@@ -54,7 +54,8 @@ under **Environments (Production / Testing)**.
 - `brand` colour tuple built around **#2563EB**, `primaryColor: 'brand'`, `primaryShade: 6`.
 - `defaultRadius: 'md'`, `fontFamily: '"Segoe UI", Inter, system-ui, sans-serif'`, headings `fontWeight: 700`.
 - Component defaults: Button/TextInput/Textarea/Select/NumberInput/PasswordInput radius `md`, Paper radius
-  `lg`, Modal radius `lg` + centered + overlay blur 2, Badge radius `xl`, Table `highlightOnHover`.
+  `lg`, Modal radius `lg` + centered + overlay blur 2, Badge radius `xl`, Table `highlightOnHover`, DateInput
+  `dateParser: parseTypedDate` (see **Dates**).
 - `CONTENT_BG` (`#EDF1F9`) is the shell's content background — a tint of the sign-in navy, so cards and grids
   read as white panels **on** something rather than as slightly different whites.
 - `KATANGA` carries the sign-in screen's palette (`navy` #013596, `navyDeep` #01235a, `navyGlow` #0a2e6e,
@@ -74,6 +75,9 @@ plate that lines up with the white header beside it. Everything that has to sit 
 `src/styles/app.css`, scoped under `.app-navbar`: Mantine's `NavLink` is also used on white grounds (the Roles
 page's master list), and those must keep the default light styling.
 
+- **The header on a phone.** Its buttons (TESTING badge, search, bell, avatar) never shrink (`flexShrink: 0`); the
+  title on the left gives way, cut with "…" and clipped. Below `sm` the breadcrumb trail and the avatar's chevron are
+  hidden, so at 390 px the avatar stays whole on screen (it ran 22 px past the edge); the page repeats the title.
 - The menu is generated from `src/navigation.ts`; never hard-code menu items in the shell.
 - Collapsed state is remembered in `localStorage` inside `try/catch`; below `sm` the navbar becomes a drawer
   driven by the header `Burger`.
@@ -321,9 +325,20 @@ toggle state either way), so the flag stays off and `FIXED_ACCESSORS` decides wh
 Conventions:
 
 - **The key is namespaced after the page** - `masterdata.branches`, `logistics.containers`,
-  `purchase.purchaseDocuments`, `security.users`. It is persisted, so treat it as permanent: reusing
+  `purchase.purchaseDocuments.PO`, `security.users`. It is persisted, so treat it as permanent: reusing
   one key for two grids has them overwrite each other's layout, and renaming one throws away what
-  the reader arranged.
+  the reader arranged. **One page component that serves several lists takes one key per list**: the
+  purchase orders, invoices and returns once shared `purchase.purchaseDocuments`, and the saved layout of
+  the first list opened put the other lists' own columns after Actions. They now use
+  `purchase.purchaseDocuments.{PO|PINV|PRET}` (the hidden columns, widths and page size saved under the old
+  key are copied once), and the page remounts per kind (`key={kind.code}`), since the three routes render
+  the same component and would otherwise carry one list's state into the next.
+- **The columns stay in the page's order.** Nothing lets a reader move a column, yet `mantine-datatable`
+  stores an order under `<storeKey>-columns-order` and puts a column it has not seen before at the
+  end, after Actions - every column a release adds would land there for anyone who opened the list before.
+  `DataTable` therefore keeps that stored order equal to the column list as defined: written before the
+  grid reads it, and put back if it drifts. Add a column where it belongs in the definition; no key
+  change is needed.
 - **`#` and `Actions` are never hideable or resizable** (`FIXED_ACCESSORS` in `DataTable.tsx`). `#`
   is a position marker rather than data, and `Actions` is what `pinLastColumn` deliberately keeps in
   view. `mantine-datatable` also never resizes the last column, whatever it is, and a resize takes
@@ -574,7 +589,8 @@ for the life of the draft. The wizard resets itself by remounting on `opened`.
 `Configuration › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
 `inventory.documenttypes.manage`) edits the document kinds: name, prefix, number length, number on
 post, number per branch, **year in number** (a checkbox: `SHR-2026-000001`, one sequence per year), requires reason, default pricing (Cost / PriceList / None), price editable, active.
-Code, family and stock direction are read-only — the procedures branch on them.
+Code, family, stock direction and **BIVAC items only** are read-only — the procedures branch on them (see
+**A document type that limits its items**).
 
 Every document page reads the configuration through **`useDocumentTypes()`** (`src/hooks/useDocumentTypes.ts`,
 one cached fetch shared by every reader; the configuration page calls `refresh()` after a save) and
@@ -626,8 +642,8 @@ asks "The file is for WH-002 — switch the document to WH-002?" and calls `onSw
 moves the lines and the seed rather than a header field.
 
 **One document per warehouse** is a choice the reader makes on every import, on the pages whose host
-passes **`allowSplitByWarehouse`**: Sales Invoice and Inventory In (not Inventory Out, purchase or Import
-Sales). Step 3's groups panel then shows a Mantine `Switch` — "One invoice per warehouse" on the sales
+passes **`allowSplitByWarehouse`**: Sales Invoice and Inventory In (not Inventory Out, BIVAC Out, purchase or
+Import Sales). Step 3's groups panel then shows a Mantine `Switch` — "One invoice per warehouse" on the sales
 page, "One document per warehouse" on Inventory In — **off by default**, described "Off: one invoice
 holding every warehouse. On: one invoice per warehouse (2 invoices)." The panel follows it: the alert,
 a **Becomes** column on each warehouse row ("Lines on the one new invoice" / "New invoice 1 of 2"), the
@@ -644,7 +660,7 @@ warehouse — is exactly the single document above.
 
 `/sales/invoices` (list, `SalesInvoicesPage`) and `/sales/invoices/new` / `/:id` (`SalesInvoicePage`) are
 the priced document on the same skeleton as Inventory In: a header card, an editable lines grid, the
-summary and audit cards, the sticky action bar, attachments in a drawer, a Draft → Posted → Cancelled
+summary and audit cards, the sticky action bar, a Documents card, a Draft → Posted → Cancelled
 lifecycle where posted and cancelled are read-only text. What is the invoice's own:
 
 - **Header** (`SalesInvoiceHeaderCard`): invoice no. ("Assigned on posting"), invoice date, due date,
@@ -665,11 +681,16 @@ lifecycle where posted and cancelled are read-only text. What is the invoice's o
   mixed-warehouse invoice through `importCreate` (Manual prices only are sent).
 - **Errors**: `Line N:` messages land on line N; INSUFFICIENT_STOCK highlights every line of the named
   item and refreshes its On Hand; CONCURRENCY reloads. Same unsaved-changes guard as Inventory In.
+- **Out of stock and goods receipts**: before posting, `decideOutOfStock(id, canViewGoodsReceipts)` asks the stock
+  check; for a reader with `purchase.goodsreceipts.view` it also looks for DRAFT goods receipts holding the items short
+  (the drafts whose search matches the item code, confirmed on their lines) and the warning (or the refusal) adds "A
+  goods receipt is waiting to be posted: GRN draft of KTG-2026-0031." Nothing found or not readable: the warning as
+  before.
 - **List**: filters (search, branch, client, salesman, status, dates), bulk Post / Delete on ticked
   drafts, a total in the invoice currency ("$ 5,000.00 USD"), row actions gated by permission and status.
 
-`AttachmentsDrawer` and `AuditTrail` are shared by every family: the drawer takes the family's file
-endpoints through `api` (the stock documents' when left out) and both read structural DTOs.
+`DocumentAttachmentsCard` and `AuditTrail` are shared by every family: the card takes the family's file
+endpoints through `api` (required) and both read structural DTOs (see **Attachments (documents on every page)**).
 ## Purchase documents
 
 `/purchase/orders`, `/purchase/invoices` and `/purchase/returns` (lists, `PurchaseDocumentsPage`) and their
@@ -705,6 +726,69 @@ in **cost mode**:
   `purchase.invoices.create`. The action bar's Create Purchase Invoice and Close Order read the same
   object. A new order action, approval ones included, is added there, not decided in its button.
 
+  **`receiveGoods`** ("Receive goods…", `purchase.goodsreceipts.create`) has reasons of its own and never
+  `notOpenReason`, because a CLOSED order may still have invoiced goods to receive: draft "Approve the order first:
+  goods are received against an approved order.", waiting "This order is waiting for approval.", "This order is
+  cancelled.", then the server's `canReceive` / `receiveBlockedReason`, else the lines' figures: "Everything ordered is
+  already received.", "Everything still to receive travels in containers: it is received with its containers." (and
+  "The rest is in draft goods receipts: post or delete them first." when drafts hold it).
+- **Posting and receiving (scripts 64-65).** Goods enter the stock only with a goods receipt (see **Goods receipts**).
+  A supplier invoice posted since the switch moves no stock: it becomes payable and sets the cost of what was received
+  against it. The page says so in every text that names posting, from `purchaseKind.ts`:
+  - **Posting wording.** Order: "Confirm this purchase order? The number is assigned and the ordered quantities count
+    as incoming stock until they are received or the order is closed.", banner "The order is open: its quantities
+    count as incoming stock, and goods can be received and invoiced against it.". Invoice:
+    `PURCHASE_INVOICE.postConfirm` "Post this purchase invoice? The number is assigned and the amount becomes payable
+    to the supplier. The stock does not change: goods enter with goods receipts.", banner "Posted by {user} on {date}."
+    + `invoicePostedBanner` "Received so far: {r} of {q} pcs.". Return: unchanged, "…Stock will be removed from
+    {warehouse} at the invoice cost…". Never write that a posted invoice "adds stock" (only an invoice posted before
+    the switch keeps that text, below).
+  - **The invoice's post confirmation** (`askInvoicePost`, `invoicePostQuestion.tsx`) adds the estimate of
+    `GET api/purchase/documents/{id}/receipt-cost-preview` (`receiptCostPreviewText`): "60 pcs already received will have their cost adjusted
+    by +60.00 USD (estimate: stock 40.00, cost of sales 20.00)." or "No goods received yet: their cost will be this
+    invoice's when they arrive." When the difference is 0.00 on every line it says instead "The invoice price equals
+    the cost of the {n} pcs already received: their cost does not change." (`receiptCostUnchangedText`), whatever the
+    server's `message` wrote. For a LOCAL invoice, read by someone with goods receipts create + post, with pieces
+    left to receive, it adds the checkbox "Receive the goods now into {warehouses of the lines}" (`ReceiveNowChoice`,
+    off by default), sent as `receiveNow`. The posting's `message` is shown as it comes: a warning when the receipt was
+    not made (the invoice stays posted).
+  - **An old local invoice** (posted before the switch, `usesGoodsReceipts` false, `receiptMode` 1) keeps the texts of
+    its time: `PURCHASE_INVOICE.postedBanner` "Stock has been added…", the gray hint `LEGACY_INVOICE_TEXTS.hint`
+    "Posted before goods receipts: its stock entered when it was posted (or when its container was offloaded).", "No -
+    stock in on posting" (`legacyReceipt` on `PurchaseHeaderCard`) and the Containers card's "Received when the invoice
+    was posted: no containers needed." An **older "Shipped in containers" invoice** (mode 2) is not legacy: its
+    containers may still be travelling and are received with goods receipts, so it shows "Received so far: {r} of {q}
+    pcs." and "Yes - received with its containers"; only when the server gives the hint as the reason for "Receive
+    goods…" (every container offloaded the old way) does it add the gray hint and the card's "Shipped in containers:
+    the goods entered the stock when these containers were offloaded." Decide from the loaded invoice's
+    `usesGoodsReceipts` and `receiptMode`, never from today's date.
+  - **Cancel** says what it does (`CancelReasonModal description`): on a supplier invoice that brought no stock of its
+    own (`usesGoodsReceipts`, or mode 2) "Cancelling makes the amount no longer payable and leaves the invoice in place
+    as a record. The stock does not change: goods already received go back to the order price (goods without an order
+    keep their cost at receipt), and the difference is booked to the stock value and the cost of sales. It cannot be
+    undone."; on an order "Cancelling leaves the order in place as a record: it no longer counts as incoming stock, and
+    nothing can be received or invoiced against it. The stock does not change. It cannot be undone."; an old local
+    invoice keeps the default (its cancel reverses its stock rows).
+  - **Receive goods…** opens the shared `ReceiveGoodsModal` (source `order` or `invoice`) on an approved order (action
+    bar, and a row action on the order list; `orderAbilities.receiveGoods` above) and on a posted invoice, disabled
+    with `invoiceReceiveReason`: "Post the invoice first: goods are received against a posted invoice, or from the
+    order.", "Every piece of this invoice is already received.", "This invoice's goods travel in containers: they are
+    received with their containers.", or the old invoice's hint. The server's `canReceive` / `receiveBlockedReason`
+    come first.
+  - **Received, Invoiced, Short: three different numbers.** On an order line, **Invoiced** is `receivedQuantityBase`
+    (the old name: it has always meant invoiced by posted invoices), **Received** is `goodsReceivedBase` (posted goods
+    receipts, plus what came in before them) and **Short** is `goodsShortBase` (settled short: received less with a
+    reason, or "Nothing more will come"). Never show `receivedQuantityBase` under the word "Received" on an order.
+    On an invoice line, Received is the line's `receivedQuantityBase` (the receipt pieces matched to it). An order is
+    done when Invoiced ≥ ordered and Received + Short ≥ ordered. `PurchaseLinesGrid receipts="order"` shows the three
+    on a posted or closed order, `receipts="invoice"` shows Received on a posted invoice; the order's progress card
+    adds Received ("66 / 150 pcs (+4 short)"). The other figures of a line (`toReceiveBase`, `inContainersBase`,
+    `inDraftReceiptsBase`, `outstandingBase`) are the server's: never recompute them.
+  - **"Cost of received goods"** (`InvoiceReceiptCostCard`): the invoice's `costAdjustments`, with the sentence "Cost of
+    received goods adjusted: +120.00 USD (stock 80.00, cost of sales 40.00)" above the detail.
+  - **Linked Documents** lists the document's `goodsReceipts` under "Goods receipts" (links only with
+    `purchase.goodsreceipts.view`).
+
 - **Header** (`PurchaseHeaderCard`): document no. (orders are numbered on save, invoices and returns on
   posting), document date, expected / due date, supplier (searchable; **picking a supplier sets Currency to
   the supplier's default currency**, else the base one, until the reader picks another), branch, warehouse,
@@ -727,19 +811,33 @@ in **cost mode**:
   document created from this one, each with its status — a cancelled invoice under an order means the
   order is open again.
 - **Lifecycle**: Draft → Posted → Cancelled, plus **Closed (teal)** for orders: automatically when every line
-  is received, or by hand with "Close Order" (`CloseOrderModal`, reason optional, needs
-  `purchase.orders.post`). Confirmations say what posting does per kind — an order is *confirmed* and its
-  quantities count as incoming; an invoice adds stock and sets costs; a return removes stock at the
-  invoice cost. View mode offers Export, **Create Purchase Invoice** (open order, needs
+  is fully invoiced and received (or settled short), or by hand with "Close Order" (`CloseOrderModal`, reason
+  optional, needs `purchase.orders.post`); goods already invoiced can still be received on a closed order.
+  Confirmations say what posting does per kind — an order is *confirmed* and its quantities count as incoming
+  until they are received; an invoice becomes payable and moves no stock (goods enter with goods receipts); a return
+  removes stock at the invoice cost. View mode offers Export, **Receive goods…** (approved order, posted invoice;
+  needs `purchase.goodsreceipts.create`), **Create Purchase Invoice** (open order, needs
   `purchase.invoices.create`), **Create Purchase Return** (posted invoice, needs `purchase.returns.create`),
   Close Order, Cancel Document, Back. Posted, closed and cancelled documents are read-only text.
-- **List**: filters (search, branch, supplier, status Draft / Posted / Cancelled / Closed, dates), a Source
-  column that links to the order / invoice, a **Received** progress bar on orders (0–100 % of the ordered
-  quantity invoiced), bulk Post / Delete on ticked drafts, row actions gated by permission and status
-  including Create invoice / Create return.
+- **List**: filters (search, branch, supplier, status Draft / Posted / Cancelled / Closed, dates, and the checkbox
+  "To receive" on orders / "Not fully received" on invoices, sent as `toReceive` / `notFullyReceived`), a Source
+  column that links to the order / invoice, on orders a **Received** (`receivedPercent`, goods receipts) and an
+  **Invoiced** (`invoicedPercent`) progress bar, each a share of the ordered quantity, on invoices a **Received** bar
+  (`receivedBase` ÷ `quantityBase`) - the figure and its meaning on hover, the share in the CSV export - bulk Post /
+  Delete on ticked drafts, row actions gated by permission and status including "Receive goods…" (orders; disabled
+  "Everything ordered is already received." at 100 % received, or on a closed order received as far as it was
+  invoiced) / Create invoice (disabled "Everything ordered is already invoiced." at 100 % invoiced: since goods
+  receipts such an order stays open until its goods arrive) / Create return. The percentages are rounded, so these are
+  hints: the dialogs check the document itself (`CreateInvoiceFromOrderModal` says "Everything ordered is already
+  invoiced." or "The rest of this order is already in draft invoices: post or delete them first." and disables
+  Create). The invoice list shows the readers who post invoices a blue banner, once (closing it is
+  remembered in `localStorage`, guarded): "Since {switch date}, posting a supplier invoice no longer adds stock:
+  receive the goods with Receive goods…" (the date from `GET api/purchase/goods-receipts/switch`).
 - **Charges card (invoices)**: one **"+ Add charge"** in every status, and what it adds depends on the invoice:
   - **local draft**: the invoice's own charges (`PurchaseChargesGrid`, saved with the draft; `purchase.invoices.create`);
-  - **local posted**: `PostedInvoiceChargesCard`. It lists the charges posted with the invoice (badge
+  - **local posted** (not "Shipped in containers": such an invoice counts as imported even before a line is linked -
+    the late charges API refuses it with 67012's sentence, as the database does): `PostedInvoiceChargesCard`. It lists
+    the charges posted with the invoice (badge
     "With the invoice", read-only) and the **late charges** (badge "Late" plus the adjustment status and
     number). "+ Add charge" opens `LateChargeModal`, which saves a draft late charge into the invoice's
     open landed cost adjustment (`src/api/purchase/lateCharges.ts`, `purchase.landedcosts.create`).
@@ -751,8 +849,21 @@ in **cost mode**:
     "Post it in Container Charges" link.
 
   There is no "New landed cost adjustment" action on the invoice any more: "+ Add charge" replaces it.
-- **Shipped in containers (invoices, script 43)**: a switch in the header is the invoice's receipt mode.
-  - On means stock in at the offload of the containers the invoice is linked to; off means stock in on posting.
+- **Shipped in containers (invoices, script 43)**: a switch in the header is the invoice's receipt mode. It says
+  **how the goods arrive**, never when the stock moves (no invoice moves stock since goods receipts).
+  - On: its goods travel in containers and come in with their containers' goods receipts. The switch's description
+    is "Its goods travel in containers and are received with them."; read-only it says "Yes - received with its
+    containers". `ShippedInvoiceContainersCard` says "Shipped in containers: the goods enter the stock when their
+    containers' goods receipts are posted." Receive goods… on such an invoice starts every line at 0, with the orange
+    alert: pieces are received there only when they came without a container. A line not linked to a container is
+    still matched to the goods of its order's containers when they are received.
+  - Off: the goods are received with Receive goods… ("No - received with Receive goods…"; the card: "Received with
+    Receive goods…: no containers needed.").
+  - Before goods receipts off meant stock in on posting: an old local invoice keeps that text in the header and the
+    card (`LEGACY_INVOICE_TEXTS`, `ShippedInvoiceContainersCard legacy`). An older shipped one reads like a new one,
+    except a card whose containers were all offloaded the old way (above).
+  - An invoice shipped in containers has no charges of its own and no landed cost adjustment (67012): its charges are
+    the containers'.
   - It is disabled with a tooltip while lines are linked, and on an invoice that is not from an order.
   - An invoice created from an order with containers starts on.
   - While it is on, `ShippedInvoiceContainersCard` replaces the side card "where are my goods"
@@ -805,6 +916,210 @@ in **cost mode**:
 - **API**: `src/api/purchase/documents.ts` — one module for the three kinds; every 403 from it names the
   permission that was missing (`code: FORBIDDEN`).
 
+## Goods receipts
+
+Purchase › **Goods Receipts** (scripts 64-65) is the only way supplier goods enter the stock: a posted supplier invoice
+no longer moves stock, it adjusts the cost of goods already received. A **family of its own** (no prices, currency or
+approval), not a fourth `PurchaseKind`: `src/api/purchase/goodsReceipts.ts` (`goodsReceiptsApi`, every route of
+`api/purchase/goods-receipts`), the pieces in `src/components/purchase/goodsReceipts/` (the shared sentences in
+`goodsReceiptModel.ts`), the pages `GoodsReceiptsPage` / `GoodsReceiptPage` / `GoodsReceiptPrintPage`
+(`src/pages/purchase/`), links through `routes.goodsReceipts / goodsReceipt(id) / goodsReceiptPrint(id) /
+newGoodsReceipt(supplierId)`. Permissions `purchase.goodsreceipts.view / create / post / cancel / delete`
+(`PERMISSIONS.goodsReceipts*`; never "receipts" alone: `sales.receipts.*` is customer payments). Status is a code
+(`GOODS_RECEIPT_STATUSES`: 1 Draft gray, 2 Posted green, 3 Cancelled red; `toGoodsReceiptStatus` also reads the
+name); a receipt has one source, `sourceKind` Container / Order / Invoice / Manual. **The goods are not in stock until
+the receipt is posted**: every draft says so ("The goods are not in stock until this receipt is posted.").
+
+- **The menu count** (`countOf: 'draftGoodsReceipts'`, icon `inbox`, after Approvals) is the drafts waiting to be
+  posted: `draftCount` of `GET …/waiting`, read by `useGoodsReceiptsWaiting()` the way the approvals count is read (one
+  reading for the whole app, every minute and on focus, only for a reader with the view permission; hidden at 0).
+  Anything that creates, posts, deletes or cancels a receipt calls `refreshGoodsReceiptsWaiting()`, so the count moves
+  at once. It is how the warehouse learns that a Delivery made drafts.
+- **The list** (`GoodsReceiptsPage`, "Goods entering the stock: from containers, orders and invoices.")
+  - Opens on Status = Draft when drafts exist, until the reader picks a Status themselves: that choice is remembered in
+    `localStorage` (`inventory_shipment.goodsReceipts.status`, read and written in try/catch). Clear Filters goes back
+    to every status.
+  - Filters: search ("Number, container, order, invoice or item"), Status, Source, Branch, Supplier, Warehouse, dates,
+    "With differences", "Received not invoiced".
+  - Columns: Number ("Assigned on posting" in gray on a draft), Date, Status, Source ("Container KTG-2026-0031",
+    "Order PO-…", "Invoice PINV-…", "Manual", with a violet **Auto** badge when a Delivery made it), Supplier ("Several
+    suppliers" on a mixed container), Warehouse (an orange "to choose" on a draft without one), Received (pcs), Short
+    (pcs, red when above 0), Value (USD).
+  - The totals row of the search is the line under the grid: "Received not invoiced: {n} pcs, {value} USD at the order
+    price." (month-end).
+  - Row actions View, Print, Post (draft), Delete (draft), Cancel… (posted), each by permission. **Post and Cancel…
+    read the receipt first** (`goodsReceiptsApi.get`; the list carries no `canPost` / `canCancel`, too costly over a
+    search of thousands): when `canPost` / `canCancel` is false, a dialog "{GRN-… | draft #n} cannot be {posted |
+    cancelled}" shows the server's `postBlockedReason` / `cancelBlockedReason` with "Open the receipt" and "Close",
+    instead of the dialog (never a refusal after a cancel reason was typed); otherwise Post asks `postConfirmFor` on
+    the receipt read, as the page does, and Cancel… sends the row version just read. Bulk Post
+    (`post-many`) and Delete (one `DELETE` per draft, with its row version) show `BulkResultsModal`; deleting
+    automatic drafts warns that their containers then wait without a receipt.
+  - Empty: "No goods receipts yet. They are created when a container's delivery is completed, with Receive goods… on
+    an order, an invoice or a container, or with + New."
+- **"+ New"** (create permission) opens `NewGoodsReceiptModal`, "Where do the goods come from?":
+  - "From a purchase order…": the supplier, then its orders with something to receive (the `documents` of
+    `GET …/receivable?supplierId=`), then `ReceiveGoodsModal`;
+  - "From a container…": `GET …/receivable-containers` (status 2-5 and no draft or posted receipt, delivered ones
+    first); the draft is created and opened. The create permission is enough (no `containers.view` needed);
+  - "Without an order": a supplier first, then `/purchase/goods-receipts/new?supplierId=`, with the hint "For stock
+    that does not come from a supplier (opening balance, correction, found goods), use Inventory › Inventory In."
+- **The page** (`GoodsReceiptPage`) decides from the receipt it loads.
+  - A container's lines are its load lines (none added or removed): received 0 to loaded, a reason code
+    (`VARIANCE_REASONS`: Short-shipped, Damaged, Missing, Wrongly counted at loading, Other) and a note when they
+    differ, one "Receive into" for the whole container (warehouses of its branch). An order's or an invoice's lines take
+    a warehouse each and "Nothing more will come" (its reason fields appear when ticked); "Receive into" sets every
+    line. A line of 0 needs "Nothing more will come" (a line of an order) or more than 0: the page refuses it before
+    saving with the server's sentence ("Line {n} ({item}): the received quantity must be more than 0, or tick "Nothing
+    more will come" to settle the rest of the order line." / "…must be more than 0."), and the server never drops a
+    line, so "Line N" is the N-th row on screen. Such a line can be left out of the draft with its trash icon ("Remove
+    line: its pieces stay to receive"). Only a receipt without an order adds lines ("+ Add line") and types its unit
+    cost (default: the item's last cost).
+  - Alerts: the blue automatic-draft one ("Created automatically when MOV-… (Delivery, Kasumbalesa → Kolwezi) was
+    completed on {date}. Proposed warehouse: LUB-WH (from the container). Check the warehouse and the received
+    quantities, then post."; the "Proposed warehouse" sentence only while the saved draft still holds the container's
+    own warehouse, of its branch), the orange "Choose the warehouse the goods are received into: the container's warehouse
+    is not set or does not belong to branch {branch}.", the orange "KTG-… has not left the supplier…" of a container
+    still Confirmed, and the gray draft hint.
+  - Post, Cancel… and Delete are disabled with the API's `postBlockedReason` / `cancelBlockedReason` /
+    `deleteBlockedReason` (the same sentences SQL refuses with). With unsaved changes Post saves first and judges the
+    saved receipt. Post asks `postConfirmFor(receipt)` (`postConfirmMessage`): "Post this goods receipt? {n} pcs enter
+    {warehouse} at {value} USD, the item costs are updated and the number is assigned. Pieces not invoiced yet are
+    valued at the order price; their cost is adjusted when the invoice is posted." - the last sentence only when a
+    line has an order or a container (a receipt without an order has its cost typed) - and notifies "Posted: GRN-…". Delete of an automatic draft
+    asks "Delete this draft goods receipt? KTG-… then waits without a receipt: create it again with Receive goods… on
+    the container." Cancel… is `CancelReasonModal` titled "Cancel goods receipt", reason required, with
+    `cancelDescription` ("…The stock it brought is taken out again and the item costs are replayed." + "Container
+    {ref} goes back to its delivery status and can be received again." for a container).
+  - Posted: the green banner "Received into {warehouse} on {date} by {user}. The stock and the item costs were
+    updated; this receipt can no longer be edited."; cancelled: the red one with the reason.
+  - "Date received" is a `DateInput` read by the theme's `parseTypedDate` (no `dateParser` of its own) and stored with
+    `isoDate(next)` (see **Dates**); the server refuses a future date or one before the container's Delivery.
+  - `/new` and `/:id` share one route group (the page checks the create permission for `/new`) so the first save does
+    not remount the page. At 390 px the lines are cards: Item, Expected, Received, Difference and Reason first, the
+    cost below.
+  - Files are the **Documents card** (`DocumentAttachmentsCard`, kind `GRN`, `goodsReceiptsApi.files`) below the
+    lines, with "Documents (n)" and "Add document…" in the action bar, as on every document (no drawer). "Print" opens
+    the print page; "Export" downloads `{number}.xlsx` (`GRN-draft-{id}.xlsx` for a draft); both are disabled on a
+    receipt never saved ("Save the draft first").
+- **How the cost is shown.** A receipt is valued at the order price until an invoice covers its pieces, and the cost
+  then moves by itself; the screens say which:
+  - each line's "Unit cost" carries a badge from `COST_SOURCE_LABELS` ("Order price", "Invoice", "Order + invoice",
+    "Typed") and, posted, "{n} of {r} pcs invoiced"; the summary card's "Value at cost" says on a draft "Estimate: the
+    cost is set when the receipt is posted.";
+  - a posted receipt with changes shows the **"Cost adjustments"** card (`GoodsReceiptCostAdjustmentsCard`): Date,
+    Cause (`costCauseLabel`: "Invoice PINV-… posted", "Invoice … cancelled", "Landed cost adjustment …", "… cancelled",
+    "Goods receipt … posted", "Goods receipt … cancelled", "Sold before receipt"), Item, Received, "Unit cost before →
+    after", Amount, "To stock", "To cost of sales", a Total, and the hint `COST_ADJUSTMENTS_HINT` ("The part still in
+    stock changes the average cost; the part already sold goes to the cost of sales. A difference of exchange rate
+    between the order and the invoice is part of the cost.");
+  - the invoice shows the same events as "Cost of received goods", and its post confirmation estimates them first
+    (**Purchase documents**);
+  - Stock Valuation says "Goods received but not invoiced yet are valued at the order price; their cost moves when the
+    invoice is posted."; Sales Profit's COGS adjustments include them (by item, family, brand, branch or month, never
+    per invoice).
+- **`ReceiveGoodsModal`** (`source: { kind: 'order' | 'invoice', id, documentNumber }`) is the one "Receive goods -
+  {document no.}" dialog for an order and an invoice. `GET …/receivable` answers `{ kind, documents, container, lines }`.
+  - Columns: Item, Ordered (or Invoiced), Received, Short, In containers, In draft receipts, To receive, **Receive
+    now**, "Nothing more will come" (+ reason), Warehouse; fields "Date received", "Delivery note no.".
+  - **Receive now starts at each line's `defaultReceiveBase`**: To receive, or **0 when the goods travel in
+    containers**. Then the orange Alert shows (a document is `shippedInContainers`): "This order is shipped in
+    containers: its goods are received with their containers. Receive pieces here only if they arrived without a
+    container." (or "This invoice is…"). Never default those pieces to To receive: they would be received twice.
+  - Hints "Goods in containers are received with their container." and "Pieces not invoiced yet are valued at the
+    order price; the invoice adjusts their cost when it is posted."
+  - An order with nothing left to receive outside containers (its `documents[0]` has `toReceiveBase` and
+    `maxOutsideBase` 0) shows rule 14's sentence instead of the lines, the one the order page's disabled button gives:
+    "Everything still to receive travels in containers: it is received with its containers." (`inContainersBase` > 0)
+    or "Everything ordered is already received.", and both buttons are disabled.
+  - "Create draft" / "Create and post" (post permission); then the receipt opens (for a reader with
+    `purchase.goodsreceipts.view`; without it the host page stays) with "Draft goods receipt created" or
+    "Posted: GRN-…". A from-* answer whose posting was refused keeps the draft and carries `postRefusal`: its
+    `message` is shown as a warning. The limits are the server's and its refusal is shown as it comes.
+- **Automatic drafts.** Completing a Delivery-stage movement drafts one receipt per container, and the answer becomes
+  one notification naming the drafts made and the containers left out: see **Containers and movements** below.
+- **The print page** (outside the shell, like the receipt voucher; `window.print()` once loaded) has no costs. A draft
+  prints as the count sheet ("DRAFT - not posted", the received, difference and reason boxes left blank for the pen),
+  with "Received by" and "Delivered by / driver".
+- **The stock statement** links `GRN` movements to the receipt and, beside it, `sourceReference` to what it names
+  (`sourceContainerId`, else `sourcePurchaseOrderId`, else `sourceInvoiceId`): "GRN-BR-002-000001 · KTG-2026-0031".
+  Every document link, the movement's own included, needs that page's view permission (`documentRoute(m,
+  hasPermission)`); without it the number is plain text. The page itself needs only the item's view.
+- **Sales**: before a sales invoice is posted, a short item held by a draft goods receipt adds "A goods receipt is
+  waiting to be posted: GRN draft of KTG-2026-0031." to the out-of-stock warning (**Sales invoice page**).
+
+### Containers and movements (the offload is retired)
+
+A container's goods enter the stock with a goods receipt; posting it makes the container **Offloaded** (the status keeps
+its name). The container and the movement DTOs carry the open receipt as `goodsReceiptId / goodsReceiptNumber /
+goodsReceiptStatus` (a cancelled one is no receipt: the container can be received again); read them through
+`containerReceiptOf()` (`src/components/logistics/containerReceipt.ts`, which also holds the sentences below) and show
+them with `ContainerReceiptCell` (the GRN number, or a gray "Draft" badge, linked with `goodsReceiptsView`, else text).
+
+- **Container page.** No receipt and status 1-5: **"Receive goods…"** (`purchase.goodsreceipts.create`), disabled on a
+  draft container with "Confirm the container first."; `?receive=1` opens it (the old `?offload=1` too). It opens
+  `ReceiveContainerModal` (the former `OffloadModal`): "Receive goods - KTG-…", "Receive into" (an active warehouse of
+  the container's branch, the container's own one first), "Date received" (`isoDate(next)`, not in the future; "Delivered
+  {date}: not before."), per line Loaded / Received / Difference and a reason (`VARIANCE_REASONS` code + optional note,
+  required when they differ), the orange Alert of a container still Confirmed, "Create draft" / "Create and post" (post
+  permission) → `goodsReceiptsApi.fromContainer`, then the receipt opens (with `goodsReceiptsView`; without it the
+  container page reads itself again). The checks it makes first are the server's own
+  sentences (63000); the server's refusal is shown as it comes.
+  - A **draft** receipt: "Open goods receipt (draft)" and the blue Alert "Goods receipt draft created on {date}. The goods
+    are not in stock until it is posted. Changing the container's warehouse does not change the draft."
+  - A **posted** one: the green banner "Received by {GRN-…} into {warehouse} on {date} by {user}. The container is
+    read-only." (the number linked) replaces "Offloaded into …", and **"Cancel goods receipt…"** opens the receipt's own
+    cancel dialog (`cancelDescription`), disabled with the receipt's `cancelBlockedReason`. Containers offloaded before
+    goods receipts keep "Offloaded into …" and "Cancel Offload".
+  - The page reads the receipt itself (`goodsReceiptsApi.get`, with `goodsReceiptsView`) for those dates, names and
+    reasons; without the permission it says what the container knows.
+  - While a receipt exists (draft or posted) the loaded lines and the branch are fixed (rule 21: "fixed by the draft goods
+    receipt"); the header stays editable until the receipt is posted. **Cancel** stays visible on status 1-5 (cancel
+    permission) and is disabled with the 69019 sentence `receiptBlocksCancelText`: "Container KTG-… has {goods receipt
+    GRN-… | a draft goods receipt}. Delete the draft (or cancel the receipt) first." "Delivered" shows the end of the
+    latest completed Delivery-stage movement (`deliveredDate`), where the free time stops counting.
+  - "Warehouse (offloading destination)" here and "Offloading warehouse" in Auto-plan say "The goods receipt proposes
+    this warehouse."
+  - **Close** is on every Offloaded container (close permission) and disabled while `closeBlockedReason` says why: the
+    refusal Close itself gives (`logistics.fn_Container_CloseBlock`), draft charges first ("The container still has
+    draft charges. Post or delete them before closing it."), then rule 20 ("Line {n} ({item}): {r} received but {i}
+    invoiced by posted invoices. Post the supplier invoices before closing the container."). `canClose` is true only
+    when nothing blocks it.
+- **Containers list.** A "Goods receipt" column (and CSV column); the Status filter has a group "Goods receipt" with
+  **"Delivered, not received"** (`deliveredNotReceived=true` instead of a status); the row menu offers "Receive goods"
+  (status 2-5, no receipt, create permission) or "Goods receipt" (open it, view permission). Its "Cancel" item is there
+  on status 1-5 and, while a receipt exists, disabled with the same 69019 sentence written under its label (a disabled
+  menu item cannot carry a tooltip); its "Close" item is there on every Offloaded container, disabled the same way with
+  `closeBlockedReason`. The order and PI filters load their lists only with `purchase.orders.view` /
+  `purchase.invoices.view` (without it they offer nothing, and no refused request reaches the console).
+- **"Add container…"** (`AddContainerModal`): the column "Outside containers" is `invoicedDirectBase`, the larger of
+  what the order line invoiced and what it received + holds on draft goods receipts outside containers (Ordered −
+  Loaded elsewhere − Outside containers = what may go here); its tooltip gives the parts, "Invoiced {a} · received {b} ·
+  on draft receipts {c} pcs (the larger counts)".
+- **Movement page.** Completing a movement of the **Delivery** stage: the Complete dialog says "The containers arrive at
+  the warehouse: a draft goods receipt is created for each of them. The stock changes only when the warehouse posts it."
+  and lists each container ("KTG-… → draft goods receipt into LUB-WH", "→ draft, warehouse to choose", "→ no receipt: it
+  already has GRN-…"), from `warehouseCode` / `warehouseInBranch` and the receipt fields of `MovementDto.containers`.
+  The answer's `goodsReceipts` (`MovementReceiptResultDto[]`) becomes one notification, `showDeliveryResult`
+  (`deliveryNotification.tsx`): "Draft goods receipts created: KTG-… (warehouse to choose), KTG-…. Not created: KTG-…
+  already has GRN-…." - the created ones linked (the notifications sit outside the router: the link navigates through
+  the page's `navigate`); when the whole call failed, the answer's `warnings` are shown on their own (the movement is
+  completed whatever happened to the drafts). Cancelling a **completed** Delivery (`DeliveryCancelDrafts`, inside
+  `CancelReasonModal`'s new `children`) lists the automatic drafts deleted with it (`autoDraftOfThisMovement` on the
+  movement's containers) and names the edited ones (`goodsReceiptUpdatedAtUtc / ByName`: "GRN draft of KTG-… was edited
+  by {user} on {date}: the received quantities and reasons typed there are lost."). The Containers card has a "Receipt"
+  column. After **Start, Complete or Cancel** the page drops the places it had judged (`show(dto, true)`) and bumps the
+  card's `reloadToken`: the candidates and the places are read again, so the Place column says where the containers
+  are now (a completed movement shows their current location), as a reload would.
+- **Status badges in the container page's tables** (Invoices, Charges, the Receipt cell, the FOB source on Loaded
+  items) keep their whole label with `WHOLE_BADGE` (`movementContainers.ts`): a Mantine badge's label hides its
+  overflow, so a narrow column cut "Posted" to "P…" and "Received" to "Rec…" with no tooltip. On the Charges card the
+  status and "after receipt" wrap under each other, and the table's minimum width (760) lets the Status column show
+  at 1440 px without scrolling.
+- **Wording** that named the offload now names the receipt: "after receipt" badges on charges, "The goods are received:
+  the item costs will be adjusted", the FOB source "Received", "Received" on the tracking board, "Received {date} into
+  {warehouse} (GRN-…)" on the order's Containers card, "not yet received" in Shortages.
+
 ## Shortage plans
 
 `/inventory/shortages` (list, `ShortagesPage`), `/inventory/shortages/new` and `/:id` (`ShortageDocumentPage`)
@@ -829,9 +1144,21 @@ Per line, in **base units** (only Required Qty is in the purchase unit, shown as
 | Required Qty | typed; defaults to the shortage rounded up to whole purchase units |
 | Container Requirement | Required Qty × packing ÷ PC per Container (the item's *PC per Container*, overridable per line) |
 
-Transit = quantities **marked as shipped** on open purchase orders and not yet received; Outstanding Order =
-what remains on those orders *minus* what is in transit. Summary card: items, total shortage, total required,
-containers (the sum, 7.35), containers rounded (8) and utilization (91.88 %, with a bar).
+The live figures come from `inventory.fn_Shortage_Live` (last changed by script 65, goods receipts), for the
+plan's warehouse and every warehouse under it:
+
+- **Transit** = pieces loaded in containers that have left the supplier (In Transit, At Port, Cleared: statuses 3-5)
+  and are not received yet, counted on the warehouse of their order line.
+- **Outstanding Order** = max(0, what approved orders still bring − Transit). What an order still brings is its
+  lines' **outstanding** (`outstandingBase`, the same number as the item's "On order"): on an open order ordered −
+  received − settled short, on a closed one invoiced − received − settled short, never below 0. Posted
+  supplier invoices **without an order** whose goods come with goods receipts add invoiced − received.
+- "Received" here is goods receipts (plus what came in before them), never "invoiced": a posted invoice no longer
+  ends what is on the way, its goods receipt does. Pieces settled short (received less with a reason, or "Nothing
+  more will come") are not on the way any more.
+
+Summary card: items, total shortage, total required, containers (the sum, 7.35), containers rounded (8) and
+utilization (91.88 %, with a bar).
 
 ### Draft vs posted
 
@@ -870,9 +1197,9 @@ in the purchase unit; NOTHING_TO_ORDER when there is none. The PO shows a **"Sou
 linking back, and the plan's **Purchase orders** card lists every order made from it (number, date, status,
 amount); the audit trail shows Created / Updated / Recalculated / Posted / POCreated.
 
-On an open purchase order, **Mark as shipped** (`MarkShippedModal`, needs `purchase.orders.create`) records the
-*total* shipped so far per line in base units ("All shipped" fills the ordered quantities). It moves no stock:
-it is what the plans read as Transit, and the order's lines grid shows it as **In transit**.
+**Mark as shipped** (the order's shipped quantities, `purchaseDocumentsApi.markShipped`) is no longer what the plans
+read as Transit: since the containers, Transit is the containers' (above). The order's lines grid still shows a
+recorded shipped quantity as **In transit**; it moves no stock and changes no plan.
 
 ### Print and export
 
@@ -977,6 +1304,10 @@ is a document with its own Draft → Posted → Cancelled life rather than an ed
   stock raises the inventory value (and the item's average cost), the quantity already sold becomes
   a **COGS adjustment** in the period. The Split table shows allocated, extra per unit, remaining,
   both portions and the landed cost before and after, under a banner naming who posted it.
+- On an invoice that **uses goods receipts** (posted since the switch, script 65) the split is over the pieces
+  received so far, and the company's stock decides the stock part (the goods receipts' cost adjustments, cause
+  "Landed cost adjustment …"); pieces not received yet simply take the new invoice cost when they arrive. A "Shipped
+  in containers" invoice takes no adjustment (67012): its charges are the containers'.
 - Cancelling writes the reversal and rebuilds the item costs.
 
 ## Sales profit
@@ -1010,9 +1341,46 @@ Every quantity and amount the app shows goes through `formatNumber` / `formatMon
 **14,020,800.00**, whatever the browser locale. `money()` in `documentKind.ts` is the same thing with the
 currency code. A `NumberInput` that holds a quantity or an amount carries `thousandSeparator=","`.
 Counts (items, rows) go through `formatNumber` too; a bare `{value}` of a number in JSX is a bug.
+
+## Dates
+
+A typed date is read **day first**, and strictly, in every `DateInput`: the people using the app write 05/10/2026
+for 5 October. The theme gives every `DateInput` the one parser, `parseTypedDate` (`src/components/typedDate.ts`);
+a field never passes its own `dateParser`, and its `valueFormat` (`"DD/MM/YYYY"`, a few `"DD MMM YYYY"`) only says
+how the date is shown. Mantine's own parser ignored the format (dayjs has no `customParseFormat` here, so
+`dayjs(text, format)` ignores the format too: never parse with it) and fell back to `new Date(text)`, which read
+05/10/2026 as 10 May and turned half-typed text into dates of 2001.
+
+- **Accepted:** day, month, year with `/`, `-`, `.` or a space (the same one twice), one or two digits for the day
+  and the month: `5/10/2026`, `05.10.2026`, `5 10 2026`; a two-digit year is 20YY (`5-10-26`); an English month name
+  of three letters or more instead of the number, any case: `5 Oct 2026`, `05-oct-26`, `5 October 2026`; year first,
+  as pasted, `YYYY-MM-DD` with two digits for the month and the day (any of the four separators): `2026-10-05`.
+- **Refused** (null) - everything else: a day the month does not have (31/02/2026, 00/10/2026), month 13, text, no
+  year, a year outside 1900-2099, a year first with one-digit parts (`2026-1-5`). The field then keeps the last date
+  it read and shows it again on blur (an empty field stays empty).
+- **No half-typed text is a date.** Mantine parses at every key and keeps the last result that was not null, so the
+  beginning of a longer text must never parse: otherwise 29/02/2027 (no such day) would stop at "29/02/20" and save
+  29 February 2020. So the two-digit years **19 and 20 are refused** (type 2019 / 2020 in full): every accepted
+  four-digit year starts with them. Keep this in mind before accepting a new shape.
+- It returns `"YYYY-MM-DD"`, the string a click in the calendar gives, so a page's `onChange` handles both alike.
+- **Keep that string as it is: never `new Date(next)`.** `new Date('2026-10-05')` is midnight UTC, still 4 October
+  west of Greenwich, so a page that rebuilt the day from it saved the day before there (a typed date and a pick
+  alike). Store it with `isoDate(next)` (`documentKind.ts`, which takes the string or a Date) or `String(next)`, and
+  give the field back the string (`value={filters.dateFrom}`) or `fromIsoDate(...)`, a Date at local midnight.
+- `DatePickerInput` and `MonthPickerInput` are picked from a calendar, never typed: nothing to parse.
+- Shown outside an input, a document date reads `DD/MM/YYYY` through `dateLabel`; a moment goes through
+  `formatDateTime` (see `format.ts`): **`DD/MM/YYYY HH:mm`, day first and 24-hour, in the reader's local time**
+  ("2026-10-11T22:35:40Z" reads "12/10/2026 01:35" at UTC+3), whatever the browser's language - never
+  `toLocaleString()`, which printed "10/12/2026, 1:35:40 AM" in an en-US browser next to a typed "12/10/2026". The
+  print pages use the same helper (`stamp()` is it with "—" when empty).
+- A stored reason ends its sentence: `reasonSentence(reason)` (`format.ts`) gives " Reason: {reason}." with the full
+  stop added when the reason has none, for the banners that go on after it ("Closed by … on …. Reason: Fully invoiced
+  and received. No more invoices will be made from it…").
+
 ## Document pages
 
-Inventory In and Inventory Out are the first **document family**. Purchase and Sales will be the same
+Inventory In and Inventory Out are the first **document family** (BIVAC Out is a third kind on the same
+pages: see **A document type that limits its items**). Purchase and Sales will be the same
 shape — a header, editable lines, attachments, an audit trail and a Draft → Posted → Cancelled
 lifecycle — so the pieces live in `src/components/documents/` and are meant to be reused rather than
 copied.
@@ -1026,9 +1394,9 @@ copied.
 | `QuickItemSearch` | The scanner's way in: type or scan, press Enter, the line appears. |
 | `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
-| `AuditTrail` | What has happened to the document, five entries then the rest on asking. |
-| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. |
-| `AttachmentsDrawer` | The paperwork behind the document. |
+| `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. |
+| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. |
+| `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
 | `CancelReasonModal` | Asks why a posted document is being cancelled. |
 
 ### The rules that are easy to get wrong
@@ -1054,10 +1422,144 @@ copied.
 
 ### Adding the next family
 
-1. Add a `DocumentKind` for it (title, route, colour, direction, cost rule, five permission codes).
+1. Add a `DocumentKind` for it (title, route, colour, direction, five permission codes, and optionally
+   the Reference No. placeholder). Rules about cost, numbering, the reason and which items a line may
+   hold belong to the document **type** (Configuration › Document Types), not to the kind.
 2. Add the permission codes to `src/navigation.ts` and the menu entries.
 3. Add three routes in `src/App.tsx` pointing at `StockDocumentsPage` / `StockDocumentPage` — or at a
    family-specific page that reuses the same components when its header needs more fields.
+4. Add the code to `StockDocumentTypeCode`, to `AttachmentDocumentKind` (`src/api/documentFiles.ts`) and to
+   the item statement's links (`ItemStockMovementsPage.tsx`).
+
+## A document type that limits its items
+
+**BIVAC Out** (`BIV_OUT`, script 66; Inventory › BIVAC Out, routes `/inventory/bivac-out`, `/new`, `/:id`) is an
+Inventory Out of its own: the same `StockDocumentsPage` / `StockDocumentPage` with the `BIVAC_OUT` kind (grape
+accent, `inventory.bivacout.view / create / post / cancel / delete`, Reference No. placeholder "BIVAC certificate
+or container no."). Numbers `BIV-<branch>-000001` are given at the first save, no reason is required, and the
+units leave stock at the average cost like any Out. There is no link to a shipment: the BIVAC certificate or the
+container number goes in Reference No., and the certificate can be attached. Its lines may hold **only items
+with "BIVAC Item" ticked** in Item Definition.
+
+- **The rule belongs to the type, not to the page.** `DocumentTypeDto.bivacItemsOnly`
+  (`inventory.DocumentTypes.BivacItemsOnly`) says it. The page reads it through `useDocumentTypes()` and never
+  compares the code with `'BIV_OUT'`, so another type given the flag behaves the same with no change here.
+  Configuration › Document Types shows it read-only: a "BIVAC items only" column, and the line "BIVAC items only:
+  Yes: every line must be an item with "BIVAC Item" ticked." in the edit dialog of a type that has it. The
+  script that creates the type sets it.
+- **Both pickers are narrowed.**
+  - The line Item dropdown loads `itemsApi.lookup(true, undefined, undefined, false, true)`
+    (`GET api/inventory/items/lookup?bivacOnly=true`). Its placeholder is "Choose a BIVAC item", and when nothing
+    matches it says "No BIVAC item matches. Tick "BIVAC Item" in Inventory › Item Definition to add one."
+  - The quick search (`<QuickItemSearch bivacOnly />`) sends `isBivac: true` to the item search. A code that
+    matches no BIVAC item gives "No BIVAC item matches {term}."
+  - A gray hint stands beside the quick search: "Only BIVAC items. Tick "BIVAC Item" in Inventory › Item
+    Definition to add one."
+- **The item list waits for the type.** The page loads it once the configuration has answered (cached after the
+  first document page); the quick search stays disabled until then. If the configuration cannot be loaded (or the
+  kind's row is missing), the page says so and offers no items, so a BIVAC Out never offers other items: a red
+  Alert above the lines ("The document types could not be loaded.", or "The {kind} settings could not be loaded.
+  Reload the page."), and the quick search, Save Draft and Save & Post disabled with the same text as tooltip.
+  Inventory In / Out show the same error in that case instead of guessing their rules. A list loaded for another
+  filter is never offered while the right one loads.
+- **A line's own item stays visible on its own line only (never offered on other lines).** `DocumentLinesGrid`
+  gives the row whose item is missing from the list (made inactive, or unticked since the draft was saved) that
+  item as an extra option, first. The cell never goes blank, and the server's refusal points at a code the reader
+  can see, but no other line can pick it.
+- **The server still decides.**
+  - Save and Post refuse any other item with 62000: "Line 2: BAT-12V is not a BIVAC item. A BIVAC Out holds BIVAC
+    items only." It lands on line 2, like every `Line N:` message.
+  - The Excel import (`ImportInvoiceItemsWizard`, unchanged) checks the rows on the server: such a row is an Error,
+    "BAT-12V is not a BIVAC item.". "One document per warehouse" stays Inventory In only.
+- **The item lists have no row limit.** Every page loads `/items/lookup` once and searches it in the browser.
+  The procedure used to return 20 rows by default, which silently cut every line dropdown. Since script 66 it
+  returns every matching item, unless a caller sends `top`. An item dropdown shows at most 100 matches at a time
+  (`limit={100}` on the line Item select of `DocumentLinesGrid`, `SalesInvoiceLinesGrid` and `PurchaseLinesGrid`),
+  and typing narrows them; the options are built once per list (`useMemo`), not on every render.
+- **Around the document.** `BIV_OUT` is an `AttachmentDocumentKind`, and script 66 copied Inventory Out's "Used
+  for" rows to it, so an administrator can add a "BIVAC certificate" type in Master Data › Attachment Types. The
+  item statement (`ItemStockMovementsPage`) links BIV_OUT movements to `/inventory/bivac-out/:id`.
+
+## Attachments (documents on every page)
+
+Every place that keeps files shows them the way the container page always did (prompt 40; scripts 52, 55 and 67):
+purchase orders, invoices and returns, sales invoices and returns, Inventory In / Out / BIVAC Out, customer receipts,
+supplier payments, containers (and their movements and charges) and item definitions. Landed cost adjustments have
+no documents: the provider's invoice of a late charge goes on the purchase invoice. An item's **picture**
+(`ItemImageCard`, `itemsApi.addImage`) is not a document: JPEG, PNG or WebP up to 5 MB, no type, unchanged.
+
+- **One list: `AttachmentsPanel`** (`src/components/attachments/`). Each file shows its type badge ("Purchase ›
+  Proforma Invoice"), its name and size, the date written on it, the note, who added it and when, with Download,
+  Edit and Delete, and an "Every type" filter above the list. **Table or cards by the width the panel really gets**
+  (`useElementSize` on the panel, not the screen): a table from 1,000 px (`TABLE_WIDTH`; once shown it stays down to
+  960, so a page scrollbar coming and going cannot flip it), one small card per file below - the type badge, the name
+  on its own line, "date · size · who · when", the note, and Download / Edit / Delete on the right. At 1440 px that gives
+  the table on document pages and the item's tab (about 1,130 px) and the cards in the left column of a container page
+  and in a movement's Documents tab (about 740 px, where the table squeezed names to a few letters a line and hid
+  Delete behind a scroll), and on a phone. `layout="cards"` asks for the cards whatever the width (the charge drawer).
+  A long name wraps between its words: `FileName` puts a `<wbr>` after every "_" and "." (a 90-character name takes
+  two lines of a card at 1440 px instead of breaking after "TEST-" and then mid-word), and the audit trail wraps the
+  name in "Attachment added: ..." rather than widening the page. Where it sits:
+  - document pages: `DocumentAttachmentsCard` (`src/components/documents/`), a **"Documents" card on the page**, below
+    the lines (and the charges), above the audit trail. The supplier payment numbers it "4 · Documents". No drawer;
+  - containers: `ContainerDocumentsCard`, grouped General / each movement / each charge;
+  - Logistics › Movements › the **Documents** tab: `MovementDocumentsCard` on the panel, one row per stored file with
+    "On KTG-…" links to the containers holding it;
+  - the container charge drawer: the panel without its card, `layout="cards"`;
+  - Item Definition › the **Documents** tab: kind `ITEM`, `itemsApi.files` (the shared `documentFilesApi`).
+- **One popup to add, one to edit.** `AttachmentUploadDialog` ("Add document", button "Upload") and
+  `AttachmentEditDialog` ("Edit document"): File ("PDF, image or Office file, up to 20 MB"), Attachment type
+  (required, "Pick a type"), Document date ("Date on the document"), Note; the edit can also replace the file
+  ("Replace file (optional)"). Containers add "Link to a movement" ("General - not tied to a movement") and "Also
+  attach to"; a charge's upload says "Filed under this charge on N containers." instead. The edit on a container
+  page offers "Link to a movement" too (cleared = General; `movementId` is sent only when it changed, and the server
+  refuses a movement one of the file's containers is not on); a charge's file stays with its charge.
+- **Nothing is uploaded without a type.** "Add document…" (the card's button, and the action bar of a document
+  page), dropping a file on the drop zone ("Drop a file here, or click to choose one") or clicking it all open the
+  popup, with the file filled in. A page opens it through the panel's `openUpload` counter; once that upload is in,
+  the card scrolls into view.
+- **The types offered are the kind's**: only those whose "Used for" (Master Data › Attachment Types) names the kind
+  (`attachmentTypesApi.forKind`): `CONTAINER`, `ITEM`, `PO`, `PINV`, `PRET`, `SO`, `SINV`, `SRET`, `RCPT`, `PAY`,
+  `INV_IN`, `INV_OUT`, `BIV_OUT`, `GRN` (goods receipts). With none: "No attachment type is used for
+  this kind of document: add one in Master Data › Attachment Types." Missing type: "Choose the attachment type."
+- **20 MB, PDF, image or Office files**, through `attachmentRules.ts` (`ATTACHMENT_ACCEPT`, `ATTACHMENT_HINT`,
+  `attachmentFileError`): "{file} cannot be attached: PDF, image or Office file, up to 20 MB." / "The file is {n}
+  MB; the limit is 20 MB." The API checks it again (`AttachmentRules`). SQL messages are shown as they come.
+- **"Other" asks for a type.** Files from before types existed (and the old item files, script 67) are typed "Other
+  › Other": an orange badge and an orange **"Choose a type"** button that opens the edit, which starts with no type
+  picked and says 'Still typed "Other": choose what this file is.'.
+- **The action bar of a document page** (PO, PINV, PRET, goods receipt, sales invoice / return, Inventory In / Out /
+  BIVAC Out, receipt, payment): **"Documents (n)"** scrolls to the card; **"Add document…"** (with the create permission) opens
+  the popup. On a draft never saved it is disabled with "Save the draft first to attach documents.", which the card
+  says too; a reversed receipt / payment: "This receipt is reversed: its documents stay as they are." / "This
+  payment is reversed: …". A new item's tab says "Save the item first to attach documents."
+- **A file changes only the files.** After an upload, an edit or a delete the page reads the document again and
+  takes only its `files` (the count) and `audit` (`filesChanged`), never the header and lines being typed: a file
+  does not touch the document's row, so its RowVersion still holds. The item page re-counts its documents for the
+  tab's badge; the charge drawer lists the charge's files from a fresh read of the charge.
+- **Who may add, edit and delete** (without it: download only). Nothing ever requires a file to post.
+
+  | Place | Permission | Status |
+  |---|---|---|
+  | Purchase order / invoice / return | `purchase.orders / invoices / returns.create` | any status |
+  | Sales invoice / return | `sales.invoices.create` | any status |
+  | Inventory In / Out / BIVAC Out | `inventory.stockin / stockout / bivacout.create` | any status |
+  | Goods receipt | `purchase.goodsreceipts.create` | any status |
+  | Customer receipt / supplier payment | `sales.receipts.create` / `purchase.payments.create` | not once Reversed (SQL 71005 / 73005) |
+  | Container, movement, charge | `containers.attachments.manage` | a movement needs containers; no new file on a cancelled charge |
+  | Item definition | `inventory.items.edit` | view mode too, like a posted document |
+
+  The panel's `canAdd` covers a new file (the drop zone, "Add document…", `openUpload`); `canEdit` (default
+  `canAdd`) covers Edit and "Choose a type". A cancelled charge passes `canAdd` false and `canEdit` with the
+  permission alone: its files can still be retyped, edited and deleted, and the drawer says "This charge is cancelled:
+  no new document can be added." instead of "An upload goes on every container of the group (N containers)."
+- **Shared container files.** One upload for several containers is one stored file ("shared with N containers").
+  Deleting asks how far ("Only this container" / "All containers"; on a movement "This movement's containers" /
+  "All containers"); a container's edit asks the same when the file is shared. A movement's or a charge's file is
+  always edited on every container holding it.
+- **Inside another form.** The item's Documents tab sits inside the item's `<form>`. A popup's form is rendered in a
+  portal but its submit still bubbles up the React tree, so the item form's `onSubmit` ignores a submit whose target
+  is not itself, and does nothing in view mode. Do the same wherever the panel lands inside a form.
 
 ## Checklist for a new page
 

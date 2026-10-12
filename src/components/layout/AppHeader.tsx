@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Avatar,
   Badge,
+  Box,
   Breadcrumbs,
   Group,
   Indicator,
@@ -51,8 +52,9 @@ export function AppHeader() {
 
   return (
     <Group justify="space-between" wrap="nowrap" gap="sm" style={{ flex: 1, minWidth: 0 }}>
-      <Stack gap={0} style={{ minWidth: 0 }}>
-        <Breadcrumbs separator="›" fz="xs" c="dimmed">
+      {/* Clipped, so on a narrow phone nothing runs under the buttons; there the title stands alone (no trail). */}
+      <Stack gap={0} style={{ minWidth: 0, overflow: 'hidden' }}>
+        <Breadcrumbs separator="›" fz="xs" c="dimmed" visibleFrom="sm">
           {trail.map((part, index) => (
             <Text key={part} fz="xs" c={index === trail.length - 1 ? undefined : 'dimmed'} fw={index === trail.length - 1 ? 600 : 400}>
               {part}
@@ -64,7 +66,11 @@ export function AppHeader() {
         </Text>
       </Stack>
 
-      <Group gap="sm" wrap="nowrap">
+      {/*
+        The buttons never shrink: at 390 px they kept their size anyway and ran past the right edge (the avatar half
+        off the screen); the title on the left gives way instead (it is cut with "…", and the page repeats it).
+      */}
+      <Group gap="sm" wrap="nowrap" style={{ flexShrink: 0 }}>
         {/*
           On every page of the testing environment, so a screen full of test data is never taken for
           the real thing. Production (and an environment that could not be read) shows nothing here.
@@ -140,7 +146,7 @@ export function AppHeader() {
 
         <Menu position="bottom-end" shadow="md" width={240}>
           <Menu.Target>
-            <UnstyledButton>
+            <UnstyledButton aria-label={`Account menu: ${user?.fullName ?? ''}`.trim()}>
               <Group gap="xs" wrap="nowrap">
                 <Avatar color="brand" radius="xl" size={34}>
                   {initials(user?.fullName)}
@@ -153,7 +159,10 @@ export function AppHeader() {
                     {user?.roles[0] ?? 'No roles'}
                   </Text>
                 </Stack>
-                <IconChevronDown size={16} />
+                {/* Not on a phone: the avatar alone opens the menu, and the title keeps the room. */}
+                <Box component="span" visibleFrom="sm" style={{ display: 'inline-flex' }}>
+                  <IconChevronDown size={16} />
+                </Box>
               </Group>
             </UnstyledButton>
           </Menu.Target>

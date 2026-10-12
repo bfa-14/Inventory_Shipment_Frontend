@@ -351,10 +351,10 @@ export function MovementsPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="Date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="Date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="Date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="Date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Button

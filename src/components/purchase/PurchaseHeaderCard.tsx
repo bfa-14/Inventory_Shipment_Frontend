@@ -24,7 +24,7 @@ export interface PurchaseHeader {
   /** Invoices only: the exporter's reference and the supplier's commercial invoice number. */
   exporterReference: string
   commercialInvoiceNo: string
-  /** Invoices only: '1' stock on posting, '2' stock on container offload. */
+  /** Invoices only: '1' local (received with Receive goods…), '2' shipped in containers (received with them). */
   receiptMode: '1' | '2'
   notes: string
 }
@@ -63,6 +63,12 @@ interface PurchaseHeaderCardProps {
   shippedLockedReason?: string | null
   /** An invoice from containers: the exporter reference is required to post (EXPORTER_REFERENCE_REQUIRED). */
   exporterRequired?: boolean
+  /**
+   * An OLD LOCAL invoice (posted before goods receipts, not shipped in containers): its "Shipped in containers" keeps
+   * the old meaning, "No - stock in on posting". An older shipped one reads like a new one: its containers' goods come
+   * in with goods receipts once the switch is made.
+   */
+  legacyReceipt?: boolean
 }
 
 /**
@@ -94,6 +100,7 @@ export function PurchaseHeaderCard({
   disabled,
   shippedLockedReason = null,
   exporterRequired = false,
+  legacyReceipt = false,
 }: PurchaseHeaderCardProps) {
   const isInvoice = kind.code === 'PINV'
   const isBase = rate?.isBaseCurrency === true
@@ -168,7 +175,7 @@ export function PurchaseHeaderCard({
               withAsterisk
               value={fromIsoDate(value.documentDate)}
               maxDate={new Date()}
-              onChange={(next) => onChange({ documentDate: next ? isoDate(new Date(next)) : '' })}
+              onChange={(next) => onChange({ documentDate: next ? isoDate(next) : '' })}
               error={errors.documentDate}
               valueFormat="DD/MM/YYYY"
               disabled={disabled}
@@ -184,7 +191,7 @@ export function PurchaseHeaderCard({
               label={dateLabelText}
               placeholder="Optional"
               value={fromIsoDate(value.expectedDate)}
-              onChange={(next) => onChange({ expectedDate: next ? isoDate(new Date(next)) : null })}
+              onChange={(next) => onChange({ expectedDate: next ? isoDate(next) : null })}
               error={errors.expectedDate}
               valueFormat="DD/MM/YYYY"
               clearable
@@ -343,17 +350,26 @@ export function PurchaseHeaderCard({
               )}
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
-              {/* THE RECEIPT MODE, CHOSEN (script 43): shipped in containers = stock in at the offload of the
-                  containers the invoice is linked to; off = stock in on posting. Locked while containers are linked. */}
+              {/* THE RECEIPT MODE, CHOSEN (script 43): shipped in containers = the goods travel in the containers the
+                  invoice is linked to and are received with them (goods receipts, script 65); off = they are received with
+                  Receive goods…. Locked while containers are linked. An old local invoice keeps the old meaning: its
+                  stock entered when it was posted. */}
               {readOnly ? (
-                field('Shipped in containers', value.receiptMode === '2' ? 'Yes - stock in at the container offload' : 'No - stock in on posting')
+                field(
+                  'Shipped in containers',
+                  value.receiptMode === '2'
+                    ? 'Yes - received with its containers'
+                    : legacyReceipt
+                      ? 'No - stock in on posting'
+                      : 'No - received with Receive goods…',
+                )
               ) : (
                 <Tooltip label={shippedLockedReason} disabled={!shippedLockedReason} withArrow multiline w={280}>
                   <div>
                     <Switch
                       mt={{ base: 0, lg: 'md' }}
                       label="Shipped in containers"
-                      description="The goods enter the stock at the container offload, not when the invoice is posted."
+                      description="Its goods travel in containers and are received with them."
                       checked={value.receiptMode === '2'}
                       disabled={disabled || shippedLockedReason !== null}
                       onChange={(event) => onChange({ receiptMode: event.currentTarget.checked ? '2' : '1' })}

@@ -312,7 +312,7 @@ export function ApplyChargeModal({ charge, onClose, onCopied }: ApplyChargeModal
             value={amount}
             onChange={(next) => setAmount(numberInputValue(next) ?? '')}
           />
-          <DateInput label="Charge date" valueFormat="DD/MM/YYYY" value={fromIsoDate(chargeDate)} onChange={(next) => setChargeDate(next ? isoDate(new Date(next)) : null)} />
+          <DateInput label="Charge date" valueFormat="DD/MM/YYYY" value={fromIsoDate(chargeDate)} onChange={(next) => setChargeDate(next ? isoDate(next) : null)} />
           <Select
             label="Allocation method"
             data={COPY_METHODS.map((m) => ({ value: m, label: allocationMethodLabel(m) }))}

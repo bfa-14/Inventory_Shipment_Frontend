@@ -21,14 +21,14 @@ import {
 } from '../../api/sales/invoices'
 import type { BranchLookupDto, CurrencyLookupDto, ItemListDto, ItemLookupDto, ItemUnitDto, PartyLookupDto, PriceListLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
-import { AttachmentsDrawer } from '../../components/documents/AttachmentsDrawer'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
 import { SalesInvoiceHeaderCard, type SalesInvoiceHeader, type SalesInvoiceHeaderErrors } from '../../components/sales/SalesInvoiceHeaderCard'
 import { SalesInvoiceLinesGrid, type InvoiceLine } from '../../components/sales/SalesInvoiceLinesGrid'
@@ -147,7 +147,9 @@ export function SalesInvoicePage() {
   const rateDirty = useRef(false)
   const priceListTouched = useRef(false)
 
-  const [attachmentsOpen, setAttachmentsOpen] = useState(false)
+  /** The action bar's "Add document…": each bump opens the Documents card's popup. */
+  const [addDocument, setAddDocument] = useState(0)
+  const documentsRef = useRef<HTMLDivElement>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -305,6 +307,18 @@ export function SalesInvoicePage() {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail: those two come from a fresh read,
+     and the header and lines being typed stay as they are (a file does not touch the invoice's row). */
+  const filesChanged = useCallback(async () => {
+    if (invoiceId === null) return
+    try {
+      const fresh = await salesInvoicesApi.get(invoiceId)
+      setInvoice((current) => (current && current.id === fresh.id ? { ...current, files: fresh.files, audit: fresh.audit } : current))
+    } catch {
+      /* The count and the trail catch up on the next load; the card already shows the files. */
+    }
+  }, [invoiceId])
 
   /* A LINE MAY SHIP FROM A WAREHOUSE OF ANY BRANCH, so every active warehouse is offered on the lines.
      Only the seed for new rows follows the header: the branch's main warehouse. */
@@ -854,7 +868,7 @@ export function SalesInvoicePage() {
     try {
       /* THE OUT-OF-STOCK GATE. Asked of the server now, so the warning names the real figures and a refusal
          is explained before anything is attempted. The warning is shown even where the setting allows the sale. */
-      const decision = await decideOutOfStock(saved.id)
+      const decision = await decideOutOfStock(saved.id, hasPermission(PERMISSIONS.goodsReceiptsView))
       if (!decision.proceed) return
       applyInvoice(await salesInvoicesApi.post(saved.id, saved.rowVersion, decision.acknowledge))
       notify.success('Invoice posted.')
@@ -957,16 +971,22 @@ export function SalesInvoicePage() {
 
   const canImportHere = editable && canImport && header.branchId !== null && defaultWarehouseId !== null && header.priceListId !== null
 
+  /* The Documents card: its count scrolls to it; "Add document…" opens its popup (any status, with the create permission). */
+  const documentActions: DocumentAction[] = [
+    { key: 'documents', label: `Documents (${formatNumber(invoice?.files.length ?? 0)})`, icon: DocumentIcons.documents, onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+    { key: 'add-document', label: 'Add document…', icon: DocumentIcons.addDocument, visible: canCreate, disabled: invoice === null, disabledReason: 'Save the draft first to attach documents.', onClick: () => setAddDocument((n) => n + 1) },
+  ]
+
   const actions: DocumentAction[] = readOnly
     ? [
-        { key: 'attachments', label: `Attachments (${invoice?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
+        ...documentActions,
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
         { key: 'create-return', label: 'Create Return', icon: <IconArrowBackUp size={16} />, colour: 'orange', visible: canCreate && invoice?.canCreateReturn === true, loading: saving, onClick: () => void createReturn() },
         { key: 'cancel-doc', label: 'Cancel Invoice', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && invoice?.canCancel === true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(ROUTE) },
       ]
     : [
-        { key: 'attachments', label: `Attachments (${invoice?.files.length ?? 0})`, icon: DocumentIcons.attachments, onClick: () => setAttachmentsOpen(true) },
+        ...documentActions,
         { key: 'import', label: 'Import from Excel', icon: DocumentIcons.import, visible: canImportHere, onClick: () => setImportOpen(true) },
         { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
@@ -986,7 +1006,7 @@ export function SalesInvoicePage() {
       )}
       {invoice && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${invoice.documentNumber ?? 'draft'}`}>
-          Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{invoice.cancelReason ? ` Reason: ${invoice.cancelReason}` : ''}
+          Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{reasonSentence(invoice.cancelReason)}
         </Alert>
       )}
 
@@ -1086,6 +1106,17 @@ export function SalesInvoicePage() {
         />
       </Paper>
 
+      <DocumentAttachmentsCard
+        ref={documentsRef}
+        documentId={invoice?.id ?? null}
+        documentKind={invoice?.documentTypeCode === 'SRET' ? 'SRET' : invoice?.documentTypeCode === 'SO' ? 'SO' : TYPE}
+        api={salesInvoicesApi.files}
+        canAdd={canCreate}
+        canRemove={canCreate}
+        onChanged={() => void filesChanged()}
+        openUpload={addDocument}
+      />
+
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
           <AuditTrail entries={invoice?.audit ?? []} />
@@ -1111,16 +1142,6 @@ export function SalesInvoicePage() {
       {invoice && canSeeProfit && invoice.totalCostBase !== null && (
         <SalesInvoiceProfitCard invoice={invoice} baseCurrencyCode={invoice.baseCurrencyCode ?? 'USD'} />
       )}
-
-      <AttachmentsDrawer
-        opened={attachmentsOpen}
-        onClose={() => setAttachmentsOpen(false)}
-        documentId={invoice?.id ?? null}
-        documentKind={invoice?.documentTypeCode === 'SRET' ? 'SRET' : invoice?.documentTypeCode === 'SO' ? 'SO' : TYPE}
-        onChanged={() => void reload()}
-        canEdit={canCreate}
-        api={salesInvoicesApi.files}
-      />
 
       <CancelReasonModal
         opened={cancelOpen}

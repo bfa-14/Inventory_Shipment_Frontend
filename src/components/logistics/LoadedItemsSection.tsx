@@ -3,10 +3,11 @@ import { ActionIcon, Anchor, Badge, Button, Checkbox, Group, NumberInput, Paper,
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { routes } from '../../routes'
-import type { FobSource } from '../../api/logistics/containers'
+import { fobSourceLabel, type FobSource } from '../../api/logistics/containers'
 import { formatNumber, numberInputValue } from '../format'
 import { ContainerFillLine } from './ContainerFillLine'
 import { fillOfLines, lineOil, type LoadLine } from './containerForm'
+import { WHOLE_BADGE } from './movementContainers'
 
 interface LoadedItemsSectionProps {
   lines: LoadLine[]
@@ -19,12 +20,13 @@ interface LoadedItemsSectionProps {
   baseCurrencyCode: string
 }
 
-const FOB_SOURCE_COLOURS: Record<FobSource, string> = { Order: 'gray', Invoice: 'blue', Offload: 'green' }
+const FOB_SOURCE_COLOURS: Record<FobSource, string> = { Order: 'gray', Invoice: 'blue', Offload: 'green', Received: 'green' }
 
 /**
  * What the container carries: order lines in PIECES, grouped by purchase order, with how far each is
- * invoiced and what it really costs — FOB per unit (from the order, the invoices, or frozen at the
- * offload), the posted charges per unit and the landed cost, final once offloaded.
+ * invoiced and what it really costs — FOB per unit (from the order, the invoices, or frozen when the
+ * goods were received: "Received"), the posted charges per unit and the landed cost, final once the
+ * goods are received (the goods receipt posted).
  *
  * A LINE THAT IS INVOICED IS HELD: its quantity cannot go below what is invoiced (the server says
  * LINE_INVOICED) and it cannot be removed. The input's minimum says so before the server does.
@@ -157,10 +159,18 @@ export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems,
                       </Table.Td>
                       <Table.Td ta="right">
                         {saved ? (
+                          // The source badge keeps its whole label (WHOLE_BADGE): the column grows rather than cutting
+                          // "Received" to "Rec…".
                           <Group gap={4} justify="flex-end" wrap="nowrap">
                             <Text fz="sm">{formatNumber(saved.unitFobBase, 2)}</Text>
-                            <Badge size="xs" variant="light" color={FOB_SOURCE_COLOURS[saved.fobSource]} data-fob-source={saved.fobSource}>
-                              {saved.fobSource}
+                            <Badge
+                              size="xs"
+                              variant="light"
+                              color={FOB_SOURCE_COLOURS[saved.fobSource] ?? 'gray'}
+                              styles={WHOLE_BADGE}
+                              data-fob-source={saved.fobSource}
+                            >
+                              {fobSourceLabel(saved.fobSource)}
                             </Badge>
                           </Group>
                         ) : (

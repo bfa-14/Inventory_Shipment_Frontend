@@ -4,8 +4,9 @@ import { saveBlob, toQueryString } from './containers'
 /**
  * Container charges (`api/logistics/container-charges`): freight, clearing, insurance… typed once for
  * one or several containers (one DRAFT per container, same groupId), divided over their lines — the
- * real cost of every item. Draft → Posted (locked) → Cancelled; one posted after the offload becomes a
- * cost adjustment ("after offload"). Permissions: containers.charges.view / create / post / cancel.
+ * real cost of every item. Draft → Posted (locked) → Cancelled; one posted after the goods were received (the
+ * container's goods receipt posted, or its offload of before) becomes a cost adjustment ("after receipt").
+ * Permissions: containers.charges.view / create / post / cancel.
  */
 const BASE = '/api/logistics/container-charges'
 
@@ -127,6 +128,8 @@ export interface ContainerChargeAttachmentDto {
   attachmentTypeId: number | null
   category: string | null
   subType: string | null
+  /** No type, or typed "Other" (script 67): the drawer asks for a real one, as every attachment list does. */
+  isOther: boolean
   fileId: number
   fileName: string
   contentType: string

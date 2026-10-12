@@ -144,7 +144,7 @@ export function ItemsPage() {
   async function handleDelete(item: ItemListDto) {
     const confirmed = await confirm({
       title: 'Delete item',
-      message: `Delete item ${item.itemCode} - ${item.itemName}? Its units and attachments go with it. This cannot be undone.`,
+      message: `Delete item ${item.itemCode} - ${item.itemName}? Its units, image and documents go with it. This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })

@@ -21,6 +21,7 @@ import {
   IconChecklist,
   IconRoute,
   IconShip,
+  IconPackageImport,
 } from '@tabler/icons-react'
 
 const ICONS = {
@@ -46,6 +47,8 @@ const ICONS = {
   route: IconRoute,
   coins: IconCoins,
   approval: IconChecklist,
+  // Goods receipts: goods coming into the stock (`box` is the warehouse).
+  inbox: IconPackageImport,
 } as const
 
 /** Maps a navigation model icon key to its Tabler icon. */

@@ -9,9 +9,14 @@ import type { PagedResult } from '../types'
  * real cost of every item. Every action answers with the whole container re-read, so the page never
  * patches what it sent.
  *
- * Permissions: containers.view / create / confirm / offload / cancel / close / delete,
- * containers.overcapacity to confirm a load above capacity, containers.attachments.manage for the
- * documents.
+ * ITS GOODS ENTER THE STOCK WITH A GOODS RECEIPT (scripts 64-65): a draft is created when its Delivery movement is
+ * completed, or with "Receive goods…" on the container (`goodsReceiptsApi.fromContainer`); posting it makes the
+ * container Offloaded. The old offload (`POST …/offload`) is refused by the server since; Cancel Offload stays for
+ * the containers offloaded before goods receipts.
+ *
+ * Permissions: containers.view / create / confirm / cancel / close / delete (containers.offload no longer has an
+ * effect), containers.overcapacity to confirm a load above capacity, containers.attachments.manage for the
+ * documents; receiving the goods is purchase.goodsreceipts.create / post.
  */
 const BASE = '/api/logistics/containers'
 
@@ -47,19 +52,61 @@ export const INVOICING_STATUSES = [
   { value: 2, label: 'Fully invoiced', colour: 'green' },
 ] as const
 
-/** Where the FOB per unit of a line comes from, in order of authority. */
-export type FobSource = 'Order' | 'Invoice' | 'Offload'
+/**
+ * Where the FOB per unit of a line comes from, in order of authority. 'Offload' = frozen when the goods were received
+ * (by a goods receipt, or by an offload before them): shown as "Received". 'Received' is read the same.
+ */
+export type FobSource = 'Order' | 'Invoice' | 'Offload' | 'Received'
+
+/** The label of a FOB source: the goods are received, whatever received them. */
+export function fobSourceLabel(source: FobSource | string): string {
+  return source === 'Offload' || source === 'Received' ? 'Received' : source
+}
+
+/** 1 Draft, 2 Posted, 3 Cancelled: the container's goods receipt (the same codes as `GoodsReceiptStatusCode`). */
+export type ContainerReceiptStatus = 1 | 2 | 3
+
+/**
+ * Who received the container's goods: a goods receipt ('GRN'), or the offload of before goods receipts ('Offload',
+ * whose Cancel Offload still works). Null while nothing is received.
+ */
+export type ContainerReceivedBy = 'GRN' | 'Offload'
+
+/**
+ * The container's goods receipt, as the container and the movement lists carry it: the open one (draft or posted), null
+ * when it has none. A cancelled receipt is not "the" receipt: the container can be received again.
+ */
+export interface ContainerReceiptRef {
+  goodsReceiptId?: number | null
+  /** Null on a draft ("Assigned on posting"). */
+  goodsReceiptNumber?: string | null
+  goodsReceiptStatus?: ContainerReceiptStatus | null
+  goodsReceiptStatusName?: string | null
+}
 
 /** What the STATUS allows. Whether the reader may is a permission, checked beside it. */
-export interface ContainerFlags {
+export interface ContainerFlags extends ContainerReceiptRef {
   status: ContainerStatusCode
   statusName: string
   canEdit: boolean
   canConfirm: boolean
-  /** Confirmed … Cleared AND every line covered by posted invoices. */
+  /** Always false since goods receipts (kept for old clients): the goods are received with "Receive goods…". */
   canOffload: boolean
+  /** Confirmed … Cleared and no open goods receipt (draft or posted): "Receive goods…" can create its draft. */
+  canReceive?: boolean
+  /** 'GRN' or 'Offload' once received; null before. */
+  receivedBy?: ContainerReceivedBy | null
+  /** False once a goods receipt (draft or posted) exists: the loaded lines are fixed (rule 21). */
+  canEditLines?: boolean
+  /** Only for a container offloaded BEFORE goods receipts; one received by a goods receipt cancels that receipt. */
   canCancelOffload: boolean
+  /** Offloaded and nothing blocks it: false while `closeBlockedReason` says why. */
   canClose: boolean
+  /**
+   * Why an offloaded container cannot be closed yet (draft charges, or received pieces not invoiced by posted invoices),
+   * the refusal Close itself would give; null when nothing blocks it.
+   */
+  closeBlockedReason?: string | null
   canReopen: boolean
   canCancel: boolean
   canDelete: boolean
@@ -118,6 +165,8 @@ export interface ContainerListDto extends ContainerFlags {
   actualPortArrival: string | null
   customsReleaseDate: string | null
   offloadedDate: string | null
+  /** The end date of its latest completed Delivery-stage movement; null when none. */
+  deliveredDate?: string | null
   freeDays: number | null
   lastFreeDay: string | null
   daysAtPort: number | null
@@ -174,7 +223,7 @@ export interface ContainerLineDto {
   invoicedDraftBase: number
   availableToInvoiceBase: number
   invoiceNumbers: string | null
-  /** Null until the offload. */
+  /** Null until the goods are received (the goods receipt is posted, or the offload of before). */
   receivedQuantityBase: number | null
   varianceReason: string | null
   notes: string | null
@@ -186,7 +235,7 @@ export interface ContainerLineDto {
   draftChargesBase: number
   chargesPerUnitBase: number | null
   landedCostBase: number | null
-  /** Final once offloaded; an estimate before. */
+  /** Final once the goods are received; an estimate before. */
   isLandedFinal: boolean
   weightKg: number | null
   volumeCbm: number | null
@@ -199,7 +248,7 @@ export interface ContainerInvoiceDto {
   documentDate: string
   /** The purchase document's status: 1 Draft, 2 Posted, 3 Cancelled, 4 Closed. */
   invoiceStatus: number
-  /** 1 = on posting, 2 = on container offload. */
+  /** 1 = local, 2 = "Shipped in containers" (received with its containers). */
   receiptMode: number
   purchaseOrderId: number | null
   purchaseOrderNumber: string | null
@@ -427,9 +476,21 @@ export interface ContainerDto extends ContainerFlags {
   borderCrossingDate: string | null
   customsReleaseDate: string | null
   daysAtPort: number | null
+  /** When the goods were received: the goods receipt's date received (or the offload date of before). */
   offloadedDate: string | null
   offloadedAtUtc: string | null
   offloadedByName: string | null
+  /** The end date of its latest completed Delivery-stage movement: the goods cannot be received before it. */
+  deliveredDate?: string | null
+  deliveryMovementId?: number | null
+  deliveryMovementNo?: string | null
+  deliveryPlaceName?: string | null
+  /** The open goods receipt (draft or posted): its date received, whether a Delivery made it, its warehouse, when. */
+  goodsReceiptDate?: string | null
+  goodsReceiptIsAuto?: boolean | null
+  goodsReceiptWarehouseId?: number | null
+  goodsReceiptWarehouseCode?: string | null
+  goodsReceiptCreatedAtUtc?: string | null
   statusNote: string | null
   currentLocation: string | null
   notes: string | null
@@ -498,8 +559,18 @@ export interface AvailablePoLineDto {
   packingFormula: number
   orderedQuantity: number
   orderedBase: number
-  /** In invoices made straight from the order (no container). */
+  /**
+   * What the order line committed OUTSIDE CONTAINERS (script 65): the larger of invoiced, and received + on draft goods
+   * receipts, outside containers. The name is older; the page calls it "Outside containers". Ordered − this − loaded
+   * elsewhere = maxHereBase.
+   */
   invoicedDirectBase: number
+  /** The parts of invoicedDirectBase: pieces invoiced outside containers… */
+  invoicedOutsideBase?: number
+  /** …received outside containers (posted goods receipts, and invoices received when posted before them)… */
+  receivedOutsideBase?: number
+  /** …and on draft goods receipts outside containers. */
+  inDraftReceiptsOutsideBase?: number
   loadedElsewhereBase: number
   /** What the container being edited already holds. */
   loadedHereBase: number
@@ -637,6 +708,8 @@ export interface ContainerQuery {
   orderMonthKey?: number
   dateFrom?: string
   dateTo?: string
+  /** A completed Delivery-stage movement, still in status 2-5 with no posted goods receipt (the drafts included). */
+  deliveredNotReceived?: boolean
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number
@@ -682,6 +755,14 @@ export interface TrackingContainerDto {
   portOfDestinationName: string | null
   finalDestinationName: string | null
   warehouseName: string | null
+  /** The end of its latest completed Delivery-stage movement; null when none. */
+  deliveredDate?: string | null
+  /** 'GRN' or 'Offload' once received; null before. */
+  receivedBy?: ContainerReceivedBy | null
+  /** The open goods receipt (draft or posted); null when none. */
+  goodsReceiptId?: number | null
+  goodsReceiptNumber?: string | null
+  goodsReceiptStatus?: ContainerReceiptStatus | null
 }
 
 export interface TrackingLegDto {
@@ -907,11 +988,17 @@ export const containersApi = {
   confirm: (id: number, rowVersion: string | null) =>
     request<ContainerDto>(`${BASE}/${id}/confirm`, { method: 'POST', body: { rowVersion } }),
 
-  /** 409 NOT_FULLY_INVOICED, or INVALID_STATUS while a movement is in progress. */
+  /**
+   * RETIRED: the server refuses it since goods receipts (69010 "Containers are received with a goods receipt now. Use
+   * Receive goods… on the container."). Kept for the shape of old clients; the page calls goodsReceiptsApi.fromContainer.
+   */
   offload: (id: number, payload: OffloadRequest) =>
     request<ContainerDto>(`${BASE}/${id}/offload`, { method: 'POST', body: payload }),
 
-  /** 409 COST_ADJUSTED once a charge was posted after the offload. */
+  /**
+   * Containers offloaded BEFORE goods receipts only. 409 COST_ADJUSTED once a charge was posted after the offload; for a
+   * container received by a goods receipt the server refuses (69010): cancel that goods receipt instead.
+   */
   cancelOffload: (id: number, reason: string, rowVersion: string | null) =>
     request<ContainerDto>(`${BASE}/${id}/cancel-offload`, { method: 'POST', body: { reason, rowVersion } }),
 
@@ -958,9 +1045,18 @@ export const containersApi = {
   /**
    * The name, type, date and note of one record and optionally a new file (script 55). allShared = every container
    * holding the file; otherwise this record only, and a new name or file becomes its own copy. Answers the record.
+   * With edit.movementId set (null = General) the file is also filed under that movement (script 67: setMovement);
+   * 400 with the SQL message ("Container KTG-… is not part of this movement.") when a container it reaches is not on
+   * it. A charge's file stays with its charge: its edit never sends a movement.
    */
-  updateAttachment: (attachmentId: number, allShared: boolean, edit: DocumentFileEdit) =>
-    putForm<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, attachmentEditForm(edit)),
+  updateAttachment: (attachmentId: number, allShared: boolean, edit: DocumentFileEdit) => {
+    const form = attachmentEditForm(edit)
+    if (edit.movementId !== undefined) {
+      form.append('setMovement', 'true')
+      if (edit.movementId !== null) form.append('movementId', String(edit.movementId))
+    }
+    return putForm<ContainerAttachmentDto>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, form)
+  },
 
   attachmentBlob: (attachmentId: number) => fetchBlob(`${BASE}/attachments/${attachmentId}/download`),
 

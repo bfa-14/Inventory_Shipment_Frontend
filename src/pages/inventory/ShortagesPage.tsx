@@ -261,10 +261,10 @@ export function ShortagesPage() {
           <Select label="Created By" placeholder="Anyone" data={users.map((u) => ({ value: String(u.id), label: u.fullName || u.username }))} value={filters.createdBy} onChange={(next) => setFilter('createdBy', next)} clearable searchable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="Date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom ? new Date(filters.dateFrom) : null} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="Date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="Date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo ? new Date(filters.dateTo) : null} onChange={(next) => setFilter('dateTo', next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="Date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Button variant="default" fullWidth mt={25} leftSection={<IconFilterOff size={16} />} disabled={grid.isDefault} onClick={grid.clearFilters}>

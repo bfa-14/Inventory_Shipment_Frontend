@@ -15,10 +15,13 @@ import { RowActions } from '../ui/RowActions'
 import { ApplyChargeModal } from './ApplyChargeModal'
 import { ChargeDrawer } from './ChargeDrawer'
 import { NewChargeModal } from './NewChargeModal'
+import { WHOLE_BADGE } from './movementContainers'
 
 interface ContainerChargesCardProps {
   container: ContainerDto
   onChanged: () => void
+  /** A charge's file was added, edited or deleted in its drawer (default onChanged): the page's file counts catch up. */
+  onDocumentsChanged?: () => void
 }
 
 const DRAFT = 1
@@ -28,10 +31,10 @@ const COLUMNS = 10
 /**
  * The "Charges" card of the container page: every charge on the container and, under each one,
  * what it adds to every item — the split the real cost is made of. Posted charges count in the
- * item costs; drafts are an estimate; a charge posted after the offload is badged, because it
- * adjusted costs that had already been fixed.
+ * item costs; drafts are an estimate; a charge posted after the goods were received (the container Offloaded) is
+ * badged, because it adjusted costs that had already been fixed.
  */
-export function ContainerChargesCard({ container, onChanged }: ContainerChargesCardProps) {
+export function ContainerChargesCard({ container, onChanged, onDocumentsChanged }: ContainerChargesCardProps) {
   const { hasPermission } = useAuth()
   const canCreate = hasPermission(PERMISSIONS.containerChargesCreate)
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
@@ -45,7 +48,7 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
       title: 'Post charge',
       message:
         container.status === OFFLOADED
-          ? `Post ${row.chargeName}? The container is offloaded: the item costs will be adjusted.`
+          ? `Post ${row.chargeName}? The goods are received: the item costs will be adjusted.`
           : `Post ${row.chargeName}? It is locked once posted and counts in the item costs.`,
       confirmLabel: 'Post',
     })
@@ -95,7 +98,7 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
       {container.charges.length === 0 ? (
         <Text fz="sm" c="dimmed">No charge on this container yet.</Text>
       ) : (
-        <Table.ScrollContainer minWidth={980}>
+        <Table.ScrollContainer minWidth={760}>
           <Table verticalSpacing="xs" fz="sm">
             <Table.Thead>
               <Table.Tr>
@@ -140,12 +143,14 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
                       <Table.Td>{allocationMethodLabel(row.allocationMethod)}</Table.Td>
                       <Table.Td>{row.includeInLandedCost ? 'Yes' : 'No'}</Table.Td>
                       <Table.Td>
-                        <Group gap={4} wrap="nowrap">
-                          <Badge variant="light" color={chargeStatusColour(row.status)}>
+                        {/* Whole labels (WHOLE_BADGE): the column grows rather than cutting "Posted" to "P…"; "after
+                            receipt" goes under the status when the column is narrow, so both read without scrolling. */}
+                        <Group gap={4} wrap="wrap">
+                          <Badge variant="light" color={chargeStatusColour(row.status)} styles={WHOLE_BADGE}>
                             {row.status === 1 ? 'Draft' : row.status === 2 ? 'Posted' : 'Cancelled'}
                           </Badge>
                           {row.adjustedAfterOffload && (
-                            <Badge variant="light" color="orange" size="xs">after offload</Badge>
+                            <Badge variant="light" color="orange" size="xs" styles={WHOLE_BADGE}>after receipt</Badge>
                           )}
                         </Group>
                       </Table.Td>
@@ -215,7 +220,7 @@ export function ContainerChargesCard({ container, onChanged }: ContainerChargesC
         onCreated={onChanged}
       />
 
-      <ChargeDrawer chargeId={openId} onClose={() => setOpenId(null)} onChanged={onChanged} />
+      <ChargeDrawer chargeId={openId} onClose={() => setOpenId(null)} onChanged={onChanged} onDocumentsChanged={onDocumentsChanged} />
 
       {copying && (
         <ApplyChargeModal

@@ -226,7 +226,7 @@ export function PaymentLinesCard({
                           aria-label={`Cheque date, line ${index + 1}`}
                           valueFormat="DD/MM/YYYY"
                           value={fromIsoDate(line.chequeDate)}
-                          onChange={(next) => onChange(line.key, { chequeDate: next ? isoDate(new Date(next)) : null })}
+                          onChange={(next) => onChange(line.key, { chequeDate: next ? isoDate(next) : null })}
                           error={!readOnly && !line.chequeDate ? 'Required' : undefined}
                           disabled={readOnly}
                         />
@@ -244,7 +244,7 @@ export function PaymentLinesCard({
                           placeholder="Optional"
                           clearable
                           value={fromIsoDate(line.chequeDueDate)}
-                          onChange={(next) => onChange(line.key, { chequeDueDate: next ? isoDate(new Date(next)) : null })}
+                          onChange={(next) => onChange(line.key, { chequeDueDate: next ? isoDate(next) : null })}
                           disabled={readOnly}
                         />
                       ) : (

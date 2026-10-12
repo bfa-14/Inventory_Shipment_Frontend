@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, FileInput, SegmentedControl, Select, SimpleGrid, Text, Textarea, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconPaperclip } from '@tabler/icons-react'
@@ -7,7 +7,8 @@ import { ApiError } from '../../api/http'
 import { attachmentTypesApi, type AttachmentTypeLookupDto } from '../../api/masterdata/attachmentTypes'
 import { formatNumber } from '../format'
 import { FormModal } from '../ui/FormModal'
-import { ATTACHMENT_ACCEPT, attachmentFileError } from './attachmentRules'
+import type { AttachmentOption } from './AttachmentUploadDialog'
+import { ATTACHMENT_ACCEPT, ATTACHMENT_HINT, attachmentFileError } from './attachmentRules'
 
 /** The part of a listed file the edit dialog reads. */
 export interface EditableAttachment {
@@ -16,6 +17,10 @@ export interface EditableAttachment {
   isOther: boolean
   documentDate: string | null
   note: string | null
+  /** A container file's movement (null = General): what "Link to a movement" opens on. */
+  movementId?: number | null
+  /** Its number, so a movement no longer offered still shows by name. */
+  movementNo?: string | null
 }
 
 interface AttachmentEditDialogProps {
@@ -27,6 +32,13 @@ interface AttachmentEditDialogProps {
    * picks how far the change goes; otherwise it goes everywhere the file is.
    */
   sharedCount?: number
+  /**
+   * Container files only (not a charge's, which stays with its charge): the movements the file may be filed under.
+   * Given, the dialog shows "Link to a movement" on the file's movement, cleared = General; the edit then carries
+   * movementId when the reader changed it. Empty (and the file on no movement) or left out (every other place), the
+   * link is neither shown nor sent.
+   */
+  movementOptions?: AttachmentOption[] | null
   /** Sends the edit; allShared = every container holding the file (containers only). A throw keeps the dialog open. */
   onSave: (edit: DocumentFileEdit, allShared: boolean) => Promise<unknown>
   onClose: () => void
@@ -34,9 +46,10 @@ interface AttachmentEditDialogProps {
 }
 
 /**
- * A file already attached: its name, type, date and note - the same checks as the upload - and optionally a new
- * version of the file in the same place in the list. A file still typed "Other" (attached before types existed)
- * opens with no type picked, so the reader chooses a real one.
+ * THE "Edit document" popup: a file already attached - its name, type, date and note, the same checks as the upload -
+ * and optionally a new version of the file in the same place in the list; on a container page also the movement it is
+ * filed under. A file still typed "Other" (attached before types existed) opens with no type picked, so the reader
+ * chooses a real one.
  */
 export function AttachmentEditDialog(props: AttachmentEditDialogProps) {
   return props.file ? <EditForm {...props} file={props.file} /> : null
@@ -46,6 +59,7 @@ function EditForm({
   file,
   documentKind,
   sharedCount = 1,
+  movementOptions = null,
   onSave,
   onClose,
   onSaved,
@@ -64,6 +78,8 @@ function EditForm({
   const [replacement, setReplacement] = useState<File | null>(null)
   const [replacementError, setReplacementError] = useState<string | null>(null)
   const [allShared, setAllShared] = useState(true)
+  const initialMovement = file.movementId == null ? null : String(file.movementId)
+  const [movementId, setMovementId] = useState<string | null>(initialMovement)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -74,6 +90,13 @@ function EditForm({
       .then(setTypes)
       .catch(() => setTypes([]))
   }, [documentKind, file.attachmentTypeId])
+
+  // The file's own movement stays choosable even when the page no longer offers it (cancelled, say).
+  const movementData = useMemo(() => {
+    if (!movementOptions) return []
+    if (initialMovement === null || movementOptions.some((o) => o.value === initialMovement)) return movementOptions
+    return [{ value: initialMovement, label: file.movementNo ?? `Movement #${initialMovement}` }, ...movementOptions]
+  }, [movementOptions, initialMovement, file.movementNo])
 
   function pick(next: File | null) {
     // The name follows the new file until the reader types one of their own.
@@ -95,6 +118,10 @@ function EditForm({
           fileName: name,
           fields: { attachmentTypeId: Number(typeId), documentDate, note: note.trim() || null },
           file: replacement,
+          // Only a link the reader changed is sent: an untouched one stays exactly as it is.
+          ...(movementOptions && movementId !== initialMovement
+            ? { movementId: movementId === null ? null : Number(movementId) }
+            : {}),
         },
         allShared,
       )
@@ -109,7 +136,7 @@ function EditForm({
   return (
     <FormModal
       opened
-      title="Edit attachment"
+      title="Edit document"
       saving={saving}
       saveDisabled={replacementError !== null}
       onClose={onClose}
@@ -146,6 +173,7 @@ function EditForm({
         leftSection={<IconPaperclip size={14} />}
         clearable
         error={replacementError}
+        description={ATTACHMENT_HINT}
       />
       {replacement ? (
         <Text fz="xs" c="dimmed">
@@ -178,6 +206,21 @@ function EditForm({
           clearable
         />
       </SimpleGrid>
+
+      {/* As on the upload popup: no field when there is no movement to choose (a never-moved container). movementData
+          holds the file's own movement too, so a file still linked to one can always go back to General. */}
+      {movementOptions && movementData.length > 0 ? (
+        <Select
+          label="Link to a movement"
+          placeholder="General - not tied to a movement"
+          data={movementData}
+          value={movementId}
+          onChange={setMovementId}
+          searchable
+          clearable
+          nothingFoundMessage="No movement matches"
+        />
+      ) : null}
 
       <Textarea
         label="Note"

@@ -4,7 +4,7 @@ import { fetchBlob, request } from '../http'
 import type { PagedResult } from '../types'
 
 /**
- * Inventory In / Out documents, the stock ledger behind them, and the configuration they read.
+ * Inventory In / Out and BIVAC Out documents, the stock ledger behind them, and the configuration they read.
  *
  * THE FIRST DOCUMENT FAMILY. Purchase and Sales will have the same shape — a header, lines, files,
  * an audit trail, and a Draft → Posted → Cancelled lifecycle — so the types here are named for what
@@ -14,8 +14,12 @@ import type { PagedResult } from '../types'
 /** Draft is editable and has no stock effect; Posted has written the ledger; Cancelled has reversed it. */
 export type StockDocumentStatus = 'Draft' | 'Posted' | 'Cancelled'
 
-/** The two inventory kinds. The other six document types exist but belong to families not built yet. */
-export type StockDocumentTypeCode = 'INV_IN' | 'INV_OUT'
+/**
+ * The inventory kinds: Inventory In, Inventory Out and BIVAC Out (script 66) - an Out of its own whose lines may
+ * only hold BIVAC items. The page never branches on these codes: what differs is in the kind's row of
+ * documentKind.ts and in the type's configuration (DocumentTypeDto).
+ */
+export type StockDocumentTypeCode = 'INV_IN' | 'INV_OUT' | 'BIV_OUT'
 
 export interface DocumentTypeDto {
   id: number
@@ -42,6 +46,12 @@ export interface DocumentTypeDto {
   numberPerBranch: boolean
   /** True: the year is part of the number and the sequence restarts every year ("SHR-2026-000001"). */
   yearInNumber: boolean
+  /**
+   * True: every line must be an item with "BIVAC Item" ticked (BIVAC Out). Set by the database script that
+   * creates the type and read-only on the configuration page; the document page then offers BIVAC items
+   * only, and the server refuses any other item (62000, "Line 2: … is not a BIVAC item.").
+   */
+  bivacItemsOnly: boolean
   isActive: boolean
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */

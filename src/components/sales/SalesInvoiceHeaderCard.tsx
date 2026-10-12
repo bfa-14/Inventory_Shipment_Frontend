@@ -164,7 +164,7 @@ export function SalesInvoiceHeaderCard({
               withAsterisk
               value={fromIsoDate(value.documentDate)}
               maxDate={new Date()}
-              onChange={(next) => onChange({ documentDate: next ? isoDate(new Date(next)) : '' })}
+              onChange={(next) => onChange({ documentDate: next ? isoDate(next) : '' })}
               error={errors.documentDate}
               valueFormat="DD/MM/YYYY"
               disabled={disabled}
@@ -180,7 +180,7 @@ export function SalesInvoiceHeaderCard({
               label="Due Date"
               placeholder="Optional"
               value={fromIsoDate(value.dueDate)}
-              onChange={(next) => onChange({ dueDate: next ? isoDate(new Date(next)) : null })}
+              onChange={(next) => onChange({ dueDate: next ? isoDate(next) : null })}
               error={errors.dueDate}
               valueFormat="DD/MM/YYYY"
               clearable

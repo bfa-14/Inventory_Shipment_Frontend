@@ -40,8 +40,9 @@ function directionLabel(direction: number): string {
 /**
  * Editing one document type.
  *
- * CODE, FAMILY AND DIRECTION ARE SHOWN, NOT EDITED. They are what the procedures branch on; a form
- * that could flip a type's direction would turn every posted document of it into a lie. What a
+ * CODE, FAMILY, DIRECTION AND "BIVAC ITEMS ONLY" ARE SHOWN, NOT EDITED. They are what the procedures
+ * branch on; a form that could flip a type's direction would turn every posted document of it into a
+ * lie, and one that could lift the BIVAC rule would let a BIVAC Out take any item. What a
  * business owner changes is the wording, the numbering and the pricing rule — and the numbering
  * change is said, in the warning, to apply to new documents only.
  */
@@ -125,6 +126,11 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
         <Grid.Col span={{ base: 12, sm: 4 }}>
           <ReadOnly label="Stock direction" value={directionLabel(type.stockDirection)} />
         </Grid.Col>
+        {type.bivacItemsOnly && (
+          <Grid.Col span={12}>
+            <ReadOnly label="BIVAC items only" value={'Yes: every line must be an item with "BIVAC Item" ticked.'} />
+          </Grid.Col>
+        )}
 
         <Grid.Col span={{ base: 12, sm: 8 }}>
           <TextInput label="Name" withAsterisk maxLength={100} {...form.getInputProps('name')} />

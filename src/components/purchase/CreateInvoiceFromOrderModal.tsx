@@ -14,7 +14,7 @@ interface CreateInvoiceFromOrderModalProps {
 }
 
 /**
- * "Create Purchase Invoice" on an approved order: what remains to receive becomes ONE DRAFT PER ITEM, or one
+ * "Create Purchase Invoice" on an approved order: what remains to invoice becomes ONE DRAFT PER ITEM, or one
  * draft holding every item. "One invoice per item" starts from the setting (Purchase.OneItemPerInvoice) and is
  * chosen for this creation only. The dialog says how many before anything is made, and takes the exporter's
  * reference and the commercial invoice number once for all of them.
@@ -42,8 +42,21 @@ export function CreateInvoiceFromOrderModal({ order: given, orderId, onClose, on
     }
   }, [given, orderId])
 
-  /* The items still to receive, in the order of their first line: one invoice each, or one invoice for all. */
+  /* The items still to invoice, in the order of their first line: one invoice each, or one invoice for all. */
   const itemCodes = distinctInOrder((order?.lines ?? []).filter((line) => (line.remainingBase ?? 0) > 0).map((line) => line.itemCode))
+
+  /* NOTHING LEFT TO INVOICE: since goods receipts a fully invoiced order stays open until its goods are received, so the
+     order list can still reach this dialog for it. Said here instead of a Create the server would refuse (65011). An
+     order line's remainingBase counts the draft invoices as not invoiced yet, so the rest may be all in drafts. */
+  const leftToInvoice = (order?.lines ?? []).reduce((sum, line) => sum + Math.max(0, line.remainingBase ?? 0), 0)
+  const nothingLeft =
+    order === null
+      ? null
+      : leftToInvoice <= 0 || order.canCreateInvoice === false
+        ? 'Everything ordered is already invoiced.'
+        : leftToInvoice <= order.inDraftInvoicesBase
+          ? 'The rest of this order is already in draft invoices: post or delete them first.'
+          : null
 
   async function create() {
     setSaving(true)
@@ -67,14 +80,19 @@ export function CreateInvoiceFromOrderModal({ order: given, orderId, onClose, on
       size="lg"
       saving={saving}
       saveLabel={onePerItem && itemCodes.length > 1 ? `Create ${itemCodes.length} invoices` : 'Create invoice'}
-      saveDisabled={order === null}
+      saveDisabled={order === null || nothingLeft !== null}
       onSubmit={() => void create()}
     >
       <Stack gap="md">
         <Text fz="sm">
-          Create purchase invoice drafts from {order?.documentNumber ?? `order #${orderId}`} with everything that remains to receive?
+          Create purchase invoice drafts from {order?.documentNumber ?? `order #${orderId}`} with everything that remains to invoice?
         </Text>
         {order === null && !error ? <Loader size="sm" /> : null}
+        {nothingLeft ? (
+          <Alert color="orange" data-nothing-to-invoice>
+            {nothingLeft}
+          </Alert>
+        ) : null}
         <Switch
           label="One invoice per item"
           description={onePerItemDescription('Off: one invoice holds every item.', choice, setting)}
@@ -83,7 +101,7 @@ export function CreateInvoiceFromOrderModal({ order: given, orderId, onClose, on
           onChange={(event) => setChoice(event.currentTarget.checked)}
           data-one-per-item-switch
         />
-        {itemCodes.length > 0 ? (
+        {itemCodes.length > 0 && nothingLeft === null ? (
           <Alert color="blue" variant="light" data-one-invoice-per-item={onePerItem}>
             {onePerItem ? onePerItemLine(itemCodes) : oneInvoiceLine(itemCodes.length)}
             {order && order.inDraftInvoicesBase > 0 ? (

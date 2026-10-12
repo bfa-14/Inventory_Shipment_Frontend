@@ -27,12 +27,12 @@ import {
   IconFileSpreadsheet,
   IconFilterOff,
   IconLock,
+  IconPackageImport,
   IconPencil,
   IconPlus,
   IconPrinter,
   IconTableExport,
   IconTrash,
-  IconTruckDelivery,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
@@ -53,6 +53,8 @@ import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { ContainerSelectionBar } from '../../components/logistics/ContainerSelectionBar'
 import { ContainerFillCell } from '../../components/logistics/ContainerFillLine'
+import { ContainerReceiptCell } from '../../components/logistics/ContainerReceiptCell'
+import { containerReceiptOf, receiptBlocksCancelText, RECEIVABLE_STATUSES } from '../../components/logistics/containerReceipt'
 import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
@@ -108,6 +110,23 @@ const NO_FILTERS: Filters = {
 const ADVANCED: (keyof Filters)[] = ['purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
 /**
+ * The Status filter's own choice beside the statuses: a completed Delivery-stage movement and no posted goods receipt
+ * (`deliveredNotReceived`). The goods are at the warehouse and not in stock yet - a window to keep short.
+ */
+const DELIVERED_NOT_RECEIVED = 'deliveredNotReceived'
+
+const STATUS_FILTER_OPTIONS = [
+  { group: 'Status', items: CONTAINER_STATUSES.map((s) => ({ value: String(s.value), label: s.label })) },
+  { group: 'Goods receipt', items: [{ value: DELIVERED_NOT_RECEIVED, label: 'Delivered, not received' }] },
+]
+
+/** "GRN-BR-002-000004", "Draft", or nothing: what the Goods receipt column shows, filters and exports. */
+function receiptText(row: ContainerListDto): string {
+  const receipt = containerReceiptOf(row)
+  return receipt ? (receipt.number ?? 'Draft') : ''
+}
+
+/**
  * What each column IS, for the grid engine. The order month reads "Sep-2026" but SORTS and filters by
  * the order date behind it, so the months run in time and not in the alphabet.
  */
@@ -130,6 +149,7 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'eta', kind: 'date' },
   { accessor: 'currentLocation', text: (r) => r.currentLocation ?? '' },
   { accessor: 'status', kind: 'list', text: (r) => r.statusName },
+  { accessor: 'goodsReceiptNumber', text: receiptText },
 ]
 
 /** 'YYYY-MM-..' -> 202609 */
@@ -142,20 +162,26 @@ function monthKey(value: string | null): number | undefined {
 /**
  * The containers, one row per box: where it is, what it carries and for whom. Order, supplier, PI
  * and item columns are the server's summaries ("PO-… +1", "Mixed - 3 items") because one container
- * carries several orders and invoices. Invoicing is by POSTED invoices (what the offload needs); the
- * movement is the one in progress, else the last completed. A red badge flags a container whose free
- * time at the port is used up.
+ * carries several orders and invoices. Invoicing is by POSTED invoices; the movement is the one in
+ * progress, else the last completed. A red badge flags a container whose free time at the port is used
+ * up. The Goods receipt column is the receipt its goods enter the stock with (a draft, or the GRN
+ * number), and the Status filter's "Delivered, not received" lists the containers waiting at the
+ * warehouse.
  */
 export function ContainersPage() {
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
 
   const canCreate = hasPermission(PERMISSIONS.containersCreate)
-  const canOffload = hasPermission(PERMISSIONS.containersOffload)
+  const canReceive = hasPermission(PERMISSIONS.goodsReceiptsCreate)
+  const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
   const canClose = hasPermission(PERMISSIONS.containersClose)
   const canCancel = hasPermission(PERMISSIONS.containersCancel)
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
   const canImportCharges = hasPermission(PERMISSIONS.containerChargesCreate)
+  // The order and PI filters list documents the reader may not see: asked for only with their view permission.
+  const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
+  const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
 
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
@@ -183,7 +209,11 @@ export function ContainersPage() {
               containerNo: filters.containerNo.trim() || undefined,
               containerRef: filters.containerRef.trim() || undefined,
               supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
-              status: filters.status === null ? undefined : (Number(filters.status) as ContainerStatusCode),
+              status:
+                filters.status === null || filters.status === DELIVERED_NOT_RECEIVED
+                  ? undefined
+                  : (Number(filters.status) as ContainerStatusCode),
+              deliveredNotReceived: filters.status === DELIVERED_NOT_RECEIVED || undefined,
               orderMonthKey: monthKey(filters.orderMonth),
               purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
               purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
@@ -226,29 +256,34 @@ export function ContainersPage() {
     portsApi.lookup(false).then(setPorts).catch(() => {})
     itemsApi.lookup(false).then(setItems).catch(() => {})
     // The PI filter needs the invoice list, which is the invoices' own permission: without it the
-    // filter simply offers nothing rather than failing the page.
-    purchaseDocumentsApi
-      .list({ documentTypeCode: 'PINV', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-      .then((result) =>
-        setInvoices(
-          result.items
-            .filter((i) => i.documentNumber)
-            .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
-        ),
-      )
-      .catch(() => {})
+    // filter simply offers nothing, and the list is not asked for at all - a refused request is a 403
+    // in the browser console, not a quiet empty list.
+    if (canViewInvoices) {
+      purchaseDocumentsApi
+        .list({ documentTypeCode: 'PINV', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
+        .then((result) =>
+          setInvoices(
+            result.items
+              .filter((i) => i.documentNumber)
+              .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
+          ),
+        )
+        .catch(() => {})
+    }
     // Same for the orders filter: the orders' own permission.
-    purchaseDocumentsApi
-      .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-      .then((result) =>
-        setOrders(
-          result.items
-            .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
-            .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
-        ),
-      )
-      .catch(() => {})
-  }, [])
+    if (canViewOrders) {
+      purchaseDocumentsApi
+        .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
+        .then((result) =>
+          setOrders(
+            result.items
+              .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
+              .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
+          ),
+        )
+        .catch(() => {})
+    }
+  }, [canViewInvoices, canViewOrders])
 
   // The advanced panel opens by itself when one of its filters is in use, so a filter is never hidden.
   const advancedActive = ADVANCED.some((key) => filters[key] !== NO_FILTERS[key])
@@ -319,12 +354,12 @@ export function ContainersPage() {
     downloadCsv(
       'containers.csv',
       ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
-        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status'],
+        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status', 'Goods receipt'],
       engine.rows.map((r) => [
         r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
         r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
         formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
-        r.currentLocation ?? '', r.statusName,
+        r.currentLocation ?? '', r.statusName, receiptText(r),
       ]),
     )
   }
@@ -449,15 +484,58 @@ export function ContainersPage() {
       ),
     },
     {
+      accessor: 'goodsReceiptNumber',
+      title: 'Goods receipt',
+      width: 175,
+      render: (row) => <ContainerReceiptCell receipt={containerReceiptOf(row)} canView={canViewReceipts} />,
+    },
+    {
       accessor: 'actions',
       title: 'Actions',
       width: 120,
       textAlign: 'right',
       render: (row) => {
+        const receipt = containerReceiptOf(row)
         const more = [
-          { key: 'offload', show: canOffload && row.canOffload, label: 'Offload', icon: <IconTruckDelivery size={16} />, onClick: () => void navigate(`${CONTAINERS_ROUTE}/${row.id}?offload=1`) },
-          { key: 'close', show: canClose && row.canClose, label: 'Close', icon: <IconLock size={16} />, onClick: () => void close(row) },
-          { key: 'cancel', show: canCancel && row.canCancel, label: 'Cancel', icon: <IconBan size={16} />, color: 'red', onClick: () => setCancelling(row) },
+          {
+            key: 'receive',
+            show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.canReceive !== false,
+            label: 'Receive goods',
+            icon: <IconPackageImport size={16} />,
+            onClick: () => void navigate(`${CONTAINERS_ROUTE}/${row.id}?receive=1`),
+          },
+          {
+            key: 'receipt',
+            show: canViewReceipts && receipt !== null,
+            label: 'Goods receipt',
+            icon: <IconPackageImport size={16} />,
+            onClick: () => {
+              if (receipt) void navigate(routes.goodsReceipt(receipt.id))
+            },
+          },
+          {
+            key: 'close',
+            // On every offloaded container; what blocks it (draft charges, received pieces not invoiced yet) is said
+            // under its label, as Cancel does - a menu item cannot carry a tooltip once disabled.
+            show: canClose && row.status === 6,
+            label: 'Close',
+            icon: <IconLock size={16} />,
+            disabled: !row.canClose,
+            reason: row.closeBlockedReason ?? 'This container cannot be closed now.',
+            onClick: () => void close(row),
+          },
+          {
+            key: 'cancel',
+            // Shown on every container before its goods arrive; a goods receipt (draft or posted) blocks it, and the
+            // item says so under its label (69019) - a menu item cannot carry a tooltip once disabled.
+            show: canCancel && row.status >= 1 && row.status <= 5,
+            label: 'Cancel',
+            icon: <IconBan size={16} />,
+            color: 'red',
+            disabled: !row.canCancel,
+            reason: receipt ? receiptBlocksCancelText(row.containerRef, receipt) : 'This container cannot be cancelled now.',
+            onClick: () => setCancelling(row),
+          },
           { key: 'delete', show: canDelete && row.canDelete, label: 'Delete', icon: <IconTrash size={16} />, color: 'red', onClick: () => void remove(row) },
           { key: 'export', show: true, label: 'Export', icon: <IconFileSpreadsheet size={16} />, onClick: () => void exportOne(row) },
         ].filter((a) => a.show)
@@ -484,8 +562,13 @@ export function ContainersPage() {
               </Menu.Target>
               <Menu.Dropdown>
                 {more.map((action) => (
-                  <Menu.Item key={action.key} leftSection={action.icon} color={action.color} onClick={action.onClick}>
+                  <Menu.Item key={action.key} leftSection={action.icon} color={action.color} onClick={action.onClick} disabled={action.disabled}>
                     {action.label}
+                    {action.disabled && action.reason ? (
+                      <Text fz="xs" c="dimmed" maw={260} style={{ whiteSpace: 'normal' }}>
+                        {action.reason}
+                      </Text>
+                    ) : null}
                   </Menu.Item>
                 ))}
               </Menu.Dropdown>
@@ -535,7 +618,7 @@ export function ContainersPage() {
             <Select label="Supplier" placeholder="All suppliers" data={supplierOptions} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable nothingFoundMessage="No supplier matches" />
           </FilterBar.Col>
           <FilterBar.Col span={2}>
-            <Select label="Status" placeholder="All" data={CONTAINER_STATUSES.map((s) => ({ value: String(s.value), label: s.label }))} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+            <Select label="Status" placeholder="All" data={STATUS_FILTER_OPTIONS} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
           </FilterBar.Col>
           <FilterBar.Col span={2}>
             <MonthPickerInput label="Order Month" placeholder="Any" valueFormat="MMM YYYY" value={filters.orderMonth} onChange={(next) => setFilter('orderMonth', next ? String(next).slice(0, 10) : null)} clearable />
@@ -577,10 +660,10 @@ export function ContainersPage() {
               <Select label="Location / Port" placeholder="Any port" data={portOptions} value={filters.portId} onChange={(next) => setFilter('portId', next)} clearable searchable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
-              <DateInput label="Order date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
+              <DateInput label="Order date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
-              <DateInput label="Order date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(new Date(next)) : null)} clearable />
+              <DateInput label="Order date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
               <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={grid.clearFilters} disabled={grid.isDefault}>

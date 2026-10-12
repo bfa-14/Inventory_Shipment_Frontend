@@ -2,7 +2,8 @@ import { formatNumber } from '../format'
 
 /**
  * What every attachment endpoint accepts (the API's AttachmentRules): the containers' list since script 27, on
- * every document since script 48. The server checks again; this saves uploading a 60 MB scan to be refused.
+ * every document since script 52, on an item's documents since script 67 (its picture keeps its own 5 MB JPEG / PNG /
+ * WebP rule). The server checks again; this saves uploading a 60 MB scan to be refused.
  */
 export const ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.tif,.tiff,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt'
 

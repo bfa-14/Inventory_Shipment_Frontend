@@ -88,7 +88,7 @@ export function PaymentHeaderCard({
             withAsterisk
             valueFormat="DD/MM/YYYY"
             value={fromIsoDate(value.paymentDate)}
-            onChange={(next) => next && onChange({ paymentDate: isoDate(new Date(next)) })}
+            onChange={(next) => next && onChange({ paymentDate: isoDate(next) })}
             error={errors.paymentDate}
             disabled={off}
           />

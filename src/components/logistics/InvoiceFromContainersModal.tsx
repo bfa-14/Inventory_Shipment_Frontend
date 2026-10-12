@@ -143,7 +143,7 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
           valueFormat="DD/MM/YYYY"
           maxDate={new Date()}
           value={fromIsoDate(documentDate)}
-          onChange={(next) => setDocumentDate(next ? isoDate(new Date(next)) : null)}
+          onChange={(next) => setDocumentDate(next ? isoDate(next) : null)}
           w={220}
         />
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" maw={560}>
