@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import { Anchor, Badge, Group, Text } from '@mantine/core'
 import { routes } from '../../routes'
 import type { ContainerReceipt } from './containerReceipt'
+import { WHOLE_BADGE } from './movementContainers'
 
 interface ContainerReceiptCellProps {
   receipt: ContainerReceipt | null
@@ -24,7 +25,7 @@ export function ContainerReceiptCell({ receipt, canView }: ContainerReceiptCellP
   const label = receipt.number ?? 'Draft'
   const content =
     receipt.status === 1 ? (
-      <Badge size="sm" variant="light" color="gray" style={{ cursor: canView ? 'pointer' : undefined }}>
+      <Badge size="sm" variant="light" color="gray" styles={WHOLE_BADGE} style={{ cursor: canView ? 'pointer' : undefined }}>
         {label}
       </Badge>
     ) : (

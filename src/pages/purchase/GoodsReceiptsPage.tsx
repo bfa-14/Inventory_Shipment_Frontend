@@ -14,6 +14,7 @@ import {
   goodsReceiptsApi,
   goodsReceiptStatusColour,
   goodsReceiptStatusLabel,
+  type GoodsReceiptDto,
   type GoodsReceiptListItemDto,
   type GoodsReceiptSourceKind,
   type GoodsReceiptStatusCode,
@@ -29,7 +30,7 @@ import { formatNumber } from '../../components/format'
 import {
   cancelDescription,
   deleteDraftMessage,
-  postConfirmMessage,
+  postConfirmFor,
   receiptLabel,
   sourceText,
   supplierText,
@@ -171,6 +172,8 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
   const [chooserOpen, setChooserOpen] = useState(false)
   const [receiving, setReceiving] = useState<ReceiveGoodsSource | null>(null)
   const [cancelling, setCancelling] = useState<GoodsReceiptListItemDto | null>(null)
+  /** The row whose receipt is being read before its Post or Cancel… (one at a time). */
+  const [checkingId, setCheckingId] = useState<number | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
 
   const selection = useBulkSelection<GoodsReceiptListItemDto>()
@@ -264,15 +267,48 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
 
   /* ── row actions ──────────────────────────────────────────────────────────────────────────── */
 
+  /**
+   * THE ROW READS THE RECEIPT BEFORE IT ASKS, as the receipt page does. The list carries no canPost / canCancel (judging
+   * every row of a search of thousands would weigh on it), so a click reads the receipt first: when it cannot be posted
+   * or cancelled, the reason is shown instead of the dialog - not after the reader has typed a cancel reason.
+   */
+  async function readForAction(row: GoodsReceiptListItemDto): Promise<GoodsReceiptDto | null> {
+    if (checkingId !== null) return null
+    setCheckingId(row.id)
+    try {
+      const receipt = await goodsReceiptsApi.get(row.id)
+      // Changed since the list was read (posted, cancelled): the row follows.
+      if (receipt.status !== row.status) load()
+      return receipt
+    } catch (err) {
+      notify.error(err instanceof ApiError ? err.message : 'The goods receipt could not be read.')
+      return null
+    } finally {
+      setCheckingId(null)
+    }
+  }
+
+  /** The server's reason, in a dialog that can open the receipt. */
+  async function showRefusal(receipt: GoodsReceiptDto, title: string, reason: string) {
+    const open = await confirm({ title, message: reason, confirmLabel: 'Open the receipt', cancelLabel: 'Close' })
+    if (open) void navigate(routes.goodsReceipt(receipt.id))
+  }
+
   async function post(row: GoodsReceiptListItemDto) {
+    const receipt = await readForAction(row)
+    if (!receipt) return
+    if (!receipt.canPost) {
+      await showRefusal(receipt, `${receiptLabel(receipt)} cannot be posted`, receipt.postBlockedReason ?? 'This goods receipt cannot be posted.')
+      return
+    }
     const go = await confirm({
       title: 'Post goods receipt',
-      message: postConfirmMessage(row.receivedBase, row.warehouseCode ?? row.warehouseName ?? 'the warehouse', row.valueBase, 'USD'),
+      message: postConfirmFor(receipt, warehouses),
       confirmLabel: 'Post',
     })
     if (!go) return
     try {
-      const posted = await goodsReceiptsApi.post(row.id, row.rowVersion)
+      const posted = await goodsReceiptsApi.post(receipt.id, receipt.rowVersion)
       notify.success(`Posted: ${posted.documentNumber ?? ''}`.trim())
       void refreshGoodsReceiptsWaiting()
       load()
@@ -292,6 +328,17 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The draft could not be deleted.')
     }
+  }
+
+  async function startCancel(row: GoodsReceiptListItemDto) {
+    const receipt = await readForAction(row)
+    if (!receipt) return
+    if (!receipt.canCancel) {
+      await showRefusal(receipt, `${receiptLabel(receipt)} cannot be cancelled`, receipt.cancelBlockedReason ?? 'This goods receipt cannot be cancelled.')
+      return
+    }
+    // The dialog cancels what was just read: its row version, number and container.
+    setCancelling({ ...row, rowVersion: receipt.rowVersion, documentNumber: receipt.documentNumber, containerRef: receipt.containerRef })
   }
 
   async function cancelReceipt(reason: string) {
@@ -467,13 +514,14 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
           custom={[
             { icon: <IconEye size={16} />, tooltip: 'View', onClick: () => void navigate(routes.goodsReceipt(row.id)) },
             { icon: <IconPrinter size={16} />, tooltip: 'Print', onClick: () => void navigate(routes.goodsReceiptPrint(row.id)) },
-            { icon: <IconSend size={16} />, tooltip: 'Post', visible: canPost && row.status === 1, onClick: () => void post(row) },
+            { icon: <IconSend size={16} />, tooltip: 'Post', visible: canPost && row.status === 1, disabled: checkingId !== null, onClick: () => void post(row) },
             {
               icon: <IconArrowBackUp size={16} />,
               tooltip: 'Cancel…',
               color: 'orange',
               visible: canCancel && row.status === 2,
-              onClick: () => setCancelling(row),
+              disabled: checkingId !== null,
+              onClick: () => void startCancel(row),
             },
           ]}
           remove={{ visible: canDelete && row.status === 1, onClick: () => void remove(row) }}

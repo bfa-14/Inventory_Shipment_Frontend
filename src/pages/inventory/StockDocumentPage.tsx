@@ -30,7 +30,7 @@ import {
   ImportInvoiceItemsWizard,
   type ImportedLine,
 } from '../../components/sales/ImportInvoiceItemsWizard'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -858,7 +858,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       {document && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${document.documentNumber ?? 'draft'}`}>
           Cancelled by {document.cancelledByName ?? 'unknown'} on {stamp(document.cancelledAtUtc)}.
-          {document.cancelReason ? ` Reason: ${document.cancelReason}` : ''}
+          {reasonSentence(document.cancelReason)}
         </Alert>
       )}
 

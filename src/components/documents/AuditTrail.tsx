@@ -34,6 +34,46 @@ const ACTION_COLOURS: Record<string, string> = {
   FileAdded: 'gray',
   FileUpdated: 'gray',
   FileDeleted: 'gray',
+  // Purchase orders: the approval decision; containers: their own steps.
+  Approved: 'green',
+  Rejected: 'red',
+  Closed: 'teal',
+  Confirmed: 'teal',
+  Offloaded: 'green',
+  OffloadCancelled: 'orange',
+  // Movements (built on the page from their stamps).
+  Started: 'blue',
+  Completed: 'green',
+}
+
+/**
+ * The words a badge shows for the codes the API sends ("CostAdjusted" reads "Cost adjusted"). A code missing here
+ * still reads as words: actionLabel splits it.
+ */
+const ACTION_LABELS: Record<string, string> = {
+  AutoCreated: 'Created automatically',
+  ReceiptPosted: 'Receipt posted',
+  ReceiptReversed: 'Receipt reversed',
+  POCreated: 'Purchase order created',
+  CostAdjusted: 'Cost adjusted',
+  FileAdded: 'File added',
+  FileUpdated: 'File updated',
+  FileDeleted: 'File deleted',
+  OffloadCancelled: 'Offload cancelled',
+  ChequeStatus: 'Cheque status',
+}
+
+/** "CostAdjusted" -> "Cost adjusted", "POCreated" -> "PO created": the map first, else the code split into words. */
+function actionLabel(code: string): string {
+  const known = ACTION_LABELS[code]
+  if (known) return known
+  const words = code
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_]+/)
+    .filter(Boolean)
+  // Only the first word keeps its capital; a short code in capitals (PO, GRN) stays as it is.
+  return words.map((word, index) => (index === 0 || /^[A-Z0-9]{2,}$/.test(word) ? word : word.toLowerCase())).join(' ')
 }
 
 /**
@@ -67,7 +107,7 @@ export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
               <Timeline.Item key={`${entry.atUtc}-${index}`}>
                 <Group gap="xs" wrap="nowrap">
                   <Badge size="sm" variant="light" color={ACTION_COLOURS[entry.action] ?? 'gray'}>
-                    {entry.action}
+                    {actionLabel(entry.action)}
                   </Badge>
                   <Text size="sm">{entry.userName ?? 'System'}</Text>
                 </Group>

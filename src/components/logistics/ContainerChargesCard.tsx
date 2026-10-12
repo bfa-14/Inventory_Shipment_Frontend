@@ -15,6 +15,7 @@ import { RowActions } from '../ui/RowActions'
 import { ApplyChargeModal } from './ApplyChargeModal'
 import { ChargeDrawer } from './ChargeDrawer'
 import { NewChargeModal } from './NewChargeModal'
+import { WHOLE_BADGE } from './movementContainers'
 
 interface ContainerChargesCardProps {
   container: ContainerDto
@@ -97,7 +98,7 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
       {container.charges.length === 0 ? (
         <Text fz="sm" c="dimmed">No charge on this container yet.</Text>
       ) : (
-        <Table.ScrollContainer minWidth={980}>
+        <Table.ScrollContainer minWidth={760}>
           <Table verticalSpacing="xs" fz="sm">
             <Table.Thead>
               <Table.Tr>
@@ -142,12 +143,14 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
                       <Table.Td>{allocationMethodLabel(row.allocationMethod)}</Table.Td>
                       <Table.Td>{row.includeInLandedCost ? 'Yes' : 'No'}</Table.Td>
                       <Table.Td>
-                        <Group gap={4} wrap="nowrap">
-                          <Badge variant="light" color={chargeStatusColour(row.status)}>
+                        {/* Whole labels (WHOLE_BADGE): the column grows rather than cutting "Posted" to "P…"; "after
+                            receipt" goes under the status when the column is narrow, so both read without scrolling. */}
+                        <Group gap={4} wrap="wrap">
+                          <Badge variant="light" color={chargeStatusColour(row.status)} styles={WHOLE_BADGE}>
                             {row.status === 1 ? 'Draft' : row.status === 2 ? 'Posted' : 'Cancelled'}
                           </Badge>
                           {row.adjustedAfterOffload && (
-                            <Badge variant="light" color="orange" size="xs">after receipt</Badge>
+                            <Badge variant="light" color="orange" size="xs" styles={WHOLE_BADGE}>after receipt</Badge>
                           )}
                         </Group>
                       </Table.Td>

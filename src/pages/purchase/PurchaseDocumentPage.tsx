@@ -45,7 +45,7 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { AddContainerModal } from '../../components/logistics/AddContainerModal'
 import { AutoPlanModal } from '../../components/logistics/AutoPlanModal'
 import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
@@ -1476,13 +1476,13 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       )}
       {document && status === 'Closed' && (
         <Alert color="teal" title={`Closed — ${document.documentNumber}`}>
-          Closed by {document.closedByName ?? 'unknown'} on {stamp(document.closedAtUtc)}.{document.closeReason ? ` Reason: ${document.closeReason}` : ''}{' '}
+          Closed by {document.closedByName ?? 'unknown'} on {stamp(document.closedAtUtc)}.{reasonSentence(document.closeReason)}{' '}
           {kind.code === 'PO' ? 'No more invoices will be made from it; goods already invoiced and not yet received can still be received.' : ''}
         </Alert>
       )}
       {document && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${document.documentNumber ?? 'draft'}`}>
-          Cancelled by {document.cancelledByName ?? 'unknown'} on {stamp(document.cancelledAtUtc)}.{document.cancelReason ? ` Reason: ${document.cancelReason}` : ''}
+          Cancelled by {document.cancelledByName ?? 'unknown'} on {stamp(document.cancelledAtUtc)}.{reasonSentence(document.cancelReason)}
         </Alert>
       )}
       {oneItemOnly && document && status === 'Draft' && savedItemCount > 1 && (

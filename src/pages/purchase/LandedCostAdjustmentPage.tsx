@@ -21,7 +21,7 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, fromIsoDate, isoDate, stamp } from '../../components/documents/documentKind'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { PurchaseChargesGrid } from '../../components/purchase/PurchaseChargesGrid'
 import {
   chargeFromDto,
@@ -432,7 +432,7 @@ export function LandedCostAdjustmentPage() {
 
       {document && cancelled && (
         <Alert color="red" title={`Cancelled — ${document.documentNumber}`}>
-          Cancelled on {stamp(document.cancelledAtUtc)}.{document.cancelReason ? ` Reason: ${document.cancelReason}` : ''} The item costs were put back.
+          Cancelled on {stamp(document.cancelledAtUtc)}.{reasonSentence(document.cancelReason)} The item costs were put back.
         </Alert>
       )}
 

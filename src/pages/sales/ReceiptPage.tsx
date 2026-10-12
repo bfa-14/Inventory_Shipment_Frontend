@@ -23,7 +23,7 @@ import { DocumentAttachmentsCard } from '../../components/documents/DocumentAtta
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { ReceiptAllocationsCard } from '../../components/sales/receipt/ReceiptAllocationsCard'
 import { ReceiptAppliedCard } from '../../components/sales/receipt/ReceiptAppliedCard'
 import { ReceiptHeaderCard, type ReceiptHeaderErrors } from '../../components/sales/receipt/ReceiptHeaderCard'
@@ -693,7 +693,7 @@ export function ReceiptPage() {
       )}
       {receipt && status === 'Reversed' && (
         <Alert color="orange" title={`Reversed — ${receipt.receiptNumber}`}>
-          Reversed by {receipt.reversedByName ?? 'unknown'} on {stamp(receipt.reversedAtUtc)}.{receipt.reverseReason ? ` Reason: ${receipt.reverseReason}` : ''}
+          Reversed by {receipt.reversedByName ?? 'unknown'} on {stamp(receipt.reversedAtUtc)}.{reasonSentence(receipt.reverseReason)}
         </Alert>
       )}
       {editable && !isNew && !headerBalanced && header.amount !== null && (

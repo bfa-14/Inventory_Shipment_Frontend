@@ -129,6 +129,16 @@ export const LEGACY_INVOICE_TEXTS = {
   containersCardShipped: 'Shipped in containers: the goods entered the stock when these containers were offloaded.',
 } as const
 
+/** True when an amount reads 0.00: a difference of a fraction of a cent changes no cost anyone can see. */
+export function isZeroAmount(amount: number): boolean {
+  return Math.abs(amount) < 0.005
+}
+
+/** The same sentence when the invoice price is what the received goods already cost (a difference of 0.00 on every line). */
+export function receiptCostUnchangedText(receivedBase: number): string {
+  return `The invoice price equals the cost of the ${formatNumber(receivedBase)} pcs already received: their cost does not change.`
+}
+
 /** The post confirmation's sentence about the goods already received, from `receipt-cost-preview` (an estimate). */
 export function receiptCostPreviewText(receivedBase: number, amountBase: number, inventoryBase: number, cogsBase: number, currencyCode: string): string {
   if (receivedBase <= 0) return "No goods received yet: their cost will be this invoice's when they arrive."

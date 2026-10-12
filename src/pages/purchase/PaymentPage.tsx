@@ -27,7 +27,7 @@ import { DocumentAttachmentsCard } from '../../components/documents/DocumentAtta
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { PaymentAllocationsCard } from '../../components/purchase/payment/PaymentAllocationsCard'
 import { PaymentAppliedCard } from '../../components/purchase/payment/PaymentAppliedCard'
 import { PaymentHeaderCard, type PaymentHeaderErrors } from '../../components/purchase/payment/PaymentHeaderCard'
@@ -771,7 +771,7 @@ export function PaymentPage() {
       )}
       {payment && status === 'Reversed' && (
         <Alert color="orange" title={`Reversed — ${payment.paymentNumber}`}>
-          Reversed by {payment.reversedByName ?? 'unknown'} on {stamp(payment.reversedAtUtc)}.{payment.reverseReason ? ` Reason: ${payment.reverseReason}` : ''}
+          Reversed by {payment.reversedByName ?? 'unknown'} on {stamp(payment.reversedAtUtc)}.{reasonSentence(payment.reverseReason)}
         </Alert>
       )}
 

@@ -75,6 +75,11 @@ interface MovementContainersCardProps {
   ticked: CardContainer[]
   /** Ticking, unticking, the import and a new From change it; the page counts it as an unsaved change. */
   onTickedChange: (next: CardContainer[]) => void
+  /**
+   * Changed by the page after Start, Complete and Cancel: the containers have moved, so the candidates and the places
+   * judged before are read again.
+   */
+  reloadToken?: number
 }
 
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`
@@ -97,6 +102,7 @@ export function MovementContainersCard({
   fromName,
   ticked,
   onTickedChange,
+  reloadToken = 0,
 }: MovementContainersCardProps) {
   const { hasPermission } = useAuth()
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
@@ -201,7 +207,16 @@ export function MovementContainersCard({
         })
       })
     return () => controller.abort()
-  }, [readOnly, candidateQuery, candidateKey])
+    // reloadToken: the same query asked again once the containers have moved.
+  }, [readOnly, candidateQuery, candidateKey, reloadToken])
+
+  // The containers moved (Start, Complete, Cancel): the saved ones are judged again for where they are now.
+  const lastReload = useRef(reloadToken)
+  useEffect(() => {
+    if (lastReload.current === reloadToken) return
+    lastReload.current = reloadToken
+    setJudged(new Map())
+  }, [reloadToken])
 
   /* ── the ticked and the saved containers judged for the place on the page ──
      A change of From, To or type is made by the reader: the ticked containers the server now refuses are unticked

@@ -75,6 +75,9 @@ plate that lines up with the white header beside it. Everything that has to sit 
 `src/styles/app.css`, scoped under `.app-navbar`: Mantine's `NavLink` is also used on white grounds (the Roles
 page's master list), and those must keep the default light styling.
 
+- **The header on a phone.** Its buttons (TESTING badge, search, bell, avatar) never shrink (`flexShrink: 0`); the
+  title on the left gives way, cut with "…" and clipped. Below `sm` the breadcrumb trail and the avatar's chevron are
+  hidden, so at 390 px the avatar stays whole on screen (it ran 22 px past the edge); the page repeats the title.
 - The menu is generated from `src/navigation.ts`; never hard-code menu items in the shell.
 - Collapsed state is remembered in `localStorage` inside `try/catch`; below `sm` the navbar becomes a drawer
   driven by the header `Burger`.
@@ -743,7 +746,9 @@ in **cost mode**:
   - **The invoice's post confirmation** (`askInvoicePost`, `invoicePostQuestion.tsx`) adds the estimate of
     `GET api/purchase/documents/{id}/receipt-cost-preview` (`receiptCostPreviewText`): "60 pcs already received will have their cost adjusted
     by +60.00 USD (estimate: stock 40.00, cost of sales 20.00)." or "No goods received yet: their cost will be this
-    invoice's when they arrive." For a LOCAL invoice, read by someone with goods receipts create + post, with pieces
+    invoice's when they arrive." When the difference is 0.00 on every line it says instead "The invoice price equals
+    the cost of the {n} pcs already received: their cost does not change." (`receiptCostUnchangedText`), whatever the
+    server's `message` wrote. For a LOCAL invoice, read by someone with goods receipts create + post, with pieces
     left to receive, it adds the checkbox "Receive the goods now into {warehouses of the lines}" (`ReceiveNowChoice`,
     off by default), sent as `receiveNow`. The posting's `message` is shown as it comes: a warning when the receipt was
     not made (the invoice stays posted).
@@ -942,7 +947,12 @@ the receipt is posted**: every draft says so ("The goods are not in stock until 
     (pcs, red when above 0), Value (USD).
   - The totals row of the search is the line under the grid: "Received not invoiced: {n} pcs, {value} USD at the order
     price." (month-end).
-  - Row actions View, Print, Post (draft), Delete (draft), Cancel… (posted), each by permission. Bulk Post
+  - Row actions View, Print, Post (draft), Delete (draft), Cancel… (posted), each by permission. **Post and Cancel…
+    read the receipt first** (`goodsReceiptsApi.get`; the list carries no `canPost` / `canCancel`, too costly over a
+    search of thousands): when `canPost` / `canCancel` is false, a dialog "{GRN-… | draft #n} cannot be {posted |
+    cancelled}" shows the server's `postBlockedReason` / `cancelBlockedReason` with "Open the receipt" and "Close",
+    instead of the dialog (never a refusal after a cancel reason was typed); otherwise Post asks `postConfirmFor` on
+    the receipt read, as the page does, and Cancel… sends the row version just read. Bulk Post
     (`post-many`) and Delete (one `DELETE` per draft, with its row version) show `BulkResultsModal`; deleting
     automatic drafts warns that their containers then wait without a receipt.
   - Empty: "No goods receipts yet. They are created when a container's delivery is completed, with Receive goods… on
@@ -973,9 +983,10 @@ the receipt is posted**: every draft says so ("The goods are not in stock until 
     still Confirmed, and the gray draft hint.
   - Post, Cancel… and Delete are disabled with the API's `postBlockedReason` / `cancelBlockedReason` /
     `deleteBlockedReason` (the same sentences SQL refuses with). With unsaved changes Post saves first and judges the
-    saved receipt. Post asks `postConfirmMessage`: "Post this goods receipt? {n} pcs enter {warehouse} at {value} USD,
-    the item costs are updated and the number is assigned. Pieces not invoiced yet are valued at the order price;
-    their cost is adjusted when the invoice is posted." and notifies "Posted: GRN-…". Delete of an automatic draft
+    saved receipt. Post asks `postConfirmFor(receipt)` (`postConfirmMessage`): "Post this goods receipt? {n} pcs enter
+    {warehouse} at {value} USD, the item costs are updated and the number is assigned. Pieces not invoiced yet are
+    valued at the order price; their cost is adjusted when the invoice is posted." - the last sentence only when a
+    line has an order or a container (a receipt without an order has its cost typed) - and notifies "Posted: GRN-…". Delete of an automatic draft
     asks "Delete this draft goods receipt? KTG-… then waits without a receipt: create it again with Receive goods… on
     the container." Cancel… is `CancelReasonModal` titled "Cancel goods receipt", reason required, with
     `cancelDescription` ("…The stock it brought is taken out again and the item costs are replayed." + "Container
@@ -1097,7 +1108,14 @@ them with `ContainerReceiptCell` (the GRN number, or a gray "Draft" badge, linke
   `CancelReasonModal`'s new `children`) lists the automatic drafts deleted with it (`autoDraftOfThisMovement` on the
   movement's containers) and names the edited ones (`goodsReceiptUpdatedAtUtc / ByName`: "GRN draft of KTG-… was edited
   by {user} on {date}: the received quantities and reasons typed there are lost."). The Containers card has a "Receipt"
-  column.
+  column. After **Start, Complete or Cancel** the page drops the places it had judged (`show(dto, true)`) and bumps the
+  card's `reloadToken`: the candidates and the places are read again, so the Place column says where the containers
+  are now (a completed movement shows their current location), as a reload would.
+- **Status badges in the container page's tables** (Invoices, Charges, the Receipt cell, the FOB source on Loaded
+  items) keep their whole label with `WHOLE_BADGE` (`movementContainers.ts`): a Mantine badge's label hides its
+  overflow, so a narrow column cut "Posted" to "P…" and "Received" to "Rec…" with no tooltip. On the Charges card the
+  status and "after receipt" wrap under each other, and the table's minimum width (760) lets the Status column show
+  at 1440 px without scrolling.
 - **Wording** that named the offload now names the receipt: "after receipt" badges on charges, "The goods are received:
   the item costs will be adjusted", the FOB source "Received", "Received" on the tracking board, "Received {date} into
   {warehouse} (GRN-…)" on the order's Containers card, "not yet received" in Shortages.
@@ -1351,7 +1369,13 @@ how the date is shown. Mantine's own parser ignored the format (dayjs has no `cu
   give the field back the string (`value={filters.dateFrom}`) or `fromIsoDate(...)`, a Date at local midnight.
 - `DatePickerInput` and `MonthPickerInput` are picked from a calendar, never typed: nothing to parse.
 - Shown outside an input, a document date reads `DD/MM/YYYY` through `dateLabel`; a moment goes through
-  `formatDateTime` (see `format.ts`).
+  `formatDateTime` (see `format.ts`): **`DD/MM/YYYY HH:mm`, day first and 24-hour, in the reader's local time**
+  ("2026-10-11T22:35:40Z" reads "12/10/2026 01:35" at UTC+3), whatever the browser's language - never
+  `toLocaleString()`, which printed "10/12/2026, 1:35:40 AM" in an en-US browser next to a typed "12/10/2026". The
+  print pages use the same helper (`stamp()` is it with "—" when empty).
+- A stored reason ends its sentence: `reasonSentence(reason)` (`format.ts`) gives " Reason: {reason}." with the full
+  stop added when the reason has none, for the banners that go on after it ("Closed by … on …. Reason: Fully invoiced
+  and received. No more invoices will be made from it…").
 
 ## Document pages
 
@@ -1370,7 +1394,7 @@ copied.
 | `QuickItemSearch` | The scanner's way in: type or scan, press Enter, the line appears. |
 | `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
-| `AuditTrail` | What has happened to the document, five entries then the rest on asking. |
+| `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. |
 | `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. |
 | `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
 | `CancelReasonModal` | Asks why a posted document is being cancelled. |

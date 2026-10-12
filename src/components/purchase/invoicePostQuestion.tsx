@@ -2,7 +2,7 @@ import { Stack, Text } from '@mantine/core'
 import { goodsReceiptsApi } from '../../api/purchase/goodsReceipts'
 import type { PurchaseDocumentDto } from '../../api/purchase/documents'
 import { confirm } from '../ui/confirm'
-import { PURCHASE_INVOICE, receiptCostPreviewText, receiveNowLabel } from './purchaseKind'
+import { isZeroAmount, PURCHASE_INVOICE, receiptCostPreviewText, receiptCostUnchangedText, receiveNowLabel } from './purchaseKind'
 import { ReceiveNowChoice } from './ReceiveNowChoice'
 
 /** The reader's answer to "Post this invoice?". */
@@ -17,7 +17,8 @@ export interface InvoicePostAnswer {
  *
  * - The sentence of `PURCHASE_INVOICE.postConfirm`.
  * - What the posting will do to goods ALREADY received, asked of the server (`receipt-cost-preview`, an estimate):
- *   "60 pcs already received will have their cost adjusted by +60.00 USD (…)", or "No goods received yet: …". Nothing
+ *   "60 pcs already received will have their cost adjusted by +60.00 USD (…)", "The invoice price equals the cost of
+ *   the 84 pcs already received: their cost does not change." (0.00 on every line) or "No goods received yet: …". Nothing
  *   is said when the preview cannot be read; the posting itself is the server's either way.
  * - "Receive the goods now into {warehouse}" (rule 15a), OFF by default: a LOCAL invoice (not shipped in containers),
  *   read by someone who may create and post goods receipts, with pieces left to receive.
@@ -27,16 +28,23 @@ export async function askInvoicePost(invoice: PurchaseDocumentDto, canReceiveNow
   let receivedAlready = 0
   try {
     const preview = await goodsReceiptsApi.receiptCostPreview(invoice.id)
-    // The server's sentence when it sends one; the same sentence from its figures otherwise.
-    previewText =
-      preview.message ||
-      receiptCostPreviewText(
-        preview.receivedNotInvoicedBase,
-        preview.differenceBase,
-        preview.estimatedInventoryBase,
-        preview.estimatedCogsBase,
-        preview.baseCurrencyCode ?? invoice.baseCurrencyCode ?? 'USD',
-      )
+    // The server's sentence when it sends one; the same sentence from its figures otherwise. A difference of 0.00 is
+    // said in words ("…their cost does not change.") rather than "adjusted by 0.00 USD", whatever the server wrote.
+    // Every line, not only the total: +10 on one line and -10 on another still changes two costs.
+    const unchanged =
+      preview.receivedNotInvoicedBase > 0 &&
+      isZeroAmount(preview.differenceBase) &&
+      (preview.lines ?? []).every((line) => isZeroAmount(line.differenceBase))
+    previewText = unchanged
+      ? receiptCostUnchangedText(preview.receivedNotInvoicedBase)
+      : preview.message ||
+        receiptCostPreviewText(
+          preview.receivedNotInvoicedBase,
+          preview.differenceBase,
+          preview.estimatedInventoryBase,
+          preview.estimatedCogsBase,
+          preview.baseCurrencyCode ?? invoice.baseCurrencyCode ?? 'USD',
+        )
     receivedAlready = preview.receivedNotInvoicedBase
   } catch {
     /* An estimate only: without it the question says what posting does, and no more. */

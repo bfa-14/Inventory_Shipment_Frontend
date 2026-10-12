@@ -28,7 +28,7 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
 import { SalesInvoiceHeaderCard, type SalesInvoiceHeader, type SalesInvoiceHeaderErrors } from '../../components/sales/SalesInvoiceHeaderCard'
 import { SalesInvoiceLinesGrid, type InvoiceLine } from '../../components/sales/SalesInvoiceLinesGrid'
@@ -1006,7 +1006,7 @@ export function SalesInvoicePage() {
       )}
       {invoice && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${invoice.documentNumber ?? 'draft'}`}>
-          Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{invoice.cancelReason ? ` Reason: ${invoice.cancelReason}` : ''}
+          Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{reasonSentence(invoice.cancelReason)}
         </Alert>
       )}
 

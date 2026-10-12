@@ -122,14 +122,14 @@ function toValues(dto: MovementDto): FormValues {
  * A saved container as the movement now has it (status, pieces), keeping what the page had already learned about
  * it - its orders and suppliers, and its place for the From, which a save does not change.
  */
-function keepDetails(saved: CardContainer, before: CardContainer | undefined): CardContainer {
+function keepDetails(saved: CardContainer, before: CardContainer | undefined, keepPlace = true): CardContainer {
   if (!before) return saved
   return {
     ...saved,
     orderNumbers: before.orderNumbers ?? saved.orderNumbers,
     supplierNames: before.supplierNames ?? saved.supplierNames,
     itemSummary: before.itemSummary ?? saved.itemSummary,
-    place: before.place,
+    place: keepPlace ? before.place : null,
   }
 }
 
@@ -175,6 +175,8 @@ export function MovementPage() {
   const [stale, setStale] = useState<string | null>(null)
   /** The ticked containers: what the movement holds once saved. */
   const [ticked, setTicked] = useState<CardContainer[]>([])
+  /** Moves on after Start, Complete and Cancel: the Containers card then reads its lists again (where they are now). */
+  const [containersVersion, setContainersVersion] = useState(0)
   /** The same as `dirty`, for what renders from it: Start and Complete wait for a save. */
   const [unsaved, setUnsaved] = useState(false)
 
@@ -208,13 +210,22 @@ export function MovementPage() {
     },
   })
 
-  /** Puts a server answer on the page. Everything typed is replaced. */
+  /**
+   * Puts a server answer on the page. Everything typed is replaced.
+   *
+   * AFTER START, COMPLETE OR CANCEL THE CONTAINERS HAVE MOVED (`containersMoved`): the places judged before are
+   * dropped and the Containers card reads its lists again, so the Place column says where they are now - as a reload
+   * would - not where they were. A save keeps them: it moves nothing.
+   */
   const show = useCallback(
-    (dto: MovementDto) => {
+    (dto: MovementDto, containersMoved = false) => {
       setMovement(dto)
       form.setValues(toValues(dto))
       form.resetDirty(toValues(dto))
-      setTicked((current) => dto.containers.map((c) => keepDetails(fromSaved(c), current.find((p) => p.containerId === c.containerId))))
+      setTicked((current) =>
+        dto.containers.map((c) => keepDetails(fromSaved(c), current.find((p) => p.containerId === c.containerId), !containersMoved)),
+      )
+      if (containersMoved) setContainersVersion((v) => v + 1)
       setStale(null)
       dirty.current = false
       setUnsaved(false)
@@ -449,7 +460,7 @@ export function MovementPage() {
         kind === 'start'
           ? await movementsApi.start(current.id, date, current.rowVersion)
           : await movementsApi.complete(current.id, date, current.rowVersion)
-      show(result)
+      show(result, true)
       setDateDialog(null)
       notify.success(kind === 'start' ? `${result.movementNo} started.` : `${result.movementNo} completed.`)
       const changes = result.containers
@@ -477,7 +488,7 @@ export function MovementPage() {
     const deliveredBefore = movement.status === 3 && movement.stage === DELIVERY
     try {
       const result = await movementsApi.cancel(movement.id, reason, movement.rowVersion)
-      show(result)
+      show(result, true)
       setCancelOpen(false)
       notify.success(`${result.movementNo} cancelled.`)
       // Its automatic draft goods receipts went with it: the menu count follows.
@@ -692,6 +703,7 @@ export function MovementPage() {
               fromName={fromName}
               ticked={ticked}
               onTickedChange={changeTicked}
+              reloadToken={containersVersion}
             />
 
             {movement ? (

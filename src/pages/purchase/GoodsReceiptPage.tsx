@@ -21,7 +21,7 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { GoodsReceiptCostAdjustmentsCard } from '../../components/purchase/goodsReceipts/GoodsReceiptCostAdjustmentsCard'
 import {
   GoodsReceiptHeaderCard,
@@ -38,7 +38,7 @@ import {
   lineValueOf,
   MANUAL_HINT,
   notDispatchedText,
-  postConfirmMessage,
+  postConfirmFor,
   postedBanner,
   receiptLabel,
   receivedBaseOf,
@@ -543,15 +543,9 @@ export function GoodsReceiptPage() {
       return
     }
 
-    const savedLines = saved.lines.map((line) => toLineForm(line))
-    const pieces = savedLines.reduce((sum, line) => sum + receivedBaseOf(line), 0)
-    const estimate = savedLines.reduce((sum, line) => sum + (lineValueOf(line, false) ?? 0), 0)
-    const value = saved.currentValueBase > 0 ? saved.currentValueBase : estimate
-    const warehouseText = warehousesOf(savedLines, saved.warehouseCode, warehouses)
-
     const go = await confirm({
       title: 'Post goods receipt',
-      message: postConfirmMessage(pieces, warehouseText, value, saved.baseCurrencyCode ?? currencyCode),
+      message: postConfirmFor(saved, warehouses),
       confirmLabel: 'Post',
     })
     if (!go) return
@@ -781,7 +775,7 @@ export function GoodsReceiptPage() {
       {receipt && status === 3 && (
         <Alert color="red" title={`Cancelled — ${receiptLabel(receipt)}`}>
           Cancelled by {receipt.cancelledByName ?? 'unknown'} on {stamp(receipt.cancelledAtUtc)}.
-          {receipt.cancelReason ? ` Reason: ${receipt.cancelReason}` : ''}
+          {reasonSentence(receipt.cancelReason)}
         </Alert>
       )}
 

@@ -7,6 +7,7 @@ import { fobSourceLabel, type FobSource } from '../../api/logistics/containers'
 import { formatNumber, numberInputValue } from '../format'
 import { ContainerFillLine } from './ContainerFillLine'
 import { fillOfLines, lineOil, type LoadLine } from './containerForm'
+import { WHOLE_BADGE } from './movementContainers'
 
 interface LoadedItemsSectionProps {
   lines: LoadLine[]
@@ -158,9 +159,17 @@ export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems,
                       </Table.Td>
                       <Table.Td ta="right">
                         {saved ? (
+                          // The source badge keeps its whole label (WHOLE_BADGE): the column grows rather than cutting
+                          // "Received" to "Rec…".
                           <Group gap={4} justify="flex-end" wrap="nowrap">
                             <Text fz="sm">{formatNumber(saved.unitFobBase, 2)}</Text>
-                            <Badge size="xs" variant="light" color={FOB_SOURCE_COLOURS[saved.fobSource] ?? 'gray'} data-fob-source={saved.fobSource}>
+                            <Badge
+                              size="xs"
+                              variant="light"
+                              color={FOB_SOURCE_COLOURS[saved.fobSource] ?? 'gray'}
+                              styles={WHOLE_BADGE}
+                              data-fob-source={saved.fobSource}
+                            >
                               {fobSourceLabel(saved.fobSource)}
                             </Badge>
                           </Group>
