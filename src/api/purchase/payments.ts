@@ -131,6 +131,27 @@ export interface PaymentAllocationDto {
   removedAtUtc: string | null
   removedByName: string | null
   isLive: boolean
+  /** A purchase invoice with containers: every container (and "Unlinked items") with this allocation's amount on it. */
+  containers: PaymentInvoiceContainerDto[]
+}
+
+/**
+ * One container of a purchase invoice, or its "Unlinked items" row (containerId null), in the INVOICE's
+ * currency (script 73). paymentStatus: Pending | Partially Paid | Fully Paid.
+ */
+export interface PaymentInvoiceContainerDto {
+  allocationId: number | null
+  documentId: number
+  containerId: number | null
+  containerRef: string
+  containerNo: string | null
+  /** The item codes of the invoice lines in it. */
+  items: string | null
+  containerAmount: number
+  previouslyPaid: number
+  outstandingAmount: number
+  paymentStatus: string
+  allocatedAmount: number
 }
 
 export interface PaymentFileDto {
@@ -227,6 +248,8 @@ export interface OpenPayableDocumentDto {
   outstandingBase: number
   /** The multiplier to the payment currency the row pre-fills (when the payment currency was given). */
   defaultRateToPayment: number | null
+  /** A purchase invoice with containers: its rows; with two or more the payment is split over them (script 73). */
+  containers: PaymentInvoiceContainerDto[]
 }
 
 export interface PaymentRateDto {
@@ -272,6 +295,8 @@ export interface SavePaymentAllocation {
   /** In the DOCUMENT's currency. */
   amount: number
   rateToPayment: number | null
+  /** A purchase invoice with containers: the amount split over them (containerId null = "Unlinked items"). */
+  containers?: { containerId: number | null; amount: number }[]
 }
 
 export interface SavePaymentRequest {

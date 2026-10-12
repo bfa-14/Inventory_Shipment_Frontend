@@ -1597,6 +1597,25 @@ no documents: the provider's invoice of a late charge goes on the purchase invoi
   portal but its submit still bubbles up the React tree, so the item form's `onSubmit` ignores a submit whose target
   is not itself, and does nothing in view mode. Do the same wherever the panel lands inside a form.
 
+## Supplier payments: a purchase invoice split by container (script 73)
+
+A **Purchase Invoice Payment** pays an invoice whose lines are linked to containers (Create Invoice from Containers,
+Link containers) container by container.
+
+- **Rows of an invoice** come with the open documents (`containers` on each invoice): one per container, and one
+  **"Unlinked items"** row (`containerId` null, key `0`) naming the items of its lines in no container. Amounts are in
+  the invoice's currency.
+- **Two rows or more** (`needsSplit` in `paymentModel.ts`): an expand arrow on the invoice row opens a table of the rows
+  (Container Ref., Container No., Items, Container PI Amount, Previously Paid, Outstanding, Allocate Amount, Payment
+  Status: Pending red, Partially Paid orange, Fully Paid green). It opens by itself once the invoice is allocated.
+- **The invoice amount and the rows never disagree:** typing the invoice amount (or ticking it, or "Allocate oldest
+  first") spreads it over the rows in order, each up to what it still owes, "Unlinked items" last; typing or ticking a row
+  makes the invoice amount their sum. **Distribute** re-spreads on demand.
+- **One container and nothing else:** no rows to type; the server records that container itself.
+- The request sends `containers` (every row, 0 where nothing goes) only for an invoice with two rows or more. The
+  server is the authority: posting is refused (73008) until the rows add up, and a row above what it owes is refused
+  (73009). The Paid documents card shows each invoice's split under it.
+
 ## Checklist for a new page
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.

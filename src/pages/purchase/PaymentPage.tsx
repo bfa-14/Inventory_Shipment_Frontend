@@ -33,8 +33,10 @@ import { PaymentAppliedCard } from '../../components/purchase/payment/PaymentApp
 import { PaymentHeaderCard, type PaymentHeaderErrors } from '../../components/purchase/payment/PaymentHeaderCard'
 import { PaymentLinesCard } from '../../components/purchase/payment/PaymentLinesCard'
 import {
+  containerKey,
   docKey,
   isBalanced,
+  needsSplit,
   PAYMENTS_ROUTE,
   round,
   toPayment,
@@ -176,7 +178,15 @@ export function PaymentPage() {
     )
     // Only a draft's allocations are being edited; on a posted payment they are history, shown in their own card.
     const next: Record<string, AllocationEntry> = {}
-    if (doc.status === 'Draft') for (const a of doc.allocations) if (a.isLive) next[docKey(a.documentKind, a.documentId)] = { amount: a.amountDocCurrency, rateToPayment: a.rateToPayment }
+    if (doc.status === 'Draft')
+      for (const a of doc.allocations)
+        if (a.isLive)
+          next[docKey(a.documentKind, a.documentId)] = {
+            amount: a.amountDocCurrency,
+            rateToPayment: a.rateToPayment,
+            // Script 73: the draft's container split, so it opens as it was saved.
+            containers: a.containers.length > 0 ? Object.fromEntries(a.containers.map((c) => [containerKey(c), c.allocatedAmount > 0 ? c.allocatedAmount : null])) : undefined,
+          }
     setEntries(next)
     dirty.current = false
   }, [])
@@ -490,6 +500,12 @@ export function PaymentPage() {
         documentId: doc.documentId,
         amount: entry!.amount!,
         rateToPayment: String(doc.currencyId) === header.currencyId ? null : entryRate(doc, entry),
+        // Script 73: an invoice with containers carries its split, every container (0 where nothing goes).
+        containers:
+          needsSplit(doc)
+            ? doc.containers.map((c) => ({ containerId: c.containerId, amount: entry!.containers?.[containerKey(c)] ?? 0 }))
+
+            : undefined,
       }))
   }
 
