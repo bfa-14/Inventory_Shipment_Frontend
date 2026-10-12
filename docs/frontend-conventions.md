@@ -79,6 +79,11 @@ page's master list), and those must keep the default light styling.
 - **The header on a phone.** Its buttons (TESTING badge, search, bell, avatar) never shrink (`flexShrink: 0`); the
   title on the left gives way, cut with "…" and clipped. Below `sm` the breadcrumb trail and the avatar's chevron are
   hidden, so at 390 px the avatar stays whole on screen (it ran 22 px past the edge); the page repeats the title.
+- **A `SegmentedControl` on a phone** (the Dashboard's "Today / This month / Last month / This year") never sets the
+  page's width: below `48em` it takes the whole row (`fullWidth`, its group at `100%`), `size="xs"`, and its
+  controls `flex: 1 1 auto; minWidth: 0`, so each option is as wide as its label and an even narrower screen cuts a
+  label with "…" instead of scrolling the page sideways (at the normal size the four periods were 383 px in a 358 px
+  column).
 - The menu is generated from `src/navigation.ts`; never hard-code menu items in the shell.
 - Collapsed state is remembered in `localStorage` inside `try/catch`; below `sm` the navbar becomes a drawer
   driven by the header `Burger`.

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { Alert, Group, Loader, SegmentedControl, Select } from '@mantine/core'
 import { AreaChart, BarChart, DonutChart, LineChart } from '@mantine/charts'
+import { useMediaQuery } from '@mantine/hooks'
 import {
   IconAlertTriangle,
   IconBuildingWarehouse,
@@ -124,6 +125,7 @@ export function DashboardPage() {
   const periodInfo = DASHBOARD_PERIODS.find((p) => p.value === period)!
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const approvals = useApprovalsMe()
+  const phone = useMediaQuery('(max-width: 48em)')
 
   const today = todayDateOnly()
   const dates = useMemo(() => periodDates(period, today), [period, today])
@@ -172,11 +174,16 @@ export function DashboardPage() {
               {` · compared with ${periodInfo.previous} · amounts in ${ccy}`}
             </div>
           </div>
-          <Group gap="sm" wrap="wrap">
+          {/* On a phone the filters take the whole width, one under the other, and the periods get smaller
+              labels: at the normal size "Today / This month / Last month / This year" is 383 px wide, more than a
+              390 px screen's column, and the page scrolled sideways. Each period is as wide as its label (flex auto,
+              not four equal parts that cut "This month" while "Today" has room to spare), and minWidth 0 lets a
+              label shrink to an ellipsis on an even narrower screen instead of pushing the page wider. */}
+          <Group gap="sm" wrap="wrap" w={phone ? '100%' : undefined}>
             <Select
               aria-label="Branch"
               placeholder="All branches"
-              w={200}
+              w={phone ? '100%' : 200}
               data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))}
               value={branchId}
               onChange={(next) => setFilter('branchId', next)}
@@ -187,6 +194,10 @@ export function DashboardPage() {
               value={period}
               onChange={(next) => setFilter('period', next === 'month' ? null : next)}
               data={DASHBOARD_PERIODS.map((p) => ({ value: p.value, label: p.label }))}
+              fullWidth={phone}
+              size={phone ? 'xs' : 'sm'}
+              w={phone ? '100%' : undefined}
+              styles={phone ? { control: { flex: '1 1 auto', minWidth: 0 } } : undefined}
             />
           </Group>
         </div>
