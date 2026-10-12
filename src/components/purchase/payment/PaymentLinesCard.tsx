@@ -19,8 +19,6 @@ interface PaymentLinesCardProps {
   methods: PaymentMethodLookupDto[]
   accounts: CashBankAccountLookupDto[]
   currencies: CurrencyLookupDto[]
-  /** Accounts of other branches are not offered; an account with no branch belongs to all. */
-  branchId: number | null
   paymentCurrencyId: string | null
   paymentCurrencyCode: string
   /** The header Payment Amount: what the Total row must equal. */
@@ -53,7 +51,6 @@ export function PaymentLinesCard({
   methods,
   accounts,
   currencies,
-  branchId,
   paymentCurrencyId,
   paymentCurrencyCode,
   headerAmount,
@@ -123,7 +120,7 @@ export function PaymentLinesCard({
               const fitting = accounts.filter(
                 (a) =>
                   String(a.id) === line.cashBankAccountId ||
-                  (a.isActive && String(a.currencyId) === line.currencyId && (a.branchId === null || branchId === null || a.branchId === branchId)),
+                  (a.isActive && String(a.currencyId) === line.currencyId),
               )
               const error = rowErrors[line.key]
               const saved = savedLines?.[index]

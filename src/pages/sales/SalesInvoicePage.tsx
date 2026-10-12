@@ -1034,7 +1034,6 @@ export function SalesInvoicePage() {
         accounts={cashAccounts}
         currencyId={invoiceCurrencyId}
         currencyCode={currencyCode}
-        branchId={header.branchId === null ? null : Number(header.branchId)}
         readOnly={!editable}
         disabled={saving}
         errors={paymentErrors}

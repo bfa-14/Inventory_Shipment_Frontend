@@ -31,9 +31,6 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: '', accountType: null, isActive: null }
 
-/** An account with no branch is usable everywhere, and the funnel has to match the words the reader sees. */
-const ALL_BRANCHES = 'All branches'
-
 /**
  * What each column IS, for the grid engine: its kind (so a number compares as a number and a date
  * as a date), and what it shows. How a cell LOOKS stays in the column definitions below.
@@ -43,7 +40,6 @@ const GRID_COLUMNS: GridColumnMeta<CashBankAccountDto>[] = [
   { accessor: 'accountName' },
   { accessor: 'accountType' },
   { accessor: 'currencyCode' },
-  { accessor: 'branchName', text: (r) => r.branchName ?? ALL_BRANCHES },
   { accessor: 'isActive', kind: 'boolean', text: (r) => (r.isActive ? 'Active' : 'Inactive') },
 ]
 
@@ -168,12 +164,6 @@ export function CashBankAccountsPage() {
       accessor: 'currencyCode',
       title: 'Currency',
       width: 110,
-    },
-    {
-      accessor: 'branchName',
-      title: 'Branch',
-      width: 180,
-      render: (row) => (row.branchName ? <Text fz="sm">{row.branchName}</Text> : <Text c="dimmed" fz="sm">{ALL_BRANCHES}</Text>),
     },
     {
       accessor: 'isActive',

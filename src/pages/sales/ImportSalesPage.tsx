@@ -683,7 +683,6 @@ export function ImportSalesPage() {
           accounts={cashAccounts}
           currencyId={rate?.currencyId ?? null}
           currencyCode={rate?.currencyCode ?? priceList?.currencyCode ?? 'USD'}
-          branchId={header.branchId === null ? null : Number(header.branchId)}
           readOnly={false}
           disabled={posting}
           errors={paymentErrors}

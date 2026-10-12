@@ -820,7 +820,6 @@ export function PaymentPage() {
         methods={methods}
         accounts={accounts}
         currencies={currencies}
-        branchId={header.branchId === null ? null : Number(header.branchId)}
         paymentCurrencyId={header.currencyId}
         paymentCurrencyCode={paymentCurrencyCode}
         headerAmount={header.amount}

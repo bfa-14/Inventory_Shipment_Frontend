@@ -15,7 +15,6 @@ interface SalesPaymentCardProps {
   /** The currency the invoice is billed in: a cash account must hold it. Null while it is not known yet. */
   currencyId: number | null
   currencyCode: string
-  branchId: number | null
   readOnly: boolean
   disabled: boolean
   errors: SalesPaymentErrors
@@ -53,7 +52,6 @@ export function SalesPaymentCard({
   accounts,
   currencyId,
   currencyCode,
-  branchId,
   readOnly,
   disabled,
   errors,
@@ -74,7 +72,7 @@ export function SalesPaymentCard({
   const fitting = accounts.filter(
     (a) =>
       String(a.id) === value.receiptAccountId
-      || (a.isActive && (currencyId === null || a.currencyId === currencyId) && (a.branchId === null || branchId === null || a.branchId === branchId)
+      || (a.isActive && (currencyId === null || a.currencyId === currencyId)
           && (kind === null || a.accountType === kind)),
   )
 
