@@ -15,7 +15,7 @@ export function ForbiddenPage() {
             Ask an administrator to grant you the required permission.
           </Text>
           <Button component={Link} to="/" mt="sm">
-            Back to the dashboard
+            Back to Home
           </Button>
         </Stack>
       </Paper>

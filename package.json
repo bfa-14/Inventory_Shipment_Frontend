@@ -13,6 +13,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@mantine/charts": "^9.5.2",
     "@mantine/core": "^9.5.2",
     "@mantine/dates": "^9.5.2",
     "@mantine/form": "^9.5.2",
@@ -25,7 +26,8 @@
     "mantine-datatable": "^9.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router": "^7.18.3"
+    "react-router": "^7.18.3",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

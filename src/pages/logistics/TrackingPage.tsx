@@ -43,9 +43,14 @@ function day(value: string | null): string {
   return value ? dayjs(value).format('D MMM YYYY') : '-'
 }
 
-/** Free time at the port is over: the last free day has passed and the box is still at the port or just cleared. */
+/**
+ * Free time at the port is over: the last free day has passed and the box is still at the port or just cleared. The
+ * free time stops counting at the end of its Delivery (edge case 29), as on the container's page: a delivered box waits
+ * Cleared for its goods receipt, and is over only if its last free day passed before it left.
+ */
 function freeTimeOver(container: TrackingContainerDto): boolean {
-  return (container.status === 4 || container.status === 5) && !!container.lastFreeDay && dayjs(container.lastFreeDay).isBefore(dayjs(), 'day')
+  const end = container.deliveredDate ? dayjs(container.deliveredDate) : dayjs()
+  return (container.status === 4 || container.status === 5) && !!container.lastFreeDay && dayjs(container.lastFreeDay).isBefore(end, 'day')
 }
 
 function FreeTimeBadge() {

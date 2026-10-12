@@ -35,7 +35,8 @@ interface GoodsReceiptHeaderCardProps {
   editable: boolean
   branches: BranchLookupDto[]
   suppliers: PartyLookupDto[]
-  /** "Receive into": the branch's warehouses for a container, the chosen branch's for a receipt without an order. */
+  /** "Receive into": warehouses at the bottom of the tree - of the container's branch for a container, of any branch (the
+      receipt's first) otherwise (scripts 70, 72). */
   warehouseData: WarehouseGroup[]
   errors: GoodsReceiptHeaderErrors
   disabled?: boolean

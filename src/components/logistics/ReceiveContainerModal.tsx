@@ -36,7 +36,8 @@ interface ReceiveContainerModalProps {
   opened: boolean
   onClose: () => void
   container: ContainerDto
-  /** The active warehouses of the container's branch: the only ones its goods can be received into. */
+  /** The active warehouses of the container's branch at the bottom of the tree (no warehouse under them, script 72): the
+      only ones its goods can be received into. */
   warehouses: WarehouseLookupDto[]
   /** purchase.goodsreceipts.post: "Create and post" is offered. */
   canPost: boolean

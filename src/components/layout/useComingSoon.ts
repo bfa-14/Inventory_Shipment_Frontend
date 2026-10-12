@@ -8,10 +8,10 @@ export const COMING_SOON_KEY = 'inventory_shipment.showComingSoon'
  *
  * Hidden by DEFAULT: a menu is a list of places you can go, and nine dead entries above the two
  * live ones make the working application look like a demo. They stay reachable through the switch
- * on the dashboard, because a roadmap is still worth showing on purpose.
+ * on Home, because a roadmap is still worth showing on purpose.
  *
  * Mantine's useLocalStorage keeps every caller of this hook in step within the tab (it broadcasts
- * its own event on write), so the sidebar re-renders the moment the dashboard's switch moves - no
+ * its own event on write), so the sidebar re-renders the moment Home's switch moves - no
  * provider, no prop drilling. getInitialValueInEffect is off so the nav paints its final shape on
  * the first render instead of flashing the coming-soon entries and then dropping them.
  */

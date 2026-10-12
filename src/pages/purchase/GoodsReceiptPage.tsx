@@ -20,6 +20,7 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentIcons } from '../../components/documents/documentIcons'
+import { defaultLineWarehouseId } from '../../components/documents/lineWarehouses'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber, reasonSentence } from '../../components/format'
 import { GoodsReceiptCostAdjustmentsCard } from '../../components/purchase/goodsReceipts/GoodsReceiptCostAdjustmentsCard'
@@ -235,8 +236,8 @@ export function GoodsReceiptPage() {
   }, [receiptId])
 
   /* THE LISTS A RECEIPT PICKS FROM. A new receipt (one without an order) opens on the main branch and its main
-     warehouse, which every new line takes too: both lists are read together so the default warehouse is the
-     default branch's. */
+     warehouse (else its first one at the bottom of the tree, see lineWarehouses), which every new line takes too: both
+     lists are read together so the default warehouse is the default branch's. */
   useEffect(() => {
     let cancelled = false
     void Promise.all([
@@ -259,8 +260,8 @@ export function GoodsReceiptPage() {
       setHeader((current) => {
         const branchId = current.branchId ?? (main ? String(main.id) : null)
         if (branchId === null || current.warehouseId !== null) return { ...current, branchId }
-        const warehouse = warehouseRows.find((w) => w.isActive && w.branchId === Number(branchId) && w.isMainWarehouse)
-        return { ...current, branchId, warehouseId: warehouse ? String(warehouse.id) : null }
+        const warehouseId = defaultLineWarehouseId(warehouseRows, Number(branchId))
+        return { ...current, branchId, warehouseId: warehouseId === null ? null : String(warehouseId) }
       })
     })
     if (isNew) {
@@ -309,9 +310,14 @@ export function GoodsReceiptPage() {
     ],
     [receipt?.warehouseId, receipt?.warehouseCode, receipt?.warehouseName, lines],
   )
-  /** A container is received in its own branch; a receipt without an order in the branch chosen; the others anywhere. */
-  const branchFilter = isContainer ? (receipt?.branchId ?? null) : isManual && header.branchId !== null ? Number(header.branchId) : null
-  const warehouseData = useMemo(() => warehouseChoices(warehouses, branchFilter, keep), [warehouses, branchFilter, keep])
+  /** A container is received in its own branch; the others into a warehouse of any branch (scripts 70, 72: the branch
+      numbers the receipt, it does not limit its lines), the receipt's branch first. Leaves only, in both cases. */
+  const branchFilter = isContainer ? (receipt?.branchId ?? null) : null
+  const firstBranchId = header.branchId !== null ? Number(header.branchId) : (receipt?.branchId ?? null)
+  const warehouseData = useMemo(
+    () => warehouseChoices(warehouses, branchFilter, keep, firstBranchId),
+    [warehouses, branchFilter, keep, firstBranchId],
+  )
 
   /* ── editing ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -324,12 +330,11 @@ export function GoodsReceiptPage() {
     })
     setHeader((current) => ({ ...current, ...patch }))
 
-    // A new branch: the warehouses belong to another branch, so none of the old ones stays chosen.
+    // A new branch leaves the lines alone: their warehouses may be of any branch (script 72, as Ali's 69 / 70 for the
+    // documents). Only "Receive into", where NEW lines start, goes to the new branch's main warehouse (or first leaf).
     if ('branchId' in patch && patch.branchId !== header.branchId) {
-      const main = warehouses.find((w) => w.isActive && w.branchId === Number(patch.branchId) && w.isMainWarehouse)
-      const next = main ? String(main.id) : null
-      setHeader((current) => ({ ...current, warehouseId: next }))
-      setLines((current) => current.map((line) => ({ ...line, warehouseId: next === null ? null : Number(next) })))
+      const main = patch.branchId ? defaultLineWarehouseId(warehouses, Number(patch.branchId)) : null
+      setHeader((current) => ({ ...current, warehouseId: main === null ? null : String(main) }))
     }
     // "Receive into" sets every line's warehouse on an order, an invoice or a typed receipt (a line may then change it).
     if ('warehouseId' in patch && !isContainer && patch.warehouseId) {
@@ -507,7 +512,7 @@ export function GoodsReceiptPage() {
     const message = error.message
     const match = /^Line (\d+)/.exec(message)
     setLines((current) => current.map((line, index) => ({ ...line, error: match && index === Number(match[1]) - 1 ? message : undefined })))
-    if (/^Choose the warehouse/.test(message) || /^The warehouse .* does not belong/.test(message)) {
+    if (/^Choose the warehouse/.test(message) || /^The warehouse .* (does not belong|has warehouses under it)/.test(message)) {
       setErrors((current) => ({ ...current, warehouseId: message }))
     }
     notify.error(message)
@@ -794,7 +799,8 @@ export function GoodsReceiptPage() {
       )}
       {receipt && isDraft && isContainer && header.warehouseId === null && (
         <Alert color="orange" data-no-warehouse>
-          Choose the warehouse the goods are received into: the container's warehouse is not set or does not belong to branch {branchText}.
+          Choose the warehouse the goods are received into: the container's warehouse is not set, does not belong to branch{' '}
+          {branchText} or has warehouses under it (stock is kept only in the warehouses at the bottom of the tree).
         </Alert>
       )}
       {receipt && isDraft && isContainer && receipt.containerStatus === 2 && receipt.containerRef && (
