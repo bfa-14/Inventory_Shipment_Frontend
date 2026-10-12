@@ -12,6 +12,7 @@ import { EmailSettingsPage } from './pages/configuration/EmailSettingsPage'
 import { PurchaseApprovalSettingsPage } from './pages/configuration/PurchaseApprovalSettingsPage'
 import { SettingsPage } from './pages/configuration/SettingsPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { HomePage } from './pages/HomePage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ItemDetailsPage } from './pages/inventory/ItemDetailsPage'
 import { ItemContainersPage } from './pages/inventory/ItemContainersPage'
@@ -106,7 +107,8 @@ export default function App() {
             </Route>
 
             <Route element={<AppShell />}>
-              <Route index element={<DashboardPage />} />
+              <Route index element={<HomePage />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/account/password" element={<ChangePasswordPage />} />
               <Route path="/forbidden" element={<ForbiddenPage />} />
 

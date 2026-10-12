@@ -8,6 +8,8 @@ import {
   IconFileInvoice,
   IconFiles,
   IconHistory,
+  IconHome,
+  IconLayoutDashboard,
   IconLayoutGrid,
   IconPlug,
   IconReceipt2,
@@ -26,6 +28,8 @@ import {
 
 const ICONS = {
   grid: IconLayoutGrid,
+  home: IconHome,
+  dashboard: IconLayoutDashboard,
   box: IconBuildingWarehouse,
   balance: IconScale,
   movement: IconArrowsExchange,

@@ -46,6 +46,7 @@ import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { PERMISSIONS } from '../../navigation'
+import { defaultLineWarehouseId } from '../../components/documents/lineWarehouses'
 
 /** The wizard's draft reference: new for every batch of lines, stable while they sit on the page. */
 const newDraftReference = () => `IMPORT-${Date.now().toString(36).toUpperCase()}`
@@ -180,20 +181,21 @@ export function ImportSalesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /* Only the fetch lives here; the list is emptied by whatever changed the branch. */
+  /* Every branch's warehouses (the default may be of any branch, a leaf); refetched when the branch
+     changes only so the default moves to the new branch's main warehouse. */
   useEffect(() => {
     if (header.branchId === null) return
 
     let cancelled = false
     warehousesApi
-      .lookup(true, Number(header.branchId))
+      .lookup(true)
       .then((rows) => {
         if (cancelled) return
         setWarehouses(rows)
         setHeader((current) => {
           if (current.warehouseId !== null) return current
-          const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? { ...current, warehouseId: String(main.id) } : current
+          const main = defaultLineWarehouseId(rows, Number(header.branchId))
+          return main !== null ? { ...current, warehouseId: String(main) } : current
         })
       })
       .catch(() => {

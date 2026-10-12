@@ -9,6 +9,7 @@ import type { BranchLookupDto, PartyLookupDto, PriceListLookupDto, WarehouseLook
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { partyLabel, priceListLabel } from './salesLines'
+import { lineWarehouseOptions } from '../documents/lineWarehouses'
 
 /** What the header holds. The page owns the state; this card only draws it and reports changes. */
 export interface SalesImportHeader {
@@ -34,7 +35,7 @@ interface SalesImportHeaderCardProps {
   value: SalesImportHeader
   onChange: (patch: Partial<SalesImportHeader>) => void
   branches: BranchLookupDto[]
-  /** Warehouses of the chosen branch. */
+  /** Every active warehouse; the select offers the leaves of every branch. */
   warehouses: WarehouseLookupDto[]
   priceLists: PriceListLookupDto[]
   clients: PartyLookupDto[]
@@ -109,7 +110,7 @@ export function SalesImportHeaderCard({
             label="Default Warehouse"
             withAsterisk
             placeholder={value.branchId ? 'Choose a warehouse' : 'Choose a branch first'}
-            data={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
+            data={lineWarehouseOptions(warehouses, value.branchId ? Number(value.branchId) : null, [value.warehouseId ? Number(value.warehouseId) : null])}
             value={value.warehouseId}
             onChange={(next) => onChange({ warehouseId: next })}
             disabled={disabled || !value.branchId}
@@ -118,7 +119,7 @@ export function SalesImportHeaderCard({
             error={
               errors.warehouseId
               ?? (value.branchId && warehouses.length === 0
-                ? 'This branch has no active warehouses. Pick another branch, or add one first.'
+                ? 'There is no active warehouse to choose. Add one first.'
                 : undefined)
             }
             searchable

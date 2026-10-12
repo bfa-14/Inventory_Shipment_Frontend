@@ -14,6 +14,7 @@ instead of repeating the rules.
 | Confirmations | `@mantine/modals` |
 | Dates | `@mantine/dates` + `dayjs` |
 | Command palette | `@mantine/spotlight` (same 9.5.x as the rest) |
+| Charts (the Dashboard) | `@mantine/charts` (same 9.5.x) on `recharts` |
 | Icons | `@tabler/icons-react` |
 
 `postcss.config.cjs` runs `postcss-preset-mantine` and `postcss-simple-vars` (breakpoints xs 36em, sm 48em,
@@ -23,7 +24,7 @@ md 62em, lg 75em, xl 88em). `src/main.tsx` imports the stylesheets in this order
 `modals.open()` bodies beside their children, where a provider below them would not reach:
 
 ```
-@mantine/core/styles.css → @mantine/notifications/styles.css → @mantine/dates/styles.css
+@mantine/core/styles.css → @mantine/charts/styles.css → @mantine/notifications/styles.css → @mantine/dates/styles.css
 → @mantine/spotlight/styles.css → mantine-datatable/styles.layer.css → src/index.css → src/styles/app.css
 ```
 
@@ -85,9 +86,10 @@ page's master list), and those must keep the default light styling.
   route is opened on load.
 - `comingSoon` items — the modules not built yet — are **hidden by default**: a menu is a list of places you
   can go, and nine dead entries above the live ones make a working application look like a demo. The switch
-  on the dashboard brings them back, rendered disabled with a "Soon" `Badge`. The preference lives in
+  on Home (`/`, the first landing page; Ali's Dashboard of figures and charts is `/dashboard`) brings them
+  back, rendered disabled with a "Soon" `Badge`. The preference lives in
   `useShowComingSoon()` (`localStorage`, key `inventory_shipment.showComingSoon`); Mantine's `useLocalStorage`
-  keeps the dashboard switch and the sidebar in step within the tab, so neither needs a provider. Pass the
+  keeps Home's switch and the sidebar in step within the tab, so neither needs a provider. Pass the
   flag as `visibleNavigation(hasPermission, showComingSoon)` — it defaults to `true`, so callers that only
   care about permissions are unaffected.
 
@@ -611,8 +613,32 @@ all show one — but it is now only a label. The editors send `warehouseId: null
 the server keeps the first line's.
 
 New rows are seeded from the branch's main warehouse (the page's `defaultWarehouseId`), so the
-ordinary single-warehouse document still needs no picking; the row's own cell overrides it. Changing
-the branch clears every line's warehouse, because warehouses belong to one branch.
+ordinary single-warehouse document still needs no picking; the row's own cell overrides it.
+
+**A line takes a warehouse at the bottom of the tree, of any branch** (Ali, scripts 69-71; goods receipts
+too, script 72). The header's branch numbers the document, it does not limit its lines; a warehouse with
+warehouses under it is a group, not a place that holds stock, and the database refuses it on save and at
+posting. One helper for every document line, `components/documents/lineWarehouses.ts`:
+
+- `lineWarehouseOptions(warehouses, headerBranchId, keepIds)`: the leaves of every branch, the header
+  branch's first, the others with their branch named. A warehouse a line already holds stays listed even
+  when it is no longer allowed, marked "- has warehouses under it, choose one of those", so an older line
+  still shows where it is.
+- `defaultLineWarehouseId(warehouses, branchId)`: the branch's main warehouse when it is a leaf, else its
+  first leaf - the seed of new rows.
+- Changing the branch leaves the lines alone; only the seed of NEW rows goes back to the new branch's.
+
+Goods receipts keep their own grouped pickers (`warehouseChoices` in `goodsReceiptModel.ts`, one group per
+branch, the receipt's or document's branch first) with the same rule: leaves only, a kept parent marked the
+same way. A container's receipt offers the leaves of the container's branch only; an order's, an invoice's or
+a receipt without an order, the leaves of every branch. On a receipt without an order a branch change sets
+"Receive into" (where new lines start) to the new branch's default and leaves the lines alone. The container
+form's "Warehouse (offloading destination)" offers the branch's leaves; a draft goods receipt takes it as
+"Receive into" only when it is one ("warehouse to choose" otherwise, and the Delivery notification says why).
+
+The Warehouses form greys out, as a parent, a warehouse already used in transactions (`isUsed` of the
+lookup: stock movements, documents, containers, goods receipts...), with " - used in transactions, cannot
+be a parent"; the current parent stays selectable.
 
 The import creates ONE document however many warehouses the file names — or, on Sales Invoice and
 Inventory In when the reader asks for it, one document per warehouse; see below. Each row keeps the
