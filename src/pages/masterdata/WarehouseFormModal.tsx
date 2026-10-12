@@ -275,10 +275,13 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
         clearable
         nothingFoundMessage="No warehouse found"
         /* Itself and its own descendants are left out: a warehouse cannot move inside itself, and
-           offering the choice only to refuse it afterwards is a worse way to learn that. */
+           offering the choice only to refuse it afterwards is a worse way to learn that.
+           A WAREHOUSE ALREADY USED IN TRANSACTIONS is shown but disabled: as a parent it would hold
+           stock no document can reach (script 71). The current parent stays selectable. */
         data={eligibleParents(warehouses, warehouse?.id).map((w) => ({
           value: String(w.id),
-          label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}`,
+          label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}${w.isUsed ? ' - used in transactions, cannot be a parent' : ''}`,
+          disabled: w.isUsed && w.id !== warehouse?.parentId,
         }))}
         {...form.getInputProps('parentId')}
       />

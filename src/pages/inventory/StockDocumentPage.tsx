@@ -34,6 +34,7 @@ import { formatNumber, reasonSentence } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
 
 let keySeed = 0
 const nextKey = () => `line-${++keySeed}`
@@ -136,9 +137,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
    *
    * The warehouse belongs to each line now, but typing one on every row would be a step backwards
    * for the common document that never leaves one warehouse. So the branch's main warehouse seeds
-   * new rows and the row's own cell overrides it. Nothing but new rows reads this.
+   * new rows and the row's own cell overrides it. Nothing but new rows reads this. The import may
+   * switch it (chosenDefaultWarehouseId); a branch change puts it back to the branch's main one.
    */
-  const [defaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
+  const [chosenDefaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
   const [reasons, setReasons] = useState<StockReasonDto[]>([])
   /** The item list with the filter it was loaded for: a list loaded for another filter is never offered. */
   const [itemList, setItemList] = useState<{ bivacOnly: boolean; rows: ItemLookupDto[] } | null>(null)
@@ -335,31 +337,32 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
     }
   }, [documentId])
 
-  /* Only the fetch lives here. The warehouse list is emptied by whatever CHANGED the branch — the
-     header card's own handler — because that is an event, not something to derive by re-rendering. */
+  /* EVERY ACTIVE WAREHOUSE, WHATEVER THE BRANCH. The header's branch numbers the document and says
+     where it was made; it does not limit where its lines take or put stock (script 69), so a line
+     may name a warehouse of another branch. The list is read once. */
   useEffect(() => {
-    if (header.branchId === null) return
-
     let cancelled = false
     warehousesApi
-      .lookup(true, Number(header.branchId))
+      .lookup(true)
       .then((rows) => {
-        if (cancelled) return
-        setWarehouses(rows)
-        setDefaultWarehouseId((current) => {
-          if (current !== null) return current
-          const main = rows.find((w) => w.isMainWarehouse) ?? rows[0]
-          return main ? main.id : null
-        })
+        if (!cancelled) setWarehouses(rows)
       })
       .catch(() => {
         /* the per-line warehouse selects are then empty and the form refuses to save, which is correct */
       })
-
     return () => {
       cancelled = true
     }
-  }, [header.branchId])
+  }, [])
+
+  const headerBranchId = header.branchId === null ? null : Number(header.branchId)
+  const defaultWarehouseId = useMemo(() => {
+    if (chosenDefaultWarehouseId !== null) return chosenDefaultWarehouseId
+    return defaultLineWarehouseId(warehouses, headerBranchId)
+  }, [chosenDefaultWarehouseId, headerBranchId, warehouses])
+
+  /* Leaves of every branch, the header branch's first (see lineWarehouses). */
+  const warehouseOptions = lineWarehouseOptions(warehouses, headerBranchId, lines.map((l) => l.warehouseId))
 
   /* ── line editing ─────────────────────────────────────────────────────────────────────────── */
 
@@ -866,14 +869,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         value={header}
         onChange={(patch) => {
           markDirty()
-          /* A BRANCH CHANGE INVALIDATES EVERY LINE'S WAREHOUSE, not just a header field: warehouses
-             belong to one branch, so a row still holding the old branch's warehouse would be
-             refused on save with a message about a row the reader never touched. Clearing them puts
-             the empty cells in plain sight instead. */
+          /* A branch change leaves the lines alone: their warehouses may be of any branch. Only the
+             warehouse NEW lines start in goes back to the new branch's main one. */
           if (patch.branchId !== undefined) {
-            setWarehouses([])
             setDefaultWarehouseId(null)
-            setLines((current) => current.map((line) => ({ ...line, warehouseId: null, onHandBase: null })))
           }
           setHeader((current) => ({ ...current, ...patch }))
         }}
@@ -953,7 +952,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           items={items}
           itemPlaceholder={bivacItemsOnly ? 'Choose a BIVAC item' : undefined}
           itemsNothingFound={typeMissing ? typeMissingMessage : bivacItemsOnly ? BIVAC_ITEMS_NONE : undefined}
-          warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
+          warehouses={warehouseOptions}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           currencyCode={document?.currencyCode ?? 'USD'}
           costIsEditable={costIsEditable}

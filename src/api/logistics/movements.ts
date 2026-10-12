@@ -103,8 +103,10 @@ export interface MovementContainerDto extends MovementContainerReceiptInfo {
 export interface MovementContainerReceiptInfo extends ContainerReceiptRef {
   /** The container's "Warehouse (offloading destination)". */
   warehouseCode?: string | null
-  /** The warehouse is active and belongs to the container's branch: the automatic draft takes it. */
+  /** The warehouse is active, belongs to the container's branch and has no warehouse under it: the automatic draft takes it. */
   warehouseInBranch?: boolean | null
+  /** Why the automatic draft will not take it ("LUB, the container's, has warehouses under it"); null when it will. */
+  warehouseNote?: string | null
   /** The open receipt is a DRAFT made by the completion of THIS movement: cancelling the movement deletes it (rule 22). */
   autoDraftOfThisMovement?: boolean
   /** Set when the draft was changed after it was created (null when never edited): who and when, for the cancel dialog. */

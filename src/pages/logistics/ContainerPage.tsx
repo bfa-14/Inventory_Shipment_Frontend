@@ -336,7 +336,11 @@ export function ContainerPage() {
     .map((p) => ({ value: String(p.id), label: portLabel(p) }))
   const supplierOptions = suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) }))
   const branchOptions = branches.map((b) => ({ value: String(b.id), label: `${b.branchCode} - ${b.branchName}` }))
-  const branchWarehouses = warehouses.filter((w) => values.branchId !== null && String(w.branchId) === values.branchId)
+  // The warehouse the goods are received into: the container's branch, and a leaf - stock lives only at the bottom of
+  // the tree (scripts 70, 72: a goods receipt takes the container's warehouse only when it is one).
+  const branchWarehouses = warehouses.filter(
+    (w) => values.branchId !== null && String(w.branchId) === values.branchId && (w.childCount === 0 || String(w.id) === values.warehouseId),
+  )
   const warehouseOptions = branchWarehouses.map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
   const countryOptions = useMemo(() => COUNTRIES.map((c) => ({ value: c.code, label: countryLabel(c) })), [])
 
@@ -1051,7 +1055,8 @@ export function ContainerPage() {
           opened
           onClose={() => setReceiveOpen(false)}
           container={container}
-          warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId)}
+          /* The container's branch, and a leaf: stock is kept only at the bottom of the tree (scripts 70, 72). */
+          warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId && w.childCount === 0)}
           canPost={perm.postReceipt}
           onCreated={(created) => receiptCreated(created.id)}
         />

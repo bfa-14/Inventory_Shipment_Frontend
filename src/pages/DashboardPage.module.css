@@ -1,0 +1,330 @@
+/*
+ * THE DASHBOARD IN THE APPLICATION'S OWN LOOK: white cards on the page, Mantine's text colours.
+ * Only the two key-figure tiles carry colour, so the eye lands on them first. Every colour lives
+ * here as a variable so the page stays one palette.
+ */
+.board {
+  --db-card: var(--mantine-color-white);
+  --db-card-2: var(--mantine-color-gray-0);
+  --db-line: var(--mantine-color-gray-3);
+  --db-text: var(--mantine-color-text);
+  --db-dim: var(--mantine-color-dimmed);
+  --db-violet: #b26cf2;
+  --db-pink: #e15ad8;
+  --db-cyan: #33d6d0;
+  --db-blue: #3d7ff0;
+  --db-red: #ff6b8a;
+  --db-green: #3ddc97;
+  --db-orange: #ffb547;
+
+  color: var(--db-text);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.boardTitle {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.dim {
+  color: var(--db-dim);
+}
+
+/* two columns: the main one, and a narrower one on the right; one column on a phone */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 1200px) {
+  .layout {
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  }
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.card {
+  background: var(--db-card);
+  border: 1px solid var(--db-line);
+  border-radius: var(--mantine-radius-lg);
+  padding: 16px 18px;
+  min-width: 0;
+}
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+/* the gradient tiles */
+.tile {
+  border-radius: 18px;
+  padding: 18px 20px;
+  color: #fff;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 150px;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.tile:hover {
+  transform: translateY(-2px);
+}
+
+.tileViolet {
+  background: linear-gradient(135deg, #c86df0 0%, #8a5cf6 100%);
+  box-shadow: 0 10px 30px rgba(178, 108, 242, 0.35);
+}
+
+.tileTeal {
+  background: linear-gradient(135deg, #2fe0c4 0%, #2f8fea 100%);
+  box-shadow: 0 10px 30px rgba(51, 214, 208, 0.3);
+}
+
+.tileLabel {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.92;
+}
+
+.tileValue {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tileUnit {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.85;
+  margin-left: 4px;
+}
+
+.tileFoot {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* the small figure pills */
+.pills {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--db-card);
+  border: 1px solid var(--db-line);
+  border-radius: var(--mantine-radius-md);
+  padding: 9px 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.pill:hover {
+  background: var(--db-card-2);
+}
+
+.pillIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.pillText {
+  flex: 1;
+  min-width: 0;
+}
+
+.pillLabel {
+  font-size: 11px;
+  color: var(--db-dim);
+}
+
+.pillValue {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.chipRed {
+  color: var(--db-red);
+  background: rgba(255, 107, 138, 0.14);
+}
+
+.chipGreen {
+  color: var(--db-green);
+  background: rgba(61, 220, 151, 0.14);
+}
+
+.chipDim {
+  color: var(--db-dim);
+  background: var(--mantine-color-gray-1);
+}
+
+/* donuts with their legend beside them */
+.donut {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 140px;
+}
+
+.legendRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.legendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  flex: none;
+}
+
+.legendName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendValue {
+  color: var(--db-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  color: var(--db-dim);
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+/* the "Needs attention" cards */
+.attention {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.count {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 26px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.countOn {
+  color: #fff;
+  background: var(--db-orange);
+}
+
+.countOff {
+  color: var(--db-dim);
+  background: var(--mantine-color-gray-1);
+}
+
+.line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--db-line);
+  font-size: 13px;
+}
+
+.line:last-child {
+  border-bottom: none;
+}
+
+.link {
+  color: var(--mantine-color-anchor);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.sub {
+  font-size: 11px;
+  color: var(--db-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.num {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}

@@ -144,6 +144,8 @@ function ReceiveGoodsBody({
   const phone = useMediaQuery('(max-width: 48em)')
 
   const [lines, setLines] = useState<ReceivableLineDto[] | null>(null)
+  /** The order's or invoice's branch: its warehouses come first in the pickers. */
+  const [documentBranchId, setDocumentBranchId] = useState<number | null>(null)
   /** The order has containers / the invoice is "Shipped in containers": the server says it on the document. */
   const [shipped, setShipped] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -162,6 +164,7 @@ function ReceiveGoodsBody({
       .receivable(source.kind === 'order' ? { purchaseOrderId: source.id } : { invoiceId: source.id }, controller.signal)
       .then((result) => {
         setLines(result.lines)
+        setDocumentBranchId(result.documents[0]?.branchId ?? null)
         setShipped(result.documents.some((d) => d.shippedInContainers))
         setBlocked(source.kind === 'order' ? orderBlockedReason(result.documents[0]) : null)
         // Receive now starts where the server says: the rest, or 0 where the goods travel in containers (rules 14, 15).
@@ -199,7 +202,9 @@ function ReceiveGoodsBody({
     () => (lines ?? []).map((l) => ({ id: l.warehouseId, code: l.warehouseCode, name: l.warehouseName })),
     [lines],
   )
-  const warehouseData = useMemo(() => warehouseChoices(warehouses, null, keep), [warehouses, keep])
+  /* Leaves of every branch, the document's branch first (scripts 70, 72): a warehouse with warehouses under it holds no
+     stock. A line's own warehouse stays listed, marked, when it is not one any more (an order saved before). */
+  const warehouseData = useMemo(() => warehouseChoices(warehouses, null, keep, documentBranchId), [warehouses, keep, documentBranchId])
 
   const quantityTitle = source.kind === 'order' ? 'Ordered' : 'Invoiced'
 

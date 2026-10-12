@@ -315,21 +315,28 @@ export function warehouseLabel(w: Pick<WarehouseLookupDto, 'warehouseCode' | 'wa
 }
 
 /**
- * The warehouses a line may be received into, grouped by branch: every active warehouse, or only those of one branch
- * (a container is received in its own branch). The line's current warehouse stays an option even when it is no longer
- * active, so the cell never goes blank.
+ * The warehouses a line may be received into, grouped by branch: every active warehouse AT THE BOTTOM OF THE TREE, or
+ * only those of one branch (a container is received in its own branch). A warehouse with warehouses under it is a
+ * group, not a place that holds stock (scripts 70, 72): the same rule as every document line (see lineWarehouses).
+ * `firstBranchId` (the receipt's or the document's branch) puts its group first. The line's current warehouse stays an
+ * option even when it is no longer allowed - inactive, or a parent, marked so - so the cell never goes blank.
  */
 export function warehouseChoices(
   warehouses: WarehouseLookupDto[],
   branchId: number | null,
   keep: { id: number | null; code: string | null; name: string | null }[] = [],
+  firstBranchId: number | null = null,
 ): WarehouseGroup[] {
-  const shown = warehouses.filter((w) => (w.isActive || keep.some((k) => k.id === w.id)) && (branchId === null || w.branchId === branchId))
+  const kept = (w: WarehouseLookupDto) => keep.some((k) => k.id === w.id)
+  const isLeaf = (w: WarehouseLookupDto) => w.childCount === 0
+  const shown = warehouses
+    .filter((w) => ((w.isActive && isLeaf(w)) || kept(w)) && (branchId === null || w.branchId === branchId))
+    .sort((a, b) => Number(b.branchId === firstBranchId) - Number(a.branchId === firstBranchId))
   const groups = new Map<string, WarehouseOption[]>()
   for (const w of shown) {
     const group = `${w.branchCode} - ${w.branchName}`
     const list = groups.get(group) ?? []
-    list.push({ value: String(w.id), label: warehouseLabel(w) })
+    list.push({ value: String(w.id), label: isLeaf(w) ? warehouseLabel(w) : `${warehouseLabel(w)} - has warehouses under it, choose one of those` })
     groups.set(group, list)
   }
   const missing = keep.filter((k) => k.id !== null && !shown.some((w) => w.id === k.id))

@@ -203,7 +203,8 @@ export interface NavSection {
 export const NAVIGATION: NavSection[] = [
   {
     items: [
-      { label: 'Dashboard', to: '/', icon: 'grid' },
+      { label: 'Home', to: '/', icon: 'home' },
+      { label: 'Dashboard', to: '/dashboard', icon: 'dashboard' },
       { label: 'Purchase Planning', icon: 'clipboard', comingSoon: true, children: [] },
       { label: 'Purchase Orders', icon: 'cart', comingSoon: true },
       { label: 'Invoices', icon: 'invoice', comingSoon: true },
@@ -394,7 +395,7 @@ export function isGroup(item: NavItem): boolean {
  * may open, and both groups and sections vanish once nothing is left inside them.
  *
  * `showComingSoon` decides whether the modules that are not built yet are listed at all. It defaults
- * to true so a caller that only cares about permissions - the dashboard's own section cards, say -
+ * to true so a caller that only cares about permissions - Home's own section cards, say -
  * keeps its existing behaviour; the sidebar passes the reader's choice from useShowComingSoon().
  * With it false a group whose children are ALL unbuilt empties out and disappears with them, which
  * is what stops "Master Data" surviving as a heading over nothing.
@@ -473,7 +474,7 @@ export function breadcrumbFor(pathname: string): string[] {
   return [leaf.section.breadcrumb, leaf.group?.label, leaf.item.label].filter((part): part is string => !!part)
 }
 
-/** Landing route after sign-in: the Users screen when allowed, otherwise the dashboard. */
+/** Landing route after sign-in: the Users screen when allowed, otherwise Home. */
 export function landingRoute(permissions: string[] | undefined): string {
   return permissions?.includes(PERMISSIONS.usersView) ? '/security/users' : '/'
 }

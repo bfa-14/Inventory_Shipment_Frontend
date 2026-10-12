@@ -61,7 +61,7 @@ interface DocumentLinesGridProps {
    */
   itemsNothingFound?: string
   /**
-   * The warehouses of the document's branch, for the per-line Warehouse select.
+   * The options of the per-line Warehouse select: leaves of every branch (see lineWarehouses).
    *
    * THE WAREHOUSE IS A LINE'S, NOT THE DOCUMENT'S. One document may move stock in several
    * warehouses, so the choice belongs next to the quantity it applies to — and On Hand, the column
@@ -276,7 +276,7 @@ export function DocumentLinesGrid({
                     <Select
                       data={warehouses}
                       value={line.warehouseId === null ? null : String(line.warehouseId)}
-                      placeholder={warehouses.length === 0 ? 'Choose a branch first' : 'Warehouse'}
+                      placeholder={warehouses.length === 0 ? 'No warehouse to choose' : 'Warehouse'}
                       disabled={warehouses.length === 0}
                       searchable
                       /* On Hand belongs to the item AND the warehouse, so changing this makes the
