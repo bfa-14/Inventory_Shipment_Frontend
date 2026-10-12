@@ -100,7 +100,13 @@ export interface ContainerFlags extends ContainerReceiptRef {
   canEditLines?: boolean
   /** Only for a container offloaded BEFORE goods receipts; one received by a goods receipt cancels that receipt. */
   canCancelOffload: boolean
+  /** Offloaded and nothing blocks it: false while `closeBlockedReason` says why. */
   canClose: boolean
+  /**
+   * Why an offloaded container cannot be closed yet (draft charges, or received pieces not invoiced by posted invoices),
+   * the refusal Close itself would give; null when nothing blocks it.
+   */
+  closeBlockedReason?: string | null
   canReopen: boolean
   canCancel: boolean
   canDelete: boolean

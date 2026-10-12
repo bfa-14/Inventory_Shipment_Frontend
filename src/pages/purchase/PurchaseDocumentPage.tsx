@@ -157,6 +157,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const canCreateReturn = kind.code === 'PINV' && hasPermission(PURCHASE_RETURN.permissions.create)
   const canOverCapacity = hasPermission(PERMISSIONS.containersOverCapacity)
   const canConfirmContainers = hasPermission(PERMISSIONS.containersConfirm)
+  /* The container reads (invoice candidates…) need containers.view: a reader without it gets no 403 in the
+     console, only the numbers the page can do without (no candidates, no container cap on the lines). */
+  const canViewContainers = hasPermission(PERMISSIONS.containersView)
   /* GOODS RECEIPTS (scripts 64-65): the goods of an order or an invoice enter the stock with "Receive goods…", and a
      local invoice's post confirmation may receive them at once (create + post of goods receipts). */
   const canReceiveGoods = hasPermission(PERMISSIONS.goodsReceiptsCreate)
@@ -324,7 +327,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       /* An invoice from containers is also capped by its CONTAINER line: loaded − invoiced elsewhere,
          i.e. what is still available on it plus what this draft already holds. */
       const containerCap = new Map<number, number>()
-      if (doc.isContainerBound) {
+      if (doc.isContainerBound && canViewContainers) {
         const candidates = await containersApi.invoiceCandidates({ purchaseOrderId: doc.sourceDocumentId, includeAll: true })
         for (const c of candidates) containerCap.set(c.containerLineId, c.availableBase)
       }
@@ -341,7 +344,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     } catch {
       /* The cap is a courtesy; the server enforces it either way. */
     }
-  }, [])
+  }, [canViewContainers])
 
   /**
    * The manual splits, re-pointed at the ids a save produced.
@@ -496,7 +499,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   /* An approved order with containers: is anything loaded and not yet invoiced? That is what offers
      "Create Invoice from Containers…". */
   useEffect(() => {
-    if (kind.code !== 'PO' || !document || document.containerCount === 0) {
+    // Without containers.view the Containers card is not shown and the endpoint answers 403: nothing to ask.
+    if (kind.code !== 'PO' || !document || document.containerCount === 0 || !canViewContainers) {
       setInvoiceCandidates(0)
       return
     }
@@ -508,7 +512,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     return () => {
       live = false
     }
-  }, [kind.code, document])
+  }, [kind.code, document, canViewContainers])
 
   /* A LINE MAY RECEIVE INTO A WAREHOUSE OF ANY BRANCH, so every active warehouse is offered on the
      lines. Only the seed for new rows follows the header: the branch's main warehouse. */

@@ -179,6 +179,9 @@ export function ContainersPage() {
   const canCancel = hasPermission(PERMISSIONS.containersCancel)
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
   const canImportCharges = hasPermission(PERMISSIONS.containerChargesCreate)
+  // The order and PI filters list documents the reader may not see: asked for only with their view permission.
+  const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
+  const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
 
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
@@ -253,29 +256,34 @@ export function ContainersPage() {
     portsApi.lookup(false).then(setPorts).catch(() => {})
     itemsApi.lookup(false).then(setItems).catch(() => {})
     // The PI filter needs the invoice list, which is the invoices' own permission: without it the
-    // filter simply offers nothing rather than failing the page.
-    purchaseDocumentsApi
-      .list({ documentTypeCode: 'PINV', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-      .then((result) =>
-        setInvoices(
-          result.items
-            .filter((i) => i.documentNumber)
-            .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
-        ),
-      )
-      .catch(() => {})
+    // filter simply offers nothing, and the list is not asked for at all - a refused request is a 403
+    // in the browser console, not a quiet empty list.
+    if (canViewInvoices) {
+      purchaseDocumentsApi
+        .list({ documentTypeCode: 'PINV', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
+        .then((result) =>
+          setInvoices(
+            result.items
+              .filter((i) => i.documentNumber)
+              .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
+          ),
+        )
+        .catch(() => {})
+    }
     // Same for the orders filter: the orders' own permission.
-    purchaseDocumentsApi
-      .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-      .then((result) =>
-        setOrders(
-          result.items
-            .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
-            .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
-        ),
-      )
-      .catch(() => {})
-  }, [])
+    if (canViewOrders) {
+      purchaseDocumentsApi
+        .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
+        .then((result) =>
+          setOrders(
+            result.items
+              .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
+              .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
+          ),
+        )
+        .catch(() => {})
+    }
+  }, [canViewInvoices, canViewOrders])
 
   // The advanced panel opens by itself when one of its filters is in use, so a filter is never hidden.
   const advancedActive = ADVANCED.some((key) => filters[key] !== NO_FILTERS[key])
@@ -505,7 +513,17 @@ export function ContainersPage() {
               if (receipt) void navigate(routes.goodsReceipt(receipt.id))
             },
           },
-          { key: 'close', show: canClose && row.canClose, label: 'Close', icon: <IconLock size={16} />, onClick: () => void close(row) },
+          {
+            key: 'close',
+            // On every offloaded container; what blocks it (draft charges, received pieces not invoiced yet) is said
+            // under its label, as Cancel does - a menu item cannot carry a tooltip once disabled.
+            show: canClose && row.status === 6,
+            label: 'Close',
+            icon: <IconLock size={16} />,
+            disabled: !row.canClose,
+            reason: row.closeBlockedReason ?? 'This container cannot be closed now.',
+            onClick: () => void close(row),
+          },
           {
             key: 'cancel',
             // Shown on every container before its goods arrive; a goods receipt (draft or posted) blocks it, and the

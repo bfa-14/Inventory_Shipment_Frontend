@@ -130,12 +130,47 @@ function sourceKindOf(kind: PurchaseKind): PurchaseKind | null {
 }
 
 /**
+ * The grid layout (hidden columns, widths, page size, footer totals) is remembered PER KIND: orders, invoices and
+ * returns have different columns, and one key shared by the three mixed them up - the column order saved by the first
+ * list opened put the other lists' own columns after Actions.
+ */
+function gridStoreKey(kind: PurchaseKind): string {
+  return `purchase.purchaseDocuments.${kind.code}`
+}
+
+/** The key the three lists shared before. */
+const SHARED_STORE_KEY = 'purchase.purchaseDocuments'
+
+/**
+ * Once per kind, the reader's choices saved under the shared key (hidden columns, widths, page size, totals) are
+ * copied to the kind's own key, so nobody loses them; the column order is not copied (the grid keeps the page's).
+ * Storage refused: nothing to copy.
+ */
+function adoptSharedLayout(storeKey: string): void {
+  try {
+    for (const suffix of ['-columns-toggle', '-columns-width', '-grid', '-summaries']) {
+      const shared = localStorage.getItem(SHARED_STORE_KEY + suffix)
+      if (shared !== null && localStorage.getItem(storeKey + suffix) === null) localStorage.setItem(storeKey + suffix, shared)
+    }
+  } catch {
+    // Storage blocked: the list starts from its defaults.
+  }
+}
+
+/**
  * Every document of one purchase kind: the same list the sales invoices have — filters that apply
  * as they are typed, bulk post / delete on the ticked drafts, row actions gated by permission and
  * status — with the purchase family's own columns: the supplier, the source document, a total in
  * the document currency and, on orders, how much has been received.
+ *
+ * ONE LIST PER KIND, REMOUNTED WHEN THE KIND CHANGES: the three routes render this same component, so going from
+ * Orders to Invoices would otherwise keep the Orders list's state - its filters, its banner, its grid layout.
  */
 export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
+  return <PurchaseDocumentsList key={kind.code} kind={kind} />
+}
+
+function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { hasPermission, user } = useAuth()
@@ -151,6 +186,13 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   /* Goods receipts: "Receive goods" on an approved order's row. */
   const canReceiveGoods = kind.code === 'PO' && hasPermission(PERMISSIONS.goodsReceiptsCreate)
   const sourceKind = sourceKindOf(kind)
+  /* The kind's own grid key (the list remounts per kind); what was saved under the shared key is copied first, before
+     the grid reads it. */
+  const [storeKey] = useState(() => {
+    const key = gridStoreKey(kind)
+    adoptSharedLayout(key)
+    return key
+  })
 
   /* SINCE GOODS RECEIPTS, posting an invoice adds no stock: said once to the people who post invoices, until they close
      it (remembered in this browser). The date is the server's; without it the sentence goes without a date. */
@@ -226,7 +268,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
   const engine = useDataGrid({
     rows,
     columns: GRID_COLUMNS,
-    storeKey: 'purchase.purchaseDocuments',
+    storeKey,
     sort: [{ accessor: 'documentDate', direction: 'desc' }],
   })
 
@@ -622,7 +664,7 @@ export function PurchaseDocumentsPage({ kind }: { kind: PurchaseKind }) {
 
       <Paper radius="lg" withBorder>
         <DataTable
-          storeKey="purchase.purchaseDocuments"
+          storeKey={storeKey}
           engine={engine}
           exportFileName="purchase-documents"
           columns={columns}

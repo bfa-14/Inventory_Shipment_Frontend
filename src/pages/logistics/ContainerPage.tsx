@@ -717,7 +717,19 @@ export function ContainerPage() {
       disabled: cancelReceiptBlocked !== null,
       disabledReason: cancelReceiptBlocked ?? undefined,
     },
-    { key: 'close', label: 'Close', icon: <IconLock size={16} />, onClick: () => void close(), variant: 'light', loading: busyAction === 'close', visible: saved && container.canClose && perm.close },
+    {
+      key: 'close',
+      label: 'Close',
+      icon: <IconLock size={16} />,
+      onClick: () => void close(),
+      variant: 'light',
+      loading: busyAction === 'close',
+      // On every offloaded container; disabled with the refusal Close would give (draft charges, received pieces not
+      // invoiced yet - rule 20), so the reader knows why before the click.
+      visible: saved && container.status === 6 && perm.close,
+      disabled: !container?.canClose,
+      disabledReason: container?.closeBlockedReason ?? 'This container cannot be closed now.',
+    },
     { key: 'reopen', label: 'Reopen', icon: <IconLockOpen size={16} />, onClick: () => void reopen(), variant: 'light', loading: busyAction === 'reopen', visible: saved && container.canReopen && perm.close },
     {
       key: 'openReceipt',

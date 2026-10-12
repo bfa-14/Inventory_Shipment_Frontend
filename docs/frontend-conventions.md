@@ -322,9 +322,20 @@ toggle state either way), so the flag stays off and `FIXED_ACCESSORS` decides wh
 Conventions:
 
 - **The key is namespaced after the page** - `masterdata.branches`, `logistics.containers`,
-  `purchase.purchaseDocuments`, `security.users`. It is persisted, so treat it as permanent: reusing
+  `purchase.purchaseDocuments.PO`, `security.users`. It is persisted, so treat it as permanent: reusing
   one key for two grids has them overwrite each other's layout, and renaming one throws away what
-  the reader arranged.
+  the reader arranged. **One page component that serves several lists takes one key per list**: the
+  purchase orders, invoices and returns once shared `purchase.purchaseDocuments`, and the saved layout of
+  the first list opened put the other lists' own columns after Actions. They now use
+  `purchase.purchaseDocuments.{PO|PINV|PRET}` (the hidden columns, widths and page size saved under the old
+  key are copied once), and the page remounts per kind (`key={kind.code}`), since the three routes render
+  the same component and would otherwise carry one list's state into the next.
+- **The columns stay in the page's order.** Nothing lets a reader move a column, yet `mantine-datatable`
+  stores an order under `<storeKey>-columns-order` and puts a column it has not seen before at the
+  end, after Actions - every column a release adds would land there for anyone who opened the list before.
+  `DataTable` therefore keeps that stored order equal to the column list as defined: written before the
+  grid reads it, and put back if it drifts. Add a column where it belongs in the definition; no key
+  change is needed.
 - **`#` and `Actions` are never hideable or resizable** (`FIXED_ACCESSORS` in `DataTable.tsx`). `#`
   is a position marker rather than data, and `Actions` is what `pinLastColumn` deliberately keeps in
   view. `mantine-datatable` also never resizes the last column, whatever it is, and a resize takes
@@ -1058,11 +1069,18 @@ them with `ContainerReceiptCell` (the GRN number, or a gray "Draft" badge, linke
     latest completed Delivery-stage movement (`deliveredDate`), where the free time stops counting.
   - "Warehouse (offloading destination)" here and "Offloading warehouse" in Auto-plan say "The goods receipt proposes
     this warehouse."
+  - **Close** is on every Offloaded container (close permission) and disabled while `closeBlockedReason` says why: the
+    refusal Close itself gives (`logistics.fn_Container_CloseBlock`), draft charges first ("The container still has
+    draft charges. Post or delete them before closing it."), then rule 20 ("Line {n} ({item}): {r} received but {i}
+    invoiced by posted invoices. Post the supplier invoices before closing the container."). `canClose` is true only
+    when nothing blocks it.
 - **Containers list.** A "Goods receipt" column (and CSV column); the Status filter has a group "Goods receipt" with
   **"Delivered, not received"** (`deliveredNotReceived=true` instead of a status); the row menu offers "Receive goods"
   (status 2-5, no receipt, create permission) or "Goods receipt" (open it, view permission). Its "Cancel" item is there
   on status 1-5 and, while a receipt exists, disabled with the same 69019 sentence written under its label (a disabled
-  menu item cannot carry a tooltip).
+  menu item cannot carry a tooltip); its "Close" item is there on every Offloaded container, disabled the same way with
+  `closeBlockedReason`. The order and PI filters load their lists only with `purchase.orders.view` /
+  `purchase.invoices.view` (without it they offer nothing, and no refused request reaches the console).
 - **"Add container…"** (`AddContainerModal`): the column "Outside containers" is `invoicedDirectBase`, the larger of
   what the order line invoiced and what it received + holds on draft goods receipts outside containers (Ordered −
   Loaded elsewhere − Outside containers = what may go here); its tooltip gives the parts, "Invoiced {a} · received {b} ·
@@ -1353,7 +1371,7 @@ copied.
 | `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
 | `AuditTrail` | What has happened to the document, five entries then the rest on asking. |
-| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. |
+| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. |
 | `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
 | `CancelReasonModal` | Asks why a posted document is being cancelled. |
 

@@ -119,7 +119,7 @@ export function receiveGoodsReason(order: PurchaseDocumentDto): string | null {
   }
   if (outstanding <= 0) return 'Everything ordered is already received.'
   if (toReceive > 0) return null
-  if (inDrafts > 0) return 'The rest is in draft goods receipts: post or delete them first.'
+  if (inDrafts > 0) return 'The rest of this order is on draft goods receipts: post or delete them first.'
   if (inContainers > 0) return 'Everything still to receive travels in containers: it is received with its containers.'
   return null
 }
