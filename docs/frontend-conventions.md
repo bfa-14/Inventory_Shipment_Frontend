@@ -634,7 +634,8 @@ same way. A container's receipt offers the leaves of the container's branch only
 a receipt without an order, the leaves of every branch. On a receipt without an order a branch change sets
 "Receive into" (where new lines start) to the new branch's default and leaves the lines alone. The container
 form's "Warehouse (offloading destination)" offers the branch's leaves; a draft goods receipt takes it as
-"Receive into" only when it is one ("warehouse to choose" otherwise, and the Delivery notification says why).
+"Receive into" only when it is one ("warehouse to choose" otherwise, and the Delivery's Complete dialog and
+notification say why).
 
 The Warehouses form greys out, as a parent, a warehouse already used in transactions (`isUsed` of the
 lookup: stock movements, documents, containers, goods receipts...), with " - used in transactions, cannot
@@ -1124,11 +1125,15 @@ them with `ContainerReceiptCell` (the GRN number, or a gray "Draft" badge, linke
   on draft receipts {c} pcs (the larger counts)".
 - **Movement page.** Completing a movement of the **Delivery** stage: the Complete dialog says "The containers arrive at
   the warehouse: a draft goods receipt is created for each of them. The stock changes only when the warehouse posts it."
-  and lists each container ("KTG-… → draft goods receipt into LUB-WH", "→ draft, warehouse to choose", "→ no receipt: it
-  already has GRN-…"), from `warehouseCode` / `warehouseInBranch` and the receipt fields of `MovementDto.containers`.
-  The answer's `goodsReceipts` (`MovementReceiptResultDto[]`) becomes one notification, `showDeliveryResult`
-  (`deliveryNotification.tsx`): "Draft goods receipts created: KTG-… (warehouse to choose), KTG-…. Not created: KTG-…
-  already has GRN-…." - the created ones linked (the notifications sit outside the router: the link navigates through
+  and lists each container ("KTG-… → draft goods receipt into LUB-WH", "→ draft, warehouse to choose (LUB, the
+  container's, has warehouses under it)", "→ no receipt: it already has GRN-…"), from `warehouseCode` /
+  `warehouseInBranch` / `warehouseNote` (the server's reason, shown as it comes) and the receipt fields of
+  `MovementDto.containers`. The answer's `goodsReceipts` (`MovementReceiptResultDto[]`) becomes one notification,
+  `showDeliveryResult` (`deliveryNotification.tsx`): "Draft goods receipts created: KTG-… (warehouse to choose), KTG-….
+  Not created: KTG-… already has GRN-…." with, under the first sentence, why a container's own warehouse was not taken,
+  once per reason ("KTG-…: choose the warehouse (LUB, the container's, has warehouses under it: …).", in orange; read
+  from the row's `message` by `warehouseToChooseReason`, nothing on an older server) - the created ones linked (the
+  notifications sit outside the router: the link navigates through
   the page's `navigate`); when the whole call failed, the answer's `warnings` are shown on their own (the movement is
   completed whatever happened to the drafts). Cancelling a **completed** Delivery (`DeliveryCancelDrafts`, inside
   `CancelReasonModal`'s new `children`) lists the automatic drafts deleted with it (`autoDraftOfThisMovement` on the

@@ -76,11 +76,14 @@ export interface DeliveryPreviewInput {
   receipt: ContainerReceipt | null
   warehouseCode: string | null | undefined
   warehouseInBranch: boolean | null | undefined
+  /** Why the container's warehouse will not be taken, from the server ("LUB, the container's, has warehouses under it"). */
+  warehouseNote?: string | null
 }
 
 /**
- * "KTG-2026-0031 → draft goods receipt into LUB-WH", "KTG-2026-0032 → draft, warehouse to choose", "KTG-2026-0033 → no
- * receipt: it already has GRN-BR-002-000004". The server decides at the completion; this is what the page can see now.
+ * "KTG-2026-0031 → draft goods receipt into LUB-WH", "KTG-2026-0032 → draft, warehouse to choose (LUB, the container's,
+ * has warehouses under it)", "KTG-2026-0033 → no receipt: it already has GRN-BR-002-000004". The server decides at the
+ * completion; this is what the page can see now.
  */
 export function deliveryPreviewLine(c: DeliveryPreviewInput): { text: string; created: boolean } {
   if (c.receipt) {
@@ -95,7 +98,25 @@ export function deliveryPreviewLine(c: DeliveryPreviewInput): { text: string; cr
   if (c.warehouseCode && c.warehouseInBranch !== false) {
     return { text: `${c.containerRef} → draft goods receipt into ${c.warehouseCode}`, created: true }
   }
-  return { text: `${c.containerRef} → draft, warehouse to choose`, created: true }
+  return {
+    text: `${c.containerRef} → draft, warehouse to choose${c.warehouseNote ? ` (${c.warehouseNote})` : ''}`,
+    created: true,
+  }
+}
+
+/** The start of the database's sentence for a draft created by a Delivery (usp_GoodsReceipt_CreateForMovement). */
+const CREATED_PREFIX = 'Draft goods receipt created: '
+
+/**
+ * Why a Delivery's draft was created without a warehouse although its container has one (script 72), from the
+ * database's sentence: "choose the warehouse (LUB, the container's, has warehouses under it: stock is kept only in the
+ * warehouses at the bottom of the tree)". Null for a draft with a warehouse, for the plain "choose the warehouse" (the
+ * container has none), for a skipped container and for an older server whose sentence gives no reason.
+ */
+export function warehouseToChooseReason(result: MovementReceiptResultDto): string | null {
+  if (!result.created || result.warehouseCode || !result.message?.startsWith(CREATED_PREFIX)) return null
+  const reason = result.message.slice(CREATED_PREFIX.length).trim().replace(/\.+$/, '')
+  return reason.includes('(') ? reason : null
 }
 
 /**

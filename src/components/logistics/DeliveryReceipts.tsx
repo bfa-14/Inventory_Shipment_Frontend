@@ -25,6 +25,7 @@ export function DeliveryCompletePreview({ movement }: { movement: MovementDto })
       receipt: containerReceiptOf(c),
       warehouseCode: c.warehouseCode,
       warehouseInBranch: c.warehouseInBranch,
+      warehouseNote: c.warehouseNote,
     }),
   )
   return (

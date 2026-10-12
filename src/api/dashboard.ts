@@ -24,8 +24,11 @@ export interface DashboardSummaryDto {
   } | null
   inventory: { valueBase: number; itemsInStock: number } | null
   onTheWay: {
+    /** The orders' still to receive, less the pieces in containers (inTransitPieces); with them when that one is null. */
     onOrderPieces: number | null
     openOrders: number | null
+    /** Posted invoices without an order whose goods are not received yet (script 72). */
+    invoicedNotReceivedPieces?: number | null
     inTransitPieces: number | null
     containersInTransit: number | null
   } | null

@@ -279,9 +279,12 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
     )
   }
   if (onTheWay) {
-    const pieces = (onTheWay.onOrderPieces ?? 0) + (onTheWay.inTransitPieces ?? 0)
+    // Still to receive, as Shortages count it: the orders, the invoices without an order, the containers on their way.
+    const pieces = (onTheWay.onOrderPieces ?? 0) + (onTheWay.invoicedNotReceivedPieces ?? 0) + (onTheWay.inTransitPieces ?? 0)
+    const to = onTheWay.onOrderPieces !== null ? '/purchase/orders'
+      : onTheWay.inTransitPieces !== null ? '/logistics/containers' : '/purchase/invoices'
     pills.push(
-      <Pill key="ontheway" to={onTheWay.onOrderPieces !== null ? '/purchase/orders' : '/logistics/containers'} icon={<IconTruckDelivery size={17} />}
+      <Pill key="ontheway" to={to} icon={<IconTruckDelivery size={17} />}
         colour={CHART.blue} label="On the way" value={`${formatNumber(pieces)} pcs`}
         chip={{ text: `${formatNumber(onTheWay.containersInTransit ?? 0)} in transit`, className: css.chipDim }} />,
     )
