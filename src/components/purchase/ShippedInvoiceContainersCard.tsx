@@ -12,6 +12,7 @@ import { AutoPlanModal } from '../logistics/AutoPlanModal'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { LinkContainersModal } from './LinkContainersModal'
+import { LEGACY_INVOICE_TEXTS } from './purchaseKind'
 
 interface ShippedInvoiceContainersCardProps {
   invoice: PurchaseDocumentDto
@@ -29,6 +30,11 @@ interface ShippedInvoiceContainersCardProps {
   onChanged: () => void
   /** "Turn on 'Shipped in containers'": the page saves the draft with the switch on. Absent = the reader cannot edit it. */
   onTurnOnShipped?: () => Promise<void>
+  /**
+   * An invoice posted before goods receipts whose goods came in the old way (`LEGACY_INVOICE_TEXTS`): an old local one
+   * (its posting), or an old shipped one whose containers were all offloaded. Its subtitle keeps that past.
+   */
+  legacy?: boolean
 }
 
 type Dialog = 'link' | 'add' | 'plan'
@@ -38,7 +44,7 @@ const containersLabel = (n: number) => (n === 1 ? '1 container' : `${formatNumbe
 /**
  * The containers of a purchase invoice - on EVERY one (script 47): per item what it needs and what is linked, the
  * containers it is linked to, and the three ways to complete it - link existing containers of the order, add one, or
- * auto-plan. Shipped in containers, its goods enter the stock at the offload of those containers, so pieces "not in a
+ * auto-plan. Shipped in containers, its goods enter the stock when the goods receipts of those containers are posted, so pieces "not in a
  * container yet" are the ones the reader still has to place (orange).
  *
  * The buttons are there for every reader who may create containers; the invoice's state (the server's) enables them
@@ -55,6 +61,7 @@ export function ShippedInvoiceContainersCard({
   ensureSaved,
   onChanged,
   onTurnOnShipped,
+  legacy = false,
 }: ShippedInvoiceContainersCardProps) {
   const [summary, setSummary] = useState<InvoiceContainerSummaryDto | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -95,7 +102,7 @@ export function ShippedInvoiceContainersCard({
     if (!onTurnOnShipped) return
     const ok = await confirm({
       title: 'Turn on "Shipped in containers"',
-      message: 'The goods will enter the stock at the container offload, not when the invoice is posted.',
+      message: "The goods will enter the stock when their containers' goods receipts are posted, not when the invoice is posted.",
       confirmLabel: 'Turn on',
     })
     if (!ok) return
@@ -168,8 +175,12 @@ export function ShippedInvoiceContainersCard({
           <Title order={5}>Containers</Title>
           <Text fz="xs" c="dimmed">
             {shipped
-              ? 'Shipped in containers: the goods enter the stock at the offload of these containers.'
-              : 'Received when the invoice is posted: no containers needed.'}
+              ? legacy
+                ? LEGACY_INVOICE_TEXTS.containersCardShipped
+                : "Shipped in containers: the goods enter the stock when their containers' goods receipts are posted."
+              : legacy
+                ? LEGACY_INVOICE_TEXTS.containersCardLocal
+                : 'Received with Receive goods…: no containers needed.'}
           </Text>
         </div>
         <Group gap="xs">

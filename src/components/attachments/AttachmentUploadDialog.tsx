@@ -48,10 +48,11 @@ interface AttachmentUploadDialogProps {
 }
 
 /**
- * THE upload of every attachment place - purchase orders, invoices and returns, sales documents, stock documents,
- * customer receipts and containers: the file, its type (required, only the types used for this kind of
- * document), the date written on it and a note. Dropping or picking a file elsewhere only opens this dialog
- * with the file filled in, so nothing is ever uploaded without a type.
+ * THE "Add document" popup of every attachment place - purchase orders, invoices and returns, sales documents, stock
+ * documents, customer receipts, supplier payments, containers (their movements and charges too) and item definitions:
+ * the file, its type (required, only the types used for this kind of document), the date written on it and a note.
+ * Dropping or picking a file elsewhere only opens this dialog with the file filled in, so nothing is ever uploaded
+ * without a type.
  */
 export function AttachmentUploadDialog(props: AttachmentUploadDialogProps) {
   // The form is a child so that closing forgets it: the next opening starts empty.
@@ -122,7 +123,7 @@ function UploadForm({
   return (
     <FormModal
       opened
-      title="Upload document"
+      title="Add document"
       saveLabel="Upload"
       saving={saving}
       saveDisabled={fileError !== null}

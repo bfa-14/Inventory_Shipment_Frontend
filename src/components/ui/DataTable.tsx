@@ -67,6 +67,32 @@ function summaryStorageKey(storeKey: string): string {
   return `${storeKey}-summaries`
 }
 
+/* ── the column order ─────────────────────────────────────────────────────────────────────────── */
+
+/** Joins a column order into one comparable string; no accessor holds this character. */
+const ORDER_SEPARATOR = '\u0000'
+
+/**
+ * Puts the page's own column order under the key mantine-datatable keeps it in, when what is stored differs (see
+ * "THE COLUMNS STAY IN THE PAGE'S ORDER" in {@link DataTable}). Run while rendering, so the grid's hooks - which read
+ * the key in their effects - find the right order the first time. Idempotent; nothing stored means nothing to fix (the
+ * grid starts from the page's order); a browser that refuses storage keeps the page's order anyway.
+ */
+function alignStoredColumnsOrder(storeKey: string | undefined, orderSignature: string): void {
+  if (storeKey === undefined) return
+  try {
+    const key = `${storeKey}-columns-order`
+    const raw = localStorage.getItem(key)
+    if (raw === null) return
+    const order = orderSignature.split(ORDER_SEPARATOR)
+    const stored: unknown = JSON.parse(raw)
+    if (Array.isArray(stored) && stored.join(ORDER_SEPARATOR) === orderSignature) return
+    localStorage.setItem(key, JSON.stringify(order))
+  } catch {
+    // Storage refused or unreadable: the grid falls back to the page's order.
+  }
+}
+
 /** Reading storage can throw in a private window or with site data blocked, so it never decides render. */
 function readSummaries(storeKey: string | undefined): SummaryChoices {
   if (storeKey === undefined) return {}
@@ -387,8 +413,26 @@ export function DataTable<T>({
    * header its resize handles; this instance is here for the chooser, and the two stay in step
    * through the stored value they share.
    */
-  const { effectiveColumns, columnsToggle, setColumnsToggle, resetColumnsToggle, resetColumnsWidth } =
+  /**
+   * THE COLUMNS STAY IN THE PAGE'S ORDER. Nothing in this application lets a reader move a column, yet
+   * mantine-datatable remembers an order under the key and puts a column it has not seen before AT THE END, after
+   * Actions: every column a release adds landed there for the readers who had opened the list before (the Received
+   * column of the purchase lists, the Goods receipt column of the containers). So the stored order is the page's
+   * own: written before the grid reads it, and put back below whenever it drifts (a column added while the list is
+   * open). Hidden columns and widths are kept under their own keys and are untouched.
+   */
+  const orderSignature = adjustableColumns.map((column) => String(column.accessor)).join(ORDER_SEPARATOR)
+  useMemo(() => alignStoredColumnsOrder(storeKey, orderSignature), [storeKey, orderSignature])
+
+  const { effectiveColumns, columnsOrder, setColumnsOrder, columnsToggle, setColumnsToggle, resetColumnsToggle, resetColumnsWidth } =
     useDataTableColumns<T>({ key: storeKey, columns: adjustableColumns })
+
+  // Both instances of the hook (this one and the grid's own) hold the order in state: setting it here stores it and
+  // tells the other one, which is what brings an order that drifted while the list is open back to the page's.
+  useEffect(() => {
+    if (storeKey === undefined || !columnsOrder) return
+    if (columnsOrder.join(ORDER_SEPARATOR) !== orderSignature) setColumnsOrder(orderSignature.split(ORDER_SEPARATOR))
+  }, [storeKey, orderSignature, columnsOrder, setColumnsOrder])
 
   /** What each column reports in the footer. Read once from storage; absent means None. */
   const [summaries, setSummaries] = useState<SummaryChoices>(() => readSummaries(storeKey))

@@ -30,8 +30,12 @@ import {
 import { partiesApi } from '../../api/masterdata/parties'
 import { purchaseDocumentsApi } from '../../api/purchase/documents'
 import type { PagedResult } from '../../api/types'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import { formatNumber } from '../format'
 import { notify } from '../ui/notify'
+import { ContainerReceiptCell } from './ContainerReceiptCell'
+import { containerReceiptOf, type ContainerReceipt } from './containerReceipt'
 import { ImportMovementContainersModal } from './ImportMovementContainersModal'
 import {
   fromCandidate,
@@ -71,6 +75,11 @@ interface MovementContainersCardProps {
   ticked: CardContainer[]
   /** Ticking, unticking, the import and a new From change it; the page counts it as an unsaved change. */
   onTickedChange: (next: CardContainer[]) => void
+  /**
+   * Changed by the page after Start, Complete and Cancel: the containers have moved, so the candidates and the places
+   * judged before are read again.
+   */
+  reloadToken?: number
 }
 
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`
@@ -80,6 +89,9 @@ const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n
  * From on the page (container-candidates, the place rules of script 49), unticked. Ticked = on this movement once
  * saved. A new From reloads the list at once and unticks the ticked ones that are not there any more. The switch
  * adds the containers that cannot be added, greyed, with the reason in red.
+ *
+ * The Receipt column is the goods receipt of each saved container (a draft, or its GRN number), linked for a reader
+ * who may open goods receipts: what the completion of a Delivery created.
  */
 export function MovementContainersCard({
   movement,
@@ -90,7 +102,10 @@ export function MovementContainersCard({
   fromName,
   ticked,
   onTickedChange,
+  reloadToken = 0,
 }: MovementContainersCardProps) {
+  const { hasPermission } = useAuth()
+  const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
   const [search, setSearch] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
   const [purchaseOrderId, setPurchaseOrderId] = useState<string | null>(null)
@@ -192,7 +207,16 @@ export function MovementContainersCard({
         })
       })
     return () => controller.abort()
-  }, [readOnly, candidateQuery, candidateKey])
+    // reloadToken: the same query asked again once the containers have moved.
+  }, [readOnly, candidateQuery, candidateKey, reloadToken])
+
+  // The containers moved (Start, Complete, Cancel): the saved ones are judged again for where they are now.
+  const lastReload = useRef(reloadToken)
+  useEffect(() => {
+    if (lastReload.current === reloadToken) return
+    lastReload.current = reloadToken
+    setJudged(new Map())
+  }, [reloadToken])
 
   /* ── the ticked and the saved containers judged for the place on the page ──
      A change of From, To or type is made by the reader: the ticked containers the server now refuses are unticked
@@ -277,6 +301,12 @@ export function MovementContainersCard({
 
   const tickedIds = useMemo(() => new Set(ticked.map((c) => c.containerId)), [ticked])
   const savedIds = useMemo(() => new Set(saved.map((c) => c.containerId)), [saved])
+  /** The goods receipt of each saved container, as the movement says it. */
+  const receipts = useMemo(() => {
+    const map = new Map<number, ContainerReceipt | null>()
+    for (const c of saved) map.set(c.containerId, containerReceiptOf(c))
+    return map
+  }, [saved])
   const loading = editable && (answer === null || answer.key !== candidateKey)
   const candidates = answer && answer.key === candidateKey ? answer.data : null
   const rows: CardContainer[] = useMemo(() => {
@@ -440,7 +470,7 @@ export function MovementContainersCard({
             </Text>
           ) : (
             <ScrollArea type="auto">
-              <Table miw={1180} verticalSpacing={4} data-movement-container-rows>
+              <Table miw={1300} verticalSpacing={4} data-movement-container-rows>
                 <Table.Thead>
                   <Table.Tr>
                     {editable ? (
@@ -463,6 +493,7 @@ export function MovementContainersCard({
                     <Table.Th ta="right">Pieces</Table.Th>
                     <Table.Th>Place</Table.Th>
                     <Table.Th>Status</Table.Th>
+                    <Table.Th>Receipt</Table.Th>
                     <Table.Th>Note</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -526,6 +557,9 @@ export function MovementContainersCard({
                               '—'
                             )}
                           </Table.Td>
+                          <Table.Td style={{ whiteSpace: 'nowrap' }} data-container-receipt>
+                            <ContainerReceiptCell receipt={receipts.get(c.containerId) ?? null} canView={canViewReceipts} />
+                          </Table.Td>
                           <Table.Td maw={320}>
                             {refused ? (
                               <Text fz="xs" c="red.7" data-container-reason>
@@ -541,7 +575,7 @@ export function MovementContainersCard({
                         {refused ? (
                           // The reason again across the row: on a narrow card the Note column is scrolled out of view.
                           <Table.Tr bg={on ? 'var(--mantine-color-blue-0)' : undefined}>
-                            <Table.Td colSpan={editable ? 11 : 10} pt={0}>
+                            <Table.Td colSpan={editable ? 12 : 11} pt={0}>
                               <Text fz="xs" c="red.7">
                                 {c.containerRef}: {refused}
                               </Text>

@@ -338,8 +338,9 @@ export function SalesProfitPage() {
         </Text>
       ),
     },
-    // Only where a landed cost adjustment can be attributed: it knows its item and its date, never
-    // its invoice, so the column would be a row of zeros on the groupings that cannot carry it.
+    // Only where a cost adjustment can be attributed - a late charge, a landed cost adjustment, an invoice price
+    // difference on goods received before their invoice (goods receipts): it knows its item and its date, never the
+    // sales invoice, so the column would be a row of zeros on the groupings that cannot carry it.
     ...(withAdjustments
       ? [
           {
@@ -504,6 +505,12 @@ export function SalesProfitPage() {
         {stat('Gross Profit', money(totals.grossProfitBase), 'net sales less COGS', totals.grossProfitBase < 0)}
         {stat('GP %', percent(totalPct), 'of net sales', totalPct !== null && totalPct < 0)}
       </SimpleGrid>
+
+      <Text fz="xs" c="dimmed" mb="xs" data-cogs-adjustments-hint>
+        {withAdjustments
+          ? 'COGS adjustments: the cost of goods already sold, moved afterwards by late charges and invoice price differences.'
+          : 'Cost adjustments after the sale are shown by item, month or branch.'}
+      </Text>
 
       <Paper radius="lg" withBorder>
         <DataTable

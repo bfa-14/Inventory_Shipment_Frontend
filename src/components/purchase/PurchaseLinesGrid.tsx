@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, useMemo } from 'react'
 import { ActionIcon, Anchor, Badge, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
@@ -57,8 +57,13 @@ export interface PurchaseLine {
   containerRef?: string | null
   containerNo?: string | null
   containerStatus?: number | null
-  /** FOB + the container charges per unit — final once the container is offloaded. */
+  /** FOB + the container charges per unit — final once the goods are received. */
   estimatedLandedCostBase?: number | null
+  /* Goods receipts (script 65), base units, from the saved line. Orders: received, invoiced and settled short;
+     invoices: received (the goods receipts matched to the line). */
+  receivedBase?: number | null
+  invoicedBase?: number | null
+  shortBase?: number | null
   /** The saved line's quantity in base units: its own share of the container line counts as available to it. */
   savedQuantityBase?: number | null
   /** A message about the row: the server's "Line N: …". */
@@ -99,6 +104,11 @@ interface PurchaseLinesGridProps {
   /** False on an invoice from containers: its lines are the container lines, none can be added. */
   allowAdd?: boolean
   /**
+   * What came in, per line (goods receipts): an order shows Received, Invoiced and Short; an invoice shows Received.
+   * Null = no such columns (a draft, a return).
+   */
+  receipts?: 'order' | 'invoice' | null
+  /**
    * A supplier invoice holds ONE item: once a line has one, the Item Code select of a new row offers only
    * that item (the others stay listed, disabled). Null = any item.
    */
@@ -138,19 +148,27 @@ export function PurchaseLinesGrid({
   showEstimatedLanded = false,
   allowAdd = true,
   onlyItemId = null,
+  receipts = null,
   readOnly,
   warehouses,
 }: PurchaseLinesGridProps) {
-  const columnCount = 12 + (showTransit ? 2 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0)
+  const receiptColumns = receipts === 'order' ? 3 : receipts === 'invoice' ? 1 : 0
+  const columnCount = 12 + (showTransit ? 2 : 0) + (showCosts ? 3 : 0) + (showEstimatedLanded ? 1 : 0) + receiptColumns
 
-  const itemOptions = items.map((i) => ({
-    value: String(i.id),
-    label: `${i.itemCode} — ${i.itemName}`,
-    disabled: onlyItemId !== null && i.id !== onlyItemId,
-  }))
+  /* Built once per list: the list is the whole catalogue (no row limit since script 66), and a new array on every
+     render would make each row's Select parse it again. */
+  const itemOptions = useMemo(
+    () =>
+      items.map((i) => ({
+        value: String(i.id),
+        label: `${i.itemCode} — ${i.itemName}`,
+        disabled: onlyItemId !== null && i.id !== onlyItemId,
+      })),
+    [items, onlyItemId],
+  )
 
   return (
-    <Table.ScrollContainer minWidth={1340 + (showTransit ? 200 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0)}>
+    <Table.ScrollContainer minWidth={1340 + (showTransit ? 200 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0) + receiptColumns * 100}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -163,6 +181,27 @@ export function PurchaseLinesGrid({
             <Table.Th w={110} ta="right">Qty</Table.Th>
             {showTransit && <Table.Th w={100} ta="right">Shipped</Table.Th>}
             {showTransit && <Table.Th w={100} ta="right">In transit</Table.Th>}
+            {receipts && (
+              <Table.Th w={100} ta="right">
+                <Tooltip label={receipts === 'order' ? 'Received by posted goods receipts (base units)' : 'Received by the goods receipts matched to this line (base units)'} withArrow multiline w={260}>
+                  <span>Received</span>
+                </Tooltip>
+              </Table.Th>
+            )}
+            {receipts === 'order' && (
+              <Table.Th w={100} ta="right">
+                <Tooltip label="Invoiced by posted supplier invoices (base units)" withArrow>
+                  <span>Invoiced</span>
+                </Tooltip>
+              </Table.Th>
+            )}
+            {receipts === 'order' && (
+              <Table.Th w={100} ta="right">
+                <Tooltip label="Settled short: received less with a reason, nothing more will come (base units)" withArrow multiline w={260}>
+                  <span>Short</span>
+                </Tooltip>
+              </Table.Th>
+            )}
             <Table.Th w={150} ta="right">Unit Cost</Table.Th>
             <Table.Th w={90} ta="right">Disc %</Table.Th>
             <Table.Th w={140} ta="right">Line Total</Table.Th>
@@ -173,7 +212,13 @@ export function PurchaseLinesGrid({
                 <Table.Th w={140} ta="right">Landed cost ({baseCurrencyCode})</Table.Th>
               </>
             )}
-            {showEstimatedLanded && <Table.Th w={130} ta="right">Est. landed/unit ({baseCurrencyCode})</Table.Th>}
+            {showEstimatedLanded && (
+              <Table.Th w={130} ta="right">
+                <Tooltip label="FOB + the container charges per unit: final once the goods are received." withArrow multiline w={260}>
+                  <span>Est. landed/unit ({baseCurrencyCode})</span>
+                </Tooltip>
+              </Table.Th>
+            )}
             <Table.Th w={160}>Notes</Table.Th>
             <Table.Th w={84} />
           </Table.Tr>
@@ -243,6 +288,8 @@ export function PurchaseLinesGrid({
                       value={null}
                       placeholder="Choose an item"
                       searchable
+                      /* The open list shows 100 rows at most; typing searches the whole list. */
+                      limit={100}
                       onChange={(next) => next && onItemChosen(line.key, Number(next))}
                       error={Boolean(line.error)}
                       comboboxProps={{ withinPortal: true }}
@@ -348,6 +395,26 @@ export function PurchaseLinesGrid({
                         <Text fz="sm" fw={600} c="blue">{formatNumber(line.transitBase)}</Text>
                       </Tooltip>
                     )}
+                  </Table.Td>
+                )}
+
+                {receipts && (
+                  <Table.Td ta="right" data-line-received={line.key}>
+                    <Text fz="sm" fw={(line.receivedBase ?? 0) > 0 ? 600 : 400} c={line.receivedBase == null ? 'dimmed' : undefined}>
+                      {formatNumber(line.receivedBase)}
+                    </Text>
+                  </Table.Td>
+                )}
+                {receipts === 'order' && (
+                  <Table.Td ta="right" data-line-invoiced={line.key}>
+                    <Text fz="sm" c={line.invoicedBase == null ? 'dimmed' : undefined}>{formatNumber(line.invoicedBase)}</Text>
+                  </Table.Td>
+                )}
+                {receipts === 'order' && (
+                  <Table.Td ta="right" data-line-short={line.key}>
+                    <Text fz="sm" c={line.shortBase == null ? 'dimmed' : line.shortBase > 0 ? 'red' : undefined} fw={(line.shortBase ?? 0) > 0 ? 600 : 400}>
+                      {formatNumber(line.shortBase)}
+                    </Text>
                   </Table.Td>
                 )}
 

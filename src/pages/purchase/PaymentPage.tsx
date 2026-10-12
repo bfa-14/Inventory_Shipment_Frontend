@@ -23,13 +23,13 @@ import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto } from '../../a
 import { useAuth } from '../../auth/useAuth'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { PaymentAllocationsCard } from '../../components/purchase/payment/PaymentAllocationsCard'
 import { PaymentAppliedCard } from '../../components/purchase/payment/PaymentAppliedCard'
-import { PaymentAttachmentsCard } from '../../components/purchase/payment/PaymentAttachmentsCard'
 import { PaymentHeaderCard, type PaymentHeaderErrors } from '../../components/purchase/payment/PaymentHeaderCard'
 import { PaymentLinesCard } from '../../components/purchase/payment/PaymentLinesCard'
 import {
@@ -116,7 +116,9 @@ export function PaymentPage() {
   const rateSeq = useRef(0)
   const headerRateEdited = useRef(false)
   const dirty = useRef(false)
-  const attachmentsRef = useRef<HTMLDivElement>(null)
+  const documentsRef = useRef<HTMLDivElement>(null)
+  /** The action bar's "Add document…": each bump opens the Documents card's popup. */
+  const [addDocument, setAddDocument] = useState(0)
 
   const [reverseOpen, setReverseOpen] = useState(false)
   const [reverseBusy, setReverseBusy] = useState(false)
@@ -187,6 +189,18 @@ export function PaymentPage() {
       notify.error(error instanceof ApiError ? error.message : 'The payment could not be refreshed.')
     }
   }, [paymentId, applyPayment])
+
+  /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail: those two come from a fresh read,
+     and a draft being typed stays as it is (a file does not touch the payment's row). */
+  const filesChanged = useCallback(async () => {
+    if (paymentId === null) return
+    try {
+      const fresh = await paymentsApi.get(paymentId)
+      setPayment((current) => (current && current.id === fresh.id ? { ...current, files: fresh.files, audit: fresh.audit } : current))
+    } catch {
+      /* The count and the trail catch up on the next load; the card already shows the files. */
+    }
+  }, [paymentId])
 
   useEffect(() => {
     if (paymentId === null) return
@@ -675,7 +689,6 @@ export function PaymentPage() {
           ? 'Unbalanced Allocation: the allocated amount must equal the Payment Amount'
           : undefined
 
-  const scrollToAttachments = () => attachmentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   const print: DocumentAction = {
     key: 'print',
     label: 'Print',
@@ -691,20 +704,32 @@ export function PaymentPage() {
       void navigate(`${PAYMENTS_ROUTE}/${payment.id}/print`)
     },
   }
-  const attachmentAction: DocumentAction = {
-    key: 'attachment',
-    label: editable ? 'Add Attachment' : 'View Attachments',
-    icon: DocumentIcons.attachments,
-    disabled: isNew,
-    disabledReason: 'Save the draft first',
-    onClick: scrollToAttachments,
-  }
+  /* A reversed payment's evidence stays as it was (SQL 73005): its files are only read. */
+  const canAddDocument = canCreate && status !== 'Reversed'
+  /* The Documents card: its count scrolls to it; "Add document…" opens its popup. */
+  const documentActions: DocumentAction[] = [
+    {
+      key: 'documents',
+      label: `Documents (${formatNumber(payment?.files.length ?? 0)})`,
+      icon: DocumentIcons.documents,
+      onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    },
+    {
+      key: 'add-document',
+      label: 'Add document…',
+      icon: DocumentIcons.addDocument,
+      visible: canCreate,
+      disabled: isNew || !canAddDocument,
+      disabledReason: isNew ? 'Save the draft first to attach documents.' : 'This payment is reversed: its documents stay as they are.',
+      onClick: () => setAddDocument((n) => n + 1),
+    },
+  ]
 
   const actions: DocumentAction[] = editable
     ? [
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
         print,
-        attachmentAction,
+        ...documentActions,
         { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: canCreate, loading: saving, onClick: () => void saveDraft() },
         {
           key: 'post',
@@ -720,7 +745,7 @@ export function PaymentPage() {
       ]
     : [
         print,
-        attachmentAction,
+        ...documentActions,
         { key: 'reverse', label: 'Reverse', icon: DocumentIcons.cancel, colour: 'red', visible: canReverse && status === 'Posted', onClick: () => setReverseOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(PAYMENTS_ROUTE) },
       ]
@@ -746,7 +771,7 @@ export function PaymentPage() {
       )}
       {payment && status === 'Reversed' && (
         <Alert color="orange" title={`Reversed — ${payment.paymentNumber}`}>
-          Reversed by {payment.reversedByName ?? 'unknown'} on {stamp(payment.reversedAtUtc)}.{payment.reverseReason ? ` Reason: ${payment.reverseReason}` : ''}
+          Reversed by {payment.reversedByName ?? 'unknown'} on {stamp(payment.reversedAtUtc)}.{reasonSentence(payment.reverseReason)}
         </Alert>
       )}
 
@@ -870,14 +895,18 @@ export function PaymentPage() {
         />
       )}
 
-      <div ref={attachmentsRef}>
-        <PaymentAttachmentsCard
-          paymentId={payment?.id ?? null}
-          canAdd={canCreate && status !== 'Reversed'}
-          canRemove={canCreate && status !== 'Reversed'}
-          onChanged={() => void reload()}
-        />
-      </div>
+      {/* Adding is allowed on a posted payment too - the SWIFT copy often arrives after the transfer. */}
+      <DocumentAttachmentsCard
+        ref={documentsRef}
+        title="4 · Documents"
+        documentId={payment?.id ?? null}
+        documentKind="PAY"
+        api={paymentsApi.files}
+        canAdd={canAddDocument}
+        canRemove={canAddDocument}
+        onChanged={() => void filesChanged()}
+        openUpload={addDocument}
+      />
 
       <AuditTrail entries={payment?.audit ?? []} />
 

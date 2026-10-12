@@ -1,14 +1,33 @@
 import { fetchBlob, postForm, putForm, request } from './http'
 
 /**
- * The files of a document - purchase, sales and stock documents, customer receipts, supplier payments - with their
- * type, date and note. Every family answers the same routes under its own base: GET / POST {id}/files, GET / PUT /
- * DELETE {id}/files/{fileId}. The containers keep their own routes (containersApi) and the same fields.
+ * The files of a document - purchase, sales and stock documents, goods receipts, customer receipts, supplier payments, and the
+ * documents of an item definition (script 67) - with their type, date and note. Every family answers the same routes
+ * under its own base: GET / POST {id}/files, GET / PUT / DELETE {id}/files/{fileId}. The containers keep their own
+ * routes (containersApi) and the same fields. An item's PICTURE is not one of these files: it keeps its own upload
+ * (itemsApi.addImage) and never appears in the list.
  */
 
-/** What an attachment type is used for: CONTAINER or a document type code (api/masterdata/attachment-types/document-kinds). */
+/**
+ * What an attachment type is used for: CONTAINER, ITEM (an item definition's documents, script 67) or a document type
+ * code (api/masterdata/attachment-types/document-kinds).
+ */
 export type AttachmentDocumentKind =
-  'CONTAINER' | 'PO' | 'PINV' | 'PRET' | 'SO' | 'SINV' | 'SRET' | 'RCPT' | 'PAY' | 'INV_IN' | 'INV_OUT'
+  | 'CONTAINER'
+  | 'ITEM'
+  | 'PO'
+  | 'PINV'
+  | 'PRET'
+  | 'SO'
+  | 'SINV'
+  | 'SRET'
+  | 'RCPT'
+  | 'PAY'
+  | 'INV_IN'
+  | 'INV_OUT'
+  | 'BIV_OUT'
+  /** Goods receipts (scripts 64-65): the delivery note, the packing list, the signed count sheet. */
+  | 'GRN'
 
 export interface DocumentFileDto {
   id: number
@@ -55,6 +74,12 @@ export interface DocumentFileEdit {
   fields: DocumentFileFields
   /** Null keeps the stored file. */
   file: File | null
+  /**
+   * Containers only (script 67): the movement the file is filed under from now on, null = General. Left out = the
+   * link stays as it is - every document family, and a container edit whose "Link to a movement" was not changed.
+   * containersApi.updateAttachment sends it; attachmentEditForm ignores it.
+   */
+  movementId?: number | null
 }
 
 /** The multipart body of an edit: the name, the fields and the new version when there is one. */

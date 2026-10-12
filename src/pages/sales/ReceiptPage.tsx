@@ -19,13 +19,13 @@ import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto } from '../../a
 import { useAuth } from '../../auth/useAuth'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
-import { formatNumber } from '../../components/format'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { ReceiptAllocationsCard } from '../../components/sales/receipt/ReceiptAllocationsCard'
 import { ReceiptAppliedCard } from '../../components/sales/receipt/ReceiptAppliedCard'
-import { ReceiptAttachmentsCard } from '../../components/sales/receipt/ReceiptAttachmentsCard'
 import { ReceiptHeaderCard, type ReceiptHeaderErrors } from '../../components/sales/receipt/ReceiptHeaderCard'
 import { ReceiptLinesCard } from '../../components/sales/receipt/ReceiptLinesCard'
 import {
@@ -106,7 +106,9 @@ export function ReceiptPage() {
   /** True once the reader typed the header rate (or it was loaded from a saved receipt): a date change then leaves it alone. */
   const headerRateEdited = useRef(false)
   const dirty = useRef(false)
-  const attachmentsRef = useRef<HTMLDivElement>(null)
+  const documentsRef = useRef<HTMLDivElement>(null)
+  /** The action bar's "Add document…": each bump opens the Documents card's popup. */
+  const [addDocument, setAddDocument] = useState(0)
 
   const [reverseOpen, setReverseOpen] = useState(false)
   const [reverseBusy, setReverseBusy] = useState(false)
@@ -171,6 +173,18 @@ export function ReceiptPage() {
       notify.error(error instanceof ApiError ? error.message : 'The receipt could not be refreshed.')
     }
   }, [receiptId, applyReceipt])
+
+  /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail: those two come from a fresh read,
+     and a draft being typed stays as it is (a file does not touch the receipt's row). */
+  const filesChanged = useCallback(async () => {
+    if (receiptId === null) return
+    try {
+      const fresh = await receiptsApi.get(receiptId)
+      setReceipt((current) => (current && current.id === fresh.id ? { ...current, files: fresh.files, audit: fresh.audit } : current))
+    } catch {
+      /* The count and the trail catch up on the next load; the card already shows the files. */
+    }
+  }, [receiptId])
 
   useEffect(() => {
     if (receiptId === null) return
@@ -591,7 +605,6 @@ export function ReceiptPage() {
     )
   }
 
-  const scrollToAttachments = () => attachmentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   /* THE PRINT VIEW SHOWS THE SAVED RECEIPT, so unsaved edits are said before they go missing on paper. */
   const print: DocumentAction = {
     key: 'print',
@@ -608,27 +621,38 @@ export function ReceiptPage() {
       void navigate(`${ROUTE}/${receipt.id}/print`)
     },
   }
-  const addAttachment: DocumentAction = {
-    key: 'attachment',
-    label: 'Add Attachment',
-    icon: DocumentIcons.attachments,
-    visible: canCreate,
-    disabled: isNew,
-    disabledReason: 'Save the draft first',
-    onClick: scrollToAttachments,
-  }
+  /* A reversed receipt's evidence stays as it was (SQL 71005): its files are only read. */
+  const canAddDocument = canCreate && status !== 'Reversed'
+  /* The Documents card: its count scrolls to it; "Add document…" opens its popup. */
+  const documentActions: DocumentAction[] = [
+    {
+      key: 'documents',
+      label: `Documents (${formatNumber(receipt?.files.length ?? 0)})`,
+      icon: DocumentIcons.documents,
+      onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    },
+    {
+      key: 'add-document',
+      label: 'Add document…',
+      icon: DocumentIcons.addDocument,
+      visible: canCreate,
+      disabled: isNew || !canAddDocument,
+      disabledReason: isNew ? 'Save the draft first to attach documents.' : 'This receipt is reversed: its documents stay as they are.',
+      onClick: () => setAddDocument((n) => n + 1),
+    },
+  ]
 
   const actions: DocumentAction[] = editable
     ? [
         print,
-        addAttachment,
+        ...documentActions,
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
         { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: canCreate, loading: saving, onClick: () => void saveDraft() },
         { key: 'post', label: 'Post Receipt', icon: DocumentIcons.post, variant: 'filled', visible: canCreate && canPost, loading: saving, onClick: () => void saveAndPost() },
       ]
     : [
         print,
-        addAttachment,
+        ...documentActions,
         {
           key: 'reverse',
           label: 'Reverse Receipt',
@@ -669,7 +693,7 @@ export function ReceiptPage() {
       )}
       {receipt && status === 'Reversed' && (
         <Alert color="orange" title={`Reversed — ${receipt.receiptNumber}`}>
-          Reversed by {receipt.reversedByName ?? 'unknown'} on {stamp(receipt.reversedAtUtc)}.{receipt.reverseReason ? ` Reason: ${receipt.reverseReason}` : ''}
+          Reversed by {receipt.reversedByName ?? 'unknown'} on {stamp(receipt.reversedAtUtc)}.{reasonSentence(receipt.reverseReason)}
         </Alert>
       )}
       {editable && !isNew && !headerBalanced && header.amount !== null && (
@@ -768,14 +792,17 @@ export function ReceiptPage() {
         />
       )}
 
-      <div ref={attachmentsRef}>
-        <ReceiptAttachmentsCard
-          receiptId={receipt?.id ?? null}
-          canAdd={canCreate && status !== 'Reversed'}
-          canRemove={canCreate && status !== 'Reversed'}
-          onChanged={() => void reload()}
-        />
-      </div>
+      {/* Adding (and retyping) is allowed on a posted receipt too - the cheque photo often arrives after the cash. */}
+      <DocumentAttachmentsCard
+        ref={documentsRef}
+        documentId={receipt?.id ?? null}
+        documentKind="RCPT"
+        api={receiptsApi.files}
+        canAdd={canAddDocument}
+        canRemove={canAddDocument}
+        onChanged={() => void filesChanged()}
+        openUpload={addDocument}
+      />
 
       <AuditTrail entries={receipt?.audit ?? []} />
 

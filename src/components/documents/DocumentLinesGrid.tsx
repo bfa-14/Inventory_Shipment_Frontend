@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { ActionIcon, Anchor, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
@@ -46,8 +47,19 @@ interface DocumentLinesGridProps {
   onChange: (key: string, patch: Partial<EditableLine>) => void
   onRemove: (key: string) => void
   onAdd: () => void
-  /** Every active item, for the Item Code select. Searchable, so the whole list is fine. */
+  /**
+   * The items a line may hold, for the Item Code select: every active item, or only the BIVAC ones on a
+   * type whose bivacItemsOnly is set. Searchable, with at most 100 rows drawn at a time, so the whole list
+   * is fine.
+   */
   items: ItemLookupDto[]
+  /** The Item select's placeholder. Absent: "Choose an item". */
+  itemPlaceholder?: string
+  /**
+   * What the Item select says when nothing matches what was typed, or when a narrowed list is empty
+   * (no BIVAC item yet): how to widen it. Absent: the select simply shows no options.
+   */
+  itemsNothingFound?: string
   /**
    * The warehouses of the document's branch, for the per-line Warehouse select.
    *
@@ -83,6 +95,8 @@ export function DocumentLinesGrid({
   onRemove,
   onAdd,
   items,
+  itemPlaceholder = 'Choose an item',
+  itemsNothingFound,
   warehouses,
   onItemChosen,
   currencyCode,
@@ -90,7 +104,34 @@ export function DocumentLinesGrid({
   warnOnOverdraw,
   readOnly,
 }: DocumentLinesGridProps) {
-  const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
+  /* THE OPTIONS ARE BUILT ONCE PER LIST, not on every render. The list is the whole catalogue (no row limit since
+     script 66), and a new array on every keystroke anywhere in the grid would make each row's Select parse it
+     again. */
+  const itemOptions = useMemo(
+    () => items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` })),
+    [items],
+  )
+  const listed = useMemo(() => new Set(items.map((i) => i.id)), [items])
+
+  /* A LINE'S OWN ITEM STAYS AN OPTION ON ITS OWN LINE, even when the list does not hold it (made inactive, or no
+     longer a BIVAC item, since the draft was saved; or the list has not arrived yet): without it the cell would
+     show nothing, and a refusal such as "Line 2: … is not a BIVAC item." would point at an empty box. It is
+     never offered on another line: the list is what a line may take, and a BIVAC Out's list holds BIVAC items
+     only. It goes first, so the dropdown's 100-row limit never hides it. The key is a string, so these arrays
+     keep their identity while quantities or prices change. */
+  const missingKey = JSON.stringify(
+    lines
+      .filter((line) => line.itemId !== null && !listed.has(line.itemId))
+      .map((line) => [line.itemId, `${line.itemCode} — ${line.itemName}`]),
+  )
+  const ownItemOptions = useMemo(() => {
+    const missing = JSON.parse(missingKey) as [number, string][]
+    return new Map(
+      missing.map(([itemId, label]): [number, typeof itemOptions] => [itemId, [{ value: String(itemId), label }, ...itemOptions]]),
+    )
+  }, [itemOptions, missingKey])
+  const optionsFor = (line: EditableLine) =>
+    (line.itemId === null ? undefined : ownItemOptions.get(line.itemId)) ?? itemOptions
 
   /**
    * Enter in a quantity moves to the next row's item.
@@ -161,10 +202,13 @@ export function DocumentLinesGrid({
                   ) : (
                     <Group gap={4} wrap="nowrap">
                       <Select
-                        data={itemOptions}
+                        data={optionsFor(line)}
                         value={line.itemId === null ? null : String(line.itemId)}
-                        placeholder="Choose an item"
+                        placeholder={itemPlaceholder}
                         searchable
+                        /* The open list shows 100 rows at most; typing searches the whole list. */
+                        limit={100}
+                        nothingFoundMessage={itemsNothingFound}
                         onChange={(next) => {
                           if (!next) return
                           onItemChosen(line.key, Number(next))

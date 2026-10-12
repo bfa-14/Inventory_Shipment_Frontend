@@ -12,7 +12,8 @@ const BASE = '/api/masterdata/attachment-types'
 
 /** The categories the seed data uses. The column is free text; these are offered, not enforced. */
 export const ATTACHMENT_CATEGORIES = [
-  'Container', 'Purchase', 'Sales', 'Shipping', 'Customs', 'Transport', 'Delivery', 'Returns', 'Payment', 'Bank', 'Cheque', 'Other',
+  'Container', 'Purchase', 'Sales', 'Shipping', 'Customs', 'Transport', 'Delivery', 'Returns', 'Payment', 'Bank', 'Cheque',
+  'Item', 'Other',
 ]
 
 /**

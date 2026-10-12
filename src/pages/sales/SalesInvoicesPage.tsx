@@ -170,7 +170,7 @@ export function SalesInvoicesPage() {
     if (!go) return
     try {
       // Out of stock: warned here, before posting, with the real figures; a refusal is explained instead of attempted.
-      const decision = await decideOutOfStock(row.id)
+      const decision = await decideOutOfStock(row.id, hasPermission(PERMISSIONS.goodsReceiptsView))
       if (!decision.proceed) return
       await salesInvoicesApi.post(row.id, row.rowVersion, decision.acknowledge)
       notify.success('Invoice posted.')
@@ -376,10 +376,10 @@ export function SalesInvoicesPage() {
           <Select label="Payment" placeholder="All" data={PAYMENT_STATUS_OPTIONS} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
-          <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom ? new Date(filters.dateFrom) : null} onChange={(next) => setFilter('dateFrom', next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
-          <DateInput label="To" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo ? new Date(filters.dateTo) : null} onChange={(next) => setFilter('dateTo', next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="To" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
       </FilterBar>
 

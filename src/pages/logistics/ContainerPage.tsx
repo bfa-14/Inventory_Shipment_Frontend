@@ -30,9 +30,9 @@ import {
   IconFileSpreadsheet,
   IconLock,
   IconLockOpen,
+  IconPackageImport,
   IconPrinter,
   IconTrash,
-  IconTruckDelivery,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
@@ -40,7 +40,6 @@ import {
   containerStatusColour,
   SHIPPING_METHODS,
   type ContainerDto,
-  type OffloadRequest,
 } from '../../api/logistics/containers'
 import { branchesApi } from '../../api/masterdata/branches'
 import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/masterdata/containerTypes'
@@ -48,12 +47,13 @@ import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { CreatedPurchaseInvoiceDto } from '../../api/purchase/documents'
+import { goodsReceiptsApi, type GoodsReceiptDto } from '../../api/purchase/goodsReceipts'
 import type { BranchLookupDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
-import { dateLabel, stamp } from '../../components/documents/documentKind'
+import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { AddPoLinesModal } from '../../components/logistics/AddPoLinesModal'
 import { ContainerCapacityCard } from '../../components/logistics/ContainerCapacityCard'
@@ -79,16 +79,33 @@ import { ContainerRouteTimeline } from '../../components/logistics/ContainerRout
 import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFromContainersModal'
 import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
 import { LoadedItemsSection } from '../../components/logistics/LoadedItemsSection'
-import { OffloadModal } from '../../components/logistics/OffloadModal'
+import {
+  CONFIRM_FIRST,
+  containerReceiptOf,
+  draftReceiptAlert,
+  receiptBlocksCancelText,
+  receivedBanner,
+  WAREHOUSE_PROPOSED_HINT,
+} from '../../components/logistics/containerReceipt'
+import { ReceiveContainerModal } from '../../components/logistics/ReceiveContainerModal'
+import { cancelDescription } from '../../components/purchase/goodsReceipts/goodsReceiptModel'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { COUNTRIES, countryLabel } from '../../data/countries'
+import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
 import { CONTAINERS_ROUTE } from './ContainersPage'
 
 type ReasonDialog = 'cancel' | 'cancelOffload' | null
+
+/** The local date of a UTC moment, as yyyy-MM-dd ("created on" a day, in the reader's time zone). */
+function localDay(utc: string | null | undefined): string | null {
+  if (!utc) return null
+  const moment = new Date(utc)
+  return Number.isNaN(moment.getTime()) ? null : isoDate(moment)
+}
 
 /** "Line 2: ..." -> 2, so the message lands on the row the server judged. */
 function lineNumberOf(message: string): number | null {
@@ -102,6 +119,11 @@ function lineNumberOf(message: string): number | null {
  * THE STATUS DECIDES THE MODE. Up to Cleared the container is a form (the loading plan and the route
  * can still change); offloaded, closed and cancelled containers are records and every field is text.
  * Every action answers with the whole container, so the page never guesses the status it moved to.
+ *
+ * ITS GOODS ARE RECEIVED WITH A GOODS RECEIPT (scripts 64-65), never by an offload any more: "Receive goods…" creates
+ * the draft (or the completion of its Delivery movement did), and posting that receipt makes the container Offloaded.
+ * While it has a receipt (draft or posted) its loaded lines and its branch are fixed; the header stays editable until
+ * the receipt is posted. A container offloaded before goods receipts keeps its "Cancel Offload".
  */
 export function ContainerPage() {
   const { id } = useParams<{ id: string }>()
@@ -122,6 +144,10 @@ export function ContainerPage() {
     invoice: hasPermission(PERMISSIONS.purchaseInvoicesCreate),
     movements: hasPermission(PERMISSIONS.movementsManage),
     attachments: hasPermission(PERMISSIONS.containerAttachmentsManage),
+    receive: hasPermission(PERMISSIONS.goodsReceiptsCreate),
+    postReceipt: hasPermission(PERMISSIONS.goodsReceiptsPost),
+    viewReceipt: hasPermission(PERMISSIONS.goodsReceiptsView),
+    cancelReceipt: hasPermission(PERMISSIONS.goodsReceiptsCancel),
   }
 
   const [container, setContainer] = useState<ContainerDto | null>(null)
@@ -142,10 +168,12 @@ export function ContainerPage() {
   const [addItemsOpen, setAddItemsOpen] = useState(false)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
   /** Several invoices made at once (one per item): listed rather than one of them opened. */
-  const [createdInvoices, setCreatedInvoices] = useState<{ invoices: CreatedPurchaseInvoiceDto[]; orderIds: number[] } | null>(null)
-  const [offloadOpen, setOffloadOpen] = useState(false)
-  const [offloadError, setOffloadError] = useState<string | null>(null)
+  const [createdInvoices, setCreatedInvoices] = useState<{ invoices: CreatedPurchaseInvoiceDto[]; orderIds: number[]; onePerItem: boolean } | null>(null)
+  const [receiveOpen, setReceiveOpen] = useState(false)
   const [reasonDialog, setReasonDialog] = useState<ReasonDialog>(null)
+  /** The container's goods receipt as the receipt itself says it (dates, who, why it cannot be cancelled). */
+  const [receiptDoc, setReceiptDoc] = useState<GoodsReceiptDto | null>(null)
+  const [cancelReceiptOpen, setCancelReceiptOpen] = useState(false)
 
   const dirty = useRef(false)
   const markDirty = () => {
@@ -197,6 +225,24 @@ export function ContainerPage() {
     void load()
   }, [load])
 
+  /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
+     files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the
+     rest stays as it is - no loader, a charge's drawer stays open, a draft being edited keeps its changes (a file does
+     not touch the container's row). */
+  const documentsChanged = useCallback(async () => {
+    if (containerId === null) return
+    try {
+      const fresh = await containersApi.get(containerId)
+      setContainer((current) =>
+        current && current.id === fresh.id
+          ? { ...current, attachments: fresh.attachments, audit: fresh.audit, movements: fresh.movements, charges: fresh.charges }
+          : current,
+      )
+    } catch {
+      /* The counts catch up on the next load; the card already shows the files. */
+    }
+  }, [containerId])
+
   useEffect(() => {
     containerTypesApi.lookup(false).then(setTypes).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
@@ -229,21 +275,53 @@ export function ContainerPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [])
 
-  // ?offload=1 from the list: open the offload as soon as the container says it can be.
+  const receipt = containerReceiptOf(container)
+  /** "Receive goods…" is offered: no open receipt and not received, offloaded, closed or cancelled. */
+  const receivable = container !== null && receipt === null && container.status <= 5
+  const canReceiveNow = container !== null && receivable && container.status !== 1 && container.canReceive !== false
+
+  // ?receive=1 from the list ("Receive goods"): open the dialog as soon as the container says it can be. The old
+  // ?offload=1 of a bookmark does the same.
   useEffect(() => {
-    if (container && searchParams.get('offload') === '1') {
-      if (container.canOffload && perm.offload) setOffloadOpen(true)
+    if (container && (searchParams.get('receive') === '1' || searchParams.get('offload') === '1')) {
+      if (canReceiveNow && perm.receive) setReceiveOpen(true)
       setSearchParams({}, { replace: true })
     }
-  }, [container, searchParams, setSearchParams, perm.offload])
+  }, [container, searchParams, setSearchParams, canReceiveNow, perm.receive])
+
+  /* THE RECEIPT ITSELF says when the draft was made, who posted it, and why it cannot be cancelled (its
+     cancelBlockedReason): read once per receipt and status, for a reader who may read goods receipts. Without that
+     permission the page says what the container knows. */
+  const receiptKey = receipt ? `${receipt.id}:${receipt.status}:${container?.rowVersion ?? ''}` : null
+  useEffect(() => {
+    if (receiptKey === null || !perm.viewReceipt) {
+      setReceiptDoc(null)
+      return
+    }
+    const id = Number(receiptKey.split(':')[0])
+    const controller = new AbortController()
+    goodsReceiptsApi
+      .get(id, controller.signal)
+      .then((doc) => {
+        if (!controller.signal.aborted) setReceiptDoc(doc)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setReceiptDoc(null)
+      })
+    return () => controller.abort()
+  }, [receiptKey, perm.viewReceipt])
 
   const readOnly = !perm.create || (container !== null && !container.canEdit)
+  /** Rule 21: a container with a goods receipt (draft or posted) keeps its loaded lines and its branch. */
+  const loadFixed = readOnly || receipt !== null
   const values = form.values
   const fill = fillOfLines(lines)
   const totalOil = lines.reduce((sum, line) => sum + lineOil(line), 0)
   const type = types.find((t) => String(t.id) === values.containerTypeId) ?? null
   const freeDay = lastFreeDay(values.actualPortArrival, values.freeDays)
-  const freeDayPassed = freeDay !== null && container !== null && [4, 5].includes(container.status) && freeDay < new Date().toISOString().slice(0, 10)
+  // The free time stops counting when the Delivery reached the warehouse (rule 29), not when the receipt is posted.
+  const freeTimeEnd = container?.deliveredDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
+  const freeDayPassed = freeDay !== null && container !== null && [4, 5].includes(container.status) && freeDay < freeTimeEnd
   const suppliersOnBoard = useMemo(() => [...new Set(lines.map((l) => l.supplierName))], [lines])
   /** Travelled with a movement: the four milestone dates are the movements', shown read-only. */
   const datesLocked = container?.datesFromMovements === true
@@ -301,14 +379,23 @@ export function ContainerPage() {
     key: keyof ContainerFormValues,
     label: string,
     options: { value: string; label: string }[],
-    extra: { required?: boolean; onPick?: (value: string | null) => void; placeholder?: string } = {},
+    extra: {
+      required?: boolean
+      onPick?: (value: string | null) => void
+      placeholder?: string
+      description?: string
+      /** Text even on a form: a field the container's state fixes (the branch, once a goods receipt exists). */
+      fixed?: string
+    } = {},
   ) {
     const value = values[key] as string | null
-    if (readOnly) return <ViewField label={label} value={optionLabel(options, value)} />
+    if (readOnly || extra.fixed) return <ViewField label={label} value={optionLabel(options, value)} hint={extra.fixed} />
     return (
       <Select
         label={label}
         placeholder={extra.placeholder}
+        description={extra.description}
+        inputWrapperOrder={['label', 'input', 'description', 'error']}
         withAsterisk={extra.required}
         data={options}
         searchable
@@ -430,24 +517,53 @@ export function ContainerPage() {
     if (go) await quiet(act('confirm', (c) => containersApi.confirm(c.id, c.rowVersion), (d) => `${d.containerRef} confirmed.`))
   }
 
-  async function offload(request: Omit<OffloadRequest, 'rowVersion'>) {
+  /** "Receive goods…": unsaved edits are saved (or given up) first - the dialog works on the saved container. */
+  async function openReceive() {
     if (!container) return
-    setOffloadError(null)
-    setBusyAction('offload')
+    if (dirty.current) {
+      const go = await confirm({ title: 'Unsaved changes', message: 'Save your changes first?', confirmLabel: 'Save and continue' })
+      if (!go) return
+      if (!(await save())) return
+    }
+    setReceiveOpen(true)
+  }
+
+  /**
+   * The receipt exists (draft or posted): it opens - or, for a reader who may create receipts but not view them, the
+   * container page reads itself again and the reader stays.
+   */
+  function receiptCreated(id: number) {
+    setReceiveOpen(false)
+    dirty.current = false
+    if (perm.viewReceipt) void navigate(routes.goodsReceipt(id))
+    else void load()
+  }
+
+  /** "Cancel goods receipt…": the receipt's own cancel, from the container (rule 12). */
+  async function openCancelReceipt() {
+    if (!receipt) return
+    if (!receiptDoc && perm.viewReceipt) {
+      try {
+        setReceiptDoc(await goodsReceiptsApi.get(receipt.id))
+      } catch {
+        /* the cancel then goes without the row version; the server still checks the receipt */
+      }
+    }
+    setCancelReceiptOpen(true)
+  }
+
+  async function cancelReceipt(reason: string) {
+    if (!receipt) return
+    setBusyAction('cancelReceipt')
     try {
-      const result = await containersApi.offload(container.id, { ...request, rowVersion: container.rowVersion })
-      show(result)
-      setOffloadOpen(false)
-      const received = result.lines
-        .filter((l) => (l.receivedQuantityBase ?? 0) > 0)
-        .map((l) => `${formatNumber(l.receivedQuantityBase)} × ${l.itemCode}`)
-        .join(', ')
-      notify.success(`Stock received into ${result.warehouseCode ?? 'the warehouse'}: ${received || 'nothing'}.`)
+      await goodsReceiptsApi.cancel(receipt.id, reason, receiptDoc?.rowVersion ?? null)
+      notify.success('Goods receipt cancelled.')
+      setCancelReceiptOpen(false)
+      void refreshGoodsReceiptsWaiting()
+      await load()
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'The container could not be offloaded.'
-      // NOT_FULLY_INVOICED, INVALID_STATUS (a movement in progress): said as a notification, the form stays.
-      notify.error(message)
-      setOffloadError(message)
+      // 63007 stock used, 63008 cost adjusted, 63010 container closed / goods returned: said as they come.
+      notify.error(err instanceof ApiError ? err.message : 'The goods receipt could not be cancelled.')
     } finally {
       setBusyAction(null)
     }
@@ -551,16 +667,92 @@ export function ContainerPage() {
   }
 
   const saved = container !== null
+  /** Received by a goods receipt: its cancel replaces Cancel Offload, which stays for the offloads of before. */
+  const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
+  const draftReceipt = receipt?.status === 1 ? receipt : null
+  const postedReceipt = receipt?.status === 2 ? receipt : null
+  // Why the posted receipt cannot be cancelled: the receipt's own reason, else the closed container's (rule 12).
+  const cancelReceiptBlocked = receiptDoc
+    ? receiptDoc.canCancel
+      ? null
+      : (receiptDoc.cancelBlockedReason ?? 'This goods receipt cannot be cancelled.')
+    : container?.status === 7
+      ? `Container ${container.containerRef} is closed. Reopen it before cancelling its goods receipt.`
+      : null
   const actions: DocumentAction[] = [
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'print', label: 'Print', icon: <IconPrinter size={16} />, onClick: () => window.print(), variant: 'default', visible: saved },
     { key: 'export', label: 'Export', icon: <IconFileSpreadsheet size={16} />, onClick: () => void exportXlsx(), variant: 'default', visible: saved },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && container.canDelete && perm.delete },
-    { key: 'cancel', label: 'Cancel', icon: <IconBan size={16} />, onClick: () => setReasonDialog('cancel'), variant: 'default', colour: 'red', visible: saved && container.canCancel && perm.cancel },
-    { key: 'cancelOffload', label: 'Cancel Offload', icon: <IconArrowBackUp size={16} />, onClick: () => setReasonDialog('cancelOffload'), variant: 'default', colour: 'orange', visible: saved && container.canCancelOffload && perm.cancel },
-    { key: 'close', label: 'Close', icon: <IconLock size={16} />, onClick: () => void close(), variant: 'light', loading: busyAction === 'close', visible: saved && container.canClose && perm.close },
+    {
+      key: 'cancel',
+      label: 'Cancel',
+      icon: <IconBan size={16} />,
+      onClick: () => setReasonDialog('cancel'),
+      variant: 'default',
+      colour: 'red',
+      // Shown on every container before its goods arrive; a goods receipt (draft or posted) blocks it, and says so (69019).
+      visible: saved && container.status >= 1 && container.status <= 5 && perm.cancel,
+      disabled: !container?.canCancel,
+      disabledReason: receipt ? receiptBlocksCancelText(container?.containerRef ?? '', receipt) : 'This container cannot be cancelled now.',
+    },
+    {
+      key: 'cancelOffload',
+      label: 'Cancel Offload',
+      icon: <IconArrowBackUp size={16} />,
+      onClick: () => setReasonDialog('cancelOffload'),
+      variant: 'default',
+      colour: 'orange',
+      visible: saved && container.canCancelOffload && perm.cancel && !receivedByReceipt,
+    },
+    {
+      key: 'cancelReceipt',
+      label: 'Cancel goods receipt…',
+      icon: <IconArrowBackUp size={16} />,
+      onClick: () => void openCancelReceipt(),
+      variant: 'default',
+      colour: 'orange',
+      loading: busyAction === 'cancelReceipt',
+      visible: saved && postedReceipt !== null && perm.cancelReceipt,
+      disabled: cancelReceiptBlocked !== null,
+      disabledReason: cancelReceiptBlocked ?? undefined,
+    },
+    {
+      key: 'close',
+      label: 'Close',
+      icon: <IconLock size={16} />,
+      onClick: () => void close(),
+      variant: 'light',
+      loading: busyAction === 'close',
+      // On every offloaded container; disabled with the refusal Close would give (draft charges, received pieces not
+      // invoiced yet - rule 20), so the reader knows why before the click.
+      visible: saved && container.status === 6 && perm.close,
+      disabled: !container?.canClose,
+      disabledReason: container?.closeBlockedReason ?? 'This container cannot be closed now.',
+    },
     { key: 'reopen', label: 'Reopen', icon: <IconLockOpen size={16} />, onClick: () => void reopen(), variant: 'light', loading: busyAction === 'reopen', visible: saved && container.canReopen && perm.close },
-    { key: 'offload', label: 'Offload', icon: <IconTruckDelivery size={16} />, onClick: () => setOffloadOpen(true), variant: 'light', colour: 'green', visible: saved && container.canOffload && perm.offload },
+    {
+      key: 'openReceipt',
+      label: 'Open goods receipt (draft)',
+      icon: <IconPackageImport size={16} />,
+      onClick: () => {
+        if (draftReceipt) void navigate(routes.goodsReceipt(draftReceipt.id))
+      },
+      variant: 'light',
+      colour: 'green',
+      visible: saved && draftReceipt !== null && perm.viewReceipt,
+    },
+    {
+      key: 'receive',
+      label: 'Receive goods…',
+      icon: <IconPackageImport size={16} />,
+      onClick: () => void openReceive(),
+      variant: 'light',
+      colour: 'green',
+      visible: saved && receivable && perm.receive,
+      disabled: !canReceiveNow,
+      disabledReason: container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.',
+    },
     { key: 'confirm', label: 'Confirm', icon: <IconCheck size={16} />, onClick: () => void confirmPlan(), variant: 'light', loading: busyAction === 'confirm', visible: saved && container.canConfirm && perm.confirm },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
   ]
@@ -588,11 +780,43 @@ export function ContainerPage() {
         </Alert>
       ) : null}
 
-      {container && container.status >= 6 ? (
-        <Alert color={container.status === 8 ? 'red' : 'green'} mb="md">
-          {container.status === 8
-            ? `Cancelled ${stamp(container.cancelledAtUtc)} by ${container.cancelledByName ?? '—'}: ${container.cancelReason ?? ''}`
-            : `Offloaded into ${container.warehouseName ?? '—'} on ${dateLabel(container.offloadedDate)} by ${container.offloadedByName ?? '—'}. The container is read-only${container.status === 7 ? ' and closed' : ''}.`}
+      {container && container.status === 8 ? (
+        <Alert color="red" mb="md">
+          {`Cancelled ${stamp(container.cancelledAtUtc)} by ${container.cancelledByName ?? '—'}: ${container.cancelReason ?? ''}`}
+        </Alert>
+      ) : container && (container.status === 6 || container.status === 7) && postedReceipt ? (
+        <Alert color="green" mb="md" data-received-banner>
+          {(() => {
+            const banner = receivedBanner(
+              receiptDoc?.warehouseName ?? container.goodsReceiptWarehouseCode ?? container.warehouseName ?? '—',
+              dateLabel(receiptDoc?.documentDate ?? container.goodsReceiptDate ?? container.offloadedDate),
+              receiptDoc?.postedByName ?? container.offloadedByName ?? '—',
+              container.status === 7,
+            )
+            const number = postedReceipt.number ?? 'its goods receipt'
+            return (
+              <>
+                {banner.before}
+                {perm.viewReceipt ? (
+                  <Anchor component={Link} to={routes.goodsReceipt(postedReceipt.id)} fz="sm" fw={600}>
+                    {number}
+                  </Anchor>
+                ) : (
+                  <b>{number}</b>
+                )}
+                {banner.after}
+              </>
+            )
+          })()}
+        </Alert>
+      ) : container && container.status >= 6 ? (
+        <Alert color="green" mb="md">
+          {`Offloaded into ${container.warehouseName ?? '—'} on ${dateLabel(container.offloadedDate)} by ${container.offloadedByName ?? '—'}. The container is read-only${container.status === 7 ? ' and closed' : ''}.`}
+        </Alert>
+      ) : null}
+      {container && draftReceipt ? (
+        <Alert color="blue" mb="md" data-draft-receipt>
+          {draftReceiptAlert(localDay(receiptDoc?.createdAtUtc ?? container.goodsReceiptCreatedAtUtc))}
         </Alert>
       ) : null}
       {container?.statusNote && container.status < 6 ? (
@@ -628,7 +852,11 @@ export function ContainerPage() {
                 {selectField('countryOfOrigin', 'Country of Origin', countryOptions)}
                 {selectField('forwarderId', 'Forwarder', supplierOptions)}
                 {selectField('transporterId', 'Transporter', supplierOptions)}
-                {selectField('branchId', 'Branch', branchOptions, { required: true, onPick: () => form.setFieldValue('warehouseId', null) })}
+                {selectField('branchId', 'Branch', branchOptions, {
+                  required: true,
+                  onPick: () => form.setFieldValue('warehouseId', null),
+                  fixed: receipt && !readOnly ? `fixed by ${receipt.number ? `goods receipt ${receipt.number}` : 'the draft goods receipt'}` : undefined,
+                })}
                 <div>
                   <Text fz="sm" fw={500} mb={2}>
                     Purchase Order
@@ -700,7 +928,7 @@ export function ContainerPage() {
 
             <LoadedItemsSection
               lines={lines}
-              editable={!readOnly}
+              editable={!loadFixed}
               onAddItems={() => setAddItemsOpen(true)}
               onLinesChange={(next) => {
                 setLines(next)
@@ -719,7 +947,7 @@ export function ContainerPage() {
               />
             ) : null}
 
-            {container ? <ContainerChargesCard container={container} onChanged={() => void load()} /> : null}
+            {container ? <ContainerChargesCard container={container} onChanged={() => void load()} onDocumentsChanged={() => void documentsChanged()} /> : null}
 
             <Section title="6. Operational information">
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
@@ -730,7 +958,11 @@ export function ContainerPage() {
                 {dateField('actualPortArrival', 'Actual Port Arrival', false, datesLocked)}
                 {dateField('borderCrossingDate', 'Border Crossing', false, datesLocked)}
                 {dateField('customsReleaseDate', 'Customs Release Date', false, datesLocked)}
-                {selectField('warehouseId', 'Warehouse (offloading destination)', warehouseOptions, { placeholder: values.branchId ? 'Pick a warehouse' : 'Pick the branch first' })}
+                {selectField('warehouseId', 'Warehouse (offloading destination)', warehouseOptions, {
+                  placeholder: values.branchId ? 'Pick a warehouse' : 'Pick the branch first',
+                  description: WAREHOUSE_PROPOSED_HINT,
+                })}
+                {container?.deliveredDate ? <ViewField label="Delivered" value={dateLabel(container.deliveredDate)} /> : null}
                 <ViewField label="Offloaded Date" value={container?.offloadedDate ? dateLabel(container.offloadedDate) : null} />
               </SimpleGrid>
               {readOnly ? (
@@ -741,7 +973,7 @@ export function ContainerPage() {
             </Section>
 
             {container ? (
-              <ContainerDocumentsCard container={container} canManage={perm.attachments} onChanged={() => void load()} />
+              <ContainerDocumentsCard container={container} canManage={perm.attachments} onChanged={() => void documentsChanged()} />
             ) : null}
           </Stack>
         </Grid.Col>
@@ -792,10 +1024,10 @@ export function ContainerPage() {
           opened
           onClose={() => setInvoiceOpen(false)}
           containerId={container.id}
-          onCreated={(invoices, orderIds) => {
+          onCreated={(invoices, orderIds, onePerItem) => {
             setInvoiceOpen(false)
             if (invoices.length === 1) void navigate(routes.purchaseInvoice(invoices[0].id))
-            else setCreatedInvoices({ invoices, orderIds })
+            else setCreatedInvoices({ invoices, orderIds, onePerItem })
           }}
         />
       ) : null}
@@ -804,6 +1036,7 @@ export function ContainerPage() {
         <CreatedInvoicesModal
           opened
           invoices={createdInvoices.invoices}
+          onePerItem={createdInvoices.onePerItem}
           onClose={() => setCreatedInvoices(null)}
           onGoToOrder={
             createdInvoices.orderIds.length === 1
@@ -813,19 +1046,27 @@ export function ContainerPage() {
         />
       ) : null}
 
-      {offloadOpen && container ? (
-        <OffloadModal
+      {receiveOpen && container ? (
+        <ReceiveContainerModal
           opened
-          onClose={() => setOffloadOpen(false)}
-          lines={lines}
+          onClose={() => setReceiveOpen(false)}
+          container={container}
           warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId)}
-          defaultWarehouseId={container.warehouseId}
-          busy={busyAction === 'offload'}
-          error={offloadError}
-          onSubmit={(request) => void offload(request)}
-          fullyInvoiced={container.isFullyInvoiced}
+          canPost={perm.postReceipt}
+          onCreated={(created) => receiptCreated(created.id)}
         />
       ) : null}
+
+      <CancelReasonModal
+        opened={cancelReceiptOpen}
+        onClose={() => setCancelReceiptOpen(false)}
+        documentLabel={postedReceipt?.number ?? 'goods receipt'}
+        busy={busyAction === 'cancelReceipt'}
+        title="Cancel goods receipt"
+        confirmLabel="Cancel goods receipt"
+        description={cancelDescription(postedReceipt?.number ?? null, container?.containerRef ?? null)}
+        onConfirm={(reason) => void cancelReceipt(reason)}
+      />
 
       <CancelReasonModal
         opened={reasonDialog !== null}

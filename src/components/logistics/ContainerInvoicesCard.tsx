@@ -5,6 +5,7 @@ import { routes } from '../../routes'
 import type { ContainerInvoiceDto } from '../../api/logistics/containers'
 import { dateLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
+import { WHOLE_BADGE } from './movementContainers'
 
 const INVOICE_STATUS: Record<number, { label: string; colour: string }> = {
   1: { label: 'Draft', colour: 'gray' },
@@ -68,7 +69,7 @@ export function ContainerInvoicesCard({
                     </Table.Td>
                     <Table.Td>{dateLabel(i.documentDate)}</Table.Td>
                     <Table.Td>
-                      <Badge size="sm" variant="light" color={status.colour}>
+                      <Badge size="sm" variant="light" color={status.colour} styles={WHOLE_BADGE}>
                         {status.label}
                       </Badge>
                     </Table.Td>

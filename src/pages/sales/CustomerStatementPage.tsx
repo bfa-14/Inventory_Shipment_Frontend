@@ -143,10 +143,10 @@ export function CustomerStatementPage() {
           <Select label="Customer" placeholder="Choose a customer" data={clients.map((c) => ({ value: String(c.id), label: partyLabel(c) }))} value={clientId} onChange={setClientId} searchable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="From" placeholder="Beginning" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateFrom)} onChange={(next) => setDateFrom(next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="From" placeholder="Beginning" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateFrom)} onChange={(next) => setDateFrom(next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="To" placeholder="Today" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateTo)} onChange={(next) => setDateTo(next ? isoDate(new Date(next)) : null)} clearable />
+          <DateInput label="To" placeholder="Today" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateTo)} onChange={(next) => setDateTo(next ? isoDate(next) : null)} clearable />
         </FilterBar.Col>
       </FilterBar>
 

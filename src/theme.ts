@@ -1,4 +1,6 @@
 import { createTheme, type MantineColorsTuple } from '@mantine/core'
+import { DateInput } from '@mantine/dates'
+import { parseTypedDate } from './components/typedDate'
 
 /** Ten shades around the reference primary #2563EB; shade 6 is the primary. */
 const brand: MantineColorsTuple = [
@@ -55,5 +57,8 @@ export const theme = createTheme({
     Modal: { defaultProps: { radius: 'lg', centered: true, overlayProps: { blur: 2 } } },
     Badge: { defaultProps: { radius: 'xl' }, styles: { root: { textTransform: 'none' } } },
     Table: { defaultProps: { highlightOnHover: true } },
+    // A typed date is read day first, strictly, whatever the field's valueFormat (see typedDate.ts). DatePickerInput
+    // and MonthPickerInput are picked from a calendar, never typed, so they need nothing.
+    DateInput: DateInput.extend({ defaultProps: { dateParser: parseTypedDate } }),
   },
 })

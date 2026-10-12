@@ -237,9 +237,9 @@ export function StartShipmentModal({ containers, onClose, onShipped }: StartShip
             label={startNow === 'start' ? 'Start date' : 'Planned date'}
             valueFormat="DD/MM/YYYY"
             value={fromIsoDate(startDate)}
-            onChange={(next) => setStartDate(next ? isoDate(new Date(next)) : null)}
+            onChange={(next) => setStartDate(next ? isoDate(next) : null)}
           />
-          <DateInput label="ETA" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(eta)} onChange={(next) => setEta(next ? isoDate(new Date(next)) : null)} />
+          <DateInput label="ETA" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(eta)} onChange={(next) => setEta(next ? isoDate(next) : null)} />
           <Select
             label="Carrier"
             placeholder="Shipping line, trucker..."
@@ -254,7 +254,7 @@ export function StartShipmentModal({ containers, onClose, onShipped }: StartShip
           <TextInput label="Voyage" maxLength={30} value={voyage} onChange={(e) => setVoyage(e.currentTarget.value)} />
           <TextInput label="Reference (booking)" maxLength={50} value={reference} onChange={(e) => setReference(e.currentTarget.value)} />
           <TextInput label="B/L No." maxLength={30} value={blNo} onChange={(e) => setBlNo(e.currentTarget.value)} />
-          <DateInput label="B/L date" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(blDate)} onChange={(next) => setBlDate(next ? isoDate(new Date(next)) : null)} />
+          <DateInput label="B/L date" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(blDate)} onChange={(next) => setBlDate(next ? isoDate(next) : null)} />
         </SimpleGrid>
         {routeHint ? (
           <Text fz="xs" c="dimmed" mt={-4} data-ship-route>

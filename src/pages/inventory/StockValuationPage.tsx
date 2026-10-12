@@ -203,12 +203,16 @@ export function StockValuationPage() {
         </Alert>
       )}
 
-      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md" mb="md">
+      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md" mb="xs">
         {stat('Items with stock', formatNumber(data?.itemsWithStock), 'a zero-stock item is listed but is not a line of inventory')}
         {stat('Total on hand', formatNumber(data?.totalOnHandBase), 'base units')}
         {/* Dashes rather than a zero until the figures are in: "0.00 USD" reads as an answer. */}
         {stat('Total inventory value', data ? money(data.totalInventoryValue) : '—', data?.warehouseName ?? 'all warehouses')}
       </SimpleGrid>
+      {/* Goods receipts (scripts 64-65): received goods enter at the order price until their invoice is posted. */}
+      <Text fz="xs" c="dimmed" mb="md" data-valuation-hint>
+        Goods received but not invoiced yet are valued at the order price; their cost moves when the invoice is posted.
+      </Text>
 
       <Paper radius="lg" withBorder>
         <DataTable

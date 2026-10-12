@@ -828,6 +828,8 @@ export interface ItemLookupDto {
   itemName: string
   baseUnitSku: string | null
   isActive: boolean
+  /** "BIVAC Item" ticked in Item Definition: the items a BIVAC Out may hold. */
+  isBivac: boolean
 }
 
 // ----- master data: parties -----
@@ -993,6 +995,15 @@ export interface ItemStockMovementDto {
   /** The client of a sale or the supplier of a purchase. */
   counterparty: string | null
   createdByName: string | null
+  /**
+   * What the document came from, shown beside its number: a goods receipt's container ref ("GRN-BR-002-000001 ·
+   * KTG-2026-0031"). Null when there is none (or before the API sends it).
+   */
+  sourceReference?: string | null
+  /** What sourceReference names, so it links: the container, else the order, else the invoice (one of the three). */
+  sourceContainerId?: number | null
+  sourcePurchaseOrderId?: number | null
+  sourceInvoiceId?: number | null
 }
 
 /** An item's stock statement: brought forward, the movements, and what is left. */
@@ -1022,8 +1033,13 @@ export interface ItemPurchaseOrderDto {
   currencyCode: string
   decimalPlaces: number
   orderedBase: number
+  /** Received by goods receipts (and by the receipts made before them). */
   receivedBase: number
-  /** Still to come: on an open (Posted) order only. */
+  /** Invoiced by posted supplier invoices. */
+  invoicedBase?: number
+  /** Settled short: recorded as never coming (a short container line, "Nothing more will come"). */
+  shortBase?: number
+  /** Still to come (Shortages' figure): ordered − received − short on an open order, invoiced − … on a closed one. */
   outstandingBase: number
   amount: number
 }

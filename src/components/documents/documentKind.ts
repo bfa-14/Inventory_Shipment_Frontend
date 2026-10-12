@@ -3,12 +3,14 @@ import { PERMISSIONS } from '../../navigation'
 import { formatDateTime, formatMoney } from '../format'
 
 /**
- * Everything that differs between Inventory In and Inventory Out, in one table.
+ * Everything that differs between Inventory In, Inventory Out and BIVAC Out, in one table.
  *
- * ONE SET OF SCREENS, TWO DOCUMENTS. In and Out are the same form with a different sign: the same
+ * ONE SET OF SCREENS, THREE DOCUMENTS. In and Out are the same form with a different sign: the same
  * header, the same lines, the same lifecycle. What actually changes is the wording, the accent
  * colour, the five permissions and two rules about cost — so those live here and the pages read
- * them, rather than the pages carrying `code === 'INV_IN' ? … : …` in forty places.
+ * them, rather than the pages carrying `code === 'INV_IN' ? … : …` in forty places. BIVAC Out is an
+ * Out with its own list, numbers and permissions; that its lines hold BIVAC items only is a rule of
+ * its TYPE (bivacItemsOnly, read through useDocumentTypes), not of this table.
  *
  * IT IS ALSO THE SHAPE PURCHASE AND SALES WILL TAKE. When those families arrive they add a row to
  * this table and reuse the components, which is why nothing below mentions inventory by name except
@@ -24,13 +26,16 @@ export interface DocumentKind {
   route: string
 
   /**
-   * The accent. Green for stock coming in, orange for stock going out, so the two screens are
-   * tellable apart at a glance before anybody reads the heading.
+   * The accent. Green for stock coming in, orange for stock going out, grape for BIVAC Out (an Out
+   * of its own), so the screens are tellable apart at a glance before anybody reads the heading.
    */
   colour: string
 
   /** 1 adds stock, -1 removes it. Also what the reasons endpoint filters on. */
   direction: 1 | -1
+
+  /** What the header's Reference No. suggests typing. Absent: "Delivery note, count sheet…". */
+  referencePlaceholder?: string
 
   /* THE COST RULE IS NOT HERE ANY MORE. Whether the cost column may be typed comes from the document
      type configuration (defaultPricing / priceEditable, read through useDocumentTypes), so a business
@@ -76,6 +81,27 @@ export const INVENTORY_OUT: DocumentKind = {
   },
 }
 
+/**
+ * BIVAC Out (script 66): units of BIVAC items taken out of stock at the average cost, like an Inventory Out,
+ * with its own list, BIV- numbers and permissions. No link to a shipment: the BIVAC certificate or the
+ * container number goes in Reference No., and the certificate can be attached.
+ */
+export const BIVAC_OUT: DocumentKind = {
+  code: 'BIV_OUT',
+  title: 'BIVAC Out',
+  route: '/inventory/bivac-out',
+  colour: 'grape',
+  direction: -1,
+  referencePlaceholder: 'BIVAC certificate or container no.',
+  permissions: {
+    view: PERMISSIONS.bivacOutView,
+    create: PERMISSIONS.bivacOutCreate,
+    post: PERMISSIONS.bivacOutPost,
+    cancel: PERMISSIONS.bivacOutCancel,
+    delete: PERMISSIONS.bivacOutDelete,
+  },
+}
+
 /** Draft grey, Posted green, Cancelled red — the three colours every document list uses. */
 export const STATUS_COLOURS: Record<string, string> = {
   Draft: 'gray',
@@ -90,8 +116,15 @@ export function money(value: number | null | undefined, currencyCode = 'USD'): s
   return formatMoney(value, currencyCode)
 }
 
-/** 'yyyy-MM-dd' for a Date, built from its own parts so no timezone can shift the day. */
-export function isoDate(value: Date): string {
+/**
+ * 'yyyy-MM-dd' for a Date, built from its own parts so no timezone can shift the day.
+ *
+ * A STRING IS ALREADY THE DAY: a DateInput's onChange gives 'YYYY-MM-DD' (typed or picked), so pass it as it comes,
+ * never through `new Date(next)`. `new Date('2026-10-05')` is midnight UTC, which west of Greenwich is still
+ * 4 October, so the day saved would be one too early.
+ */
+export function isoDate(value: Date | string): string {
+  if (typeof value === 'string') return value.slice(0, 10)
   const month = `${value.getMonth() + 1}`.padStart(2, '0')
   const day = `${value.getDate()}`.padStart(2, '0')
   return `${value.getFullYear()}-${month}-${day}`

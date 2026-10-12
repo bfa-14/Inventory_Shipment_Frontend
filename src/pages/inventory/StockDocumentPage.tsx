@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Stack, Title } from '@mantine/core'
+import { Alert, Box, Button, Grid, Group, Loader, Paper, Stack, Text, Title, Tooltip } from '@mantine/core'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
@@ -16,9 +16,9 @@ import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, ItemListDto, ItemLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
-import { AttachmentsDrawer } from '../../components/documents/AttachmentsDrawer'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
+import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { DocumentHeaderCard, type DocumentHeaderValue } from '../../components/documents/DocumentHeaderCard'
@@ -30,12 +30,20 @@ import {
   ImportInvoiceItemsWizard,
   type ImportedLine,
 } from '../../components/sales/ImportInvoiceItemsWizard'
+import { formatNumber, reasonSentence } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 
 let keySeed = 0
 const nextKey = () => `line-${++keySeed}`
+
+/** Under the quick search of a type that takes BIVAC items only (BIVAC Out): what is offered, and how to add one. */
+const BIVAC_ITEMS_HINT = 'Only BIVAC items. Tick "BIVAC Item" in Inventory › Item Definition to add one.'
+/** The same type's Item dropdown when what was typed matches no BIVAC item (or there is none yet). */
+const BIVAC_ITEMS_NONE = 'No BIVAC item matches. Tick "BIVAC Item" in Inventory › Item Definition to add one.'
+/** What the Item dropdown offers while no list fits the type. One array, so the grid's options keep their identity. */
+const NO_ITEMS: ItemLookupDto[] = []
 
 /**
  * Puts the cursor in a line's quantity box once React has drawn it.
@@ -91,8 +99,8 @@ function emptyLine(warehouseId: number | null): EditableLine {
 }
 
 /**
- * One Inventory In or Inventory Out document: create it, edit it while it is a draft, read it once
- * it is posted.
+ * One Inventory In, Inventory Out or BIVAC Out document: create it, edit it while it is a draft, read it
+ * once it is posted.
  *
  * THREE MODES, ONE COMPONENT, and the mode is the document's status rather than a prop. A draft is
  * a form; a posted or cancelled document is a record and every input becomes text. Splitting them
@@ -132,15 +140,26 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
    */
   const [defaultWarehouseId, setDefaultWarehouseId] = useState<number | null>(null)
   const [reasons, setReasons] = useState<StockReasonDto[]>([])
-  const [items, setItems] = useState<ItemLookupDto[]>([])
+  /** The item list with the filter it was loaded for: a list loaded for another filter is never offered. */
+  const [itemList, setItemList] = useState<{ bivacOnly: boolean; rows: ItemLookupDto[] } | null>(null)
   /* THE TYPE CONFIGURATION DECIDES the numbering, the reason and — since the configuration page —
      whether the cost may be typed. Read from the shared cache; the fallbacks cover the first render
      before it answers, and read the way the two inventory kinds have always behaved. */
-  const { byCode } = useDocumentTypes()
+  const { byCode, loading: typesLoading, error: typesError } = useDocumentTypes()
   const documentType = byCode(kind.code)
+  /* A TYPE THAT CANNOT BE READ (the configuration failed to load, or this kind's row is missing) OFFERS NO ITEMS
+     AND SAVES NOTHING. Its rules are unknown, and guessing would be wrong for a type that limits its items: a
+     BIVAC Out would offer every item. The page says so instead; the server's checks stand either way. */
+  const typeMissing = !typesLoading && !documentType
+  const typeMissingMessage = typesError ?? `The ${kind.title} settings could not be loaded. Reload the page.`
   const numberOnPost = documentType?.numberOnPost ?? false
   const reasonRequired = documentType?.requiresReason ?? true
   const costIsEditable = pricingOf(documentType, { mode: 'cost', editable: kind.direction === 1 }).editable
+  /* THE TYPE ALSO DECIDES WHICH ITEMS A LINE MAY HOLD. bivacItemsOnly (BIVAC Out) narrows the Item dropdown
+     and the quick search to the items with "BIVAC Item" ticked; the server refuses any other on save and
+     on post (62000), and the import's check refuses it as an Error row. Read from the type, never the code. */
+  const bivacItemsOnly = documentType?.bivacItemsOnly === true
+  const items = !typeMissing && itemList?.bivacOnly === bivacItemsOnly ? itemList.rows : NO_ITEMS
 
   const [header, setHeader] = useState<DocumentHeaderValue>({
     branchId: null,
@@ -152,7 +171,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const [lines, setLines] = useState<EditableLine[]>([])
   const [errors, setErrors] = useState<Partial<Record<keyof DocumentHeaderValue, string>>>({})
 
-  const [attachmentsOpen, setAttachmentsOpen] = useState(false)
+  /** The action bar's "Add document…": each bump opens the Documents card's popup. */
+  const [addDocument, setAddDocument] = useState(0)
+  const documentsRef = useRef<HTMLDivElement>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -184,9 +205,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         )
       })
       .catch(() => notify.error('Branches could not be loaded.'))
-    itemsApi.lookup().then(setItems).catch(() => {
-      /* the Item select is then empty; the quick search still works */
-    })
 
     inventoryLookupsApi
       .stockReasons(kind.direction)
@@ -196,6 +214,28 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
     // isNew is derived from the route and cannot change without remounting the page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind.code, kind.direction])
+
+  /* THE ITEM LIST WAITS FOR THE TYPE CONFIGURATION, because the type decides what it holds: loading every
+     item first would offer a BIVAC Out other items for a moment. The configuration is cached, so after the
+     first document page of a session this runs at once. A type that cannot be read loads no list at all, and a
+     list loaded for another filter (the page reused for another kind) is not offered while the new one loads. */
+  useEffect(() => {
+    if (typesLoading || typeMissing) return
+
+    let cancelled = false
+    itemsApi
+      .lookup(true, undefined, undefined, false, bivacItemsOnly)
+      .then((rows) => {
+        if (!cancelled) setItemList({ bivacOnly: bivacItemsOnly, rows })
+      })
+      .catch(() => {
+        /* the Item select is then empty; the quick search still works */
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [typesLoading, typeMissing, bivacItemsOnly])
 
   const applyDocument = useCallback((doc: StockDocumentDto) => {
     setDocument(doc)
@@ -282,6 +322,18 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail: those two come from a fresh read,
+     and the header and lines being typed stay as they are (a file does not touch the document's row). */
+  const filesChanged = useCallback(async () => {
+    if (documentId === null) return
+    try {
+      const fresh = await stockDocumentsApi.get(documentId)
+      setDocument((current) => (current && current.id === fresh.id ? { ...current, files: fresh.files, audit: fresh.audit } : current))
+    } catch {
+      /* The count and the trail catch up on the next load; the card already shows the files. */
+    }
+  }, [documentId])
 
   /* Only the fetch lives here. The warehouse list is emptied by whatever CHANGED the branch — the
      header card's own handler — because that is an event, not something to derive by re-rendering. */
@@ -700,14 +752,28 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
     )
   }
 
+  /* The Documents card: its count scrolls to it; "Add document…" opens its popup (any status, with the create permission). */
+  const documentActions: DocumentAction[] = [
+    {
+      key: 'documents',
+      label: `Documents (${formatNumber(document?.files.length ?? 0)})`,
+      icon: DocumentIcons.documents,
+      onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    },
+    {
+      key: 'add-document',
+      label: 'Add document…',
+      icon: DocumentIcons.addDocument,
+      visible: canCreate,
+      disabled: document === null,
+      disabledReason: 'Save the draft first to attach documents.',
+      onClick: () => setAddDocument((n) => n + 1),
+    },
+  ]
+
   const actions: DocumentAction[] = readOnly
     ? [
-        {
-          key: 'attachments',
-          label: `Attachments (${document?.files.length ?? 0})`,
-          icon: DocumentIcons.attachments,
-          onClick: () => setAttachmentsOpen(true),
-        },
+        ...documentActions,
         {
           key: 'export',
           label: 'Export to Excel',
@@ -730,12 +796,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         },
       ]
     : [
-        {
-          key: 'attachments',
-          label: `Attachments (${document?.files.length ?? 0})`,
-          icon: DocumentIcons.attachments,
-          onClick: () => setAttachmentsOpen(true),
-        },
+        ...documentActions,
         {
           key: 'import',
           label: 'Import from File',
@@ -748,6 +809,8 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           label: 'Save Draft',
           icon: DocumentIcons.save,
           visible: editable,
+          disabled: typeMissing,
+          disabledReason: typeMissing ? typeMissingMessage : undefined,
           loading: saving,
           onClick: () => void saveDraft(),
         },
@@ -764,6 +827,8 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           variant: 'filled',
           colour: kind.colour,
           visible: editable && canPost,
+          disabled: typeMissing,
+          disabledReason: typeMissing ? typeMissingMessage : undefined,
           loading: saving,
           onClick: () => void saveAndPost(),
         },
@@ -793,7 +858,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       {document && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${document.documentNumber ?? 'draft'}`}>
           Cancelled by {document.cancelledByName ?? 'unknown'} on {stamp(document.cancelledAtUtc)}.
-          {document.cancelReason ? ` Reason: ${document.cancelReason}` : ''}
+          {reasonSentence(document.cancelReason)}
         </Alert>
       )}
 
@@ -821,6 +886,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         currencyCode={document?.currencyCode ?? 'USD'}
         readOnly={!editable}
         errors={errors}
+        referencePlaceholder={kind.referencePlaceholder}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -852,9 +918,30 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           </Group>
         </Group>
 
+        {editable && typeMissing && (
+          <Alert color="red" mb="md">
+            {typeMissingMessage}
+          </Alert>
+        )}
+
         {editable && (
           <Group mb="md" align="flex-end">
-            <QuickItemSearch onPick={(item) => void addScanned(item)} />
+            {/* Off until the type is known, like the item list: a scan cannot add an item the type refuses. The
+                box, not the input, holds the tooltip: a disabled input does not report the hover. */}
+            <Tooltip label={typeMissingMessage} disabled={!typeMissing} withArrow multiline w={300}>
+              <Box>
+                <QuickItemSearch
+                  onPick={(item) => void addScanned(item)}
+                  bivacOnly={bivacItemsOnly}
+                  disabled={typesLoading || typeMissing}
+                />
+              </Box>
+            </Tooltip>
+            {bivacItemsOnly && (
+              <Text size="sm" c="dimmed" pb={8}>
+                {BIVAC_ITEMS_HINT}
+              </Text>
+            )}
           </Group>
         )}
 
@@ -864,6 +951,8 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
+          itemPlaceholder={bivacItemsOnly ? 'Choose a BIVAC item' : undefined}
+          itemsNothingFound={typeMissing ? typeMissingMessage : bivacItemsOnly ? BIVAC_ITEMS_NONE : undefined}
           warehouses={warehouses.map((w) => ({ value: String(w.id), label: w.warehouseName }))}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           currencyCode={document?.currencyCode ?? 'USD'}
@@ -872,6 +961,17 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           readOnly={!editable}
         />
       </Paper>
+
+      <DocumentAttachmentsCard
+        ref={documentsRef}
+        documentId={document?.id ?? null}
+        documentKind={kind.code}
+        api={stockDocumentsApi.files}
+        canAdd={canCreate}
+        canRemove={canCreate}
+        onChanged={() => void filesChanged()}
+        openUpload={addDocument}
+      />
 
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
@@ -886,16 +986,6 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           />
         </Grid.Col>
       </Grid>
-
-      <AttachmentsDrawer
-        opened={attachmentsOpen}
-        onClose={() => setAttachmentsOpen(false)}
-        documentId={document?.id ?? null}
-        documentKind={kind.code}
-        onChanged={() => void reload()}
-        canEdit={canCreate}
-        api={stockDocumentsApi.files}
-      />
 
       <CancelReasonModal
         opened={cancelOpen}
@@ -922,8 +1012,11 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           mode="stock"
           draftReference={document ? `${kind.code}-${document.id}` : null}
           onImported={appendImported}
-          // A file naming several warehouses becomes ONE document, each line keeping its own.
-          importCreate={(imported, postImmediately) =>
+          // A file naming several warehouses becomes ONE document, each line keeping its own — or, on
+          // Inventory In only (what the business asked for), one document per warehouse when the reader
+          // turns on "One document per warehouse".
+          allowSplitByWarehouse={kind.code === 'INV_IN'}
+          importCreate={(imported, postImmediately, splitByWarehouse) =>
             stockDocumentsApi.importCreate({
               documentTypeCode: kind.code,
               documentDate: header.documentDate,
@@ -932,6 +1025,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
               referenceNo: header.referenceNo.trim() || null,
               notes: header.notes.trim() || null,
               postImmediately,
+              splitByWarehouse,
               lines: imported.map((line) => ({
                 warehouseId: line.warehouseId,
                 itemId: line.itemId,

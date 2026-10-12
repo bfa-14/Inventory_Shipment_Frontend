@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { ActionIcon, Anchor, Autocomplete, Badge, Group, Menu, NumberInput, Select, Table, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconDotsVertical, IconExternalLink, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
@@ -100,7 +101,12 @@ export function SalesInvoiceLinesGrid({
   warehouses,
   readOnly,
 }: SalesInvoiceLinesGridProps) {
-  const itemOptions = items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` }))
+  /* Built once per list: the list is the whole catalogue (no row limit since script 66), and a new array on every
+     render would make each row's Select parse it again. */
+  const itemOptions = useMemo(
+    () => items.map((i) => ({ value: String(i.id), label: `${i.itemCode} — ${i.itemName}` })),
+    [items],
+  )
 
   /**
    * What one line's Specification box offers: what THIS invoice already says for the same item,
@@ -189,6 +195,8 @@ export function SalesInvoiceLinesGrid({
                       value={null}
                       placeholder="Choose an item"
                       searchable
+                      /* The open list shows 100 rows at most; typing searches the whole list. */
+                      limit={100}
                       onChange={(next) => next && onItemChosen(line.key, Number(next))}
                       error={Boolean(line.error)}
                       comboboxProps={{ withinPortal: true }}

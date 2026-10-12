@@ -29,6 +29,11 @@ export interface OrderAbilities {
   /** "Create Purchase Invoice": the order's remaining lines (an order with containers gives an invoice shipped in containers). */
   createInvoice: OrderAbility
   closeOrder: OrderAbility
+  /**
+   * "Receive goods…" (goods receipts, rule 14): the goods that arrived WITHOUT a container, on an approved order - open
+   * or closed, because a closed order may still have invoiced goods to receive. Its own reasons: never `notOpenReason`.
+   */
+  receiveGoods: OrderAbility
 
   /*
    * THE APPROVAL. Each of these belongs to ONE state of the order and is hidden in the others: they are
@@ -81,6 +86,42 @@ export function notOpenReason(status: PurchaseDocumentStatus, draftReason: strin
     default:
       return null
   }
+}
+
+/** Why "Receive goods…" cannot be used on this order (rule 14); null when it can. */
+export function receiveGoodsReason(order: PurchaseDocumentDto): string | null {
+  switch (order.status) {
+    case 'Draft':
+      return 'Approve the order first: goods are received against an approved order.'
+    case 'PendingApproval':
+      return 'This order is waiting for approval.'
+    case 'Cancelled':
+      return 'This order is cancelled.'
+    default:
+      break
+  }
+  // THE SERVER'S ANSWER FIRST: it knows the containers and the draft receipts. The figures below are for an answer
+  // without it.
+  if (order.canReceive === false) return order.receiveBlockedReason ?? 'Nothing is left to receive on this order.'
+  if (order.canReceive === true) return null
+
+  let outstanding = 0
+  let toReceive = 0
+  let inContainers = 0
+  let inDrafts = 0
+  for (const line of order.lines) {
+    const received = line.goodsReceivedBase ?? 0
+    const short = line.goodsShortBase ?? 0
+    outstanding += line.outstandingBase ?? Math.max(0, line.quantityBase - received - short)
+    toReceive += line.toReceiveBase ?? 0
+    inContainers += line.inContainersBase ?? 0
+    inDrafts += line.inDraftReceiptsBase ?? 0
+  }
+  if (outstanding <= 0) return 'Everything ordered is already received.'
+  if (toReceive > 0) return null
+  if (inDrafts > 0) return 'The rest of this order is on draft goods receipts: post or delete them first.'
+  if (inContainers > 0) return 'Everything still to receive travels in containers: it is received with its containers.'
+  return null
 }
 
 function ability(visible: boolean, ...reasons: (string | null)[]): OrderAbility {
@@ -139,6 +180,7 @@ export function orderAbilities(
       hasPermission(PERMISSIONS.purchaseOrdersPost),
       notOpenReason(order.status, 'Approve the order first: only an open order can be closed.'),
     ),
+    receiveGoods: ability(hasPermission(PERMISSIONS.goodsReceiptsCreate), receiveGoodsReason(order)),
 
     sendForApproval: ability(needsApproval && canPost),
     approveDirect: ability(needsApproval && state?.canApproveDirect === true),

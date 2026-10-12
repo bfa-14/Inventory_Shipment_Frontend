@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button, Group, Menu, Paper, Tooltip } from '@mantine/core'
+import { Button, Group, Menu, Paper, Text, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconDotsVertical } from '@tabler/icons-react'
 
@@ -35,6 +35,12 @@ interface DocumentActionBarProps {
  * A MENU BELOW 768 px. Five buttons will not fit across a phone, and buttons that wrap into three
  * rows push the document itself off the screen. The primary action stays visible and the rest
  * collapse behind one icon — so the thing being done is always one tap away and the rest is two.
+ *
+ * REASONS WRAP. A disabled action's reason can be a long sentence ("The cost of these goods was
+ * adjusted …"). A menu is as wide as its longest line, so on one line it ran far past a phone's
+ * edge and the end of the reason, the part that says what to do, was cut off. The menu is held
+ * inside the screen and the reason sits on its own line under the label; on a wide screen the
+ * tooltip wraps for the same reason.
  */
 export function DocumentActionBar({ actions }: DocumentActionBarProps) {
   const compact = useMediaQuery('(max-width: 768px)')
@@ -74,19 +80,29 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
                   <IconDotsVertical size={18} />
                 </Button>
               </Menu.Target>
-              <Menu.Dropdown>
-                {rest.map((action) => (
-                  <Menu.Item
-                    key={action.key}
-                    leftSection={action.icon}
-                    disabled={action.disabled}
-                    onClick={action.onClick}
-                    color={action.colour}
-                  >
-                    {action.label}
-                    {action.disabled && action.disabledReason ? ` — ${action.disabledReason}` : ''}
-                  </Menu.Item>
-                ))}
+              <Menu.Dropdown maw="calc(100vw - 32px)">
+                {rest.map((action) => {
+                  const reason = action.disabled ? action.disabledReason : undefined
+                  return (
+                    <Menu.Item
+                      key={action.key}
+                      leftSection={action.icon}
+                      disabled={action.disabled}
+                      onClick={action.onClick}
+                      color={action.colour}
+                      // Full strength when there is a reason to read: the label stays greyed by
+                      // the disabled colour, the reason itself must stay legible.
+                      style={reason ? { opacity: 1 } : undefined}
+                    >
+                      {action.label}
+                      {reason ? (
+                        <Text component="span" display="block" fz="xs" c="dimmed" style={{ whiteSpace: 'normal' }}>
+                          {reason}
+                        </Text>
+                      ) : null}
+                    </Menu.Item>
+                  )
+                })}
               </Menu.Dropdown>
             </Menu>
           )}
@@ -101,7 +117,7 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
         {shown.map((action) =>
           action.disabled && action.disabledReason ? (
             // data-disabled rather than disabled: a disabled button swallows the hover the tooltip needs.
-            <Tooltip key={action.key} label={action.disabledReason} withArrow>
+            <Tooltip key={action.key} label={action.disabledReason} withArrow multiline w={280}>
               <Button
                 leftSection={action.icon}
                 variant={action.variant ?? 'default'}

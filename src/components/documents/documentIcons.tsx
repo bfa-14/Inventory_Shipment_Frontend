@@ -3,6 +3,7 @@ import {
   IconDeviceFloppy,
   IconFileExport,
   IconFileImport,
+  IconFileText,
   IconPaperclip,
   IconSend,
   IconX,
@@ -15,7 +16,10 @@ import {
  * hot reloading for the component, so the shared value moves out rather than the rule being waived.
  */
 export const DocumentIcons = {
-  attachments: <IconPaperclip size={16} />,
+  /** "Documents (n)": scrolls to the page's Documents card. */
+  documents: <IconFileText size={16} />,
+  /** "Add document…": opens the "Add document" popup, like the card's own button. */
+  addDocument: <IconPaperclip size={16} />,
   import: <IconFileImport size={16} />,
   save: <IconDeviceFloppy size={16} />,
   cancel: <IconX size={16} />,

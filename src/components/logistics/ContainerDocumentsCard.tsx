@@ -3,7 +3,7 @@ import { Badge } from '@mantine/core'
 import { containersApi, type ContainerAttachmentDto, type ContainerDto } from '../../api/logistics/containers'
 import { movementsApi } from '../../api/logistics/movements'
 import { AttachmentsPanel, type AttachmentGroup, type AttachmentsSource } from '../attachments/AttachmentsPanel'
-import type { ContainerFiling } from '../attachments/AttachmentUploadDialog'
+import type { AttachmentOption, ContainerFiling } from '../attachments/AttachmentUploadDialog'
 import { chooseRemoval } from '../attachments/chooseRemoval'
 import { formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
@@ -15,11 +15,28 @@ interface ContainerDocumentsCardProps {
   onChanged: () => void
 }
 
+/** What a file looks like on the list: an upload, an edit (name, type, date, note, new file, movement) or a delete changes it. */
+function attachmentKey(a: ContainerAttachmentDto): string {
+  return [
+    a.id,
+    a.fileId,
+    a.attachmentTypeId ?? 0,
+    a.movementId ?? 0,
+    a.chargeId ?? 0,
+    a.documentDate ?? '',
+    a.sizeBytes,
+    a.sharedWith,
+    a.fileName,
+    a.note ?? '',
+  ].join('.')
+}
+
 /**
  * The container's paperwork, filed where it belongs: general papers, the documents of each leg of the
  * route, the invoices behind each charge - the shared attachments list, grouped. A file uploaded once for
  * several containers is ONE file; the badge says so, and editing or deleting it asks whether that is for this
- * container or for all of them.
+ * container or for all of them. The edit can also file it under another movement of the route, or back under
+ * General (script 67); the server refuses a movement that one of the file's containers is not on.
  */
 export function ContainerDocumentsCard({ container, canManage, onChanged }: ContainerDocumentsCardProps) {
   const routeOrder = useMemo(
@@ -39,6 +56,12 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
     return { key: 'general', title: 'General', order: 0 }
   }
 
+  /** The container's movements, in route order: what a file can be filed under (upload and edit alike). */
+  const movementOptions: AttachmentOption[] = useMemo(
+    () => container.movements.map((m) => ({ value: String(m.movementId), label: `${m.movementNo} - ${m.typeName}` })),
+    [container.movements],
+  )
+
   /** The boxes that travel with this one: every other container on any of its movements. */
   async function filing(): Promise<ContainerFiling> {
     const movements = await Promise.all(
@@ -56,10 +79,7 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
       otherContainers: [...others]
         .map(([value, label]) => ({ value, label }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-      movementOptions: container.movements.map((m) => ({
-        value: String(m.movementId),
-        label: `${m.movementNo} - ${m.typeName}`,
-      })),
+      movementOptions,
     }
   }
 
@@ -100,13 +120,17 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
       title="Documents"
       documentKind="CONTAINER"
       source={source}
-      // The charges' and the movements' uploads change the list too; the page's reload says so.
-      reloadKey={`${container.id}:${container.attachments.map((a) => `${a.id}.${a.attachmentTypeId ?? 0}`).join(',')}`}
+      // The charges' and the movements' uploads and edits change the list too; the page's fresh read says so. Every
+      // field an edit can change is in the key, so a file renamed, redated, renoted or replaced in a charge's drawer
+      // is read again here.
+      reloadKey={`${container.id}:${container.attachments.map(attachmentKey).join(',')}`}
       canAdd={canManage}
       canRemove={canManage}
       filing={filing}
       groupOf={groupOf}
       sharedCount={(row) => row.sharedWith + 1}
+      // A file can move to another movement, or back to General; a charge's file stays with its charge.
+      movementOptions={(row) => (row.chargeId ? null : movementOptions)}
       fileExtra={(row) =>
         row.sharedWith > 0 ? (
           <Badge size="xs" variant="light" color="grape" style={{ flexShrink: 0 }}>
@@ -114,7 +138,6 @@ export function ContainerDocumentsCard({ container, canManage, onChanged }: Cont
           </Badge>
         ) : null
       }
-      emptyText="No document yet."
       onChanged={onChanged}
     />
   )

@@ -20,6 +20,7 @@ import { NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router
 import { katangaLogo } from '../../assets'
 import { useAuth } from '../../auth/useAuth'
 import { useApprovalsMe } from '../../hooks/useApprovalsMe'
+import { useGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { findLeaf, isGroup, navLeaves, searchNavigation, visibleNavigation, type NavFacts, type NavItem } from '../../navigation'
 import { NavIcon } from './NavIcon'
 import { useShowComingSoon } from './useComingSoon'
@@ -43,7 +44,12 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
 
   const [showComingSoon] = useShowComingSoon()
   const approvals = useApprovalsMe()
-  const facts: NavFacts = { canApproveInApp: approvals?.canApproveInApp === true, pendingApprovals: approvals?.pendingCount ?? 0 }
+  const draftGoodsReceipts = useGoodsReceiptsWaiting()
+  const facts: NavFacts = {
+    canApproveInApp: approvals?.canApproveInApp === true,
+    pendingApprovals: approvals?.pendingCount ?? 0,
+    draftGoodsReceipts,
+  }
   const allSections = visibleNavigation(hasPermission, showComingSoon, facts)
 
   const [query, setQuery] = useState('')

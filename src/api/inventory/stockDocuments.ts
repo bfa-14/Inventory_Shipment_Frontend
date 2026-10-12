@@ -4,7 +4,7 @@ import { fetchBlob, request } from '../http'
 import type { PagedResult } from '../types'
 
 /**
- * Inventory In / Out documents, the stock ledger behind them, and the configuration they read.
+ * Inventory In / Out and BIVAC Out documents, the stock ledger behind them, and the configuration they read.
  *
  * THE FIRST DOCUMENT FAMILY. Purchase and Sales will have the same shape — a header, lines, files,
  * an audit trail, and a Draft → Posted → Cancelled lifecycle — so the types here are named for what
@@ -14,8 +14,12 @@ import type { PagedResult } from '../types'
 /** Draft is editable and has no stock effect; Posted has written the ledger; Cancelled has reversed it. */
 export type StockDocumentStatus = 'Draft' | 'Posted' | 'Cancelled'
 
-/** The two inventory kinds. The other six document types exist but belong to families not built yet. */
-export type StockDocumentTypeCode = 'INV_IN' | 'INV_OUT'
+/**
+ * The inventory kinds: Inventory In, Inventory Out and BIVAC Out (script 66) - an Out of its own whose lines may
+ * only hold BIVAC items. The page never branches on these codes: what differs is in the kind's row of
+ * documentKind.ts and in the type's configuration (DocumentTypeDto).
+ */
+export type StockDocumentTypeCode = 'INV_IN' | 'INV_OUT' | 'BIV_OUT'
 
 export interface DocumentTypeDto {
   id: number
@@ -42,6 +46,12 @@ export interface DocumentTypeDto {
   numberPerBranch: boolean
   /** True: the year is part of the number and the sequence restarts every year ("SHR-2026-000001"). */
   yearInNumber: boolean
+  /**
+   * True: every line must be an item with "BIVAC Item" ticked (BIVAC Out). Set by the database script that
+   * creates the type and read-only on the configuration page; the document page then offers BIVAC items
+   * only, and the server refuses any other item (62000, "Line 2: … is not a BIVAC item.").
+   */
+  bivacItemsOnly: boolean
   isActive: boolean
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */
@@ -63,7 +73,10 @@ export interface UpdateDocumentTypeRequest {
   rowVersion: string | null
 }
 
-/** An imported file becoming stock documents: the shared header and the lines, grouped by warehouse on the server. */
+/**
+ * An imported file becoming stock documents: the shared header and the lines. ONE document whose lines
+ * keep their own warehouse, or with splitByWarehouse one document per warehouse (grouped on the server).
+ */
 export interface ImportCreateStockDocumentsRequest {
   documentTypeCode: StockDocumentTypeCode
   documentDate: string
@@ -73,6 +86,8 @@ export interface ImportCreateStockDocumentsRequest {
   notes?: string | null
   lines: ImportCreateLine[]
   postImmediately: boolean
+  /** One document per warehouse, each with this header and posted on its own. Absent or false: one document. */
+  splitByWarehouse?: boolean
 }
 
 export interface StockReasonDto {
@@ -303,7 +318,10 @@ export const stockDocumentsApi = {
   /** Deletes each draft in its own call; a posted document among the ids fails alone with NOT_DRAFT. */
   bulkDelete: (ids: number[]) => request<BulkActionResult>(`${BASE}/bulk-delete`, { method: 'POST', body: { ids } }),
 
-  /** ONE document holding every line, each in the warehouse it names; posted at once when asked. */
+  /**
+   * ONE document holding every line, each in the warehouse it names — or, with splitByWarehouse, one
+   * document per warehouse, each posted on its own; posted at once when asked.
+   */
   importCreate: (payload: ImportCreateStockDocumentsRequest) =>
     request<ImportCreateResult>(`${BASE}/import-create`, { method: 'POST', body: payload }),
 
