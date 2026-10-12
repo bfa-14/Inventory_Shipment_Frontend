@@ -1,5 +1,12 @@
 /** Permission codes the API guards its endpoints with. */
 export const PERMISSIONS = {
+  // The Dashboard (script 74): who may open it at all; each figure still follows its own screen's permission.
+  dashboardView: 'dashboard.view',
+  // Screens with their own permission since script 75 (they borrowed another screen's before).
+  valuationView: 'inventory.valuation.view',
+  statementView: 'sales.statement.view',
+  movementsView: 'containers.movements.view',
+  trackingView: 'containers.tracking.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -204,7 +211,7 @@ export const NAVIGATION: NavSection[] = [
   {
     items: [
       { label: 'Home', to: '/', icon: 'home' },
-      { label: 'Dashboard', to: '/dashboard', icon: 'dashboard' },
+      { label: 'Dashboard', to: '/dashboard', permission: PERMISSIONS.dashboardView, icon: 'dashboard' },
       { label: 'Purchase Planning', icon: 'clipboard', comingSoon: true, children: [] },
       { label: 'Purchase Orders', icon: 'cart', comingSoon: true },
       { label: 'Invoices', icon: 'invoice', comingSoon: true },
@@ -234,7 +241,7 @@ export const NAVIGATION: NavSection[] = [
       // An Inventory Out of BIVAC items only (script 66): its own list, numbers (BIV-) and permissions.
       { label: 'BIVAC Out', to: '/inventory/bivac-out', permission: PERMISSIONS.bivacOutView, icon: 'box' },
       // What the shelves are worth: the item list with its money shown, behind the same permission.
-      { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.itemsView, icon: 'balance' },
+      { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.valuationView, icon: 'balance' },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
       // Shortage plans: saved planning documents (draft, then a posted snapshot) that purchase orders are created from.
@@ -282,9 +289,9 @@ export const NAVIGATION: NavSection[] = [
     breadcrumb: 'Logistics',
     items: [
       { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
-      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.containersView, icon: 'ship' },
+      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsView, icon: 'ship' },
       { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
-      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.containersView, icon: 'route' },
+      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.trackingView, icon: 'route' },
     ],
   },
   {
@@ -298,7 +305,7 @@ export const NAVIGATION: NavSection[] = [
       // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       { label: 'Receipts', to: '/sales/receipts', permission: PERMISSIONS.receiptsView, icon: 'wallet' },
-      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.receiptsView, icon: 'reports' },
+      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },
       // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
       { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },
       {

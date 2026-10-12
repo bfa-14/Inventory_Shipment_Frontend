@@ -575,9 +575,13 @@ function ChargeBody({
               label="Movement"
               value={
                 dto.movementId ? (
-                  <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${dto.movementId}`} fz="sm">
-                    {dto.movementNo ?? `#${dto.movementId}`}
-                  </Anchor>
+                  hasPermission(PERMISSIONS.movementsView) ? (
+                    <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${dto.movementId}`} fz="sm">
+                      {dto.movementNo ?? `#${dto.movementId}`}
+                    </Anchor>
+                  ) : (
+                    dto.movementNo ?? `#${dto.movementId}`
+                  )
                 ) : null
               }
             />

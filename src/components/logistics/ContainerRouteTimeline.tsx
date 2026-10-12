@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Table, Text, Timeline, Title } from '@mantine/core'
 import { IconArrowRight, IconPlus, IconRoute } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import type { ContainerDto, ContainerMovementDto } from '../../api/logistics/containers'
 import { movementsApi, movementStatusColour, type MovementListDto } from '../../api/logistics/movements'
 import { dateLabel } from '../documents/documentKind'
@@ -86,6 +88,8 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
 }
 
 function LegTitle({ leg }: { leg: ContainerMovementDto }) {
+  // The movement's own page needs View Movements (script 75); its number is shown either way.
+  const canOpen = useAuth().hasPermission(PERMISSIONS.movementsView)
   return (
     <Group gap="xs" wrap="wrap">
       <Text fz="sm" fw={600}>
@@ -94,9 +98,13 @@ function LegTitle({ leg }: { leg: ContainerMovementDto }) {
       <Badge size="sm" variant="light" color={movementStatusColour(leg.status)}>
         {STATUS_NAMES[leg.status] ?? leg.status}
       </Badge>
-      <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}`} fz="xs">
-        {leg.movementNo}
-      </Anchor>
+      {canOpen ? (
+        <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}`} fz="xs">
+          {leg.movementNo}
+        </Anchor>
+      ) : (
+        <Text span fz="xs">{leg.movementNo}</Text>
+      )}
     </Group>
   )
 }

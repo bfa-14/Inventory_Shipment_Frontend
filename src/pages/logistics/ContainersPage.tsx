@@ -173,6 +173,7 @@ export function ContainersPage() {
   const { hasPermission } = useAuth()
 
   const canCreate = hasPermission(PERMISSIONS.containersCreate)
+  const canOpenMovements = hasPermission(PERMISSIONS.movementsView)
   const canReceive = hasPermission(PERMISSIONS.goodsReceiptsCreate)
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
   const canClose = hasPermission(PERMISSIONS.containersClose)
@@ -443,9 +444,13 @@ export function ContainersPage() {
       width: 160,
       render: (row) =>
         row.currentMovementId ? (
-          <Anchor component={Link} to={`/logistics/movements/${row.currentMovementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-            {row.currentMovementNo}
-          </Anchor>
+          canOpenMovements ? (
+            <Anchor component={Link} to={`/logistics/movements/${row.currentMovementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+              {row.currentMovementNo}
+            </Anchor>
+          ) : (
+            <Text span fz="sm" style={{ whiteSpace: 'nowrap' }}>{row.currentMovementNo}</Text>
+          )
         ) : (
           dash
         ),

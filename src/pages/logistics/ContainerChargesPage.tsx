@@ -107,6 +107,7 @@ function toQuery(filters: Filters): ContainerChargeQuery {
 export function ContainerChargesPage() {
   const { hasPermission } = useAuth()
   const canCreate = hasPermission(PERMISSIONS.containerChargesCreate)
+  const canOpenMovements = hasPermission(PERMISSIONS.movementsView)
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
 
   const [containers, setContainers] = useState<Option[]>([])
@@ -277,9 +278,13 @@ export function ContainerChargesPage() {
         width: 170,
         render: (row) =>
           row.movementId ? (
-            <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${row.movementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }}>
-              {row.movementNo ?? `#${row.movementId}`}
-            </Anchor>
+            canOpenMovements ? (
+              <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${row.movementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }}>
+                {row.movementNo ?? `#${row.movementId}`}
+              </Anchor>
+            ) : (
+              <Text span fz="sm" style={{ whiteSpace: 'nowrap' }}>{row.movementNo ?? `#${row.movementId}`}</Text>
+            )
           ) : (
             '—'
           ),

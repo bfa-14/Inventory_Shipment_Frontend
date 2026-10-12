@@ -227,6 +227,10 @@ export function DashboardPage() {
 /* ── the board ─────────────────────────────────────────────────────────────────────────────────── */
 
 function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
+  const { hasPermission } = useAuth()
+  // Script 75: the statement and the valuation have their own permissions; fall back to the lists.
+  const receivablesTo = hasPermission(PERMISSIONS.statementView) ? '/sales/receipts/statement' : '/sales/invoices'
+  const valuationTo = hasPermission(PERMISSIONS.valuationView) ? '/inventory/valuation' : '/inventory/items'
   const { sales, receivables, payables, inventory, onTheWay } = data
   const money = (value: number | null | undefined) => `${formatNumber(value ?? 0, 2)} ${ccy}`
 
@@ -270,7 +274,7 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   const pills: ReactNode[] = []
   if (receivables) {
     pills.push(
-      <Pill key="receivables" to="/sales/receipts/statement" icon={<IconUsers size={17} />} colour={CHART.pink}
+      <Pill key="receivables" to={receivablesTo} icon={<IconUsers size={17} />} colour={CHART.pink}
         label="Customers owe" value={money(receivables.outstandingBase)}
         chip={receivables.overdueCount > 0 ? { text: `${receivables.overdueCount} overdue`, className: css.chipRed } : { text: 'on time', className: css.chipGreen }} />,
     )
@@ -285,7 +289,7 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   }
   if (inventory) {
     pills.push(
-      <Pill key="inventory" to="/inventory/valuation" icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
+      <Pill key="inventory" to={valuationTo} icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
         label="Inventory value" value={money(inventory.valueBase)} chip={{ text: `${inventory.itemsInStock} items`, className: css.chipDim }} />,
     )
   }
@@ -500,7 +504,7 @@ function NeedsAttention({ data, ccy, approvalsPending }: { data: DashboardSummar
           <Line key={i.itemId} to={`/inventory/items/${i.itemId}`} label={i.itemCode} sub={i.itemName}
             value={`${formatNumber(i.onHand)} / ${formatNumber(i.minQuantity)}`} colour="#ffb547" />
         ))}
-        {a.negativeStock > 0 && <Line to="/inventory/valuation" label="Item and warehouse below zero" value={formatNumber(a.negativeStock)} colour="#ff6b8a" />}
+        {a.negativeStock > 0 && <Line to={hasPermission(PERMISSIONS.valuationView) ? '/inventory/valuation' : '/inventory/items'} label="Item and warehouse below zero" value={formatNumber(a.negativeStock)} colour="#ff6b8a" />}
         {(a.outOfStockSales ?? 0) > 0 && <Line to="/sales/out-of-stock-audit" label="Out-of-stock sales in the period" value={formatNumber(a.outOfStockSales)} colour="#ffb547" />}
       </AttentionCard>,
     )

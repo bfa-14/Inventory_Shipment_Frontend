@@ -96,6 +96,8 @@ export default function App() {
             {/* Receipts and statements on paper: outside the shell, like the shortage plan. */}
             <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
               <Route path="/sales/receipts/:id/print" element={<ReceiptPrintPage />} />
+            </Route>
+            <Route element={<ProtectedRoute permission={PERMISSIONS.statementView} />}>
               <Route path="/sales/receipts/statement/print" element={<CustomerStatementPrintPage />} />
             </Route>
             <Route element={<ProtectedRoute permission={PERMISSIONS.paymentsView} />}>
@@ -108,7 +110,9 @@ export default function App() {
 
             <Route element={<AppShell />}>
               <Route index element={<HomePage />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route element={<ProtectedRoute permission={PERMISSIONS.dashboardView} />}>
+                <Route path="/dashboard" element={<DashboardPage />} />
+              </Route>
               <Route path="/account/password" element={<ChangePasswordPage />} />
               <Route path="/forbidden" element={<ForbiddenPage />} />
 
@@ -161,8 +165,14 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.containersView} />}>
                 <Route path="/logistics/containers" element={<ContainersPage />} />
                 <Route path="/logistics/containers/:id" element={<ContainerPage />} />
+              </Route>
+              {/* Movements and Tracking: screens of their own (script 75). A container's page still shows
+                  its movements and route with the container permission. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.movementsView} />}>
                 <Route path="/logistics/movements" element={<MovementsPage />} />
                 <Route path="/logistics/movements/:id" element={<MovementPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.trackingView} />}>
                 <Route path="/logistics/tracking" element={<TrackingPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementsManage} />}>
@@ -214,9 +224,9 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>
                 <Route path="/inventory/price-lists" element={<PriceListsPage />} />
               </Route>
-              {/* What the shelves are worth: the item list with its money shown, so it is guarded
-                  by the item permission rather than one of its own. */}
-              <Route element={<ProtectedRoute permission={PERMISSIONS.itemsView} />}>
+              {/* What the shelves are worth: its own permission (script 75), since seeing items is not
+                  seeing what they are worth. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.valuationView} />}>
                 <Route path="/inventory/valuation" element={<StockValuationPage />} />
               </Route>
               {/* Shortage plans: the list and the document sit behind the view permission; "new" needs
@@ -308,9 +318,13 @@ export default function App() {
                   reversing and allocating are checked on the page (and by the API). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
                 <Route path="/sales/receipts" element={<ReceiptsPage />} />
-                <Route path="/sales/receipts/statement" element={<CustomerStatementPage />} />
                 <Route path="/sales/receipts/new" element={<ReceiptPage />} />
                 <Route path="/sales/receipts/:id" element={<ReceiptPage />} />
+              </Route>
+              {/* The Customer Statement: its own permission (script 75). "statement" is a static segment,
+                  so react-router never takes it for a receipt id. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.statementView} />}>
+                <Route path="/sales/receipts/statement" element={<CustomerStatementPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.documentTypesManage} />}>
