@@ -1,14 +1,15 @@
 /*
- * THE DASHBOARD IN THE APPLICATION'S OWN LOOK: white cards on the page, Mantine's text colours.
- * Only the two key-figure tiles carry colour, so the eye lands on them first. Every colour lives
- * here as a variable so the page stays one palette.
+ * THE DASHBOARD IS A BLACK BOARD inside the light application: figures and charts read best on a
+ * dark ground, and the board marks the page as the one to look at rather than to work in. Every
+ * colour lives here as a variable so the board stays one palette.
  */
 .board {
-  --db-card: var(--mantine-color-white);
-  --db-card-2: var(--mantine-color-gray-0);
-  --db-line: var(--mantine-color-gray-3);
-  --db-text: var(--mantine-color-text);
-  --db-dim: var(--mantine-color-dimmed);
+  --db-bg: #000000;
+  --db-card: #15161b;
+  --db-card-2: #1d1f26;
+  --db-line: rgba(255, 255, 255, 0.08);
+  --db-text: #f1f2f6;
+  --db-dim: #9a9cab;
   --db-violet: #b26cf2;
   --db-pink: #e15ad8;
   --db-cyan: #33d6d0;
@@ -17,7 +18,10 @@
   --db-green: #3ddc97;
   --db-orange: #ffb547;
 
+  background: var(--db-bg);
   color: var(--db-text);
+  border-radius: 24px;
+  padding: 20px;
 }
 
 .toolbar {
@@ -204,7 +208,7 @@
 
 .chipDim {
   color: var(--db-dim);
-  background: var(--mantine-color-gray-1);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* donuts with their legend beside them */
@@ -281,7 +285,7 @@
 
 .countOff {
   color: var(--db-dim);
-  background: var(--mantine-color-gray-1);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .line {
@@ -299,7 +303,7 @@
 }
 
 .link {
-  color: var(--mantine-color-anchor);
+  color: #8ab4ff;
   text-decoration: none;
 }
 
@@ -327,4 +331,31 @@
   padding: 2px 8px;
   border-radius: 6px;
   white-space: nowrap;
+}
+
+/* the filters on the black ground */
+.select input {
+  background: var(--db-card);
+  border-color: var(--db-line);
+  color: var(--db-text);
+}
+
+.select input::placeholder {
+  color: var(--db-dim);
+}
+
+.segmented {
+  background: var(--db-card);
+}
+
+.segmented label {
+  color: var(--db-dim);
+}
+
+.segmented label[data-active] {
+  color: #fff;
+}
+
+.segmentedIndicator {
+  background: linear-gradient(135deg, #c86df0 0%, #8a5cf6 100%);
 }
