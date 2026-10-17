@@ -130,10 +130,13 @@ export function fromMatch(m: MovementContainerMatchDto & { containerId: number }
   }
 }
 
-/** The API takes at most 500 numbers a call. */
-const MATCH_CHUNK = 500
+/**
+ * The API takes at most 10,000 numbers a call (500 before script 78). A file up to that is checked in ONE call, so a
+ * number repeated anywhere in it is "Already in the list, row N"; a bigger one goes in parts.
+ */
+const MATCH_CHUNK = 10000
 
-/** match-containers over any number of numbers, a call per 500; rowNo stays the position in `numbers`, from 1. */
+/** match-containers over any number of numbers, a call per 10,000; rowNo stays the position in `numbers`, from 1. */
 export async function matchAll(query: MovementPlaceQuery, numbers: string[], signal?: AbortSignal): Promise<MovementContainerMatchDto[]> {
   const rows: MovementContainerMatchDto[] = []
   for (let start = 0; start < numbers.length; start += MATCH_CHUNK) {

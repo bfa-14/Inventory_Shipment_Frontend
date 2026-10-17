@@ -1865,7 +1865,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         <AddContainerModal
           opened
           onClose={() => setAddContainerOpen(false)}
-          order={{ id: document.id, documentNumber: document.documentNumber, branchId: document.branchId, warehouseId: document.warehouseId }}
+          order={{
+            id: document.id,
+            documentNumber: document.documentNumber,
+            branchId: document.branchId,
+            warehouseId: document.warehouseId,
+            supplierId: document.supplierId,
+            supplierCode: document.supplierCode,
+            supplierName: document.supplierName,
+          }}
           canOverCapacity={canOverCapacity}
           onSaved={(container, open) => {
             setAddContainerOpen(false)
@@ -1877,7 +1885,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       {kind.code === 'PO' && document && autoPlanOpen && (
         <AutoPlanModal
-          order={{ id: document.id, documentNumber: document.documentNumber, branchId: document.branchId, warehouseId: document.warehouseId }}
+          order={{
+            id: document.id,
+            documentNumber: document.documentNumber,
+            branchId: document.branchId,
+            warehouseId: document.warehouseId,
+            supplierId: document.supplierId,
+            supplierCode: document.supplierCode,
+            supplierName: document.supplierName,
+          }}
           canOverCapacity={canOverCapacity}
           canConfirm={canConfirmContainers}
           onClose={() => setAutoPlanOpen(false)}

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Anchor, Badge, Checkbox, Group, Paper, Progress, ScrollArea, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
+import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { containersApi, containerStatusColour, containerStatusLabel, type ContainerListDto } from '../../api/logistics/containers'
 import type { PurchaseInvoiceContainerDto } from '../../api/purchase/documents'
 import { dateLabel } from '../documents/documentKind'
@@ -10,6 +11,8 @@ import { ContainerFillCell } from '../logistics/ContainerFillLine'
 import { containerReceiptOf } from '../logistics/containerReceipt'
 import { ContainerSelectionBar } from '../logistics/ContainerSelectionBar'
 import { refreshSelection } from '../logistics/containerSelection'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 
 interface OrderContainersCardProps {
   purchaseOrderId: number
@@ -46,7 +49,9 @@ function receivedText(date: string, warehouseCode: string | null, row: Container
  * TICKED ROWS ARE CONTAINER LIST ROWS. The order's own figures come with the order; the rest — the
  * capacity and fill, the movement in progress that the quick selectors read — is the container
  * list for this order, asked again whenever the order is reloaded. Without containers.view that
- * list is refused and the card stays as it was: no checkboxes, no fill.
+ * list is refused and the card stays as it was: no checkboxes, no fill. EVERY PAGE OF IT (script 78:
+ * any number of containers): one page of 200 left the containers after it without a checkbox, out of
+ * "Select every container" and of the bulk actions.
  */
 export function OrderContainersCard({
   purchaseOrderId,
@@ -58,12 +63,18 @@ export function OrderContainersCard({
   emptyText = 'No container yet - use Add Container or Auto-plan.',
 }: OrderContainersCardProps) {
   const [rows, setRows] = useState<ContainerListDto[]>([])
+  // Drawn in steps (2,000 rows at once froze the page); every row is loaded, so the selection reaches all of them.
+  const shown = useShownRows(containers.length)
 
   useEffect(() => {
     const controller = new AbortController()
-    containersApi
-      .list({ purchaseOrderId, pageSize: 200, sortBy: 'ContainerRef', sortDir: 'asc' }, controller.signal)
-      .then((result) => setRows(result.items))
+    fetchAllPages(
+      (page, pageSize) => containersApi.list({ purchaseOrderId, page, pageSize, sortBy: 'ContainerRef', sortDir: 'asc' }, controller.signal),
+      { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE },
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setRows(result.items)
+      })
       .catch(() => {
         if (!controller.signal.aborted) setRows([])
       })
@@ -131,7 +142,7 @@ export function OrderContainersCard({
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {containers.map((c) => {
+                {containers.slice(0, shown.limit).map((c) => {
                   const row = byId.get(c.id)
                   return (
                     <Table.Tr key={c.id} bg={selectedIds.has(c.id) ? 'var(--mantine-color-blue-0)' : undefined} data-container-row={c.containerRef}>
@@ -184,6 +195,7 @@ export function OrderContainersCard({
               </Table.Tbody>
             </Table>
           </ScrollArea>
+          <ShownRowsFooter limit={shown.limit} total={containers.length} noun="containers" more={shown.more} all={shown.all} />
         </>
       )}
     </Paper>

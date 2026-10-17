@@ -629,6 +629,8 @@ export interface ReceivableContainerDto {
   canReceive: boolean
   /** Confirmed and never dispatched (status 2): "has not left the supplier". */
   notDispatched: boolean
+  /** "From a container…" (script 78): how many containers match, of which at most 200 are listed; 0 for one container. */
+  totalCount?: number
 }
 
 /** What `GET …/receivable` answers: the documents (one order, one invoice, or a supplier's orders) or the container, and the lines. */
@@ -898,7 +900,7 @@ export const goodsReceiptsApi = {
     return { ...answer, documents: answer.documents ?? [], lines: answer.lines ?? [], container: answer.container ?? null }
   },
 
-  /** "+ New › From a container…": the containers Confirmed to Cleared with no receipt (at most 200, delivered first). */
+  /** "+ New › From a container…": the containers Confirmed to Cleared with no receipt (at most 200, delivered first; totalCount says how many match). */
   receivableContainers: (query: ReceivableContainersQuery = {}, signal?: AbortSignal) =>
     request<ReceivableContainerDto[]>(`${BASE}/receivable-containers${toQueryString(query)}`, { signal }),
 

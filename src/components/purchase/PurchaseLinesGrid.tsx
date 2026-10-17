@@ -7,6 +7,17 @@ import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
 import { unitLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber, numberInputValue } from '../format'
 import { lineMaximum, purchaseLineTotal } from './purchaseLines'
+import { LazySelect } from '../ui/LazySelect'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
+
+/**
+ * THE TOOLTIPS OF A ROW STAY IN THE PAGE, NOT IN A PORTAL. A Mantine Tooltip mounts its portal even while closed, and
+ * each portal looks for the shared portal node at the end of the page - a walk through every element. Three per row of
+ * a 2,000-line invoice made the page take minutes (script 78: any number of containers). Fixed positioning keeps them
+ * above the grid's scroll container.
+ */
+const ROW_TOOLTIP = { withinPortal: false, floatingStrategy: 'fixed' } as const
 
 /**
  * One purchase line while it is on the page.
@@ -167,396 +178,411 @@ export function PurchaseLinesGrid({
     [items, onlyItemId],
   )
 
+  /* DRAWN IN STEPS (script 78: an invoice of any number of containers, one line per container line): the first 200,
+     then "Show more". Every line stays in the document - totals, Save and Post take them all - and a line with a
+     problem, or one just added, always shows. */
+  const shown = useShownRows(lines.length)
+  const visible = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line, index }) => {
+      if (index < shown.limit || line.id === null || line.error) return true
+      const max = lineMaximum(line)
+      return max !== null && line.quantity > max
+    })
+
   return (
-    <Table.ScrollContainer minWidth={1340 + (showTransit ? 200 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0) + receiptColumns * 100}>
-      <Table striped highlightOnHover verticalSpacing="xs">
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th w={56}>#</Table.Th>
-            <Table.Th w={240}>Item Code</Table.Th>
-            <Table.Th w={200}>Item Name</Table.Th>
-            <Table.Th w={150}>Unit</Table.Th>
-            <Table.Th w={190}>Warehouse</Table.Th>
-            <Table.Th w={90} ta="right">On Hand</Table.Th>
-            <Table.Th w={110} ta="right">Qty</Table.Th>
-            {showTransit && <Table.Th w={100} ta="right">Shipped</Table.Th>}
-            {showTransit && <Table.Th w={100} ta="right">In transit</Table.Th>}
-            {receipts && (
-              <Table.Th w={100} ta="right">
-                <Tooltip label={receipts === 'order' ? 'Received by posted goods receipts (base units)' : 'Received by the goods receipts matched to this line (base units)'} withArrow multiline w={260}>
-                  <span>Received</span>
-                </Tooltip>
-              </Table.Th>
-            )}
-            {receipts === 'order' && (
-              <Table.Th w={100} ta="right">
-                <Tooltip label="Invoiced by posted supplier invoices (base units)" withArrow>
-                  <span>Invoiced</span>
-                </Tooltip>
-              </Table.Th>
-            )}
-            {receipts === 'order' && (
-              <Table.Th w={100} ta="right">
-                <Tooltip label="Settled short: received less with a reason, nothing more will come (base units)" withArrow multiline w={260}>
-                  <span>Short</span>
-                </Tooltip>
-              </Table.Th>
-            )}
-            <Table.Th w={150} ta="right">Unit Cost</Table.Th>
-            <Table.Th w={90} ta="right">Disc %</Table.Th>
-            <Table.Th w={140} ta="right">Line Total</Table.Th>
-            {showCosts && (
-              <>
-                <Table.Th w={120} ta="right">FOB ({baseCurrencyCode})</Table.Th>
-                <Table.Th w={120} ta="right">Charges ({baseCurrencyCode})</Table.Th>
-                <Table.Th w={140} ta="right">Landed cost ({baseCurrencyCode})</Table.Th>
-              </>
-            )}
-            {showEstimatedLanded && (
-              <Table.Th w={130} ta="right">
-                <Tooltip label="FOB + the container charges per unit: final once the goods are received." withArrow multiline w={260}>
-                  <span>Est. landed/unit ({baseCurrencyCode})</span>
-                </Tooltip>
-              </Table.Th>
-            )}
-            <Table.Th w={160}>Notes</Table.Th>
-            <Table.Th w={84} />
-          </Table.Tr>
-        </Table.Thead>
+    <>
+      <Table.ScrollContainer minWidth={1340 + (showTransit ? 200 : 0) + (showCosts ? 380 : 0) + (showEstimatedLanded ? 130 : 0) + receiptColumns * 100}>
+        <Table striped highlightOnHover verticalSpacing="xs">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th w={56}>#</Table.Th>
+              <Table.Th w={240}>Item Code</Table.Th>
+              <Table.Th w={200}>Item Name</Table.Th>
+              <Table.Th w={150}>Unit</Table.Th>
+              <Table.Th w={190}>Warehouse</Table.Th>
+              <Table.Th w={90} ta="right">On Hand</Table.Th>
+              <Table.Th w={110} ta="right">Qty</Table.Th>
+              {showTransit && <Table.Th w={100} ta="right">Shipped</Table.Th>}
+              {showTransit && <Table.Th w={100} ta="right">In transit</Table.Th>}
+              {receipts && (
+                <Table.Th w={100} ta="right">
+                  <Tooltip label={receipts === 'order' ? 'Received by posted goods receipts (base units)' : 'Received by the goods receipts matched to this line (base units)'} withArrow multiline w={260}>
+                    <span>Received</span>
+                  </Tooltip>
+                </Table.Th>
+              )}
+              {receipts === 'order' && (
+                <Table.Th w={100} ta="right">
+                  <Tooltip label="Invoiced by posted supplier invoices (base units)" withArrow>
+                    <span>Invoiced</span>
+                  </Tooltip>
+                </Table.Th>
+              )}
+              {receipts === 'order' && (
+                <Table.Th w={100} ta="right">
+                  <Tooltip label="Settled short: received less with a reason, nothing more will come (base units)" withArrow multiline w={260}>
+                    <span>Short</span>
+                  </Tooltip>
+                </Table.Th>
+              )}
+              <Table.Th w={150} ta="right">Unit Cost</Table.Th>
+              <Table.Th w={90} ta="right">Disc %</Table.Th>
+              <Table.Th w={140} ta="right">Line Total</Table.Th>
+              {showCosts && (
+                <>
+                  <Table.Th w={120} ta="right">FOB ({baseCurrencyCode})</Table.Th>
+                  <Table.Th w={120} ta="right">Charges ({baseCurrencyCode})</Table.Th>
+                  <Table.Th w={140} ta="right">Landed cost ({baseCurrencyCode})</Table.Th>
+                </>
+              )}
+              {showEstimatedLanded && (
+                <Table.Th w={130} ta="right">
+                  <Tooltip label="FOB + the container charges per unit: final once the goods are received." withArrow multiline w={260}>
+                    <span>Est. landed/unit ({baseCurrencyCode})</span>
+                  </Tooltip>
+                </Table.Th>
+              )}
+              <Table.Th w={160}>Notes</Table.Th>
+              <Table.Th w={84} />
+            </Table.Tr>
+          </Table.Thead>
 
-        <Table.Tbody>
-          {lines.map((line, index) => {
-            const wanted = line.quantity * (line.packingFormula || 1)
-            const short = warnOnOverdraw && line.onHandBase !== null && wanted > line.onHandBase
-            const max = lineMaximum(line)
-            const over = max !== null && line.quantity > max
-            const problem = line.error ?? (over ? `Only ${formatNumber(max)} remain on the source line.` : undefined)
-            const fixed = readOnly || (linesFromSource && line.sourceLineId !== null)
-            // A header row above the first line of each container (the server returns them grouped).
-            const newGroup = groupByContainer && (index === 0 || lines[index - 1].containerId !== line.containerId)
+          <Table.Tbody>
+            {visible.map(({ line, index }, position) => {
+              const wanted = line.quantity * (line.packingFormula || 1)
+              const short = warnOnOverdraw && line.onHandBase !== null && wanted > line.onHandBase
+              const max = lineMaximum(line)
+              const over = max !== null && line.quantity > max
+              const problem = line.error ?? (over ? `Only ${formatNumber(max)} remain on the source line.` : undefined)
+              const fixed = readOnly || (linesFromSource && line.sourceLineId !== null)
+              // A header row above the first line of each container (the server returns them grouped).
+              const newGroup = groupByContainer && (position === 0 || visible[position - 1].line.containerId !== line.containerId)
 
-            return (
-              <Fragment key={line.key}>
-              {newGroup && (
-                <Table.Tr data-container-group={line.containerId ?? 'none'}>
-                  <Table.Td colSpan={columnCount} bg="var(--mantine-color-gray-0)">
-                    {line.containerId ? (
-                      <Group gap="xs" wrap="wrap">
-                        <Anchor component={Link} to={`/logistics/containers/${line.containerId}`} fw={700} fz="sm">
-                          {line.containerRef}
-                        </Anchor>
-                        {line.containerNo ? <Text fz="sm" c="dimmed">{line.containerNo}</Text> : null}
-                        {line.containerStatus ? (
-                          <Badge size="sm" variant="light" color={containerStatusColour(line.containerStatus)}>
-                            {containerStatusLabel(line.containerStatus)}
-                          </Badge>
-                        ) : null}
-                      </Group>
+              return (
+                <Fragment key={line.key}>
+                {newGroup && (
+                  <Table.Tr data-container-group={line.containerId ?? 'none'}>
+                    <Table.Td colSpan={columnCount} bg="var(--mantine-color-gray-0)">
+                      {line.containerId ? (
+                        <Group gap="xs" wrap="wrap">
+                          <Anchor component={Link} to={`/logistics/containers/${line.containerId}`} fw={700} fz="sm">
+                            {line.containerRef}
+                          </Anchor>
+                          {line.containerNo ? <Text fz="sm" c="dimmed">{line.containerNo}</Text> : null}
+                          {line.containerStatus ? (
+                            <Badge size="sm" variant="light" color={containerStatusColour(line.containerStatus)}>
+                              {containerStatusLabel(line.containerStatus)}
+                            </Badge>
+                          ) : null}
+                        </Group>
+                      ) : (
+                        <Text fz="sm" c="dimmed" fw={600}>Not in a container yet</Text>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                )}
+                <Table.Tr bg={problem ? 'var(--mantine-color-red-0)' : undefined}>
+                  <Table.Td>
+                    <Group gap={4} wrap="nowrap">
+                      {index + 1}
+                      {problem && (
+                        <Tooltip {...ROW_TOOLTIP} label={problem} multiline w={300} withArrow>
+                          <IconAlertTriangle size={15} color="var(--mantine-color-red-6)" />
+                        </Tooltip>
+                      )}
+                    </Group>
+                  </Table.Td>
+
+                  <Table.Td data-line-item={index} className="line-item-link">
+                    {readOnly || line.itemId !== null ? (
+                      line.itemId === null ? (
+                        <Text fz="sm" fw={500}>{line.itemCode}</Text>
+                      ) : (
+                        <Group gap={4} wrap="nowrap">
+                          <Anchor component={Link} to={`/inventory/items/${line.itemId}`} target="_blank" rel="noopener" fz="sm" fw={500} tabIndex={-1} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            {line.itemCode}
+                            <IconExternalLink size={14} className="line-item-link-icon" />
+                          </Anchor>
+                        </Group>
+                      )
                     ) : (
-                      <Text fz="sm" c="dimmed" fw={600}>Not in a container yet</Text>
+                      <Select
+                        data={itemOptions}
+                        value={null}
+                        placeholder="Choose an item"
+                        searchable
+                        /* The open list shows 100 rows at most; typing searches the whole list. */
+                        limit={100}
+                        onChange={(next) => next && onItemChosen(line.key, Number(next))}
+                        error={Boolean(line.error)}
+                        comboboxProps={{ withinPortal: true }}
+                      />
                     )}
+                  </Table.Td>
+
+                  <Table.Td>
+                    <Text fz="sm" c="dimmed">{line.itemName || '—'}</Text>
+                  </Table.Td>
+
+                  <Table.Td>
+                    {fixed ? (
+                      <Text fz="sm">{unitLabel(line.unitTypeName, line.packingFormula)}</Text>
+                    ) : (
+                      <LazySelect
+                        data={line.units.map((u) => ({ value: String(u.id), label: unitLabel(u.unitTypeName, u.packingFormula) }))}
+                        value={line.itemUnitId === null ? null : String(line.itemUnitId)}
+                        placeholder={line.itemId ? unitLabel(line.unitTypeName, line.packingFormula) || 'Unit' : '—'}
+                        disabled={line.itemId === null}
+                        onDropdownOpen={() => line.units.length === 0 && onUnitsNeeded(line.key)}
+                        onChange={(next) => {
+                          const unit = line.units.find((u) => String(u.id) === next)
+                          if (unit) onUnitChosen(line.key, unit)
+                        }}
+                        comboboxProps={{ withinPortal: true }}
+                      />
+                    )}
+                  </Table.Td>
+
+                  <Table.Td>
+                    {readOnly ? (
+                      <Text fz="sm">
+                        {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
+                      </Text>
+                    ) : (
+                      <LazySelect
+                        data={warehouses}
+                        value={line.warehouseId === null ? null : String(line.warehouseId)}
+                        placeholder={warehouses.length === 0 ? 'No active warehouses' : 'Warehouse'}
+                        disabled={warehouses.length === 0}
+                        searchable
+                        /* On Hand is this item IN THIS WAREHOUSE, so the figure beside it goes stale
+                           the moment this changes. Null shows a dash until the new one arrives. */
+                        onChange={(next) => {
+                          if (!next) return
+                          onChange(line.key, { warehouseId: Number(next), onHandBase: null })
+                        }}
+                        error={Boolean(line.error) && line.warehouseId === null}
+                        comboboxProps={{ withinPortal: true }}
+                      />
+                    )}
+                  </Table.Td>
+
+                  <Table.Td ta="right">
+                    {line.onHandBase === null ? (
+                      <Text fz="sm" c="dimmed">—</Text>
+                    ) : (
+                      <Text fz="sm" fw={short ? 700 : 400} c={short ? 'red' : undefined}>
+                        {formatNumber(line.onHandBase)}
+                      </Text>
+                    )}
+                  </Table.Td>
+
+                  <Table.Td data-line-qty={line.key}>
+                    {readOnly ? (
+                      <Text fz="sm" ta="right">{formatNumber(line.quantity)}</Text>
+                    ) : (
+                      <NumberInput
+                        value={line.quantity > 0 ? line.quantity : ''}
+                        min={1}
+                        max={max ?? undefined}
+                        step={1}
+                        allowDecimal={false}
+                        allowNegative={false}
+                        thousandSeparator=","
+                        onChange={(next) => onChange(line.key, { quantity: numberInputValue(next) ?? 0 })}
+                        error={short || over}
+                        description={max === null ? undefined : `Remaining: ${formatNumber(max)}`}
+                        aria-label={`Quantity of line ${index + 1}`}
+                      />
+                    )}
+                  </Table.Td>
+
+                  {showTransit && (
+                    <Table.Td ta="right" data-line-shipped={line.key}>
+                      {line.shippedBase == null || line.shippedBase === 0 ? (
+                        <Text fz="sm" c="dimmed">{line.shippedBase === 0 ? '0' : '—'}</Text>
+                      ) : (
+                        <Tooltip {...ROW_TOOLTIP} label="Recorded as shipped by the supplier (Mark as shipped), base units" withArrow>
+                          <Text fz="sm" fw={600}>{formatNumber(line.shippedBase)}</Text>
+                        </Tooltip>
+                      )}
+                    </Table.Td>
+                  )}
+
+                  {showTransit && (
+                    <Table.Td ta="right" data-line-transit={line.key}>
+                      {line.transitBase == null || line.transitBase === 0 ? (
+                        <Text fz="sm" c="dimmed">{line.transitBase === 0 ? '0' : '—'}</Text>
+                      ) : (
+                        <Tooltip {...ROW_TOOLTIP} label="In containers that are in transit, at port or cleared, not yet received (base units)" withArrow>
+                          <Text fz="sm" fw={600} c="blue">{formatNumber(line.transitBase)}</Text>
+                        </Tooltip>
+                      )}
+                    </Table.Td>
+                  )}
+
+                  {receipts && (
+                    <Table.Td ta="right" data-line-received={line.key}>
+                      <Text fz="sm" fw={(line.receivedBase ?? 0) > 0 ? 600 : 400} c={line.receivedBase == null ? 'dimmed' : undefined}>
+                        {formatNumber(line.receivedBase)}
+                      </Text>
+                    </Table.Td>
+                  )}
+                  {receipts === 'order' && (
+                    <Table.Td ta="right" data-line-invoiced={line.key}>
+                      <Text fz="sm" c={line.invoicedBase == null ? 'dimmed' : undefined}>{formatNumber(line.invoicedBase)}</Text>
+                    </Table.Td>
+                  )}
+                  {receipts === 'order' && (
+                    <Table.Td ta="right" data-line-short={line.key}>
+                      <Text fz="sm" c={line.shortBase == null ? 'dimmed' : line.shortBase > 0 ? 'red' : undefined} fw={(line.shortBase ?? 0) > 0 ? 600 : 400}>
+                        {formatNumber(line.shortBase)}
+                      </Text>
+                    </Table.Td>
+                  )}
+
+                  <Table.Td data-line-cost={line.key}>
+                    {readOnly || !priceEditable ? (
+                      <Tooltip {...ROW_TOOLTIP} label="The cost is set by the document type configuration" disabled={readOnly || priceEditable} withArrow>
+                        <Text fz="sm" ta="right" c={line.unitPrice === null ? 'dimmed' : undefined}>
+                          {line.unitPrice === null ? '—' : formatNumber(line.unitPrice, decimalPlaces)}
+                        </Text>
+                      </Tooltip>
+                    ) : (
+                      <NumberInput
+                        value={line.unitPrice ?? ''}
+                        min={0}
+                        decimalScale={decimalPlaces}
+                        fixedDecimalScale
+                        thousandSeparator=","
+                        placeholder="Last cost"
+                        onChange={(next) => onChange(line.key, { unitPrice: numberInputValue(next) })}
+                        aria-label={`Unit cost of line ${index + 1}`}
+                      />
+                    )}
+                  </Table.Td>
+
+                  <Table.Td>
+                    {readOnly ? (
+                      <Text fz="sm" ta="right">{formatNumber(line.discountPercent, 2)}</Text>
+                    ) : (
+                      <NumberInput
+                        value={line.discountPercent}
+                        min={0}
+                        max={100}
+                        decimalScale={2}
+                        allowNegative={false}
+                        clampBehavior="strict"
+                        onChange={(next) => onChange(line.key, { discountPercent: numberInputValue(next) ?? 0 })}
+                        aria-label={`Discount of line ${index + 1}`}
+                      />
+                    )}
+                  </Table.Td>
+
+                  <Table.Td ta="right">
+                    <Text fz="sm" fw={500}>{formatMoney(purchaseLineTotal(line), currencyCode, decimalPlaces)}</Text>
+                  </Table.Td>
+
+                  {showCosts && (
+                    <>
+                      {/* Per base unit, so FOB and Landed read against each other; the charges are the line's whole share. */}
+                      <Table.Td ta="right" data-line-fob={line.key}>
+                        <Text fz="sm">{formatNumber(line.fobCostBase, 2)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right" data-line-charges={line.key}>
+                        <Text fz="sm">{formatNumber(line.allocatedChargesBase, 2)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right" data-line-landed={line.key}>
+                        <Tooltip {...ROW_TOOLTIP} label="FOB plus the charges allocated to this line, per base unit — what the ledger took" withArrow>
+                          <Text fz="sm" fw={600}>{formatNumber(line.landedCostBase, 2)}</Text>
+                        </Tooltip>
+                      </Table.Td>
+                    </>
+                  )}
+
+                  {showEstimatedLanded && (
+                    <Table.Td ta="right" data-line-est-landed={line.key}>
+                      <Text fz="sm" fw={600}>{formatNumber(line.estimatedLandedCostBase, 2)}</Text>
+                    </Table.Td>
+                  )}
+
+                  <Table.Td>
+                    {readOnly ? (
+                      <Text fz="sm" c="dimmed">{line.notes || '—'}</Text>
+                    ) : (
+                      <TextInput
+                        value={line.notes}
+                        placeholder="Optional"
+                        maxLength={300}
+                        onChange={(event) => onChange(line.key, { notes: event.currentTarget.value })}
+                      />
+                    )}
+                  </Table.Td>
+
+                  <Table.Td>
+                    <Group gap={2} wrap="nowrap" justify="flex-end">
+                      {!readOnly && (
+                        <Tooltip {...ROW_TOOLTIP} label="Remove line" withArrow>
+                          <ActionIcon variant="subtle" color="red" onClick={() => onRemove(line.key)} aria-label={`Remove line ${index + 1}`}>
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                      <Menu position="bottom-end" withinPortal shadow="md" width={200}>
+                        <Menu.Target>
+                          <ActionIcon variant="subtle" tabIndex={-1} aria-label={`Actions for line ${index + 1}`}>
+                            <IconDotsVertical size={16} />
+                          </ActionIcon>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          <Menu.Item
+                            component="a"
+                            href={line.itemId === null ? undefined : `/inventory/items/${line.itemId}`}
+                            target="_blank"
+                            rel="noopener"
+                            leftSection={<IconExternalLink size={14} />}
+                            disabled={line.itemId === null}
+                          >
+                            View item details
+                          </Menu.Item>
+                          {!readOnly && (
+                            <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onRemove(line.key)}>
+                              Remove line
+                            </Menu.Item>
+                          )}
+                        </Menu.Dropdown>
+                      </Menu>
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
-              )}
-              <Table.Tr bg={problem ? 'var(--mantine-color-red-0)' : undefined}>
-                <Table.Td>
-                  <Group gap={4} wrap="nowrap">
-                    {index + 1}
-                    {problem && (
-                      <Tooltip label={problem} multiline w={300} withArrow>
-                        <IconAlertTriangle size={15} color="var(--mantine-color-red-6)" />
-                      </Tooltip>
-                    )}
-                  </Group>
-                </Table.Td>
+                </Fragment>
+              )
+            })}
 
-                <Table.Td data-line-item={index} className="line-item-link">
-                  {readOnly || line.itemId !== null ? (
-                    line.itemId === null ? (
-                      <Text fz="sm" fw={500}>{line.itemCode}</Text>
-                    ) : (
-                      <Group gap={4} wrap="nowrap">
-                        <Anchor component={Link} to={`/inventory/items/${line.itemId}`} target="_blank" rel="noopener" fz="sm" fw={500} tabIndex={-1} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          {line.itemCode}
-                          <IconExternalLink size={14} className="line-item-link-icon" />
-                        </Anchor>
-                      </Group>
-                    )
-                  ) : (
-                    <Select
-                      data={itemOptions}
-                      value={null}
-                      placeholder="Choose an item"
-                      searchable
-                      /* The open list shows 100 rows at most; typing searches the whole list. */
-                      limit={100}
-                      onChange={(next) => next && onItemChosen(line.key, Number(next))}
-                      error={Boolean(line.error)}
-                      comboboxProps={{ withinPortal: true }}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td>
-                  <Text fz="sm" c="dimmed">{line.itemName || '—'}</Text>
-                </Table.Td>
-
-                <Table.Td>
-                  {fixed ? (
-                    <Text fz="sm">{unitLabel(line.unitTypeName, line.packingFormula)}</Text>
-                  ) : (
-                    <Select
-                      data={line.units.map((u) => ({ value: String(u.id), label: unitLabel(u.unitTypeName, u.packingFormula) }))}
-                      value={line.itemUnitId === null ? null : String(line.itemUnitId)}
-                      placeholder={line.itemId ? unitLabel(line.unitTypeName, line.packingFormula) || 'Unit' : '—'}
-                      disabled={line.itemId === null}
-                      onDropdownOpen={() => line.units.length === 0 && onUnitsNeeded(line.key)}
-                      onChange={(next) => {
-                        const unit = line.units.find((u) => String(u.id) === next)
-                        if (unit) onUnitChosen(line.key, unit)
-                      }}
-                      comboboxProps={{ withinPortal: true }}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td>
-                  {readOnly ? (
-                    <Text fz="sm">
-                      {warehouses.find((w) => w.value === String(line.warehouseId))?.label ?? '—'}
-                    </Text>
-                  ) : (
-                    <Select
-                      data={warehouses}
-                      value={line.warehouseId === null ? null : String(line.warehouseId)}
-                      placeholder={warehouses.length === 0 ? 'No active warehouses' : 'Warehouse'}
-                      disabled={warehouses.length === 0}
-                      searchable
-                      /* On Hand is this item IN THIS WAREHOUSE, so the figure beside it goes stale
-                         the moment this changes. Null shows a dash until the new one arrives. */
-                      onChange={(next) => {
-                        if (!next) return
-                        onChange(line.key, { warehouseId: Number(next), onHandBase: null })
-                      }}
-                      error={Boolean(line.error) && line.warehouseId === null}
-                      comboboxProps={{ withinPortal: true }}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td ta="right">
-                  {line.onHandBase === null ? (
-                    <Text fz="sm" c="dimmed">—</Text>
-                  ) : (
-                    <Text fz="sm" fw={short ? 700 : 400} c={short ? 'red' : undefined}>
-                      {formatNumber(line.onHandBase)}
-                    </Text>
-                  )}
-                </Table.Td>
-
-                <Table.Td data-line-qty={line.key}>
-                  {readOnly ? (
-                    <Text fz="sm" ta="right">{formatNumber(line.quantity)}</Text>
-                  ) : (
-                    <NumberInput
-                      value={line.quantity > 0 ? line.quantity : ''}
-                      min={1}
-                      max={max ?? undefined}
-                      step={1}
-                      allowDecimal={false}
-                      allowNegative={false}
-                      thousandSeparator=","
-                      onChange={(next) => onChange(line.key, { quantity: numberInputValue(next) ?? 0 })}
-                      error={short || over}
-                      description={max === null ? undefined : `Remaining: ${formatNumber(max)}`}
-                      aria-label={`Quantity of line ${index + 1}`}
-                    />
-                  )}
-                </Table.Td>
-
-                {showTransit && (
-                  <Table.Td ta="right" data-line-shipped={line.key}>
-                    {line.shippedBase == null || line.shippedBase === 0 ? (
-                      <Text fz="sm" c="dimmed">{line.shippedBase === 0 ? '0' : '—'}</Text>
-                    ) : (
-                      <Tooltip label="Recorded as shipped by the supplier (Mark as shipped), base units" withArrow>
-                        <Text fz="sm" fw={600}>{formatNumber(line.shippedBase)}</Text>
-                      </Tooltip>
-                    )}
-                  </Table.Td>
-                )}
-
-                {showTransit && (
-                  <Table.Td ta="right" data-line-transit={line.key}>
-                    {line.transitBase == null || line.transitBase === 0 ? (
-                      <Text fz="sm" c="dimmed">{line.transitBase === 0 ? '0' : '—'}</Text>
-                    ) : (
-                      <Tooltip label="In containers that are in transit, at port or cleared, not yet received (base units)" withArrow>
-                        <Text fz="sm" fw={600} c="blue">{formatNumber(line.transitBase)}</Text>
-                      </Tooltip>
-                    )}
-                  </Table.Td>
-                )}
-
-                {receipts && (
-                  <Table.Td ta="right" data-line-received={line.key}>
-                    <Text fz="sm" fw={(line.receivedBase ?? 0) > 0 ? 600 : 400} c={line.receivedBase == null ? 'dimmed' : undefined}>
-                      {formatNumber(line.receivedBase)}
-                    </Text>
-                  </Table.Td>
-                )}
-                {receipts === 'order' && (
-                  <Table.Td ta="right" data-line-invoiced={line.key}>
-                    <Text fz="sm" c={line.invoicedBase == null ? 'dimmed' : undefined}>{formatNumber(line.invoicedBase)}</Text>
-                  </Table.Td>
-                )}
-                {receipts === 'order' && (
-                  <Table.Td ta="right" data-line-short={line.key}>
-                    <Text fz="sm" c={line.shortBase == null ? 'dimmed' : line.shortBase > 0 ? 'red' : undefined} fw={(line.shortBase ?? 0) > 0 ? 600 : 400}>
-                      {formatNumber(line.shortBase)}
-                    </Text>
-                  </Table.Td>
-                )}
-
-                <Table.Td data-line-cost={line.key}>
-                  {readOnly || !priceEditable ? (
-                    <Tooltip label="The cost is set by the document type configuration" disabled={readOnly || priceEditable} withArrow>
-                      <Text fz="sm" ta="right" c={line.unitPrice === null ? 'dimmed' : undefined}>
-                        {line.unitPrice === null ? '—' : formatNumber(line.unitPrice, decimalPlaces)}
-                      </Text>
-                    </Tooltip>
-                  ) : (
-                    <NumberInput
-                      value={line.unitPrice ?? ''}
-                      min={0}
-                      decimalScale={decimalPlaces}
-                      fixedDecimalScale
-                      thousandSeparator=","
-                      placeholder="Last cost"
-                      onChange={(next) => onChange(line.key, { unitPrice: numberInputValue(next) })}
-                      aria-label={`Unit cost of line ${index + 1}`}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td>
-                  {readOnly ? (
-                    <Text fz="sm" ta="right">{formatNumber(line.discountPercent, 2)}</Text>
-                  ) : (
-                    <NumberInput
-                      value={line.discountPercent}
-                      min={0}
-                      max={100}
-                      decimalScale={2}
-                      allowNegative={false}
-                      clampBehavior="strict"
-                      onChange={(next) => onChange(line.key, { discountPercent: numberInputValue(next) ?? 0 })}
-                      aria-label={`Discount of line ${index + 1}`}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td ta="right">
-                  <Text fz="sm" fw={500}>{formatMoney(purchaseLineTotal(line), currencyCode, decimalPlaces)}</Text>
-                </Table.Td>
-
-                {showCosts && (
-                  <>
-                    {/* Per base unit, so FOB and Landed read against each other; the charges are the line's whole share. */}
-                    <Table.Td ta="right" data-line-fob={line.key}>
-                      <Text fz="sm">{formatNumber(line.fobCostBase, 2)}</Text>
-                    </Table.Td>
-                    <Table.Td ta="right" data-line-charges={line.key}>
-                      <Text fz="sm">{formatNumber(line.allocatedChargesBase, 2)}</Text>
-                    </Table.Td>
-                    <Table.Td ta="right" data-line-landed={line.key}>
-                      <Tooltip label="FOB plus the charges allocated to this line, per base unit — what the ledger took" withArrow>
-                        <Text fz="sm" fw={600}>{formatNumber(line.landedCostBase, 2)}</Text>
-                      </Tooltip>
-                    </Table.Td>
-                  </>
-                )}
-
-                {showEstimatedLanded && (
-                  <Table.Td ta="right" data-line-est-landed={line.key}>
-                    <Text fz="sm" fw={600}>{formatNumber(line.estimatedLandedCostBase, 2)}</Text>
-                  </Table.Td>
-                )}
-
-                <Table.Td>
-                  {readOnly ? (
-                    <Text fz="sm" c="dimmed">{line.notes || '—'}</Text>
-                  ) : (
-                    <TextInput
-                      value={line.notes}
-                      placeholder="Optional"
-                      maxLength={300}
-                      onChange={(event) => onChange(line.key, { notes: event.currentTarget.value })}
-                    />
-                  )}
-                </Table.Td>
-
-                <Table.Td>
-                  <Group gap={2} wrap="nowrap" justify="flex-end">
-                    {!readOnly && (
-                      <Tooltip label="Remove line" withArrow>
-                        <ActionIcon variant="subtle" color="red" onClick={() => onRemove(line.key)} aria-label={`Remove line ${index + 1}`}>
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                    )}
-                    <Menu position="bottom-end" withinPortal shadow="md" width={200}>
-                      <Menu.Target>
-                        <ActionIcon variant="subtle" tabIndex={-1} aria-label={`Actions for line ${index + 1}`}>
-                          <IconDotsVertical size={16} />
-                        </ActionIcon>
-                      </Menu.Target>
-                      <Menu.Dropdown>
-                        <Menu.Item
-                          component="a"
-                          href={line.itemId === null ? undefined : `/inventory/items/${line.itemId}`}
-                          target="_blank"
-                          rel="noopener"
-                          leftSection={<IconExternalLink size={14} />}
-                          disabled={line.itemId === null}
-                        >
-                          View item details
-                        </Menu.Item>
-                        {!readOnly && (
-                          <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onRemove(line.key)}>
-                            Remove line
-                          </Menu.Item>
-                        )}
-                      </Menu.Dropdown>
-                    </Menu>
-                  </Group>
+            {lines.length === 0 && (
+              <Table.Tr>
+                <Table.Td colSpan={columnCount}>
+                  <Text ta="center" c="dimmed" py="lg">
+                    No lines yet. Scan an item above, add one below, or import a file.
+                  </Text>
                 </Table.Td>
               </Table.Tr>
-              </Fragment>
-            )
-          })}
+            )}
 
-          {lines.length === 0 && (
-            <Table.Tr>
-              <Table.Td colSpan={columnCount}>
-                <Text ta="center" c="dimmed" py="lg">
-                  No lines yet. Scan an item above, add one below, or import a file.
-                </Text>
-              </Table.Td>
-            </Table.Tr>
-          )}
-
-          {!readOnly && allowAdd && (
-            <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={columnCount}>
-                <Text c="dimmed" fz="sm">
-                  + Click to add an item…
-                </Text>
-              </Table.Td>
-            </Table.Tr>
-          )}
-        </Table.Tbody>
-      </Table>
-    </Table.ScrollContainer>
+            {!readOnly && allowAdd && (
+              <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
+                <Table.Td colSpan={columnCount}>
+                  <Text c="dimmed" fz="sm">
+                    + Click to add an item…
+                  </Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
+      <ShownRowsFooter limit={shown.limit} total={lines.length} noun="lines" more={shown.more} all={shown.all} />
+    </>
   )
 }

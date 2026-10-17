@@ -11,6 +11,8 @@ import { AddContainerModal } from '../logistics/AddContainerModal'
 import { AutoPlanModal } from '../logistics/AutoPlanModal'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 import { LinkContainersModal } from './LinkContainersModal'
 import { LEGACY_INVOICE_TEXTS } from './purchaseKind'
 
@@ -119,6 +121,10 @@ export function ShippedInvoiceContainersCard({
     documentNumber: invoice.sourceDocumentNumber ?? null,
     branchId: invoice.branchId,
     warehouseId: invoice.warehouseId,
+    // An invoice made from an order carries the order's supplier: the dialogs show it, never ask for it.
+    supplierId: invoice.supplierId,
+    supplierCode: invoice.supplierCode,
+    supplierName: invoice.supplierName,
   }
 
   function open(next: Dialog) {
@@ -166,6 +172,8 @@ export function ShippedInvoiceContainersCard({
 
   // Several items: one container per item from the invoice, so the summary per container lists its item.
   const containerRows = summary?.containers ?? []
+  // Drawn in steps: an invoice may hold any number of containers (script 78).
+  const shownContainers = useShownRows(containerRows.length)
   const pieces = (containerId: number) => containerRows.filter((c) => c.containerId === containerId).reduce((sum, c) => sum + c.quantityBase, 0)
 
   return (
@@ -289,7 +297,7 @@ export function ShippedInvoiceContainersCard({
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {containerRows.map((c, index) => {
+                  {containerRows.slice(0, shownContainers.limit).map((c, index) => {
                     const first = index === 0 || containerRows[index - 1].containerId !== c.containerId
                     return (
                       <Table.Tr key={`${c.containerId}-${c.itemId}`} data-linked-container={c.containerRef}>
@@ -337,6 +345,7 @@ export function ShippedInvoiceContainersCard({
               </Table>
             </Table.ScrollContainer>
           )}
+          <ShownRowsFooter limit={shownContainers.limit} total={containerRows.length} noun="rows" more={shownContainers.more} all={shownContainers.all} />
         </>
       )}
 

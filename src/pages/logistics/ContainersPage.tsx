@@ -47,7 +47,6 @@ import {
 } from '../../api/logistics/containers'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
-import { purchaseDocumentsApi } from '../../api/purchase/documents'
 import type { ItemLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
@@ -62,6 +61,8 @@ import { formatNumber } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
+import { SearchSelect } from '../../components/ui/SearchSelect'
+import { loadNothing, loadPurchaseInvoices, loadPurchaseOrders, resolvePurchaseDocument } from '../../components/purchase/documentSearch'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
@@ -187,8 +188,6 @@ export function ContainersPage() {
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
-  const [invoices, setInvoices] = useState<{ value: string; label: string }[]>([])
-  const [orders, setOrders] = useState<{ value: string; label: string }[]>([])
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -256,35 +255,13 @@ export function ContainersPage() {
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
     itemsApi.lookup(false).then(setItems).catch(() => {})
-    // The PI filter needs the invoice list, which is the invoices' own permission: without it the
-    // filter simply offers nothing, and the list is not asked for at all - a refused request is a 403
-    // in the browser console, not a quiet empty list.
-    if (canViewInvoices) {
-      purchaseDocumentsApi
-        .list({ documentTypeCode: 'PINV', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-        .then((result) =>
-          setInvoices(
-            result.items
-              .filter((i) => i.documentNumber)
-              .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
-          ),
-        )
-        .catch(() => {})
-    }
-    // Same for the orders filter: the orders' own permission.
-    if (canViewOrders) {
-      purchaseDocumentsApi
-        .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-        .then((result) =>
-          setOrders(
-            result.items
-              .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
-              .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
-          ),
-        )
-        .catch(() => {})
-    }
-  }, [canViewInvoices, canViewOrders])
+  }, [])
+
+  // The PO and PI filters search the server as they are typed (script 78), where they held the 200 newest. Each needs
+  // its own list's permission: without it the filter offers nothing and asks nothing - a refused request is a 403 in
+  // the browser console, not a quiet empty list.
+  const orderLoader = canViewOrders ? loadPurchaseOrders : loadNothing
+  const invoiceLoader = canViewInvoices ? loadPurchaseInvoices : loadNothing
 
   // The advanced panel opens by itself when one of its filters is in use, so a filter is never hidden.
   const advancedActive = ADVANCED.some((key) => filters[key] !== NO_FILTERS[key])
@@ -647,10 +624,28 @@ export function ContainersPage() {
         <Collapse expanded={advancedShown}>
           <FilterBar>
             <FilterBar.Col span={3}>
-              <Select label="Purchase order" placeholder="Any order" data={orders} value={filters.purchaseOrderId} onChange={(next) => setFilter('purchaseOrderId', next)} clearable searchable nothingFoundMessage="No order matches" />
+              <SearchSelect
+                label="Purchase order"
+                placeholder="Type an order no. or supplier"
+                load={orderLoader}
+                resolve={canViewOrders ? resolvePurchaseDocument : undefined}
+                value={filters.purchaseOrderId}
+                onChange={(next) => setFilter('purchaseOrderId', next)}
+                clearable
+                nothingFoundMessage="No order matches"
+              />
             </FilterBar.Col>
             <FilterBar.Col span={3}>
-              <Select label="PI No." placeholder="Any invoice" data={invoices} value={filters.purchaseDocumentId} onChange={(next) => setFilter('purchaseDocumentId', next)} clearable searchable nothingFoundMessage="No invoice matches" />
+              <SearchSelect
+                label="PI No."
+                placeholder="Type an invoice no. or supplier"
+                load={invoiceLoader}
+                resolve={canViewInvoices ? resolvePurchaseDocument : undefined}
+                value={filters.purchaseDocumentId}
+                onChange={(next) => setFilter('purchaseDocumentId', next)}
+                clearable
+                nothingFoundMessage="No invoice matches"
+              />
             </FilterBar.Col>
             <FilterBar.Col span={3}>
               <TextInput label="Commercial Invoice No." value={filters.commercialInvoiceNo} onChange={(e) => setFilter('commercialInvoiceNo', e.currentTarget.value)} onKeyDown={(e) => { if (e.key === 'Enter') grid.commitFilters() }} />

@@ -18,11 +18,11 @@ import { useMediaQuery } from '@mantine/hooks'
 import { IconArrowLeft, IconChecks, IconClipboardCopy, IconDownload, IconFileSpreadsheet, IconListCheck } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containerStatusColour, saveBlob } from '../../api/logistics/containers'
-import { movementsApi, type MovementContainerMatchDto, type MovementPlaceQuery } from '../../api/logistics/movements'
+import type { MovementContainerMatchDto, MovementPlaceQuery } from '../../api/logistics/movements'
 import { formatDateTime, formatNumber, todayDateOnly } from '../format'
 import { buildWorkbook, readSpreadsheet, SpreadsheetError, type SheetRow } from '../spreadsheet'
 import { notify } from '../ui/notify'
-import { fromMatch, placeKey, placeText, WHOLE_BADGE, type CardContainer } from './movementContainers'
+import { fromMatch, matchAll, placeKey, placeText, WHOLE_BADGE, type CardContainer } from './movementContainers'
 
 /** The template Bilal keeps in public/templates: a "Containers" sheet (header "Container no."), the instructions, an example. */
 const TEMPLATE_URL = '/templates/Movement_Containers_Import_Template.xlsx'
@@ -206,7 +206,8 @@ export function ImportMovementContainersModal({
     setChecking(true)
     setCheckError(null)
     try {
-      const rows = await movementsApi.matchContainers(
+      // Any number of them (script 78): matchAll sends a file above the API's 10,000 in parts.
+      const rows = await matchAll(
         query,
         entries.map((e) => e.value),
       )
@@ -219,7 +220,7 @@ export function ImportMovementContainersModal({
       setCheckedAt(new Date())
       setShow(null)
     } catch (err) {
-      // The server's sentence - "At most 500 container numbers at a time." - as it comes.
+      // The server's sentence, as it comes.
       setCheckError(err instanceof ApiError ? err.message : 'The numbers could not be checked.')
     } finally {
       setChecking(false)

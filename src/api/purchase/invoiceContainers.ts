@@ -111,6 +111,9 @@ export interface AddInvoiceContainerRequest {
   portOfLoadingId: number | null
   portOfDestinationId: number | null
   eta: string | null
+  /** (78) The dialog's defaults: the order's last container's forwarder (else its supplier), the supplier's country. */
+  forwarderId?: number | null
+  countryOfOrigin?: string | null
   allowOverCapacity: boolean
 }
 

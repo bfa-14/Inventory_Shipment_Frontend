@@ -722,6 +722,8 @@ export interface AvailablePoLineQuery {
   search?: string
   /** The container being edited: what it holds counts apart. */
   containerId?: number
+  /** At most this many lines (1-500, the server's default 200). */
+  top?: number
 }
 
 export interface InvoiceCandidateQuery {
@@ -826,6 +828,47 @@ export interface AttachmentCreatedDto {
 }
 
 /* ── many containers per order: auto-plan and bulk actions ────────────────────────────────── */
+
+/**
+ * What Auto-plan containers… and Add Container… fill in by themselves for an order (script 78): the order's supplier
+ * (shown read-only: a container's goods come from its order lines), the forwarder (of the order's most recent container
+ * that has one, else the supplier; the dialog keeps it editable) and the country of origin (the supplier's).
+ */
+export interface ContainerOrderDefaultsDto {
+  purchaseOrderId: number
+  purchaseOrderNumber: string | null
+  supplierId: number
+  supplierCode: string
+  supplierName: string
+  /** ISO 3166-1 alpha-2, null when the supplier has none. */
+  countryOfOrigin: string | null
+  forwarderId: number
+  forwarderCode: string
+  forwarderName: string
+  /** LastContainer: the forwarder of lastContainerRef; Supplier: the order's supplier. */
+  forwarderSource: 'LastContainer' | 'Supplier'
+  lastContainerRef: string | null
+}
+
+/** A container in a picker (script 78): what a charge's "By pieces" split needs too. */
+export interface ContainerLookupDto {
+  id: number
+  containerRef: string
+  containerNo: string | null
+  status: number
+  /** Pieces loaded (base units). */
+  pieces: number
+  purchaseOrderId: number | null
+}
+
+/** `ids`: those containers, any number; otherwise at most `top` (default 50, at most 200) matching `search`, newest first. */
+export interface ContainerLookupRequest {
+  ids?: number[]
+  search?: string
+  /** 6 = the containers a charge can still be typed for (Draft … Offloaded). */
+  maxStatus?: number
+  top?: number
+}
 
 export interface AutoPlanRequest {
   purchaseOrderId: number
@@ -1067,7 +1110,15 @@ export const containersApi = {
   removeAttachment: (attachmentId: number, allShared: boolean) =>
     request<void>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, { method: 'DELETE' }),
 
-  /** The proposed containers of an approved order for one container type; nothing is saved. */
+  /** What the container dialogs fill in by themselves for an order: supplier, forwarder, country of origin. */
+  orderDefaults: (purchaseOrderId: number, signal?: AbortSignal) =>
+    request<ContainerOrderDefaultsDto>(`${BASE}/order-defaults/${purchaseOrderId}`, { signal }),
+
+  /** The container pickers: the given ids in one call, or the newest matching what is typed. */
+  lookup: (payload: ContainerLookupRequest, signal?: AbortSignal) =>
+    request<ContainerLookupDto[]>(`${BASE}/lookup`, { method: 'POST', body: payload, signal }),
+
+  /** The proposed containers of an approved order for one container type (any number of them, script 78); nothing is saved. */
   autoPlan: (payload: AutoPlanRequest, signal?: AbortSignal) =>
     request<AutoPlanDto>(`${BASE}/auto-plan`, { method: 'POST', body: payload, signal }),
 

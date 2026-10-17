@@ -265,10 +265,12 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
   const [search, setSearch] = useState('')
   const [debounced] = useDebouncedValue(search, 350)
   /** The answer, with the search it is for: while a newer search runs, the loader shows instead of stale rows. */
-  const [result, setResult] = useState<{ term: string; rows: ReceivableContainerDto[] | null; error: string | null } | null>(null)
+  const [result, setResult] = useState<{ term: string; rows: ReceivableContainerDto[] | null; total: number; error: string | null } | null>(null)
   const current = result !== null && result.term === debounced ? result : null
   const containers = current?.rows ?? null
   const error = current?.error ?? null
+  /** How many match: the server lists at most 200 of them (script 78 says so instead of cutting silently). */
+  const matching = current?.total ?? 0
   const [creating, setCreating] = useState<number | null>(null)
 
   useEffect(() => {
@@ -279,10 +281,10 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
         // The server's list: status 2-5 and no draft or posted receipt (a draft that exists is opened, not created again).
         const rows = await goodsReceiptsApi.receivableContainers({ search: term.trim() || undefined }, controller.signal)
         if (controller.signal.aborted) return
-        setResult({ term, rows: rows.filter((c) => c.canReceive), error: null })
+        setResult({ term, rows: rows.filter((c) => c.canReceive), total: rows[0]?.totalCount ?? rows.length, error: null })
       } catch (err) {
         if (controller.signal.aborted) return
-        setResult({ term, rows: null, error: err instanceof ApiError ? err.message : 'The containers could not be loaded.' })
+        setResult({ term, rows: null, total: 0, error: err instanceof ApiError ? err.message : 'The containers could not be loaded.' })
       }
     })()
     return () => controller.abort()
@@ -337,6 +339,13 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
           No confirmed container is waiting for a goods receipt{debounced.trim() ? ' with this search' : ''}.
         </Text>
       )}
+
+      {containers !== null && matching > containers.length ? (
+        <Text size="sm" c="dimmed" data-receivable-more>
+          Showing {formatNumber(containers.length)} of {formatNumber(matching)} containers, the delivered ones first: type a ref, a
+          container no. or an order to narrow the list.
+        </Text>
+      ) : null}
 
       {containers !== null && containers.length > 0 && (
         <Table.ScrollContainer minWidth={720}>

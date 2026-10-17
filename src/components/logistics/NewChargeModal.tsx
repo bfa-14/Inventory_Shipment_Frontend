@@ -26,7 +26,7 @@ import {
   type ChargeGroupMemberDto,
   type SplitRule,
 } from '../../api/logistics/containerCharges'
-import { containersApi } from '../../api/logistics/containers'
+import { containersApi, type ContainerLookupDto } from '../../api/logistics/containers'
 import { movementsApi, type MovementContainerDto, type MovementListDto } from '../../api/logistics/movements'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -38,6 +38,8 @@ import { PERMISSIONS } from '../../navigation'
 import { currencyLabel, formatMoney, formatNumber, numberInputValue, todayDateOnly } from '../format'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
+import { SearchMultiSelect, SearchSelect, type SearchOption, type SearchOptionsLoader } from '../ui/SearchSelect'
+import { containerLabel } from '../purchase/documentSearch'
 
 interface NewChargeModalProps {
   opened: boolean
@@ -62,6 +64,24 @@ const LAST_CHARGEABLE_STATUS = 6
 
 function movementContainer(c: MovementContainerDto): ContainerOption {
   return { id: c.containerId, ref: c.containerRef, containerNo: c.containerNo, pieces: c.totalAllocatedBase }
+}
+
+function lookupContainer(c: ContainerLookupDto): ContainerOption {
+  return { id: c.id, ref: c.containerRef, containerNo: c.containerNo, pieces: c.pieces }
+}
+
+function containerOption(c: ContainerOption): SearchOption {
+  return { value: String(c.id), label: containerLabel({ containerRef: c.ref, containerNo: c.containerNo }) }
+}
+
+function movementLabel(m: Pick<MovementListDto, 'movementNo' | 'typeName' | 'fromCode' | 'toCode'>): string {
+  return `${m.movementNo} - ${m.typeName} (${m.fromCode} → ${m.toCode})`
+}
+
+/** Movements that are not cancelled, by number, from the server (not a preloaded 200). */
+const loadMovements: SearchOptionsLoader = async (search, signal) => {
+  const page = await movementsApi.list({ search: search || undefined, pageSize: 50 }, signal)
+  return page.items.filter((m) => m.status !== 4).map((m) => ({ value: String(m.id), label: movementLabel(m) }))
 }
 
 function round2(value: number): number {
@@ -122,9 +142,10 @@ function NewChargeDialog({
   const { hasPermission } = useAuth()
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
 
-  const [allContainers, setAllContainers] = useState<ContainerOption[]>([])
+  /** Every container this dialog has seen - the presets, the search answers, a movement's - by id: the split needs their pieces. */
+  const [known, setKnown] = useState<Map<number, ContainerOption>>(new Map())
   const [movementContainers, setMovementContainers] = useState<ContainerOption[] | null>(null)
-  const [movements, setMovements] = useState<MovementListDto[]>([])
+  const [pickedMovement, setPickedMovement] = useState<SearchOption | null>(null)
   const [chargeTypes, setChargeTypes] = useState<ChargeTypeLookupDto[]>([])
   const [currencies, setCurrencies] = useState<CurrencyLookupDto[]>([])
   const [providers, setProviders] = useState<PartyLookupDto[]>([])
@@ -158,46 +179,52 @@ function NewChargeDialog({
   const isBase = currency?.isBaseCurrency ?? true
   const chargeType = chargeTypes.find((t) => String(t.id) === chargeTypeId)
 
+  const remember = useCallback((rows: ContainerOption[]) => {
+    setKnown((current) => {
+      const next = new Map(current)
+      for (const row of rows) next.set(row.id, row)
+      return next
+    })
+  }, [])
+
+  /** The containers a charge can still be typed for, matching what is typed - from the server, any number of them. */
+  const loadContainers = useCallback<SearchOptionsLoader>(
+    async (search, signal) => {
+      const rows = (await containersApi.lookup({ search: search || undefined, maxStatus: LAST_CHARGEABLE_STATUS, top: 50 }, signal)).map(lookupContainer)
+      remember(rows)
+      return rows.map(containerOption)
+    },
+    [remember],
+  )
+
   /** A movement restricts the containers to the ones it carries, and preselects them all. */
   const loadMovement = useCallback(async (id: number) => {
     try {
       const movement = await movementsApi.get(id)
       const rows = movement.containers.map(movementContainer)
+      remember(rows)
       setMovementContainers(rows)
       setContainerIds(rows.map((r) => String(r.id)))
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The movement could not be loaded.')
     }
-  }, [])
+  }, [remember])
 
   const [presetIds] = useState<number[]>(presetContainerIds ?? [])
   const [presetMovement] = useState<number | null>(presetMovementId)
 
-  // Lookups, once per opening. A preset container that is not in the list (a later status) is read on its own.
+  // Lookups, once per opening. The preset containers - any number of them (script 78) - are read in ONE call, where
+  // they were looked for in the 200 newest and the others read one GET each.
   useEffect(() => {
     let alive = true
-    containersApi
-      .list({ pageSize: 200, sortBy: 'ContainerRef', sortDir: 'desc' })
-      .then(async (result) => {
-        const rows: ContainerOption[] = result.items
-          .filter((c) => c.status <= LAST_CHARGEABLE_STATUS)
-          .map((c) => ({ id: c.id, ref: c.containerRef, containerNo: c.containerNo, pieces: c.totalQtyBase }))
-        const missing = presetIds.filter((id) => !rows.some((r) => r.id === id))
-        const extra = await Promise.all(
-          missing.map((id) =>
-            containersApi
-              .get(id)
-              .then((c): ContainerOption => ({ id: c.id, ref: c.containerRef, containerNo: c.containerNo, pieces: c.totalAllocatedBase }))
-              .catch(() => null),
-          ),
-        )
-        if (alive) setAllContainers([...rows, ...extra.filter((c): c is ContainerOption => c !== null)])
-      })
-      .catch(() => notify.error('The containers could not be loaded.'))
-    movementsApi
-      .list({ pageSize: 200 })
-      .then((result) => alive && setMovements(result.items.filter((m) => m.status !== 4)))
-      .catch(() => {})
+    if (presetIds.length > 0) {
+      containersApi
+        .lookup({ ids: presetIds })
+        .then((rows) => {
+          if (alive) remember(rows.map(lookupContainer))
+        })
+        .catch(() => notify.error('The containers could not be loaded.'))
+    }
     chargeTypesApi.lookup().then((types) => alive && setChargeTypes(types)).catch(() => notify.error('The charge types could not be loaded.'))
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: true }).then((p) => alive && setProviders(p)).catch(() => {})
     currenciesApi
@@ -215,6 +242,8 @@ function NewChargeDialog({
         .then((movement) => {
           if (!alive) return
           const rows = movement.containers.map(movementContainer)
+          remember(rows)
+          setPickedMovement({ value: String(movement.id), label: movementLabel(movement) })
           setMovementContainers(rows)
           setContainerIds(rows.map((r) => String(r.id)))
         })
@@ -224,7 +253,7 @@ function NewChargeDialog({
       alive = false
     }
     // The presets are held in state: read once per opening, as the dialog was opened.
-  }, [presetIds, presetMovement])
+  }, [presetIds, presetMovement, remember])
 
   function chooseMovement(next: string | null) {
     setMovementId(next)
@@ -257,18 +286,12 @@ function NewChargeDialog({
     [currencies],
   )
 
-  const options = movementContainers ?? allContainers
-  const containerData = useMemo(
-    () => options.map((c) => ({ value: String(c.id), label: c.containerNo ? `${c.ref} (${c.containerNo})` : c.ref })),
-    [options],
-  )
+  const movementData = useMemo(() => (movementContainers ?? []).map(containerOption), [movementContainers])
   const chosen = useMemo(
-    () =>
-      containerIds
-        .map((id) => options.find((c) => String(c.id) === id) ?? allContainers.find((c) => String(c.id) === id))
-        .filter((c): c is ContainerOption => c !== undefined),
-    [containerIds, options, allContainers],
+    () => containerIds.map((id) => known.get(Number(id))).filter((c): c is ContainerOption => c !== undefined),
+    [containerIds, known],
   )
+  const chosenOptions = useMemo(() => chosen.map(containerOption), [chosen])
   const preview = splitPreview(splitRule, total ?? 0, chosen)
   const previewSum = preview ? preview.reduce((acc, value) => acc + value, 0) : null
   const effectiveRate = isBase ? 1 : rate
@@ -397,29 +420,47 @@ function NewChargeDialog({
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" verticalSpacing="sm">
         {/* openOnFocus off: the dialog opens with the cursor here, and an open list over the form would take
             the next click - picking a movement replaces the containers the dialog was opened with. */}
-        <Select
+        <SearchSelect
           openOnFocus={false}
           label="Movement"
-          placeholder="Optional"
+          placeholder="Optional - type a movement no."
           description="Picking one puts the charge on its containers"
-          data={movements.map((m) => ({ value: String(m.id), label: `${m.movementNo} - ${m.typeName} (${m.fromCode} → ${m.toCode})` }))}
+          load={loadMovements}
+          selected={pickedMovement}
           value={movementId}
-          onChange={chooseMovement}
-          searchable
+          onChange={(next) => chooseMovement(next)}
           clearable
           nothingFoundMessage="No movement matches"
         />
-        <MultiSelect
-          label="Containers"
-          withAsterisk
-          placeholder={containerIds.length ? undefined : 'Choose containers'}
-          data={containerData}
-          value={containerIds}
-          onChange={setContainerIds}
-          searchable
-          nothingFoundMessage="No container matches"
-          error={errors.containers}
-        />
+        {movementContainers ? (
+          <MultiSelect
+            label="Containers"
+            withAsterisk
+            description={`The containers of the movement: ${formatNumber(containerIds.length)} chosen`}
+            placeholder={containerIds.length ? undefined : 'Choose containers'}
+            data={movementData}
+            value={containerIds}
+            onChange={setContainerIds}
+            searchable
+            hidePickedOptions
+            nothingFoundMessage="No container matches"
+            error={errors.containers}
+          />
+        ) : (
+          <SearchMultiSelect
+            label="Containers"
+            withAsterisk
+            description={containerIds.length > 0 ? `${formatNumber(containerIds.length)} chosen` : 'Type a container ref or no.'}
+            placeholder={containerIds.length ? undefined : 'Choose containers'}
+            load={loadContainers}
+            selected={chosenOptions}
+            value={containerIds}
+            onChange={setContainerIds}
+            hidePickedOptions
+            nothingFoundMessage="No container matches"
+            error={errors.containers}
+          />
+        )}
 
         <Stack gap={4}>
           <Select

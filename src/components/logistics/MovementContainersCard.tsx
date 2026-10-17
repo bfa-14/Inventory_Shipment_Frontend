@@ -19,6 +19,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { IconFileSpreadsheet, IconSearch } from '@tabler/icons-react'
+import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
 import { CONTAINER_STATUSES, containerStatusColour } from '../../api/logistics/containers'
 import {
@@ -27,13 +28,15 @@ import {
   type MovementDto,
   type MovementPlaceQuery,
 } from '../../api/logistics/movements'
-import { partiesApi } from '../../api/masterdata/parties'
-import { purchaseDocumentsApi } from '../../api/purchase/documents'
 import type { PagedResult } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { PERMISSIONS } from '../../navigation'
 import { formatNumber } from '../format'
 import { notify } from '../ui/notify'
+import { SearchSelect } from '../ui/SearchSelect'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
+import { loadNothing, loadPurchaseOrders, loadSuppliers } from '../purchase/documentSearch'
 import { ContainerReceiptCell } from './ContainerReceiptCell'
 import { containerReceiptOf, type ContainerReceipt } from './containerReceipt'
 import { ImportMovementContainersModal } from './ImportMovementContainersModal'
@@ -50,16 +53,11 @@ import {
 
 const CONTAINERS_ROUTE = '/logistics/containers'
 
-/** The API's page ceiling: more candidates than this and the reader is asked to narrow the filters. */
-const PAGE_SIZE = 200
-
 /** Offloaded, closed and cancelled containers are never candidates. */
 const STATUS_OPTIONS = CONTAINER_STATUSES.filter((s) => s.value <= 5).map((s) => ({
   value: String(s.value),
   label: s.label,
 }))
-
-type Option = { value: string; label: string }
 
 interface MovementContainersCardProps {
   /** The saved movement; null = not saved yet. */
@@ -106,14 +104,13 @@ export function MovementContainersCard({
 }: MovementContainersCardProps) {
   const { hasPermission } = useAuth()
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
+  const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const [search, setSearch] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
   const [purchaseOrderId, setPurchaseOrderId] = useState<string | null>(null)
   const [supplierId, setSupplierId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [includeBlocked, setIncludeBlocked] = useState(false)
-  const [orders, setOrders] = useState<Option[]>([])
-  const [suppliers, setSuppliers] = useState<Option[]>([])
   const [importOpen, setImportOpen] = useState(false)
   /** The last answer and the query it answers: loading is "the answer is for another query". */
   const [answer, setAnswer] = useState<{
@@ -137,26 +134,9 @@ export function MovementContainersCard({
     return () => clearTimeout(timer)
   }, [search, appliedSearch])
 
-  useEffect(() => {
-    if (readOnly) return
-    partiesApi
-      .lookup({ partyType: 'Supplier', activeOnly: false })
-      .then((list) =>
-        setSuppliers(list.map((p) => ({ value: String(p.id), label: `${p.partyCode} - ${p.partyName}` }))),
-      )
-      .catch(() => {})
-    // The orders' own permission: without it the filter simply offers nothing.
-    purchaseDocumentsApi
-      .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-      .then((result) =>
-        setOrders(
-          result.items
-            .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
-            .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
-        ),
-      )
-      .catch(() => {})
-  }, [readOnly])
+  // The order and supplier filters search the server as they are typed (script 78), where they held the 200 newest
+  // orders and the first 50 suppliers. The orders' own permission: without it the filter offers nothing.
+  const orderLoader = canViewOrders ? loadPurchaseOrders : loadNothing
 
   /* ── the candidates of the From on the page, reloaded at once when it changes ── */
 
@@ -174,7 +154,6 @@ export function MovementContainersCard({
             supplierId: supplierId === null ? undefined : Number(supplierId),
             status: status === null ? undefined : Number(status),
             includeBlocked: includeBlocked || undefined,
-            pageSize: PAGE_SIZE,
           },
     // query is rebuilt every render; its parts are the dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,9 +174,25 @@ export function MovementContainersCard({
   useEffect(() => {
     if (readOnly || candidateQuery === null || candidateKey === null) return
     const controller = new AbortController()
-    movementsApi
-      .containerCandidates(candidateQuery, controller.signal)
-      .then((data) => setAnswer({ key: candidateKey, data, error: null }))
+    // EVERY CANDIDATE AT THE FROM (script 78: any number of containers), in pages of 5,000: one page of 200 left the
+    // others out of the list and out of "Tick every container of the list".
+    fetchAllPages(
+      (page, pageSize) => movementsApi.containerCandidates({ ...candidateQuery, page, pageSize }, controller.signal),
+      { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE },
+    )
+      .then((all) => {
+        if (controller.signal.aborted) return
+        const data: PagedResult<MovementContainerCandidateDto> = {
+          items: all.items,
+          page: 1,
+          pageSize: all.items.length,
+          totalCount: all.items.length,
+          totalPages: 1,
+          hasNext: false,
+          hasPrevious: false,
+        }
+        setAnswer({ key: candidateKey, data, error: null })
+      })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setAnswer({
@@ -324,6 +319,8 @@ export function MovementContainersCard({
   const selectable = (c: CardContainer) =>
     tickedIds.has(c.containerId) || (judgedNow(c) !== null && !judgedNow(c)?.reason && !judgedNow(c)?.unknown)
   const selectableRows = rows.filter(selectable)
+  // Drawn in steps (thousands of candidates at a From froze the page); "Tick every container of the list" ticks all.
+  const shownRows = useShownRows(rows.length, candidateKey)
   const allTicked = selectableRows.length > 0 && selectableRows.every((c) => tickedIds.has(c.containerId))
   const someTicked = selectableRows.some((c) => tickedIds.has(c.containerId))
 
@@ -398,23 +395,21 @@ export function MovementContainersCard({
                   }}
                   style={{ flex: '1 1 240px' }}
                 />
-                <Select
+                <SearchSelect
                   label="Purchase order"
                   placeholder="Any"
-                  data={orders}
+                  load={orderLoader}
                   value={purchaseOrderId}
-                  onChange={setPurchaseOrderId}
-                  searchable
+                  onChange={(next) => setPurchaseOrderId(next)}
                   clearable
                   style={{ flex: '1 1 200px' }}
                 />
-                <Select
+                <SearchSelect
                   label="Supplier"
                   placeholder="Any"
-                  data={suppliers}
+                  load={loadSuppliers}
                   value={supplierId}
-                  onChange={setSupplierId}
-                  searchable
+                  onChange={(next) => setSupplierId(next)}
                   clearable
                   style={{ flex: '1 1 200px' }}
                 />
@@ -441,12 +436,6 @@ export function MovementContainersCard({
                   </Text>
                 </Group>
               </Group>
-              {candidates && candidates.totalCount > candidates.items.length ? (
-                <Alert color="blue" variant="light" py={6} mb="xs">
-                  Showing {formatNumber(candidates.items.length)} of {formatNumber(candidates.totalCount)}: narrow the
-                  filters.
-                </Alert>
-              ) : null}
               {answer?.error && answer.key === candidateKey ? (
                 <Alert color="red" variant="light" mb="xs">
                   {answer.error}
@@ -469,125 +458,143 @@ export function MovementContainersCard({
                   : `No container at ${fromName} can join this movement${includeBlocked ? '.' : ': the switch shows the ones that cannot be added.'}`}
             </Text>
           ) : (
-            <ScrollArea type="auto">
-              <Table miw={1300} verticalSpacing={4} data-movement-container-rows>
-                <Table.Thead>
-                  <Table.Tr>
-                    {editable ? (
-                      <Table.Th w={36}>
-                        <Checkbox
-                          aria-label="Tick every container of the list"
-                          checked={allTicked}
-                          indeterminate={!allTicked && someTicked}
-                          disabled={selectableRows.length === 0}
-                          onChange={(event) => toggleAll(event.currentTarget.checked)}
-                        />
-                      </Table.Th>
-                    ) : null}
-                    <Table.Th>Container Ref.</Table.Th>
-                    <Table.Th>Container No.</Table.Th>
-                    <Table.Th>Type</Table.Th>
-                    <Table.Th>Order(s)</Table.Th>
-                    <Table.Th>Supplier(s)</Table.Th>
-                    <Table.Th>Items</Table.Th>
-                    <Table.Th ta="right">Pieces</Table.Th>
-                    <Table.Th>Place</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th>Receipt</Table.Th>
-                    <Table.Th>Note</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {rows.map((c) => {
-                    const on = tickedIds.has(c.containerId)
-                    const place = judgedNow(c)
-                    const refused = editable ? (place?.reason ?? null) : null
-                    const canTick = selectable(c)
-                    return (
-                      <Fragment key={c.containerId}>
-                        <Table.Tr
-                          data-container-row={c.containerRef}
-                          data-ticked={on || undefined}
-                          bg={on ? 'var(--mantine-color-blue-0)' : undefined}
-                          style={{
-                            ...(!on && refused ? { opacity: 0.75 } : {}),
-                            ...(refused ? { borderBottom: 0 } : {}),
-                          }}
-                        >
-                          {editable ? (
-                            <Table.Td>
-                              <Tooltip label={refused ?? ''} disabled={canTick || !refused} withArrow multiline w={280}>
-                                <span>
-                                  <Checkbox
-                                    aria-label={`Tick ${c.containerRef}`}
-                                    checked={on}
-                                    disabled={!canTick}
-                                    onChange={(event) => toggle(c, event.currentTarget.checked)}
-                                  />
-                                </span>
-                              </Tooltip>
-                            </Table.Td>
-                          ) : null}
-                          <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                            <Anchor component={Link} to={`${CONTAINERS_ROUTE}/${c.containerId}`} fz="sm" fw={600}>
-                              {c.containerRef}
-                            </Anchor>
-                          </Table.Td>
-                          <Table.Td style={{ whiteSpace: 'nowrap' }}>{c.containerNo ?? '—'}</Table.Td>
-                          <Table.Td>{c.containerTypeCode || '—'}</Table.Td>
-                          <Table.Td style={{ whiteSpace: 'nowrap' }}>{c.orderNumbers ?? '—'}</Table.Td>
-                          <Table.Td>{c.supplierNames ?? '—'}</Table.Td>
-                          <Table.Td>{c.itemSummary ?? '—'}</Table.Td>
-                          <Table.Td ta="right">{formatNumber(c.pieces)}</Table.Td>
-                          <Table.Td maw={260}>
-                            <Text fz="sm">
-                              {place && !place.unknown ? placeText(place) : (c.currentLocation ?? '—')}
-                            </Text>
-                          </Table.Td>
-                          <Table.Td>
-                            {c.statusName ? (
-                              <Badge
-                                color={containerStatusColour(c.status)}
-                                variant={c.status === 7 ? 'filled' : 'light'}
-                                styles={WHOLE_BADGE}
-                              >
-                                {c.statusName}
-                              </Badge>
-                            ) : (
-                              '—'
-                            )}
-                          </Table.Td>
-                          <Table.Td style={{ whiteSpace: 'nowrap' }} data-container-receipt>
-                            <ContainerReceiptCell receipt={receipts.get(c.containerId) ?? null} canView={canViewReceipts} />
-                          </Table.Td>
-                          <Table.Td maw={320}>
-                            {refused ? (
-                              <Text fz="xs" c="red.7" data-container-reason>
-                                {refused}
-                              </Text>
-                            ) : place?.note ? (
-                              <Text fz="xs" c="dimmed" data-container-note>
-                                {place.note}
-                              </Text>
+            <>
+              <ScrollArea type="auto">
+                <Table miw={1300} verticalSpacing={4} data-movement-container-rows>
+                  <Table.Thead>
+                    <Table.Tr>
+                      {editable ? (
+                        <Table.Th w={36}>
+                          <Checkbox
+                            aria-label="Tick every container of the list"
+                            checked={allTicked}
+                            indeterminate={!allTicked && someTicked}
+                            disabled={selectableRows.length === 0}
+                            onChange={(event) => toggleAll(event.currentTarget.checked)}
+                          />
+                        </Table.Th>
+                      ) : null}
+                      <Table.Th>Container Ref.</Table.Th>
+                      <Table.Th>Container No.</Table.Th>
+                      <Table.Th>Type</Table.Th>
+                      <Table.Th>Order(s)</Table.Th>
+                      <Table.Th>Supplier(s)</Table.Th>
+                      <Table.Th>Items</Table.Th>
+                      <Table.Th ta="right">Pieces</Table.Th>
+                      <Table.Th>Place</Table.Th>
+                      <Table.Th>Status</Table.Th>
+                      <Table.Th>Receipt</Table.Th>
+                      <Table.Th>Note</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {rows.slice(0, shownRows.limit).map((c) => {
+                      const on = tickedIds.has(c.containerId)
+                      const place = judgedNow(c)
+                      const refused = editable ? (place?.reason ?? null) : null
+                      const canTick = selectable(c)
+                      return (
+                        <Fragment key={c.containerId}>
+                          <Table.Tr
+                            data-container-row={c.containerRef}
+                            data-ticked={on || undefined}
+                            bg={on ? 'var(--mantine-color-blue-0)' : undefined}
+                            style={{
+                              ...(!on && refused ? { opacity: 0.75 } : {}),
+                              ...(refused ? { borderBottom: 0 } : {}),
+                            }}
+                          >
+                            {editable ? (
+                              <Table.Td>
+                                <Tooltip
+                                  label={refused ?? ''}
+                                  disabled={canTick || !refused}
+                                  withArrow
+                                  multiline
+                                  w={280}
+                                >
+                                  <span>
+                                    <Checkbox
+                                      aria-label={`Tick ${c.containerRef}`}
+                                      checked={on}
+                                      disabled={!canTick}
+                                      onChange={(event) => toggle(c, event.currentTarget.checked)}
+                                    />
+                                  </span>
+                                </Tooltip>
+                              </Table.Td>
                             ) : null}
-                          </Table.Td>
-                        </Table.Tr>
-                        {refused ? (
-                          // The reason again across the row: on a narrow card the Note column is scrolled out of view.
-                          <Table.Tr bg={on ? 'var(--mantine-color-blue-0)' : undefined}>
-                            <Table.Td colSpan={editable ? 12 : 11} pt={0}>
-                              <Text fz="xs" c="red.7">
-                                {c.containerRef}: {refused}
+                            <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                              <Anchor component={Link} to={`${CONTAINERS_ROUTE}/${c.containerId}`} fz="sm" fw={600}>
+                                {c.containerRef}
+                              </Anchor>
+                            </Table.Td>
+                            <Table.Td style={{ whiteSpace: 'nowrap' }}>{c.containerNo ?? '—'}</Table.Td>
+                            <Table.Td>{c.containerTypeCode || '—'}</Table.Td>
+                            <Table.Td style={{ whiteSpace: 'nowrap' }}>{c.orderNumbers ?? '—'}</Table.Td>
+                            <Table.Td>{c.supplierNames ?? '—'}</Table.Td>
+                            <Table.Td>{c.itemSummary ?? '—'}</Table.Td>
+                            <Table.Td ta="right">{formatNumber(c.pieces)}</Table.Td>
+                            <Table.Td maw={260}>
+                              <Text fz="sm">
+                                {place && !place.unknown ? placeText(place) : (c.currentLocation ?? '—')}
                               </Text>
+                            </Table.Td>
+                            <Table.Td>
+                              {c.statusName ? (
+                                <Badge
+                                  color={containerStatusColour(c.status)}
+                                  variant={c.status === 7 ? 'filled' : 'light'}
+                                  styles={WHOLE_BADGE}
+                                >
+                                  {c.statusName}
+                                </Badge>
+                              ) : (
+                                '—'
+                              )}
+                            </Table.Td>
+                            <Table.Td style={{ whiteSpace: 'nowrap' }} data-container-receipt>
+                              <ContainerReceiptCell
+                                receipt={receipts.get(c.containerId) ?? null}
+                                canView={canViewReceipts}
+                              />
+                            </Table.Td>
+                            <Table.Td maw={320}>
+                              {refused ? (
+                                <Text fz="xs" c="red.7" data-container-reason>
+                                  {refused}
+                                </Text>
+                              ) : place?.note ? (
+                                <Text fz="xs" c="dimmed" data-container-note>
+                                  {place.note}
+                                </Text>
+                              ) : null}
                             </Table.Td>
                           </Table.Tr>
-                        ) : null}
-                      </Fragment>
-                    )
-                  })}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea>
+                          {refused ? (
+                            // The reason again across the row: on a narrow card the Note column is scrolled out of view.
+                            <Table.Tr bg={on ? 'var(--mantine-color-blue-0)' : undefined}>
+                              <Table.Td colSpan={editable ? 12 : 11} pt={0}>
+                                <Text fz="xs" c="red.7">
+                                  {c.containerRef}: {refused}
+                                </Text>
+                              </Table.Td>
+                            </Table.Tr>
+                          ) : null}
+                        </Fragment>
+                      )
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+              <ShownRowsFooter
+                limit={shownRows.limit}
+                total={rows.length}
+                noun="containers"
+                more={shownRows.more}
+                all={shownRows.all}
+              />
+            </>
           )}
         </>
       )}

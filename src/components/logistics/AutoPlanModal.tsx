@@ -35,21 +35,31 @@ import {
   type PlanOrderLineDto,
 } from '../../api/logistics/containers'
 import { containerTypesApi, type ContainerTypeLookupDto } from '../../api/masterdata/containerTypes'
-import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import { invoiceContainersApi } from '../../api/purchase/invoiceContainers'
-import type { PartyLookupDto, WarehouseLookupDto } from '../../api/types'
+import type { WarehouseLookupDto } from '../../api/types'
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
-import { supplierLabel } from '../purchase/purchaseKind'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
+import { SearchSelect } from '../ui/SearchSelect'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 import { fillColour, fillLabel, FULL_TOLERANCE, isOverFull } from './containerFill'
+import {
+  defaultForwarderOption,
+  forwarderHint,
+  loadForwarders,
+  useContainerOrderDefaults,
+  useCountryOptions,
+  type ContainerOrderSupplier,
+} from './containerDefaults'
+import { OrderSupplierLine } from './OrderSupplierLine'
 import { WAREHOUSE_PROPOSED_HINT } from './containerReceipt'
 
-/** The approved order the containers are planned for. */
-export interface AutoPlanOrder {
+/** The approved order the containers are planned for, with its supplier (shown, never typed). */
+export interface AutoPlanOrder extends ContainerOrderSupplier {
   id: number
   documentNumber: string | null
   branchId: number
@@ -128,7 +138,11 @@ function qty(line: PlanLine): number {
  * 3. CREATE sends the non-empty containers numbered 1..N in the order shown — the # column shows the
  *    same numbers, so "Container 3 of 30" in an error is row #3 (it is highlighted). Containers above
  *    100 % need containers.overcapacity and ONE confirmation listing all of them; without the right
- *    the list is shown and Create stays disabled.
+ *    the list is shown and Create stays disabled. ANY NUMBER OF CONTAINERS (script 78): the 200 ceiling is
+ *    gone from the proposal and the creation, and the API gives the creation a long timeout of its own.
+ * 4. THE SUPPLIER IS AUTOMATIC (script 78): shown read-only from the order (a container's goods come from
+ *    its order lines). The Forwarder starts as the order's last container's forwarder, else the supplier,
+ *    searched on the server as it is typed; the country of origin starts as the supplier's. Both stay editable.
  */
 export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onClose, onCreated }: AutoPlanModalProps) {
   // The order's endpoints, or the invoice's: the same dialog, the same proposal shape.
@@ -155,7 +169,8 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
   const [types, setTypes] = useState<ContainerTypeLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
-  const [forwarders, setForwarders] = useState<PartyLookupDto[]>([])
+  const { defaults } = useContainerOrderDefaults(order.id)
+  const countryOptions = useCountryOptions()
 
   // settings
   const [typeId, setTypeId] = useState<string | null>(null)
@@ -165,7 +180,12 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
   const [portOfDestinationId, setPortOfDestinationId] = useState<string | null>(null)
   const [finalDestinationId, setFinalDestinationId] = useState<string | null>(null)
   const [eta, setEta] = useState<string | null>(null)
-  const [forwarderId, setForwarderId] = useState<string | null>(null)
+  // The forwarder and the country start as the order's defaults (undefined = not changed by hand yet); a value the
+  // reader picks or clears wins over them.
+  const [forwarderPick, setForwarderPick] = useState<string | null | undefined>(undefined)
+  const [countryPick, setCountryPick] = useState<string | null | undefined>(undefined)
+  const forwarderId = forwarderPick !== undefined ? forwarderPick : defaults ? String(defaults.forwarderId) : null
+  const countryOfOrigin = countryPick !== undefined ? countryPick : (defaults?.countryOfOrigin ?? null)
   const [shippingLine, setShippingLine] = useState('')
   const [mix, setMix] = useState(true)
   const [confirmAfter, setConfirmAfter] = useState(false)
@@ -198,11 +218,12 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
       .catch(() => {})
     portsApi.lookup(true).then((list) => live && setPorts(list)).catch(() => {})
     warehousesApi.lookup(true, order.branchId, order.warehouseId).then((list) => live && setWarehouses(list)).catch(() => {})
-    partiesApi.lookup({ partyType: 'Supplier' }).then((list) => live && setForwarders(list)).catch(() => {})
     return () => {
       live = false
     }
   }, [order.branchId, order.warehouseId])
+
+  const forwarderDefault = useMemo(() => defaultForwarderOption(defaults), [defaults])
 
   // The order lines and the pieces per container of their items (their Container units), for the chosen type.
   useEffect(() => {
@@ -281,6 +302,9 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
   const pieces = toCreate.reduce((sum, b) => sum + b.units, 0)
 
   const stale = proposal !== null && proposal.mix !== mix
+  // A proposal of 2,000 containers is drawn in steps; the row of an error and the one being edited always show.
+  const shownBoxes = useShownRows(boxes.length, proposal)
+  const visibleBoxes = boxes.filter((b, i) => i < shownBoxes.limit || (errorSeq !== null && b.number === errorSeq) || b.box.key === editingKey)
 
   async function propose() {
     if (!typeId || !orderLines || blockedLine) return
@@ -380,6 +404,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
         finalDestinationId: finalDestinationId ? Number(finalDestinationId) : null,
         eta,
         forwarderId: forwarderId ? Number(forwarderId) : null,
+        countryOfOrigin,
         shippingLine: shippingLine.trim() || null,
         containers: toCreate.map((b) => ({
           seq: b.number ?? 0,
@@ -416,7 +441,6 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
   const warehouseOptions = warehouses
     .filter((w) => w.childCount === 0 || String(w.id) === warehouseId)
     .map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
-  const forwarderOptions = forwarders.map((p) => ({ value: String(p.id), label: supplierLabel(p) }))
   const createBlocked = creating || proposal === null || toCreate.length === 0 || overLines.length > 0 || (overBoxes.length > 0 && !canOverCapacity)
 
   return (
@@ -434,9 +458,10 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
     >
       <Stack gap="md">
         <Paper withBorder radius="lg" p="md">
-          <Title order={6} mb="xs">
-            Settings
-          </Title>
+          <Group justify="space-between" mb="xs" wrap="wrap" gap="xs">
+            <Title order={6}>Settings</Title>
+            <OrderSupplierLine supplier={defaults ?? order} />
+          </Group>
           <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
             <Select
               label="Container type"
@@ -466,7 +491,27 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
             <Select label="Port of destination" data={portOptions} value={portOfDestinationId} onChange={setPortOfDestinationId} searchable clearable />
             <Select label="Final destination" data={portOptions} value={finalDestinationId} onChange={setFinalDestinationId} searchable clearable />
             <DateInput label="ETA" valueFormat="DD/MM/YYYY" clearable value={fromIsoDate(eta)} onChange={(next) => setEta(next ? isoDate(next) : null)} />
-            <Select label="Forwarder" data={forwarderOptions} value={forwarderId} onChange={setForwarderId} searchable clearable nothingFoundMessage="Nothing matches" />
+            <SearchSelect
+              label="Forwarder"
+              description={forwarderHint(defaults)}
+              inputWrapperOrder={['label', 'input', 'description', 'error']}
+              placeholder="Type a supplier code or name"
+              value={forwarderId}
+              selected={forwarderDefault}
+              load={loadForwarders}
+              onChange={(next) => setForwarderPick(next)}
+              clearable
+              data-forwarder
+            />
+            <Select
+              label="Country of origin"
+              data={countryOptions}
+              value={countryOfOrigin}
+              onChange={(next) => setCountryPick(next)}
+              searchable
+              clearable
+              nothingFoundMessage="Nothing matches"
+            />
             <TextInput label="Shipping line" maxLength={100} value={shippingLine} onChange={(e) => setShippingLine(e.currentTarget.value)} />
           </SimpleGrid>
           <Group mt="md" gap="xl" wrap="wrap">
@@ -603,7 +648,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {boxes.map((b) => {
+                  {visibleBoxes.map((b) => {
                     const editing = editingKey === b.box.key
                     const inError = errorSeq !== null && b.number === errorSeq
                     return (
@@ -677,6 +722,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
                 </Table.Tbody>
               </Table>
             </ScrollArea>
+            <ShownRowsFooter limit={shownBoxes.limit} total={boxes.length} noun="containers" more={shownBoxes.more} all={shownBoxes.all} />
             <Button mt="xs" size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={addEmptyBox}>
               Add empty container
             </Button>

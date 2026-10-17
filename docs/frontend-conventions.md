@@ -195,6 +195,7 @@ modifier in the hint is read from the reader's own platform.
 | `RowActions({ label, edit, toggleStatus, custom, remove })` | Subtle `ActionIcon`s with tooltips. Each action takes `visible`, `disabled`, `disabledReason`, `onClick`. `custom` adds page-specific icons (`{ icon, tooltip, color }`) between the standard ones and Delete, through the same tooltip/disabled wrapper. |
 | `MoreActionsMenu({ actions })` | The "More Actions" dropdown. |
 | `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. Opens with the cursor in the first field and gives the focus back on close — see **Modals and the keyboard**. |
+| `SearchSelect({ load, value, onChange, selected?, resolve? })` / `SearchMultiSelect({ load, value, onChange, selected })` | A dropdown that **searches the server as it is typed** (debounced, abandoned requests aborted), for the lists without a ceiling: orders, invoices, containers, movements, parties. `load(search, signal)` answers the first matches (a stable function: module level or `useCallback`; the shared ones are in `components/purchase/documentSearch.ts`); `selected` keeps a known option (a default, a preset) in the list; `resolve(value)` finds the label of a value kept from the last visit. See **Lists of any length**. |
 
 ## Modals and the keyboard
 
@@ -1630,6 +1631,49 @@ Link containers) container by container.
 - The request sends `containers` (every row, 0 where nothing goes) only for an invoice with two rows or more. The
   server is the authority: posting is refused (73008) until the rows add up, and a row above what it owes is refused
   (73009). The Paid documents card shows each invoice's split under it.
+
+## Lists of any length (script 78: any number of containers)
+
+The owner: "the system and the purchase orders and invoices must accept any number of containers". So:
+
+- **No preloaded page as a dropdown.** A `Select` filled with "the 200 newest" (or the first 50 parties) hid
+  everything after it, and typing only filtered what was loaded. Orders, invoices, containers, movements and parties
+  are picked with `SearchSelect` / `SearchMultiSelect`: the Containers page PO / PI filters, the movement card's order
+  and supplier filters, New charge's movement and containers, the Container Charges filters, the Forwarder of
+  Auto-plan and Add Container.
+- **A list a bulk action works on is whole.** The order's Containers card, a movement's containers and the movement's
+  candidates read EVERY page with `fetchAllPages(..., { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE })`: their
+  procedures take pages of up to 5,000 and work every row out before they page, so one big page is far cheaper than
+  many small ones. "Select every container" and "Tick every container of the list" then reach all of them.
+- **A preset selection is read in one call:** `containersApi.lookup({ ids })` (New charge opened from 2,000 ticked
+  containers), never one GET per container.
+- **A list the server cuts says so:** "From a container…" lists 200 and reads "Showing 200 of N containers…" from the
+  answer's `totalCount`.
+- **The Containers page** still holds at most 5,000 rows (`fetchAllPages`' default) with its "Showing the newest rows
+  only" notice: its filters (order, invoice, status…) narrow on the server, and a grid of tens of thousands of rows in
+  the browser would be slow for every reader to buy little.
+- Imports send what they read in one call up to the API's limit and in parts above it (`matchAll` for a movement's
+  container numbers: 10,000 a call).
+- **Long lists are DRAWN in steps of 200** (`useShownRows` + `ShownRowsFooter`: "Showing 200 of 1,049 containers. Show
+  200 more · Show all"): the Auto-plan proposal, the order's Containers card, the movement's list, the invoice's linked
+  containers and the purchase document lines. Only the drawing is cut: every row stays loaded, so totals, Save, Post,
+  "Select every container" and the bulk actions take them all. A row with a problem, the one being edited and a line
+  just added always show. (Measured: Propose of 1,049 containers 7.9 s → 2.0 s in the dev build.)
+- **No portal or Select per row of a long grid.** A Mantine `Select` searches the whole page for its option list when it
+  mounts (the list is closed, so it walks every element), and a `Tooltip` mounts its portal while closed (another walk):
+  one of each per row made a 300-line invoice take 16 s to appear in the production build and a 2,205-line one minutes.
+  Rows use `LazySelect` (`components/ui/LazySelect.tsx`: a plain input until focused, then the real Select, open) and
+  tooltips with `{ withinPortal: false, floatingStrategy: 'fixed' }` (`ROW_TOOLTIP` in `PurchaseLinesGrid`). Both
+  invoices now appear in under 7 s (production build, API included).
+
+### The Auto-plan and Add Container defaults
+
+`useContainerOrderDefaults(orderId)` (`components/logistics/containerDefaults.ts`, `GET …/containers/order-defaults/{id}`)
+gives what both dialogs fill in by themselves. Both show "Supplier: SUP-0001 - TVS Motor Company (from the order)"
+read-only (`OrderSupplierLine`: a container's goods come from its order lines, so its supplier is never typed). The
+**Forwarder** starts as the forwarder of the order's most recent container, else the order's supplier, with a hint
+saying which; the **Country of origin** as the supplier's country. Both stay editable and clearable: the picks are
+held as `undefined` until the reader changes them, so the defaults arriving later never overwrite a choice.
 
 ## Checklist for a new page
 

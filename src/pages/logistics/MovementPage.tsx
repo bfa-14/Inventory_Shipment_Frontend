@@ -35,6 +35,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { containersApi } from '../../api/logistics/containers'
 import { movementsApi, movementStatusColour, type MovementDto, type SaveMovementRequest } from '../../api/logistics/movements'
 import { movementTypesApi, SINGLE_PLACE_STAGES, stageExplanation, type MovementTypeLookupDto } from '../../api/masterdata/movementTypes'
@@ -319,14 +320,17 @@ export function MovementPage() {
   const fromId = values.fromPlaceId === null ? null : Number(values.fromPlaceId)
 
   // A completed or cancelled movement is not asked about places; its containers' orders and suppliers come from the
-  // container list instead.
+  // container list instead - every page of it (script 78: a movement of any number of containers).
   const movementForDetails = readOnly ? movement : null
   useEffect(() => {
     if (!movementForDetails || movementForDetails.containers.length === 0) return
     const controller = new AbortController()
-    containersApi
-      .list({ movementId: movementForDetails.id, pageSize: 200 }, controller.signal)
+    fetchAllPages(
+      (page, pageSize) => containersApi.list({ movementId: movementForDetails.id, page, pageSize }, controller.signal),
+      { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE },
+    )
       .then((result) => {
+        if (controller.signal.aborted) return
         const byId = new Map(result.items.map((c) => [c.id, c]))
         setTicked((current) =>
           current.map((c) => {

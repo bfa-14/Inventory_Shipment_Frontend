@@ -306,7 +306,7 @@ export interface MovementContainerCandidateQuery {
   /** Also the ones the save would refuse: canAdd false, with the reason. */
   includeBlocked?: boolean
   page?: number
-  /** At most 200. */
+  /** At most 5,000 (script 78). */
   pageSize?: number
 }
 
@@ -406,7 +406,7 @@ export const movementsApi = {
   containerCandidates: (query: MovementContainerCandidateQuery, signal?: AbortSignal) =>
     request<PagedResult<MovementContainerCandidateDto>>(`${BASE}/container-candidates${toQueryString(query)}`, { signal }),
 
-  /** Numbers or refs in the order of the file; nothing is saved. 400 without a number or above 500 of them. */
+  /** Numbers or refs in the order of the file; nothing is saved. 400 without a number or above 10,000 of them (matchAll sends more in parts). */
   matchContainers: (query: MovementPlaceQuery, numbers: string[], signal?: AbortSignal) =>
     request<MovementContainerMatchDto[]>(`${BASE}/match-containers`, { method: 'POST', body: { ...query, numbers }, signal }),
 
