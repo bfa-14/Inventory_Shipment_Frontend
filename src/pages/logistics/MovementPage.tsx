@@ -61,6 +61,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
 import { MOVEMENTS_ROUTE } from './MovementsPage'
+import { useDocumentTypes } from '../../hooks/useDocumentTypes'
 
 /** The stage whose completion brings the containers to the warehouse: a draft goods receipt for each (rule 5). */
 const DELIVERY = 'Delivery'
@@ -171,6 +172,9 @@ export function MovementPage() {
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
 
   const [movement, setMovement] = useState<MovementDto | null>(null)
+  /* Whether completing a Delivery drafts goods receipts: the movement says so once saved, the goods receipt type before. */
+  const goodsReceiptType = useDocumentTypes().byCode('GRN')
+  const receiptsAutomatic = movement?.goodsReceiptsAutomatic ?? goodsReceiptType?.autoCreateOnDelivery
   const [loading, setLoading] = useState(!isNew)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [stale, setStale] = useState<string | null>(null)
@@ -661,7 +665,7 @@ export function MovementPage() {
                     leftSection={type ? <StageIcon stage={type.stage} /> : null}
                   />
                 )}
-                <ViewField label="Stage" value={type ? `${type.stage} - ${stageExplanation(type.stage)}` : null} />
+                <ViewField label="Stage" value={type ? `${type.stage} - ${stageExplanation(type.stage, receiptsAutomatic)}` : null} />
                 {readOnly ? (
                   <ViewField label="From" value={placeLabel(values.fromPlaceId)} />
                 ) : (
@@ -760,7 +764,7 @@ export function MovementPage() {
                   <StageIcon stage={type.stage} size={20} />
                   <Title order={5}>{type.stage} stage</Title>
                 </Group>
-                <Text fz="sm">{stageExplanation(type.stage)}</Text>
+                <Text fz="sm">{stageExplanation(type.stage, receiptsAutomatic)}</Text>
                 <Text fz="xs" c="dimmed" mt={4}>
                   Starting and completing the movement moves every container on it accordingly.
                 </Text>

@@ -21,7 +21,13 @@ export const MOVEMENT_STAGES: { value: MovementStage; label: string; explanation
   { value: 'Delivery', label: 'Delivery', explanation: 'Cleared - on its way to the warehouse; completing it creates the draft goods receipts.' },
 ]
 
-export function stageExplanation(stage: string): string {
+/**
+ * `receiptsAutomatic` false: the goods receipt type drafts nothing on Delivery (Configuration › Document Types, script 79),
+ * so the Delivery line must not promise drafts. Undefined reads as the default, automatic.
+ */
+export function stageExplanation(stage: string, receiptsAutomatic?: boolean): string {
+  if (stage === 'Delivery' && receiptsAutomatic === false)
+    return 'Cleared - on its way to the warehouse; goods receipts are made by hand when it is completed (Receive goods… on each container).'
   return MOVEMENT_STAGES.find((s) => s.value === stage)?.explanation ?? ''
 }
 

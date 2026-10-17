@@ -30,7 +30,8 @@ import { routes } from '../../../routes'
 import { fromIsoDate, isoDate } from '../../documents/documentKind'
 import { formatNumber, numberInputValue } from '../../format'
 import { notify } from '../../ui/notify'
-import { CONTAINERS_HINT, ORDER_PRICE_HINT, warehouseChoices } from './goodsReceiptModel'
+import { useDocumentTypes } from '../../../hooks/useDocumentTypes'
+import { CONTAINERS_HINT, orderPriceHint, warehouseChoices } from './goodsReceiptModel'
 
 /** What is being received: an approved purchase order, or a posted purchase invoice. */
 export interface ReceiveGoodsSource {
@@ -141,6 +142,7 @@ function ReceiveGoodsBody({
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
   const canPost = hasPermission(PERMISSIONS.goodsReceiptsPost)
+  const invoiceType = useDocumentTypes().byCode('PINV')
   const phone = useMediaQuery('(max-width: 48em)')
 
   const [lines, setLines] = useState<ReceivableLineDto[] | null>(null)
@@ -588,7 +590,7 @@ function ReceiveGoodsBody({
           {CONTAINERS_HINT}
         </Text>
         <Text size="sm" c="dimmed">
-          {ORDER_PRICE_HINT}
+          {orderPriceHint(invoiceType?.affectsItemCost)}
         </Text>
       </Stack>
 

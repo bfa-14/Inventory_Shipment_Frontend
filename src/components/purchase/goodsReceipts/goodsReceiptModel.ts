@@ -30,6 +30,17 @@ export const CONTAINERS_HINT = 'Goods in containers are received with their cont
 export const ORDER_PRICE_HINT =
   'Pieces not invoiced yet are valued at the order price; the invoice adjusts their cost when it is posted.'
 
+/**
+ * The order-price hint as the purchase invoice type has it (script 79): with "Affects item cost" off, invoices never
+ * change the cost, so promising that "the invoice adjusts their cost" would be untrue. `affectsItemCost` undefined
+ * (types not loaded yet) reads as today's default, on.
+ */
+export function orderPriceHint(affectsItemCost: boolean | undefined): string {
+  return affectsItemCost === false
+    ? 'Pieces are valued at the order price; purchase invoices do not change item costs (Configuration › Document Types).'
+    : ORDER_PRICE_HINT
+}
+
 /** The hint of the "Cost adjustments" card. */
 export const COST_ADJUSTMENTS_HINT =
   'The part still in stock changes the average cost; the part already sold goes to the cost of sales. A difference of exchange rate between the order and the invoice is part of the cost.'

@@ -29,7 +29,8 @@ import type { WarehouseLookupDto } from '../../api/types'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
-import { DRAFT_HINT, notDispatchedText, ORDER_PRICE_HINT } from '../purchase/goodsReceipts/goodsReceiptModel'
+import { useDocumentTypes } from '../../hooks/useDocumentTypes'
+import { DRAFT_HINT, notDispatchedText, orderPriceHint } from '../purchase/goodsReceipts/goodsReceiptModel'
 import { notify } from '../ui/notify'
 
 interface ReceiveContainerModalProps {
@@ -72,6 +73,7 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
   const fullScreen = useMediaQuery('(max-width: 768px)')
   const phone = useMediaQuery('(max-width: 48em)')
   const [received, setReceived] = useState<Record<number, Received>>({})
+  const invoiceType = useDocumentTypes().byCode('PINV')
   const ownWarehouse = warehouses.some((w) => w.id === container.warehouseId) ? container.warehouseId : null
   const [warehouseId, setWarehouseId] = useState<string | null>(ownWarehouse === null ? null : String(ownWarehouse))
   const [documentDate, setDocumentDate] = useState<string | null>(isoDate(new Date()))
@@ -363,7 +365,7 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
             {DRAFT_HINT}
           </Text>
           <Text size="sm" c="dimmed">
-            {ORDER_PRICE_HINT}
+            {orderPriceHint(invoiceType?.affectsItemCost)}
           </Text>
         </Stack>
 

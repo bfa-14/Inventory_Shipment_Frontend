@@ -98,11 +98,11 @@ export function DocumentTypesPage() {
     {
       accessor: 'stockDirection',
       title: 'Stock',
-      width: 150,
+      width: 190,
       // A supplier invoice moves no stock of its own since goods receipts: the badge says what really happens.
       render: (t) => (
         <Tooltip label={stockText(t)} disabled={stockText(t).length < 18} withinPortal>
-          <Badge variant="light" color={stockColour(t)} maw={140}>
+          <Badge variant="light" color={stockColour(t)} maw={180}>
             {stockText(t)}
           </Badge>
         </Tooltip>
