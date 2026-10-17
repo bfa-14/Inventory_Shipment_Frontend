@@ -151,6 +151,25 @@ export function receiveNowLabel(warehouses: string[]): string {
   return `Receive the goods now into ${warehouses.join(', ')}`
 }
 
+/**
+ * (79) The PINV type receives the goods itself ("Affects on-hand"): said in the post confirmation instead of the
+ * "Receive the goods now" tick.
+ */
+/** (79) The post confirmation's first sentence then: the stock DOES change, through the goods receipt said below it. */
+export const INVOICE_POST_CONFIRM_RECEIVING = 'Post this purchase invoice? The number is assigned and the amount becomes payable to the supplier.'
+
+export function receiveOnPostText(warehouses: string[]): string {
+  return `Its goods are received at once into ${warehouses.join(', ')}: a goods receipt is made and posted with the invoice (Configuration › Document Types).`
+}
+
+/** (79) The Charges card of such an invoice: why it takes no late charge (the server refuses one with 67013). */
+export const NO_COST_LATE_CHARGES_TEXT =
+  'Late charges are not taken on this invoice: it does not change item costs, so a landed cost adjustment would change no cost. Container charges still enter the cost of goods received in containers.'
+
+/** (79) An invoice that does not change item costs: the "Cost of received goods" card and the page say why it is empty. */
+export const NO_COST_INVOICE_TEXT =
+  'This invoice does not change item costs (Configuration › Document Types): the goods received against it keep the order price (and their container charges).'
+
 /** Why "Receive goods…" cannot be used on this supplier invoice (rule 15); null when it can. */
 export function invoiceReceiveReason(invoice: PurchaseDocumentDto): string | null {
   if (invoice.status === 'Draft') return 'Post the invoice first: goods are received against a posted invoice, or from the order.'

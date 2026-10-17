@@ -69,6 +69,12 @@ export function receivedBanner(warehouse: string, date: string, user: string, cl
 export const DELIVERY_COMPLETE_TEXT =
   'The containers arrive at the warehouse: a draft goods receipt is created for each of them. The stock changes only when the warehouse posts it.'
 
+/**
+ * (79) The goods receipt type makes them by hand (Configuration › Document Types): the Complete dialog says this instead
+ * of the per-container preview, and the API answers the completion with the same sentence.
+ */
+export const DELIVERY_BY_HAND_TEXT = 'Goods receipts are made by hand: use Receive goods… on each container.'
+
 /** What the completion will do for one container of the movement, as the dialog lists it. */
 export interface DeliveryPreviewInput {
   containerRef: string

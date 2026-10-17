@@ -6,6 +6,7 @@ import { ApiError } from '../../api/http'
 import { inventoryLookupsApi, type DocumentTypeDto } from '../../api/inventory/stockDocuments'
 import { numberInputValue } from '../../components/format'
 import { FormModal } from '../../components/ui/FormModal'
+import { CAPTURED_NOTE, EFFECT_TEXT, GOODS_RECEIPT_TYPE, INVOICE_TYPE, stockSentence } from './documentTypeEffects'
 
 interface DocumentTypeFormModalProps {
   type: DocumentTypeDto
@@ -23,6 +24,9 @@ interface FormValues {
   requiresReason: boolean
   defaultPricing: string | null
   priceEditable: boolean
+  affectsItemCost: boolean
+  affectsOnHand: boolean
+  autoCreateOnDelivery: boolean
   isActive: boolean
 }
 
@@ -32,11 +36,6 @@ const PRICING_OPTIONS = [
   { value: 'None', label: 'None — no money on the lines (orders)' },
 ]
 
-/** The words for a stock direction on the read-only line. */
-function directionLabel(direction: number): string {
-  return direction > 0 ? 'Adds stock (In)' : direction < 0 ? 'Removes stock (Out)' : 'No stock effect'
-}
-
 /**
  * Editing one document type.
  *
@@ -45,11 +44,16 @@ function directionLabel(direction: number): string {
  * lie, and one that could lift the BIVAC rule would let a BIVAC Out take any item. What a
  * business owner changes is the wording, the numbering and the pricing rule — and the numbering
  * change is said, in the warning, to apply to new documents only.
+ *
+ * (79) WHAT THE TYPE DOES: the switches of documentTypeEffects.ts, shown only on the type they belong to (the purchase
+ * invoice's two, the goods receipt's one) and sent only for it - an older form, or another type, never touches them.
  */
 export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFormModalProps) {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
+  const isInvoice = type.code === INVOICE_TYPE
+  const isGoodsReceipt = type.code === GOODS_RECEIPT_TYPE
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -62,6 +66,9 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
       requiresReason: type.requiresReason,
       defaultPricing: type.defaultPricing,
       priceEditable: type.priceEditable,
+      affectsItemCost: type.affectsItemCost ?? true,
+      affectsOnHand: type.affectsOnHand ?? false,
+      autoCreateOnDelivery: type.autoCreateOnDelivery ?? true,
       isActive: type.isActive,
     },
     validate: {
@@ -90,6 +97,9 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
         requiresReason: values.requiresReason,
         defaultPricing: values.defaultPricing as string,
         priceEditable: values.priceEditable,
+        affectsItemCost: isInvoice ? values.affectsItemCost : undefined,
+        affectsOnHand: isInvoice ? values.affectsOnHand : undefined,
+        autoCreateOnDelivery: isGoodsReceipt ? values.autoCreateOnDelivery : undefined,
         isActive: values.isActive,
         rowVersion: type.rowVersion,
       })
@@ -124,7 +134,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
           <ReadOnly label="Family" value={type.family} />
         </Grid.Col>
         <Grid.Col span={{ base: 12, sm: 4 }}>
-          <ReadOnly label="Stock direction" value={directionLabel(type.stockDirection)} />
+          <ReadOnly label="Stock direction" value={stockSentence(type)} />
         </Grid.Col>
         {type.bivacItemsOnly && (
           <Grid.Col span={12}>
@@ -182,6 +192,40 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
             <Switch label="Active" {...form.getInputProps('isActive', { type: 'checkbox' })} />
           </Stack>
         </Grid.Col>
+
+        {(isInvoice || isGoodsReceipt) && (
+          <Grid.Col span={12}>
+            <Stack gap="xs" mt="xs">
+              <Text fz="sm" fw={600}>
+                What it does
+              </Text>
+              {isInvoice && (
+                <>
+                  <Switch
+                    label={EFFECT_TEXT.affectsItemCost.label}
+                    description={EFFECT_TEXT.affectsItemCost.description}
+                    {...form.getInputProps('affectsItemCost', { type: 'checkbox' })}
+                  />
+                  <Switch
+                    label={EFFECT_TEXT.affectsOnHand.label}
+                    description={EFFECT_TEXT.affectsOnHand.description}
+                    {...form.getInputProps('affectsOnHand', { type: 'checkbox' })}
+                  />
+                  <Text fz="xs" c="dimmed">
+                    {CAPTURED_NOTE}
+                  </Text>
+                </>
+              )}
+              {isGoodsReceipt && (
+                <Switch
+                  label={EFFECT_TEXT.autoCreateOnDelivery.label}
+                  description={EFFECT_TEXT.autoCreateOnDelivery.description}
+                  {...form.getInputProps('autoCreateOnDelivery', { type: 'checkbox' })}
+                />
+              )}
+            </Stack>
+          </Grid.Col>
+        )}
       </Grid>
     </FormModal>
   )

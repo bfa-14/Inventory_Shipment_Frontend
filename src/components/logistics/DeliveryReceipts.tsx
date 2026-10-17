@@ -5,6 +5,7 @@ import { goodsReceiptsApi } from '../../api/purchase/goodsReceipts'
 import { dateLabel, isoDate } from '../documents/documentKind'
 import {
   containerReceiptOf,
+  DELIVERY_BY_HAND_TEXT,
   DELIVERY_COMPLETE_TEXT,
   deliveryPreviewLine,
   editedDraftText,
@@ -18,6 +19,17 @@ import {
  * completes; the notification afterwards says what it did.
  */
 export function DeliveryCompletePreview({ movement }: { movement: MovementDto }) {
+  // (79) The goods receipt type drafts none on a Delivery: nothing per container to announce, only what to do.
+  if (movement.goodsReceiptsAutomatic === false) {
+    return (
+      <Stack gap={6} data-delivery-preview data-delivery-by-hand>
+        <Text fz="sm">The containers arrive at the warehouse. {DELIVERY_BY_HAND_TEXT}</Text>
+        <Text fz="sm" c="dimmed">
+          The stock changes only when a goods receipt is posted. Containers › "Delivered, not received" lists them.
+        </Text>
+      </Stack>
+    )
+  }
   const lines = movement.containers.map((c) =>
     deliveryPreviewLine({
       containerRef: c.containerRef,
@@ -125,11 +137,14 @@ export function DeliveryCancelDrafts({ movement, canViewReceipts }: { movement: 
   const drafts = reading ? null : [...known, ...(toRead.length > 0 ? (read?.drafts ?? []) : [])]
 
   const edited = (drafts ?? []).filter((d) => d.editedAtUtc)
+  // (79) Goods receipts made by hand: this movement drafted none (unless it was completed while they were automatic).
+  const noneMade = movement.goodsReceiptsAutomatic === false && drafts !== null && drafts.length === 0
   return (
     <Stack gap={6} data-delivery-cancel>
       <Text fz="sm">
-        The draft goods receipts this movement created when it was completed are deleted with it; a draft made by hand is
-        kept.
+        {noneMade
+          ? 'This movement created no draft goods receipt (goods receipts are made by hand): the receipts made for its containers are kept.'
+          : 'The draft goods receipts this movement created when it was completed are deleted with it; a draft made by hand is kept.'}
       </Text>
       {drafts === null ? (
         <Loader size="xs" />

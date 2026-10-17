@@ -467,8 +467,10 @@ export interface PurchasePostResultDto {
   /** The goods receipt lines whose cost moved. */
   costAdjustedLines: number
   baseCurrencyCode: string | null
-  /** "Receive the goods now" was asked (a supplier invoice only). */
+  /** "Receive the goods now" was asked (a supplier invoice only), or the document type receives the goods (below). */
   receiveRequested: boolean
+  /** (79) The PINV type received the goods by itself ("Affects on-hand"), whoever posted. */
+  receivedByDocumentType?: boolean
   /** The goods receipt created and posted with the invoice; null when not asked, or when it failed. */
   goodsReceiptId: number | null
   goodsReceiptNumber: string | null
@@ -523,6 +525,13 @@ export interface PurchaseDocumentDto {
   usesGoodsReceipts?: boolean
   /** When the application switched to goods receipts (purchase.GoodsReceiptSwitch); null before. */
   goodsReceiptsSinceUtc?: string | null
+  /**
+   * (79) Supplier invoices: its price becomes the cost of the goods received against it (Configuration › Document
+   * Types, "Affects item cost") - captured when posted, the type's switch while a draft. Missing (an older API) = true.
+   */
+  affectsCost?: boolean
+  /** (79) Supplier invoices: posting it receives its goods at once with a goods receipt ("Affects on-hand"). */
+  receiveOnPost?: boolean
   /** Approved orders and posted invoices: "Receive goods…" can be used, else why not. */
   canReceive?: boolean
   receiveBlockedReason?: string | null

@@ -52,6 +52,15 @@ export interface DocumentTypeDto {
    * only, and the server refuses any other item (62000, "Line 2: … is not a BIVAC item.").
    */
   bivacItemsOnly: boolean
+  /**
+   * (79) What the type does, each on one type only (pages/configuration/documentTypeEffects.ts). PINV: the invoice's
+   * price becomes the cost of the goods received against it (true on the other types).
+   */
+  affectsItemCost: boolean
+  /** (79) PINV: posting an invoice also receives its goods with a goods receipt (false on the other types). */
+  affectsOnHand: boolean
+  /** (79) GRN: completing a Delivery movement drafts a goods receipt per container (true on the other types). */
+  autoCreateOnDelivery: boolean
   isActive: boolean
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */
@@ -69,6 +78,10 @@ export interface UpdateDocumentTypeRequest {
   priceEditable: boolean
   numberPerBranch: boolean
   yearInNumber: boolean
+  /** (79) Sent only for the type they belong to (PINV, PINV, GRN); left out, the stored value stays. */
+  affectsItemCost?: boolean
+  affectsOnHand?: boolean
+  autoCreateOnDelivery?: boolean
   isActive: boolean
   rowVersion: string | null
 }

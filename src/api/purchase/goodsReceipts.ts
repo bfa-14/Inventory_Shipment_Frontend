@@ -786,6 +786,8 @@ export interface ReceiptCostPreviewLineDto {
   /** The goods receipts those pieces came from: "GRN-BR-002-000001, GRN-BR-002-000003". */
   receipts: string | null
   isEstimate: boolean
+  /** (79) The PINV type changes item costs: false, the pieces keep their cost (no difference). */
+  affectsCost?: boolean
 }
 
 /**
@@ -806,6 +808,8 @@ export interface ReceiptCostPreviewDto {
   estimatedCogsBase: number
   hasReceivedGoods: boolean
   isEstimate: boolean
+  /** (79) Posting it changes the cost of the goods received against it; false, the message says they keep their cost. */
+  affectsCost?: boolean
   message: string | null
   lines: ReceiptCostPreviewLineDto[]
 }

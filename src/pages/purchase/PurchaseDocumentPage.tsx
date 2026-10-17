@@ -81,6 +81,8 @@ import {
   invoicePostedBanner,
   invoiceReceiveReason,
   LEGACY_INVOICE_TEXTS,
+  NO_COST_INVOICE_TEXT,
+  NO_COST_LATE_CHARGES_TEXT,
   PURCHASE_INVOICE,
   PURCHASE_RETURN,
   purchaseStatusColour,
@@ -1715,6 +1717,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           canView={canViewLateCharges}
           canAdd={canAddLateCharge}
           canPost={canPostLateCharges}
+          lateChargesBlockedReason={document.affectsCost === false ? NO_COST_LATE_CHARGES_TEXT : null}
           onPosted={() => void refreshQuietly()}
         />
       )}
@@ -1738,6 +1741,17 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       {/* What this invoice did to the cost of goods already received (goods receipts, rule 10). */}
       {kind.code === 'PINV' && document && (document.costAdjustments?.length ?? 0) > 0 && (
         <InvoiceReceiptCostCard adjustments={document.costAdjustments ?? []} currencyCode={baseCode} />
+      )}
+      {/* (79) Posted without changing item costs: the card says why there is nothing to show. */}
+      {kind.code === 'PINV' && document && status === 'Posted' && document.affectsCost === false && (document.costAdjustments?.length ?? 0) === 0 && (
+        <Paper radius="lg" p="md" withBorder data-receipt-cost-card data-no-cost-invoice>
+          <Title order={5} mb={4}>
+            Cost of received goods
+          </Title>
+          <Text size="sm" c="dimmed">
+            {NO_COST_INVOICE_TEXT}
+          </Text>
+        </Paper>
       )}
 
       <DocumentAttachmentsCard

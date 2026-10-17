@@ -608,6 +608,35 @@ override permission (sales). The pages no longer hard-code `INV_IN` / `INV_OUT` 
 keeps the direction only (the fallback while the configuration loads). Document numbers run per branch
 (`IN-KLW-000012`): the number column is 190 px and never truncates.
 
+**What a type does** (script 79). Three switches, each meaningful on ONE type, described in one place,
+`pages/configuration/documentTypeEffects.ts` (`EFFECT_TEXT`, `stockText`, `stockSentence`, `effectsText`):
+
+| Type | Field | Default | The form's switch |
+|---|---|---|---|
+| PINV | `affectsItemCost` | true | "Affects item cost": the invoice's price becomes the cost of the goods received against it |
+| PINV | `affectsOnHand` | false | "Affects on-hand (receive the goods when posted)": posting also receives its goods with a goods receipt |
+| GRN | `autoCreateOnDelivery` | true | "Create goods receipts when a Delivery is completed" |
+
+- The form shows a switch, with its one-line description, only on its own type, under "What it does", and SENDS it only
+  for that type (`undefined` otherwise): the request fields are nullable, so an older form never turns one off, and the
+  server refuses one sent for another type (62000). Under the invoice's two: "Each invoice keeps the values it was
+  posted with…".
+- The list has one **What it does** column ("Item cost: yes · Receives on posting: no", "On Delivery: automatic" /
+  "by hand", a dimmed "-" elsewhere) with its grid text, so it filters and exports like the others.
+- The **Stock** column says what really happens: for PINV "None (goods receipts)" or "In, through a goods receipt at
+  posting" (green); the stored `stockDirection` is never changed (old invoices read it).
+- Where the switches show elsewhere, a missing field (an older API) means today's behaviour:
+  - the invoice: `document.affectsCost === false` -> the "Cost of received goods" card says why it is empty
+    (`NO_COST_INVOICE_TEXT`) and the posted invoice's Charges card offers no late charge
+    (`lateChargesBlockedReason`, the server's 67013 in other words); the post confirmation shows the server's preview
+    sentence as it comes, never the "invoice price equals the cost" wording;
+  - `document.receiveOnPost === true` (not shipped in containers, something to receive) -> the post confirmation SAYS
+    "Its goods are received at once into {warehouse}: …" (`receiveOnPostText`) instead of the "Receive the goods now"
+    tick; no goods receipt right is needed, the receipt is the type's rule;
+  - the movement: `goodsReceiptsAutomatic === false` -> the Complete dialog of a Delivery shows
+    `DELIVERY_BY_HAND_TEXT` instead of the per-container preview, the answer's `goodsReceiptsMessage` is shown as an
+    info notification, and the Cancel dialog says the movement created no draft when it has none.
+
 ## The warehouse is a line's, not the document's
 
 Inventory In/Out, Sales and Purchase all take the warehouse per LINE: the lines grid has a Warehouse

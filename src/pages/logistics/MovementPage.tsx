@@ -478,6 +478,9 @@ export function MovementPage() {
           navigate: (to) => void navigate(to),
         })
         void refreshGoodsReceiptsWaiting()
+      } else if (kind === 'complete' && result.goodsReceiptsAutomatic === false && result.goodsReceiptsMessage) {
+        // (79) The goods receipt type makes them by hand: none was drafted, and the answer says what to do instead.
+        notify.info(result.goodsReceiptsMessage)
       }
     } catch (err) {
       fail(err, kind === 'start' ? 'The movement could not be started.' : 'The movement could not be completed.')

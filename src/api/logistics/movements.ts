@@ -196,6 +196,12 @@ export interface MovementDto extends MovementFlags {
   updatedByName: string | null
   rowVersion: string
   isLate: boolean
+  /**
+   * (79) The goods receipt type's "Create goods receipts when a Delivery is completed" (Configuration › Document Types):
+   * false, completing a Delivery drafts none - they are made by hand with Receive goods… on each container. Missing (an
+   * older API) = true.
+   */
+  goodsReceiptsAutomatic?: boolean
   containers: MovementContainerDto[]
   charges: MovementChargeDto[]
   attachments: MovementAttachmentDto[]
