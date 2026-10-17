@@ -633,6 +633,16 @@ keeps the direction only (the fallback while the configuration loads). Document 
   - `document.receiveOnPost === true` (not shipped in containers, something to receive) -> the post confirmation SAYS
     "Its goods are received at once into {warehouse}: …" (`receiveOnPostText`) instead of the "Receive the goods now"
     tick; no goods receipt right is needed, the receipt is the type's rule;
+  - after posting, A RECEIPT WAS TRIED when the tick was on OR the answer carries a goods receipt or a `receiveWarning`:
+    the page then names the receipt, or shows the warning ("Invoice posted; the goods receipt was not: {reason}. Use
+    Receive goods…") - never only "posted". `postResult.receivedByDocumentType` is true only when the type's receipt was
+    made or refused (false for goods in containers or nothing left to receive);
+  - bulk posts and imports that post: a `BulkActionItemResult` can be ok with a `warning` (orange badge, the warning in
+    orange in `BulkResultsModal`) and a `message` saying what was done besides ("Goods received: GRN-…"); an
+    `ImportCreateDocument` carries `goodsReceiptNumber` / `warning`, shown under its status, plus a warning
+    notification;
+  - the invoice list's goods receipts banner says "Posting a supplier invoice receives its goods with a goods receipt…"
+    when the PINV type's `affectsOnHand` is on, the "no longer adds stock" sentence otherwise;
   - the movement: `goodsReceiptsAutomatic === false` -> the Complete dialog of a Delivery shows
     `DELIVERY_BY_HAND_TEXT` instead of the per-container preview, the answer's `goodsReceiptsMessage` is shown as an
     info notification, and the Cancel dialog says the movement created no draft when it has none.

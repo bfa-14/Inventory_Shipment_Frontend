@@ -45,14 +45,23 @@ export function BulkResultsModal({ opened, title, result, successLabel, labelOf,
                       <Text fz="sm" fw={500}>{item.documentNumber ?? labelOf(item)}</Text>
                     </Table.Td>
                     <Table.Td>
-                      <Badge color={item.ok ? 'green' : 'red'} variant="light">
+                      <Badge color={item.ok ? (item.warning ? 'orange' : 'green') : 'red'} variant="light">
                         {item.ok ? successLabel : (item.code ?? 'Failed')}
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Text fz="sm" c={item.ok ? 'dimmed' : undefined}>
-                        {item.message ?? '—'}
-                      </Text>
+                      {/* DONE, BUT NOT ALL OF IT: a supplier invoice posted whose goods receipt was refused. The row
+                          succeeded, and the warning says what is still to do. */}
+                      {item.message || !item.warning ? (
+                        <Text fz="sm" c={item.ok ? 'dimmed' : undefined}>
+                          {item.message ?? '—'}
+                        </Text>
+                      ) : null}
+                      {item.warning ? (
+                        <Text fz="sm" c="orange.8" data-bulk-warning>
+                          {item.warning}
+                        </Text>
+                      ) : null}
                     </Table.Td>
                   </Table.Tr>
                 ))}

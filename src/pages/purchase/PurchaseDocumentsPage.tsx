@@ -40,6 +40,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
+import { useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { useGridQuery } from '../../hooks/useGridQuery'
@@ -204,6 +205,10 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
      it (remembered in this browser). The date is the server's; without it the sentence goes without a date. */
   const [switchBanner, setSwitchBanner] = useState(() => kind.code === 'PINV' && canPost && !bannerClosed(user?.id))
   const [switchedAt, setSwitchedAt] = useState<string | null>(null)
+  /* (79) The PINV type may receive the goods itself when an invoice is posted (Configuration › Document Types): then
+     posting does add stock, through a goods receipt, and the banner says that instead. */
+  const { byCode: documentTypeByCode } = useDocumentTypes()
+  const receivesOnPost = documentTypeByCode('PINV')?.affectsOnHand === true
   useEffect(() => {
     if (!switchBanner) return
     const controller = new AbortController()
@@ -654,9 +659,11 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
           }}
           data-goods-receipts-banner
         >
-          {switchedAt
-            ? `Since ${dateLabel(isoDate(new Date(switchedAt)))}, posting a supplier invoice no longer adds stock: receive the goods with Receive goods…`
-            : 'Posting a supplier invoice no longer adds stock: receive the goods with Receive goods…'}
+          {receivesOnPost
+            ? 'Posting a supplier invoice receives its goods with a goods receipt, made and posted with it (Configuration › Document Types); goods in containers come with their containers.'
+            : switchedAt
+              ? `Since ${dateLabel(isoDate(new Date(switchedAt)))}, posting a supplier invoice no longer adds stock: receive the goods with Receive goods…`
+              : 'Posting a supplier invoice no longer adds stock: receive the goods with Receive goods…'}
         </Alert>
       )}
 

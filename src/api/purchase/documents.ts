@@ -469,7 +469,10 @@ export interface PurchasePostResultDto {
   baseCurrencyCode: string | null
   /** "Receive the goods now" was asked (a supplier invoice only), or the document type receives the goods (below). */
   receiveRequested: boolean
-  /** (79) The PINV type received the goods by itself ("Affects on-hand"), whoever posted. */
+  /**
+   * (79) The PINV type tried to receive the goods by itself ("Affects on-hand"), whoever posted: a receipt made or refused.
+   * False when nothing was tried (goods in containers, everything already received).
+   */
   receivedByDocumentType?: boolean
   /** The goods receipt created and posted with the invoice; null when not asked, or when it failed. */
   goodsReceiptId: number | null

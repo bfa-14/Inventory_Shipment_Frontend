@@ -453,12 +453,14 @@ function ImportWizardBody({
       setPhase('created')
       await logCreated(answer)
       const what = `${formatNumber(answer.created)} ${byItem ? 'invoice' : noun}(s) created${answer.posted > 0 ? `, ${formatNumber(answer.posted)} posted` : ''}`
+      const unreceived = answer.documents.filter((d) => d.warning).length
       if (answer.failed.length === 0) notify.success(`${what}.`)
       // ONE PER WAREHOUSE SUCCEEDS OR FAILS ONE BY ONE: the ones that went through are said as well,
       // not buried under a refusal that concerned another warehouse.
       else if (split && answer.created > 0) notify.warning(`${what}; ${formatNumber(answer.failed.length)} refused — see the reasons below.`)
       else if (split) notify.error(`No ${noun} could be created — see the reasons below.`)
       else notify.error(`The ${noun} could not be ${postImmediately ? 'posted' : 'created'} — see the reason below.`)
+      if (unreceived > 0) notify.warning(`${formatNumber(unreceived)} posted without their goods receipt — see the reason below.`)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The documents could not be created.')
       setPhase('groups')
@@ -949,9 +951,21 @@ function ImportWizardBody({
                     </Table.Td>
                     <Table.Td ta="right">{formatNumber(d.lineCount)}</Table.Td>
                     <Table.Td>
-                      <Badge color={d.status === 'Posted' ? 'green' : 'gray'} variant="light">
+                      <Badge color={d.status === 'Posted' ? (d.warning ? 'orange' : 'green') : 'gray'} variant="light">
                         {d.status}
                       </Badge>
+                      {/* A SUPPLIER INVOICE WHOSE TYPE RECEIVES ITS GOODS (script 79): the receipt made with it, or
+                          why it was not - the invoice is posted either way. */}
+                      {d.goodsReceiptNumber ? (
+                        <Text fz="xs" c="dimmed" mt={4}>
+                          Goods received: {d.goodsReceiptNumber}
+                        </Text>
+                      ) : null}
+                      {d.warning ? (
+                        <Text fz="xs" c="orange.8" mt={4} data-import-warning>
+                          {d.warning}
+                        </Text>
+                      ) : null}
                     </Table.Td>
                     {documentRoute && (
                       <Table.Td>

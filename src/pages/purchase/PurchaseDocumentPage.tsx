@@ -1014,9 +1014,14 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   /**
    * What the posting did besides posting, in the server's words: the cost of goods already received adjusted, and with
    * "Receive the goods now" the receipt - or why it was not made (the invoice stays posted either way).
+   *
+   * A RECEIPT WAS TRIED when the tick asked for one, or when the invoice's type receives its goods (script 79): then the
+   * tick is not offered, so the answer itself says it - a receipt made, or the refusal in its warning. A refusal is
+   * never left unsaid behind "posted".
    */
   function announcePosting(result: PostPurchaseDocumentResult, receiveNow: boolean) {
-    if (!receiveNow) {
+    const tried = receiveNow || result.goodsReceipt !== null || result.receiveWarning !== null
+    if (!tried) {
       if (result.message) notify.info(result.message)
       return
     }
