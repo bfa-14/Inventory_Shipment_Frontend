@@ -86,6 +86,7 @@ import {
   purchaseStatusColour,
   purchaseStatusLabel,
   type PurchaseKind,
+  cancelDescription as purchaseCancelDescription,
 } from '../../components/purchase/purchaseKind'
 import { defaultPurchasePrice, lineMaximum, purchaseUnitOf } from '../../components/purchase/purchaseLines'
 import { PurchaseLinesGrid, type PurchaseLine } from '../../components/purchase/PurchaseLinesGrid'
@@ -288,16 +289,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
      posted (the server marks it then). */
   const legacyInvoice =
     kind.code === 'PINV' && document != null && document.status !== 'Draft' && document.usesGoodsReceipts !== true && document.receiptMode === 1
-  /* WHAT CANCELLING DOES, said in its dialog (decision 3). An invoice that brought no stock of its own (posted since goods
-     receipts, or shipped in containers) moves no stock when cancelled: its received pieces go back to the order price
-     (the server's PINVCANCEL true-up). An order never moves stock. Only an old local invoice reverses its stock rows,
-     which is the dialog's default sentence. */
-  const cancelDescription =
-    kind.code === 'PINV' && document != null && (document.usesGoodsReceipts === true || document.receiptMode === 2)
-      ? 'Cancelling makes the amount no longer payable and leaves the invoice in place as a record. The stock does not change: goods already received go back to the order price (goods without an order keep their cost at receipt), and the difference is booked to the stock value and the cost of sales. It cannot be undone.'
-      : kind.code === 'PO'
-        ? 'Cancelling leaves the order in place as a record: it no longer counts as incoming stock, and nothing can be received or invoiced against it. The stock does not change. It cannot be undone.'
-        : undefined
+  /* What cancelling does, said in its dialog (decision 3): purchaseKind.cancelDescription. */
+  const cancelDescription = purchaseCancelDescription(kind.code, document?.usesGoodsReceipts, document?.receiptMode)
   /* The gray "Posted before goods receipts" hint: an old local invoice, and an older "Shipped in containers" one whose
      containers were all offloaded the old way - the server gives exactly that reason for "Receive goods…" then. */
   const legacyHint =

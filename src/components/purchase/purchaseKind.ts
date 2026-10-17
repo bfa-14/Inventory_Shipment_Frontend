@@ -266,3 +266,22 @@ export function supplierLabel(party: { partyCode: string; partyName: string }): 
 export function currencyLabel(currency: { currencyCode: string; currencyName: string }): string {
   return `${currency.currencyCode} - ${currency.currencyName}`
 }
+
+/**
+ * WHAT CANCELLING DOES, said in its dialog, for the page and the list alike. An invoice that brought no stock of its own
+ * (posted since goods receipts, or shipped in containers) moves no stock when cancelled: its received pieces go back to
+ * the order price (the server's PINVCANCEL true-up). An order never moves stock. Only an old local invoice reverses its
+ * stock rows, which is the dialog's default sentence (undefined here). The list knows no usesGoodsReceipts: it passes
+ * null, and a local invoice there keeps the default sentence.
+ */
+export function cancelDescription(
+  documentTypeCode: PurchaseDocumentTypeCode | string,
+  usesGoodsReceipts: boolean | null | undefined,
+  receiptMode: number | null | undefined,
+): string | undefined {
+  if (documentTypeCode === 'PINV' && (usesGoodsReceipts === true || receiptMode === 2))
+    return 'Cancelling makes the amount no longer payable and leaves the invoice in place as a record. The stock does not change: goods already received go back to the order price (goods without an order keep their cost at receipt), and the difference is booked to the stock value and the cost of sales. It cannot be undone.'
+  if (documentTypeCode === 'PO')
+    return 'Cancelling leaves the order in place as a record: it no longer counts as incoming stock, and nothing can be received or invoiced against it. The stock does not change. It cannot be undone.'
+  return undefined
+}

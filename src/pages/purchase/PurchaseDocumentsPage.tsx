@@ -29,6 +29,7 @@ import {
   purchaseStatusLabel,
   supplierLabel,
   type PurchaseKind,
+  cancelDescription,
 } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
@@ -507,7 +508,7 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
     {
       accessor: 'status',
       title: 'Status',
-      width: 140,
+      width: 170,
       render: (row) => (
         <Badge color={purchaseStatusColour(row.status, row.documentTypeCode, row.invoicingStatus)} variant="light">
           {statusText(row)}
@@ -720,7 +721,7 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
 
       <ReceiveGoodsModal opened={receiving !== null} source={receiving} onClose={() => setReceiving(null)} />
 
-      <CancelReasonModal opened={cancelling !== null} onClose={() => setCancelling(null)} documentLabel={cancelling ? label(cancelling) : ''} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} />
+      <CancelReasonModal opened={cancelling !== null} onClose={() => setCancelling(null)} documentLabel={cancelling ? label(cancelling) : ''} busy={cancelBusy} onConfirm={(reason) => void cancelDocument(reason)} description={cancelling ? cancelDescription(cancelling.documentTypeCode, null, cancelling.receiptMode) : undefined} />
     </div>
   )
 }
