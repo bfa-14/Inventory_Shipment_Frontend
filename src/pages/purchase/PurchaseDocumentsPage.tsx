@@ -9,7 +9,7 @@ import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
-import { purchaseDocumentsApi, type CreatedPurchaseInvoiceDto, type PurchaseDocumentListDto, type PurchaseDocumentStatus } from '../../api/purchase/documents'
+import { purchaseDocumentsApi, type CreatedPurchaseInvoiceDto, type PurchaseDocumentListDto } from '../../api/purchase/documents'
 import type { BranchLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
@@ -24,8 +24,8 @@ import {
   PURCHASE_INVOICE,
   PURCHASE_ORDER,
   PURCHASE_RETURN,
-  PURCHASE_STATUS_COLOURS,
-  PURCHASE_STATUSES,
+  purchaseStatusColour,
+  purchaseStatusFilters,
   purchaseStatusLabel,
   supplierLabel,
   type PurchaseKind,
@@ -111,10 +111,15 @@ const GRID_COLUMNS: GridColumnMeta<PurchaseDocumentListDto>[] = [
   { accessor: 'receivedPercent', kind: 'number', text: (r) => percentText(r.receivedPercent) },
   { accessor: 'invoicedPercent', kind: 'number', value: (r) => r.invoicedPercent ?? null, text: (r) => percentText(r.invoicedPercent) },
   { accessor: 'invoiceReceived', kind: 'number', value: invoiceReceivedPercent, text: (r) => percentText(invoiceReceivedPercent(r)) },
-  { accessor: 'status', kind: 'list' },
+  /* What the row shows: an approved order Saved / Partially posted / Posted (script 77), in the funnel and the CSV too. */
+  { accessor: 'status', kind: 'list', value: statusText, text: statusText },
   { accessor: 'paymentStatus', kind: 'list', text: (r) => (r.paymentStatus ? paymentStatusLabel(r.paymentStatus) : '') },
   { accessor: 'outstandingAmount', kind: 'number', text: (r) => (r.outstandingAmount === null ? '' : formatNumber(r.outstandingAmount, r.decimalPlaces)) },
 ]
+
+function statusText(row: PurchaseDocumentListDto): string {
+  return purchaseStatusLabel(row.status, row.documentTypeCode, row.invoicingStatus)
+}
 
 /** A supplier invoice's item, "code - name"; "3 items" for an invoice of several items (script 63). */
 function itemText(row: PurchaseDocumentListDto): string {
@@ -233,15 +238,18 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
     paging: 'client',
     errorMessage: `The ${kind.plural.toLowerCase()} could not be loaded.`,
     fetcher: useCallback(
-      ({ filters, signal }) =>
-        fetchAllPages((page, pageSize) =>
+      ({ filters, signal }) => {
+        const statusFilter = purchaseStatusFilters(kind.code).find((f) => f.value === filters.status)
+        return fetchAllPages((page, pageSize) =>
           purchaseDocumentsApi.list(
             {
               documentTypeCode: kind.code,
               search: filters.search.trim() || undefined,
               branchId: filters.branchId === null ? undefined : Number(filters.branchId),
               supplierId: filters.supplierId === null ? undefined : Number(filters.supplierId),
-              status: (filters.status as PurchaseDocumentStatus | null) ?? undefined,
+              // (77) an order's stage is status Posted + its invoicing status
+              status: statusFilter?.status,
+              invoicingStatus: statusFilter?.invoicingStatus,
               dateFrom: filters.dateFrom ?? undefined,
               dateTo: filters.dateTo ?? undefined,
               toReceive: kind.code === 'PO' && filters.toReceive ? true : undefined,
@@ -253,7 +261,8 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
             },
             signal,
           ),
-        ),
+        )
+      },
       [kind.code],
     ),
   })
@@ -498,8 +507,12 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
     {
       accessor: 'status',
       title: 'Status',
-      width: 110,
-      render: (row) => <Badge color={PURCHASE_STATUS_COLOURS[row.status] ?? 'gray'} variant="light">{purchaseStatusLabel(row.status)}</Badge>,
+      width: 140,
+      render: (row) => (
+        <Badge color={purchaseStatusColour(row.status, row.documentTypeCode, row.invoicingStatus)} variant="light">
+          {statusText(row)}
+        </Badge>
+      ),
     },
     ...(kind.code === 'PINV'
       ? [
@@ -537,13 +550,11 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
               icon: <IconPackageImport size={16} />,
               tooltip: 'Receive goods…',
               color: 'teal',
-              // An approved order, open or closed (a closed one may still have invoiced goods to receive). A hint only:
-              // the percentages are rounded, and the dialog says why when the rest travels in containers (rule 14).
-              // An order closed by hand expects only what was invoiced, so it is done once that is received.
-              visible: canReceiveGoods && (row.status === 'Posted' || row.status === 'Closed'),
-              disabled:
-                (row.receivedPercent ?? 0) >= 100 ||
-                (row.status === 'Closed' && (row.invoicedPercent ?? 0) <= (row.receivedPercent ?? 0)),
+              // An approved order - Saved, Partially posted or Posted: goods may arrive before or after their invoices.
+              // A hint only: the percentages are rounded, and the dialog says why when the rest travels in containers
+              // (rule 14) or was settled short.
+              visible: canReceiveGoods && row.status === 'Posted',
+              disabled: (row.receivedPercent ?? 0) >= 100,
               disabledReason: 'Everything ordered is already received.',
               onClick: () => setReceiving({ kind: 'order', id: row.id, documentNumber: row.documentNumber }),
             },
@@ -551,15 +562,15 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
               icon: <IconFileInvoice size={16} />,
               tooltip: 'Create invoice',
               color: 'green',
-              // Since goods receipts a fully invoiced order stays open until its goods are received: nothing is left to
-              // invoice on it (a hint from the rounded percentage; the dialog checks the order's own lines).
+              // Any approved order; a Posted one (fully invoiced) has nothing left to invoice (a hint from the rounded
+              // percentage; the dialog checks the order's own lines).
               visible: canCreateInvoice && row.status === 'Posted',
               disabled: (row.invoicedPercent ?? 0) >= 100,
               disabledReason: 'Everything ordered is already invoiced.',
               onClick: () => void createFrom(row),
             },
             { icon: <IconArrowBackUp size={16} />, tooltip: 'Create return', color: 'orange', visible: canCreateReturn && row.status === 'Posted', onClick: () => void createFrom(row) },
-            { icon: <IconFilterOff size={16} />, tooltip: `Cancel ${kind.noun}`, color: 'red', visible: canCancel && (row.status === 'Posted' || row.status === 'Closed'), onClick: () => setCancelling(row) },
+            { icon: <IconFilterOff size={16} />, tooltip: `Cancel ${kind.noun}`, color: 'red', visible: canCancel && row.status === 'Posted', onClick: () => setCancelling(row) },
           ]}
           remove={{ visible: canDelete && row.status === 'Draft', onClick: () => void remove(row) }}
         />
@@ -607,7 +618,7 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
           <Select label="Supplier" placeholder="All suppliers" data={suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) }))} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select label="Status" placeholder="All" data={PURCHASE_STATUSES.map((value) => ({ value, label: purchaseStatusLabel(value) }))} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+          <Select label="Status" placeholder="All" data={purchaseStatusFilters(kind.code).map(({ value, label }) => ({ value, label }))} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />

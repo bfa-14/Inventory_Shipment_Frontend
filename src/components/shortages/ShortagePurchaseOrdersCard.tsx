@@ -4,7 +4,7 @@ import { routes } from '../../routes'
 import type { ShortagePurchaseOrderDto } from '../../api/inventory/shortages'
 import { dateLabel } from '../documents/documentKind'
 import { formatMoney } from '../format'
-import { PURCHASE_STATUS_COLOURS, purchaseStatusLabel } from '../purchase/purchaseKind'
+import { purchaseStatusColour, purchaseStatusLabel } from '../purchase/purchaseKind'
 
 /**
  * The purchase orders created from this plan — the second link of Shortage → PO → Purchase Invoice.
@@ -38,7 +38,7 @@ export function ShortagePurchaseOrdersCard({ orders }: { orders: ShortagePurchas
                     </Anchor>
                   </Table.Td>
                   <Table.Td><Text fz="sm">{dateLabel(order.documentDate)}</Text></Table.Td>
-                  <Table.Td><Badge variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>{purchaseStatusLabel(order.status)}</Badge></Table.Td>
+                  <Table.Td><Badge variant="light" color={purchaseStatusColour(order.status, 'PO', order.invoicingStatus)}>{purchaseStatusLabel(order.status, 'PO', order.invoicingStatus)}</Badge></Table.Td>
                   <Table.Td ta="right"><Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{formatMoney(order.totalAmount, order.currencyCode)}</Text></Table.Td>
                 </Table.Tr>
               ))}

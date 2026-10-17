@@ -74,10 +74,11 @@ export interface SplitByItemResultDto {
 export type PurchaseDocumentTypeCode = 'PO' | 'PINV' | 'PRET'
 
 /**
- * Purchase documents have one status more than the others: a posted order is OPEN until it is CLOSED.
- * An order sent for approval is PendingApproval (not editable, not posted yet) until it is approved.
+ * The status the API sends. An order sent for approval is PendingApproval (not editable, not posted yet) until it is
+ * approved; an approved order is Posted, and what it SHOWS - Saved, Partially posted, Posted - comes from its
+ * `invoicingStatus` (script 77, `purchaseStatusShown` in purchaseKind.ts). Orders are no longer closed.
  */
-export type PurchaseDocumentStatus = 'Draft' | 'PendingApproval' | 'Posted' | 'Cancelled' | 'Closed'
+export type PurchaseDocumentStatus = 'Draft' | 'PendingApproval' | 'Posted' | 'Cancelled'
 
 export interface PurchaseRateResolutionDto {
   currencyId: number
@@ -225,6 +226,8 @@ export interface PurchaseDocumentListDto {
   receivedPercent: number | null
   /** Orders only: how much of the ordered quantity has been invoiced, 0–100. */
   invoicedPercent?: number | null
+  /** Orders (script 77): 0 Saved, 1 Partially posted, 2 Posted - the stage of an approved order; null otherwise. */
+  invoicingStatus?: number | null
   /** Supplier invoices: the pieces received (goods receipts matched to it) and invoiced, for the Received progress. */
   receivedBase?: number | null
   quantityBase?: number | null
@@ -251,7 +254,6 @@ export interface PurchaseDocumentListDto {
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
-  closedAtUtc: string | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -265,9 +267,11 @@ export interface PurchaseDocumentQuery {
   warehouseId?: number
   supplierId?: number
   status?: PurchaseDocumentStatus
+  /** Orders, with status Posted (script 77): 0 Saved, 1 Partially posted, 2 Posted. */
+  invoicingStatus?: 0 | 1 | 2
   dateFrom?: string
   dateTo?: string
-  /** Orders: posted or closed orders with something still to receive (outstanding > 0). */
+  /** Orders: approved orders with something still to receive (outstanding > 0). */
   toReceive?: boolean
   /** Supplier invoices: posted invoices whose received pieces are fewer than the invoiced ones. */
   notFullyReceived?: boolean
@@ -316,7 +320,7 @@ export interface PurchaseDocumentLineDto {
   remainingBase: number | null
   /* Goods receipts (script 65), base units. Orders: what was received, settled short ("Nothing more will come", or short
      on a container's receipt), is in containers not received yet and in draft receipts; outstanding = ordered − received
-     − settled short (invoiced − … on a closed order). Invoices: toReceiveBase only. */
+     − settled short. Invoices: toReceiveBase only. */
   goodsReceivedBase?: number
   goodsShortBase?: number
   inContainersBase?: number
@@ -385,6 +389,8 @@ export interface LinkedPurchaseDocumentDto {
   documentNumber: string | null
   documentDate: string
   status: PurchaseDocumentStatus
+  /** A linked order (script 77): 0 Saved, 1 Partially posted, 2 Posted; null for an invoice or a return. */
+  invoicingStatus?: number | null
   totalAmount: number
   currencyCode: string
 }
@@ -517,7 +523,7 @@ export interface PurchaseDocumentDto {
   usesGoodsReceipts?: boolean
   /** When the application switched to goods receipts (purchase.GoodsReceiptSwitch); null before. */
   goodsReceiptsSinceUtc?: string | null
-  /** Orders (posted or closed) and posted invoices: "Receive goods…" can be used, else why not. */
+  /** Approved orders and posted invoices: "Receive goods…" can be used, else why not. */
   canReceive?: boolean
   receiveBlockedReason?: string | null
   /** The goods receipts of the order's or the invoice's lines (drafts included). */
@@ -548,7 +554,7 @@ export interface PurchaseDocumentDto {
   orderedBase: number | null
   invoicedBase: number | null
   inDraftInvoicesBase: number
-  /** Orders: 0 not, 1 partially, 2 fully invoiced. */
+  /** Orders: 0 not, 1 partially, 2 fully invoiced - what an approved order shows: Saved, Partially posted, Posted. */
   invoicingStatus: number | null
   totalItems: number
   totalQuantity: number
@@ -577,9 +583,6 @@ export interface PurchaseDocumentDto {
   cancelledAtUtc: string | null
   cancelledByName: string | null
   cancelReason: string | null
-  closedAtUtc: string | null
-  closedByName: string | null
-  closeReason: string | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -589,12 +592,11 @@ export interface PurchaseDocumentDto {
   canPost: boolean
   canDelete: boolean
   canCancel: boolean
-  canClose: boolean
   /** Charges are typed on a DRAFT invoice; after posting they arrive as a landed cost adjustment. */
   canEditCharges: boolean
   /** A posted invoice can receive charges that arrived late. */
   canAdjustLandedCost: boolean
-  /** An open (posted) order: shipped quantities can be recorded. */
+  /** An approved order: shipped quantities can be recorded. */
   canMarkShipped: boolean
   canCreateInvoice: boolean
   canCreateReturn: boolean
@@ -666,6 +668,7 @@ export const purchaseDocumentsApi = {
     if (query.warehouseId !== undefined) params.set('warehouseId', String(query.warehouseId))
     if (query.supplierId !== undefined) params.set('supplierId', String(query.supplierId))
     if (query.status) params.set('status', query.status)
+    if (query.invoicingStatus !== undefined) params.set('invoicingStatus', String(query.invoicingStatus))
     if (query.dateFrom) params.set('dateFrom', query.dateFrom)
     if (query.dateTo) params.set('dateTo', query.dateTo)
     if (query.toReceive) params.set('toReceive', 'true')
@@ -694,10 +697,6 @@ export const purchaseDocumentsApi = {
 
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<PurchaseDocumentDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
-
-  /** Orders only: ends an open order that will not be received any further. */
-  close: (id: number, reason: string | null, rowVersion: string | null) =>
-    request<PurchaseDocumentDto>(`${BASE}/${id}/close`, { method: 'POST', body: { reason, rowVersion } }),
 
   /**
    * What the supplier has shipped on an open order — the TOTAL shipped so far per line, in base

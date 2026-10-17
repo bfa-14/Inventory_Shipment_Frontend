@@ -32,7 +32,7 @@ import { formatNumber, numberInputValue } from '../../format'
 import { notify } from '../../ui/notify'
 import { CONTAINERS_HINT, ORDER_PRICE_HINT, warehouseChoices } from './goodsReceiptModel'
 
-/** What is being received: a posted or closed purchase order, or a posted purchase invoice. */
+/** What is being received: an approved purchase order, or a posted purchase invoice. */
 export interface ReceiveGoodsSource {
   kind: 'order' | 'invoice'
   id: number

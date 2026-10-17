@@ -141,11 +141,11 @@ export function PublicPurchaseApprovalPage() {
   }
 
   if (result) {
-    const approved = result.status === 'Posted' || result.status === 'Closed'
+    const approved = result.status === 'Posted'
     return (
       <Frame>
         {approved ? (
-          <OutcomeCard colour="green" icon={<IconCheck size={30} />} title={`Approved: ${result.documentNumber ?? ''}`.trim()} message="The order is posted." />
+          <OutcomeCard colour="green" icon={<IconCheck size={30} />} title={`Approved: ${result.documentNumber ?? ''}`.trim()} message="The order is approved and saved." />
         ) : (
           <OutcomeCard colour="red" icon={<IconX size={30} />} title="Rejected" message="The order goes back to its author with your reason." />
         )}

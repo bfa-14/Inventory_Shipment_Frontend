@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
+import { Alert, Badge, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
 import {
   IconArrowBackUp,
   IconArrowsSplit,
@@ -8,7 +8,6 @@ import {
   IconBoxMultiple,
   IconCheck,
   IconFileInvoice,
-  IconLock,
   IconMail,
   IconPackageImport,
   IconPlus,
@@ -52,7 +51,6 @@ import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFr
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { announceApproved } from '../../components/purchase/approvalNotices'
 import { ApprovalTimeline } from '../../components/purchase/ApprovalTimeline'
-import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
 import { CreateInvoiceFromOrderModal } from '../../components/purchase/CreateInvoiceFromOrderModal'
 import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
@@ -85,6 +83,8 @@ import {
   LEGACY_INVOICE_TEXTS,
   PURCHASE_INVOICE,
   PURCHASE_RETURN,
+  purchaseStatusColour,
+  purchaseStatusLabel,
   type PurchaseKind,
 } from '../../components/purchase/purchaseKind'
 import { defaultPurchasePrice, lineMaximum, purchaseUnitOf } from '../../components/purchase/purchaseLines'
@@ -112,6 +112,18 @@ function emptyLine(warehouseId: number | null): PurchaseLine {
     units: [], quantity: 1, unitPrice: null, discountPercent: 0, expiryDate: null, notes: '', onHandBase: null,
     importRowNumber: null, sourceLineId: null, sourceRemainingBase: null,
   }
+}
+
+/**
+ * What an approved order's posted invoices cover (script 77): the sentence under its Saved / Partially posted / Posted
+ * banner. Draft invoices do not count; the progress card below has the figures.
+ */
+function orderStageSentence(order: PurchaseDocumentDto): string {
+  const ordered = order.orderedBase ?? 0
+  const invoiced = order.invoicedBase ?? 0
+  if (order.invoicingStatus === 2) return `Posted invoices cover everything ordered (${formatNumber(ordered)} pcs).`
+  if (order.invoicingStatus === 1) return `Posted invoices cover ${formatNumber(invoiced)} of ${formatNumber(ordered)} pcs.`
+  return 'No supplier invoice is posted against it yet.'
 }
 
 /** Focuses an input a state change is about to draw; a few short retries because React commits on its own schedule. */
@@ -209,8 +221,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [importOpen, setImportOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelBusy, setCancelBusy] = useState(false)
-  const [closeOpen, setCloseOpen] = useState(false)
-  const [closeBusy, setCloseBusy] = useState(false)
   /* An order shipped in containers: Add Container and the invoice made from its containers. */
   const [addContainerOpen, setAddContainerOpen] = useState(false)
   const [autoPlanOpen, setAutoPlanOpen] = useState(false)
@@ -1043,20 +1053,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }
 
-  async function closeOrder(reason: string | null) {
-    if (!document) return
-    setCloseBusy(true)
-    try {
-      applyDocument(await purchaseDocumentsApi.close(document.id, reason, document.rowVersion))
-      notify.success('Purchase order closed.')
-      setCloseOpen(false)
-    } catch (error) {
-      showApiError(error)
-    } finally {
-      setCloseBusy(false)
-    }
-  }
-
   async function createFromThis() {
     if (!document) return
     if (kind.code === 'PO') {
@@ -1363,7 +1359,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       : null
   /* Received / Invoiced / Short on an approved order's lines, Received on a posted invoice's. */
   const lineReceipts =
-    kind.code === 'PO' && (status === 'Posted' || status === 'Closed')
+    kind.code === 'PO' && status === 'Posted'
       ? ('order' as const)
       : kind.code === 'PINV' && (status === 'Posted' || status === 'Cancelled')
         ? ('invoice' as const)
@@ -1383,7 +1379,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.createInvoice), loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
-        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
         { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
       ]
@@ -1396,7 +1391,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         // its goods are received once it is posted.
         receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, colour: 'green', ...orderAction(abilities?.createInvoice), onClick: () => void createFromThis() },
-        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
         { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
         ...(creating
@@ -1418,7 +1412,17 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
   return (
     <Stack>
-      <PageHeader title={isNew ? `New ${kind.title}` : `${kind.title} ${documentLabel}`} />
+      <PageHeader
+        title={isNew ? `New ${kind.title}` : `${kind.title} ${documentLabel}`}
+        actions={
+          document ? (
+            // What the document shows: an approved order says how far its posted invoices go (script 77).
+            <Badge size="lg" variant="light" color={purchaseStatusColour(status, kind.code, document.invoicingStatus)} data-status-badge>
+              {purchaseStatusLabel(status, kind.code, document.invoicingStatus)}
+            </Badge>
+          ) : undefined
+        }
+      />
 
       <DocumentActionBar actions={actions} />
 
@@ -1453,8 +1457,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       )}
 
       {document && status === 'Posted' && (
-        <Alert color={kind.colour} title={`${kind.code === 'PO' ? 'Confirmed' : 'Posted'} — ${document.documentNumber}`}>
+        <Alert color={kind.colour} title={`${kind.code === 'PO' ? purchaseStatusLabel(status, kind.code, document.invoicingStatus) : 'Posted'} — ${document.documentNumber}`}>
           {kind.code === 'PO' ? 'Confirmed' : 'Posted'} by {document.postedByName ?? 'unknown'} on {stamp(document.postedAtUtc)}.{' '}
+          {kind.code === 'PO' && `${orderStageSentence(document)} `}
           {/* An invoice says what has come in; only an old local invoice keeps its old sentence (its posting added the stock). */}
           {kind.code !== 'PINV' || legacyInvoice ? kind.postedBanner : invoicePostedBanner(invoiceReceived, invoiceQuantity)}
           {approvalState?.sentToSupplierAtUtc ? ` Sent to the supplier on ${stamp(approvalState.sentToSupplierAtUtc)}.` : ''}
@@ -1465,15 +1470,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           )}
         </Alert>
       )}
-      {approvalState?.supplierNotEmailed && (status === 'Posted' || status === 'Closed') && (
+      {approvalState?.supplierNotEmailed && status === 'Posted' && (
         <Alert color="orange" title="Not sent to the supplier" data-supplier-not-emailed>
           Not sent to the supplier: no email address. Add it to the supplier, then use Send to supplier.
-        </Alert>
-      )}
-      {document && status === 'Closed' && (
-        <Alert color="teal" title={`Closed — ${document.documentNumber}`}>
-          Closed by {document.closedByName ?? 'unknown'} on {stamp(document.closedAtUtc)}.{reasonSentence(document.closeReason)}{' '}
-          {kind.code === 'PO' ? 'No more invoices will be made from it; goods already invoiced and not yet received can still be received.' : ''}
         </Alert>
       )}
       {document && status === 'Cancelled' && (
@@ -1976,8 +1975,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onClose={() => setReceiveOpen(false)}
         />
       )}
-
-      <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />
 
       {canImportHere && (
         <ImportInvoiceItemsWizard

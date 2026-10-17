@@ -47,7 +47,7 @@ type Step = 'choose' | 'order' | 'container' | 'manual'
 /**
  * "+ New" on Purchase › Goods Receipts: where the goods come from (rule 16).
  *
- * - "From a purchase order…": the supplier, then its posted or closed orders with something to receive; the order
+ * - "From a purchase order…": the supplier, then its approved orders with something to receive; the order
  *   picked opens the shared "Receive goods" dialog (the lines behave as on the order page, 0 on an order in containers).
  * - "From a container…": a confirmed container with no goods receipt yet (the server's list, `receivable-containers`:
  *   status 2-5, no draft or posted receipt, delivered ones first); its draft is created at once and opened.
@@ -173,7 +173,7 @@ function FromOrderStep({
     return () => controller.abort()
   }, [supplierId])
 
-  /** The supplier's posted or closed orders with something to receive, as the server totals them. */
+  /** The supplier's approved orders with something to receive, as the server totals them. */
   const orders = useMemo(() => (loaded ?? []).filter((o) => o.toReceiveBase > 0), [loaded])
 
   const supplier = suppliers?.find((s) => String(s.id) === supplierId)
@@ -204,7 +204,7 @@ function FromOrderStep({
 
       {loaded !== null && orders.length === 0 && (
         <Text size="sm" c="dimmed" ta="center" py="md">
-          {supplier ? `${supplier.partyCode} has` : 'This supplier has'} no posted or closed order with goods to receive.
+          {supplier ? `${supplier.partyCode} has` : 'This supplier has'} no approved order with goods to receive.
         </Text>
       )}
 

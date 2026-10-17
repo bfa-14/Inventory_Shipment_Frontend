@@ -123,7 +123,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       .availablePoLines({ purchaseOrderId: order.id })
       .then((lines) => {
         if (!live) return
-        // An invoice takes one quantity: the order lines only give the oil of its item (none once the order is closed).
+        // An invoice takes one quantity: the order lines only give the oil of its item.
         if (invoice) {
           const ofItem = lines.find((line) => String(line.itemId) === (invoice.items[0] ? String(invoice.items[0].itemId) : null))
           if (ofItem && (ofItem.itemOilQtyPerUnit ?? 0) > 0) {

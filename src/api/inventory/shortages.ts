@@ -79,6 +79,8 @@ export interface ShortagePurchaseOrderDto {
   documentNumber: string | null
   documentDate: string
   status: PurchaseDocumentStatus
+  /** An approved order (script 77): 0 Saved, 1 Partially posted, 2 Posted. */
+  invoicingStatus?: number | null
   totalAmount: number
   currencyCode: string
   createdAtUtc: string

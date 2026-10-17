@@ -34,7 +34,8 @@ const ACTION_COLOURS: Record<string, string> = {
   FileAdded: 'gray',
   FileUpdated: 'gray',
   FileDeleted: 'gray',
-  // Purchase orders: the approval decision; containers: their own steps.
+  // Purchase orders: the approval decision (and "Closed" in the history of an order closed before script 77);
+  // containers: their own steps.
   Approved: 'green',
   Rejected: 'red',
   Closed: 'teal',

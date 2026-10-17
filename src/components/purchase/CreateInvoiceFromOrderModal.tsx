@@ -45,8 +45,8 @@ export function CreateInvoiceFromOrderModal({ order: given, orderId, onClose, on
   /* The items still to invoice, in the order of their first line: one invoice each, or one invoice for all. */
   const itemCodes = distinctInOrder((order?.lines ?? []).filter((line) => (line.remainingBase ?? 0) > 0).map((line) => line.itemCode))
 
-  /* NOTHING LEFT TO INVOICE: since goods receipts a fully invoiced order stays open until its goods are received, so the
-     order list can still reach this dialog for it. Said here instead of a Create the server would refuse (65011). An
+  /* NOTHING LEFT TO INVOICE: a fully invoiced order shows Posted and is never closed (script 77), so the order list can
+     still reach this dialog for it. Said here instead of a Create the server would refuse (65011). An
      order line's remainingBase counts the draft invoices as not invoiced yet, so the rest may be all in drafts. */
   const leftToInvoice = (order?.lines ?? []).reduce((sum, line) => sum + Math.max(0, line.remainingBase ?? 0), 0)
   const nothingLeft =

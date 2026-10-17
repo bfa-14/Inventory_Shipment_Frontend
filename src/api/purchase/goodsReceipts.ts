@@ -567,7 +567,7 @@ export interface ReceivableDocumentDto {
   id: number
   documentNumber: string | null
   documentDate: string
-  /** The purchase document's status code: 2 Posted (an approved order), 4 Closed… */
+  /** The purchase document's status code: 2 Posted (an approved order, or a posted invoice). */
   status: number
   branchId: number
   branchCode: string | null
@@ -794,7 +794,7 @@ export interface ReceiptCostPreviewLineDto {
 export interface ReceiptCostPreviewDto {
   invoiceId: number
   documentNumber: string | null
-  /** Draft, Posted, Cancelled or Closed: only a draft is previewed. */
+  /** Draft, Posted or Cancelled: only a draft is previewed. */
   status: string
   baseCurrencyCode: string | null
   /** Received pieces whose cost the posting would adjust. */
@@ -887,7 +887,7 @@ export const goodsReceiptsApi = {
     normaliseDocument(await request<GoodsReceiptDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } })),
 
   /**
-   * The lines and the to-receive figures of an order, an invoice, a container, or every posted / closed order of a
+   * The lines and the to-receive figures of an order, an invoice, a container, or every approved order of a
    * supplier with something to receive (exactly one of the four).
    */
   receivable: async (

@@ -51,8 +51,8 @@ export const PURCHASE_ORDER: PurchaseKind = {
   route: '/purchase/orders',
   colour: 'blue',
   postVerb: 'Confirm',
-  postConfirm: () => 'Confirm this purchase order? The number is assigned and the ordered quantities count as incoming stock until they are received or the order is closed.',
-  postedBanner: 'The order is open: its quantities count as incoming stock, and goods can be received and invoiced against it.',
+  postConfirm: () => 'Confirm this purchase order? The number is assigned and the ordered quantities count as incoming stock until they are received.',
+  postedBanner: 'Its quantities count as incoming stock until they are received, and goods can be received and invoiced against it.',
   permissions: {
     view: PERMISSIONS.purchaseOrdersView,
     create: PERMISSIONS.purchaseOrdersCreate,
@@ -180,20 +180,81 @@ export function purchaseKindOf(code: PurchaseDocumentTypeCode | string | null | 
   return PURCHASE_KINDS.find((k) => k.code === code)
 }
 
-/** Draft grey, waiting for approval yellow, Posted green, Cancelled red — and Closed teal: finished, not undone. */
-export const PURCHASE_STATUS_COLOURS: Record<PurchaseDocumentStatus, string> = {
-  Draft: 'gray',
-  PendingApproval: 'yellow',
-  Posted: 'green',
-  Cancelled: 'red',
-  Closed: 'teal',
+/**
+ * WHAT A PURCHASE DOCUMENT SHOWS (script 77). The API's status, except on an approved order: the API keeps 'Posted' for
+ * every approved order (each "is it approved?" test reads it), and the order SHOWS how far its posted invoices cover it,
+ * from `invoicingStatus`: 0 Saved (none yet), 1 Partially posted, 2 Posted (everything ordered). Draft invoices and
+ * purchase returns do not change it. Invoices and returns show their own status. There is no Closed any more.
+ */
+export type PurchaseStatusShown = PurchaseDocumentStatus | 'Saved' | 'PartiallyPosted'
+
+export function purchaseStatusShown(
+  status: PurchaseDocumentStatus | string,
+  documentTypeCode?: PurchaseDocumentTypeCode | string | null,
+  invoicingStatus?: number | null,
+): PurchaseStatusShown | string {
+  if (status !== 'Posted' || documentTypeCode !== 'PO') return status
+  return invoicingStatus === 2 ? 'Posted' : invoicingStatus === 1 ? 'PartiallyPosted' : 'Saved'
 }
 
-export const PURCHASE_STATUSES: readonly PurchaseDocumentStatus[] = ['Draft', 'PendingApproval', 'Posted', 'Cancelled', 'Closed']
+/** Draft grey, waiting for approval yellow, Cancelled red; an order Saved blue, Partially posted orange, Posted green. */
+export const PURCHASE_STATUS_COLOURS: Record<PurchaseStatusShown, string> = {
+  Draft: 'gray',
+  PendingApproval: 'yellow',
+  Saved: 'blue',
+  PartiallyPosted: 'orange',
+  Posted: 'green',
+  Cancelled: 'red',
+}
 
-/** How a status reads on screen: the API's names, except the one that is two words run together. */
-export function purchaseStatusLabel(status: PurchaseDocumentStatus | string): string {
-  return status === 'PendingApproval' ? 'Waiting for approval' : status
+/** How a status reads on screen. Pass the document type and, for an order, its `invoicingStatus`. */
+export function purchaseStatusLabel(
+  status: PurchaseDocumentStatus | string,
+  documentTypeCode?: PurchaseDocumentTypeCode | string | null,
+  invoicingStatus?: number | null,
+): string {
+  const shown = purchaseStatusShown(status, documentTypeCode, invoicingStatus)
+  if (shown === 'PendingApproval') return 'Waiting for approval'
+  if (shown === 'PartiallyPosted') return 'Partially posted'
+  return shown
+}
+
+export function purchaseStatusColour(
+  status: PurchaseDocumentStatus | string,
+  documentTypeCode?: PurchaseDocumentTypeCode | string | null,
+  invoicingStatus?: number | null,
+): string {
+  return PURCHASE_STATUS_COLOURS[purchaseStatusShown(status, documentTypeCode, invoicingStatus) as PurchaseStatusShown] ?? 'gray'
+}
+
+/** One choice of a list's Status filter: the status sent to the API and, for an order's stage, its invoicing status. */
+export interface PurchaseStatusFilter {
+  value: string
+  label: string
+  status: PurchaseDocumentStatus
+  invoicingStatus?: 0 | 1 | 2
+}
+
+/**
+ * The Status filter of a list. Orders: Draft, Waiting for approval, Saved, Partially posted, Posted, Cancelled (the three
+ * stages are status Posted + invoicingStatus 0 / 1 / 2). Invoices and returns are never waiting for approval.
+ */
+export function purchaseStatusFilters(code: PurchaseDocumentTypeCode): PurchaseStatusFilter[] {
+  if (code !== 'PO') {
+    return [
+      { value: 'Draft', label: 'Draft', status: 'Draft' },
+      { value: 'Posted', label: 'Posted', status: 'Posted' },
+      { value: 'Cancelled', label: 'Cancelled', status: 'Cancelled' },
+    ]
+  }
+  return [
+    { value: 'Draft', label: 'Draft', status: 'Draft' },
+    { value: 'PendingApproval', label: 'Waiting for approval', status: 'PendingApproval' },
+    { value: 'Saved', label: 'Saved', status: 'Posted', invoicingStatus: 0 },
+    { value: 'PartiallyPosted', label: 'Partially posted', status: 'Posted', invoicingStatus: 1 },
+    { value: 'Posted', label: 'Posted', status: 'Posted', invoicingStatus: 2 },
+    { value: 'Cancelled', label: 'Cancelled', status: 'Cancelled' },
+  ]
 }
 
 /** "SUP-0001 - TVS Motor Company" — code first, so a typed code finds the supplier at once. */

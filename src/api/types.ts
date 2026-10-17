@@ -1027,8 +1027,10 @@ export interface ItemPurchaseOrderDto {
   documentDate: string
   expectedDate: string | null
   statusCode: number
-  /** Draft | PendingApproval | Posted | Closed | Cancelled. */
+  /** Draft | PendingApproval | Posted (approved: see invoicingStatus) | Cancelled. */
   status: string
+  /** The whole order's stage when approved (script 77): 0 Saved, 1 Partially posted, 2 Posted. */
+  invoicingStatus?: number | null
   supplierCode: string
   supplierName: string
   branchName: string
@@ -1041,7 +1043,7 @@ export interface ItemPurchaseOrderDto {
   invoicedBase?: number
   /** Settled short: recorded as never coming (a short container line, "Nothing more will come"). */
   shortBase?: number
-  /** Still to come (Shortages' figure): ordered − received − short on an open order, invoiced − … on a closed one. */
+  /** Still to come (Shortages' figure): ordered − received − short on an approved order, 0 otherwise. */
   outstandingBase: number
   amount: number
 }

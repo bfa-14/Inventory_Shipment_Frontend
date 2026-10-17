@@ -746,20 +746,22 @@ in **cost mode**:
   The one exception is `/new` turning into `/:id` on the first save, which keeps its instance.
 - **What can be done on an order, and why not: `orderAbilities`** (`src/components/purchase/orderAbilities.ts`).
   It returns `{ visible, blockedBy }` for every order button. A missing permission hides the button. An
-  order that is not approved and open keeps the button visible and disabled, with the reason as its
+  order that is not approved keeps the button visible and disabled, with the reason as its
   tooltip (`OrderActionButton`, or `disabledReason` in the action bar):
   - draft: "Approve the order first: containers / invoices are created from an approved order.";
   - PendingApproval: "This order is waiting for approval.";
-  - closed: "This order is closed.";
   - cancelled: "This order is cancelled.".
+
+  An approved order (Saved, Partially posted or Posted, below) is never closed: each button then follows its figures
+  ("Everything ordered is already invoiced." on a Posted one).
 
   The **Containers card** shows on every saved order to readers with `containers.view`. Its Add Container… /
   Auto-plan containers… buttons need `containers.create`, and Create Invoice from Containers… needs
-  `purchase.invoices.create`. The action bar's Create Purchase Invoice and Close Order read the same
+  `purchase.invoices.create`. The action bar's Create Purchase Invoice reads the same
   object. A new order action, approval ones included, is added there, not decided in its button.
 
   **`receiveGoods`** ("Receive goods…", `purchase.goodsreceipts.create`) has reasons of its own and never
-  `notOpenReason`, because a CLOSED order may still have invoiced goods to receive: draft "Approve the order first:
+  `notOpenReason`, because goods may arrive before or after their invoices, whatever the order shows: draft "Approve the order first:
   goods are received against an approved order.", waiting "This order is waiting for approval.", "This order is
   cancelled.", then the server's `canReceive` / `receiveBlockedReason`, else the lines' figures: "Everything ordered is
   already received.", "Everything still to receive travels in containers: it is received with its containers." (and
@@ -768,8 +770,10 @@ in **cost mode**:
   A supplier invoice posted since the switch moves no stock: it becomes payable and sets the cost of what was received
   against it. The page says so in every text that names posting, from `purchaseKind.ts`:
   - **Posting wording.** Order: "Confirm this purchase order? The number is assigned and the ordered quantities count
-    as incoming stock until they are received or the order is closed.", banner "The order is open: its quantities
-    count as incoming stock, and goods can be received and invoiced against it.". Invoice:
+    as incoming stock until they are received.", banner "{Saved | Partially posted | Posted} — PO-…": "Confirmed by
+    {user} on {date}." + what its posted invoices cover ("No supplier invoice is posted against it yet." / "Posted
+    invoices cover 60 of 100 pcs." / "Posted invoices cover everything ordered (100 pcs).") + "Its quantities count
+    as incoming stock until they are received, and goods can be received and invoiced against it.". Invoice:
     `PURCHASE_INVOICE.postConfirm` "Post this purchase invoice? The number is assigned and the amount becomes payable
     to the supplier. The stock does not change: goods enter with goods receipts.", banner "Posted by {user} on {date}."
     + `invoicePostedBanner` "Received so far: {r} of {q} pcs.". Return: unchanged, "…Stock will be removed from
@@ -813,7 +817,7 @@ in **cost mode**:
     reason, or "Nothing more will come"). Never show `receivedQuantityBase` under the word "Received" on an order.
     On an invoice line, Received is the line's `receivedQuantityBase` (the receipt pieces matched to it). An order is
     done when Invoiced ≥ ordered and Received + Short ≥ ordered. `PurchaseLinesGrid receipts="order"` shows the three
-    on a posted or closed order, `receipts="invoice"` shows Received on a posted invoice; the order's progress card
+    on an approved order, `receipts="invoice"` shows Received on a posted invoice; the order's progress card
     adds Received ("66 / 150 pcs (+4 short)"). The other figures of a line (`toReceiveBase`, `inContainersBase`,
     `inDraftReceiptsBase`, `outstandingBase`) are the server's: never recompute them.
   - **"Cost of received goods"** (`InvoiceReceiptCostCard`): the invoice's `costAdjustments`, with the sentence "Cost of
@@ -840,26 +844,37 @@ in **cost mode**:
   `purchaseDocumentsApi.importCreate`.
 - **Summary** (`SalesTotals` reused): subtotal, discount, grand total in the document currency and the
   "≈ … USD" line at the document rate. **Linked Documents** (`LinkedDocumentsCard`): the source and every
-  document created from this one, each with its status — a cancelled invoice under an order means the
-  order is open again.
-- **Lifecycle**: Draft → Posted → Cancelled, plus **Closed (teal)** for orders: automatically when every line
-  is fully invoiced and received (or settled short), or by hand with "Close Order" (`CloseOrderModal`, reason
-  optional, needs `purchase.orders.post`); goods already invoiced can still be received on a closed order.
-  Confirmations say what posting does per kind — an order is *confirmed* and its quantities count as incoming
+  document created from this one, each with its status (a linked order's from its `invoicingStatus`) — a
+  cancelled invoice under an order brings the order back to Partially posted or Saved.
+- **Lifecycle**: Draft → Posted → Cancelled for invoices and returns. **Orders (script 77)**: Draft → (Waiting for
+  approval) → approved → Cancelled, and an approved order SHOWS how far its POSTED invoices cover it:
+  **Saved** (blue, none yet), **Partially posted** (orange, invoiced < ordered), **Posted** (green, everything
+  ordered). The API keeps the status `'Posted'` for all three (every "is it approved?" test reads it) and sends
+  `invoicingStatus` 0 / 1 / 2 beside it, on the document, the list rows, the linked documents, the shortage plan's
+  orders and the item's orders. Never compare an order's status with 'Saved' or 'PartiallyPosted': show it with
+  `purchaseStatusLabel(status, documentTypeCode, invoicingStatus)` / `purchaseStatusColour(…)` (`purchaseKind.ts`),
+  and test "approved" with `status === 'Posted'` (`isApprovedOrder`). Draft invoices do not count, and purchase
+  returns do not lower it (they never lowered the order's invoiced counters). Goods receipts never change it.
+  **There is no Closed any more**: no Close Order, no closed banner; the orders closed before script 77 were brought
+  back (the pieces given up by a close by hand were settled short, so what they still expect did not change). Pieces
+  that will never come are settled with "Nothing more will come" on a goods receipt. The document page shows the
+  status as a badge in its header, and the Saved / Partially posted / Posted banner above. Confirmations say what posting does per kind — an order is *confirmed* and its quantities count as incoming
   until they are received; an invoice becomes payable and moves no stock (goods enter with goods receipts); a return
   removes stock at the invoice cost. View mode offers Export, **Receive goods…** (approved order, posted invoice;
   needs `purchase.goodsreceipts.create`), **Create Purchase Invoice** (open order, needs
   `purchase.invoices.create`), **Create Purchase Return** (posted invoice, needs `purchase.returns.create`),
-  Close Order, Cancel Document, Back. Posted, closed and cancelled documents are read-only text.
-- **List**: filters (search, branch, supplier, status Draft / Posted / Cancelled / Closed, dates, and the checkbox
+  Cancel Document, Back. Posted and cancelled documents are read-only text.
+- **List**: filters (search, branch, supplier, status - `purchaseStatusFilters(kind)`: orders Draft / Waiting for
+  approval / Saved / Partially posted / Posted / Cancelled, sent as `status` Posted + `invoicingStatus` 0 / 1 / 2 for
+  the three stages; invoices and returns Draft / Posted / Cancelled - dates, and the checkbox
   "To receive" on orders / "Not fully received" on invoices, sent as `toReceive` / `notFullyReceived`), a Source
   column that links to the order / invoice, on orders a **Received** (`receivedPercent`, goods receipts) and an
   **Invoiced** (`invoicedPercent`) progress bar, each a share of the ordered quantity, on invoices a **Received** bar
   (`receivedBase` ÷ `quantityBase`) - the figure and its meaning on hover, the share in the CSV export - bulk Post /
   Delete on ticked drafts, row actions gated by permission and status including "Receive goods…" (orders; disabled
-  "Everything ordered is already received." at 100 % received, or on a closed order received as far as it was
-  invoiced) / Create invoice (disabled "Everything ordered is already invoiced." at 100 % invoiced: since goods
-  receipts such an order stays open until its goods arrive) / Create return. The percentages are rounded, so these are
+  "Everything ordered is already received." at 100 % received) / Create invoice (disabled "Everything ordered is
+  already invoiced." at 100 % invoiced: a Posted order) / Create return. The Status column, its funnel and the CSV
+  show the words (Saved, Partially posted, Waiting for approval), not the API's names. The percentages are rounded, so these are
   hints: the dialogs check the document itself (`CreateInvoiceFromOrderModal` says "Everything ordered is already
   invoiced." or "The rest of this order is already in draft invoices: post or delete them first." and disables
   Create). The invoice list shows the readers who post invoices a blue banner, once (closing it is
@@ -1186,8 +1201,8 @@ plan's warehouse and every warehouse under it:
 - **Transit** = pieces loaded in containers that have left the supplier (In Transit, At Port, Cleared: statuses 3-5)
   and are not received yet, counted on the warehouse of their order line.
 - **Outstanding Order** = max(0, what approved orders still bring − Transit). What an order still brings is its
-  lines' **outstanding** (`outstandingBase`, the same number as the item's "On order"): on an open order ordered −
-  received − settled short, on a closed one invoiced − received − settled short, never below 0. Posted
+  lines' **outstanding** (`outstandingBase`, the same number as the item's "On order"): on an approved order ordered −
+  received − settled short, never below 0. Posted
   supplier invoices **without an order** whose goods come with goods receipts add invoiced − received.
 - "Received" here is goods receipts (plus what came in before them), never "invoiced": a posted invoice no longer
   ends what is on the way, its goods receipt does. Pieces settled short (received less with a reason, or "Nothing
@@ -1410,8 +1425,8 @@ how the date is shown. Mantine's own parser ignored the format (dayjs has no `cu
   `toLocaleString()`, which printed "10/12/2026, 1:35:40 AM" in an en-US browser next to a typed "12/10/2026". The
   print pages use the same helper (`stamp()` is it with "—" when empty).
 - A stored reason ends its sentence: `reasonSentence(reason)` (`format.ts`) gives " Reason: {reason}." with the full
-  stop added when the reason has none, for the banners that go on after it ("Closed by … on …. Reason: Fully invoiced
-  and received. No more invoices will be made from it…").
+  stop added when the reason has none, for the banners that go on after it ("Cancelled by … on …. Reason: Damaged in
+  transit. …").
 
 ## Document pages
 

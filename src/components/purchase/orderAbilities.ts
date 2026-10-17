@@ -7,7 +7,8 @@ import { PERMISSIONS } from '../../navigation'
  *
  * A button the reader may never use is hidden (the permission is missing). A button the reader could
  * use on another order stays on screen, disabled, and says why: a draft has to be approved first, an
- * order waiting for approval waits, a closed or cancelled order is finished. Deciding this in each
+ * order waiting for approval waits, a cancelled order is finished. An approved order is never closed (script 77):
+ * Saved, Partially posted and Posted are how far its invoices go, and each takes the next step its figures allow. Deciding this in each
  * button separately is how the same order came to show different buttons in different places.
  *
  * Everything here comes from the LOADED order and the permissions — never from the route, the query
@@ -28,10 +29,9 @@ export interface OrderAbilities {
   invoiceFromContainers: OrderAbility
   /** "Create Purchase Invoice": the order's remaining lines (an order with containers gives an invoice shipped in containers). */
   createInvoice: OrderAbility
-  closeOrder: OrderAbility
   /**
-   * "Receive goods…" (goods receipts, rule 14): the goods that arrived WITHOUT a container, on an approved order - open
-   * or closed, because a closed order may still have invoiced goods to receive. Its own reasons: never `notOpenReason`.
+   * "Receive goods…" (goods receipts, rule 14): the goods that arrived WITHOUT a container, on an approved order -
+   * whatever its invoices, because goods may arrive before or after them. Its own reasons: never `notOpenReason`.
    */
   receiveGoods: OrderAbility
 
@@ -54,7 +54,7 @@ export interface OrderAbilities {
   /** Waiting: the request again — new links, a new email — or taken back to a draft (purchase.orders.post). */
   resendApproval: OrderAbility
   withdrawApproval: OrderAbility
-  /** Approved (open or closed): the supplier email, again or for the first time (purchase.orders.post). */
+  /** Approved (Saved, Partially posted or Posted): the supplier email, again or for the first time (purchase.orders.post). */
   sendToSupplier: OrderAbility
 }
 
@@ -64,13 +64,13 @@ export interface OrderApprovalContext {
   userId: number | null
 }
 
-/** Approved and open: the only state in which an order takes containers, invoices or a close. */
-export function isOpenOrder(status: PurchaseDocumentStatus): boolean {
+/** Approved - Saved, Partially posted or Posted (the API's 'Posted'): the state in which an order takes containers and invoices. */
+export function isApprovedOrder(status: PurchaseDocumentStatus): boolean {
   return status === 'Posted'
 }
 
 /**
- * Why an order that is not approved and open cannot take the next step — the same words on every
+ * Why an order that is not approved cannot take the next step — the same words on every
  * button. `draftReason` is the one sentence that differs: what the approval is needed for.
  */
 export function notOpenReason(status: PurchaseDocumentStatus, draftReason: string): string | null {
@@ -79,8 +79,6 @@ export function notOpenReason(status: PurchaseDocumentStatus, draftReason: strin
       return draftReason
     case 'PendingApproval':
       return 'This order is waiting for approval.'
-    case 'Closed':
-      return 'This order is closed.'
     case 'Cancelled':
       return 'This order is cancelled.'
     default:
@@ -151,7 +149,7 @@ export function orderAbilities(
   const state = approval?.state ?? null
   const draft = order.status === 'Draft'
   const waiting = order.status === 'PendingApproval'
-  const approved = order.status === 'Posted' || order.status === 'Closed'
+  const approved = isApprovedOrder(order.status)
   const needsApproval = draft && state?.needsApproval === true
   const inAppApprover = waiting && state?.userCanApproveInApp === true
   // Self-approval off and the reader asked for it: another approver decides. The server says so too (403).
@@ -175,10 +173,6 @@ export function orderAbilities(
       forInvoices,
       // Since script 43 an order with containers is invoiced directly too: the invoice is "shipped in containers".
       !somethingToInvoice ? 'Everything ordered is already invoiced.' : null,
-    ),
-    closeOrder: ability(
-      hasPermission(PERMISSIONS.purchaseOrdersPost),
-      notOpenReason(order.status, 'Approve the order first: only an open order can be closed.'),
     ),
     receiveGoods: ability(hasPermission(PERMISSIONS.goodsReceiptsCreate), receiveGoodsReason(order)),
 
