@@ -1652,11 +1652,16 @@ The owner: "the system and the purchase orders and invoices must accept any numb
 - **The Containers page** still holds at most 5,000 rows (`fetchAllPages`' default) with its "Showing the newest rows
   only" notice: its filters (order, invoice, status…) narrow on the server, and a grid of tens of thousands of rows in
   the browser would be slow for every reader to buy little.
+- **A server-searched filter asks the server for what it offers**: `loadPurchaseOrders` sends `status: 'Posted'` (every
+  approved order: Saved, Partially posted, Posted) rather than dropping drafts from a page of the newest orders, which
+  came back empty when the newest were drafts.
+- **A message about many containers names the first 10, then "and N more"**: the notification after a Delivery
+  (`showDeliveryResult`, with "Open Goods Receipts" past 10 drafts) and the server's summary of it.
 - Imports send what they read in one call up to the API's limit and in parts above it (`matchAll` for a movement's
   container numbers: 10,000 a call).
 - **Long lists are DRAWN in steps of 200** (`useShownRows` + `ShownRowsFooter`: "Showing 200 of 1,049 containers. Show
   200 more · Show all"): the Auto-plan proposal, the order's Containers card, the movement's list, the invoice's linked
-  containers and the purchase document lines. Only the drawing is cut: every row stays loaded, so totals, Save, Post,
+  containers, "Apply to other containers…" and the purchase document lines. Only the drawing is cut: every row stays loaded, so totals, Save, Post,
   "Select every container" and the bulk actions take them all. A row with a problem, the one being edited and a line
   just added always show. (Measured: Propose of 1,049 containers 7.9 s → 2.0 s in the dev build.)
 - **No portal or Select per row of a long grid.** A Mantine `Select` searches the whole page for its option list when it

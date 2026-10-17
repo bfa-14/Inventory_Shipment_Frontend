@@ -19,11 +19,15 @@ function documentOption(d: Pick<PurchaseDocumentListDto, 'id' | 'documentNumber'
   return { value: String(d.id), label: `${d.documentNumber ?? `draft #${d.id}`} - ${d.supplierName}` }
 }
 
-/** Approved orders (not drafts, not cancelled), newest first, by number or supplier. */
+/**
+ * Approved orders (Saved, Partially posted or Posted: stored status Posted), newest first, by number or supplier. The
+ * server filters on the status: filtering a page of the newest orders here left the list empty when they were drafts.
+ */
 export const loadPurchaseOrders: SearchOptionsLoader = async (search, signal) => {
   const page = await purchaseDocumentsApi.list(
     {
       documentTypeCode: 'PO',
+      status: 'Posted',
       search: search || undefined,
       pageSize: FIRST_MATCHES,
       sortBy: 'DocumentDate',
@@ -31,9 +35,7 @@ export const loadPurchaseOrders: SearchOptionsLoader = async (search, signal) =>
     },
     signal,
   )
-  return page.items
-    .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
-    .map(documentOption)
+  return page.items.filter((o) => o.documentNumber).map(documentOption)
 }
 
 /** Supplier invoices with a number (posted, or cancelled after posting), newest first. */

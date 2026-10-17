@@ -36,6 +36,8 @@ import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatMoney, formatNumber, numberInputValue } from '../format'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 
 /** What the dialog shows of the charge: the drawer's charge and a row of the container's Charges card both carry it. */
 export interface CopyableCharge {
@@ -131,6 +133,9 @@ export function ApplyChargeModal({ charge, onClose, onCopied }: ApplyChargeModal
   }, [charge.id, applied, sameOrder])
 
   const rows = result?.rows ?? []
+  // Drawn 200 at a time (script 78: the list has no ceiling, 10,000 candidates with "Same order only" off); "Select all"
+  // still ticks every selectable row, drawn or not.
+  const shownRows = useShownRows(rows.length, result?.key)
   const selectable = rows.filter((row) => !row.hasThisCharge)
   const chosen = selectable.filter((row) => ticked.has(row.containerId))
 
@@ -250,7 +255,7 @@ export function ApplyChargeModal({ charge, onClose, onCopied }: ApplyChargeModal
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {rows.map((row) => (
+              {rows.slice(0, shownRows.limit).map((row) => (
                 <Table.Tr key={row.containerId} opacity={row.hasThisCharge ? 0.65 : undefined} data-candidate={row.containerRef}>
                   <Table.Td>
                     <Checkbox
@@ -300,6 +305,7 @@ export function ApplyChargeModal({ charge, onClose, onCopied }: ApplyChargeModal
             </Table.Tbody>
           </Table>
         </ScrollArea.Autosize>
+        <ShownRowsFooter limit={shownRows.limit} total={rows.length} noun="containers" more={shownRows.more} all={shownRows.all} />
 
         <SimpleGrid cols={{ base: 1, sm: 3 }}>
           <NumberInput
