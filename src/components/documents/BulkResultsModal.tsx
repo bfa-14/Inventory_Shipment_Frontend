@@ -47,8 +47,14 @@ export function BulkResultsModal({ opened, title, result, successLabel, labelOf,
                       <Text fz="sm" fw={500}>{item.documentNumber ?? labelOf(item)}</Text>
                     </Table.Td>
                     <Table.Td>
-                      <Badge color={item.ok ? (item.warning ? 'orange' : 'green') : 'red'} variant="light">
-                        {item.ok ? successLabel : (item.code ?? 'Failed')}
+                      {/* A REFUSAL READS "Refused": the API's code (NEXT_STEP_CHANGED, STOCK_SHORT) is for the program and
+                          was cut to "NEXT_ST…" in the badge; the message beside it says what happened. */}
+                      <Badge
+                        color={item.ok ? (item.warning ? 'orange' : 'green') : 'red'}
+                        variant="light"
+                        title={item.ok ? undefined : (item.code ?? undefined)}
+                      >
+                        {item.ok ? successLabel : 'Refused'}
                       </Badge>
                     </Table.Td>
                     <Table.Td>

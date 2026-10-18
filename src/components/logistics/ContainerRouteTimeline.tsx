@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Table, Text, Timeline, Title, Tooltip } from '@mantine/core'
 import { IconArrowRight, IconPlus, IconRoute } from '@tabler/icons-react'
@@ -25,7 +25,7 @@ interface ContainerRouteTimelineProps {
    * The container's next step, shown in the card's header when the page asks for it: on a phone or a tablet the card is
    * the top of the page and the action bar its bottom, a whole page of scrolling away. Null or absent: not shown.
    */
-  step?: { label: string; disabledReason: string | null; onClick: () => void } | null
+  step?: { label: string; disabledReason: string | null; onClick: () => void; colour?: string; icon?: ReactNode } | null
 }
 
 /**
@@ -58,8 +58,8 @@ export function ContainerRouteTimeline({ container, canManage, onChanged, step }
                 <Button
                   size="xs"
                   variant="light"
-                  color="indigo"
-                  leftSection={<IconRoute size={14} />}
+                  color={step.colour ?? 'indigo'}
+                  leftSection={step.icon ?? <IconRoute size={14} />}
                   disabled={step.disabledReason !== null}
                   onClick={step.onClick}
                   data-route-next-step

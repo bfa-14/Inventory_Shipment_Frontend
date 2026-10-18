@@ -1748,7 +1748,9 @@ every step, the proposal, many containers at once and the to-do list.
 - **On a narrow screen (below 75em) the Route card repeats the step** (`ContainerRouteTimeline`'s `step`): the card is
   the top of the page there and the action bar its bottom, a whole page of scrolling away (6,400 px on a phone). The
   card's button is the same label, reason and dialog; a disabled one says its reason under the buttons (a phone shows no
-  tooltip).
+  tooltip). A delivered container's step is its goods receipt: the card then opens with "Open goods receipt (draft)" or
+  "Receive goods…" (green, the page's own rules and permissions), before "Add to a movement..." and "New movement for
+  this container", and the action bar keeps that button beside Save instead of folding it into "More actions".
 - **The order's and the invoice's Containers cards and the Tracking board have no row menu**: they get no entry (their
   rows link to the container, whose page has the button). Give them the entry if they ever grow a menu.
 - **Start and Complete from the movement side stay one dialog**, `MovementStatusModal`, on the movement page and a row of
@@ -1813,14 +1815,17 @@ replaces "Start shipment…". It is disabled with "None of the ticked containers
 - **The groups table**, one row each: a checkbox (included), the step ("Arrived at Dar es Salaam", "Inland transport to
   Kasumbalesa") with where the proposal came from, the movement ("MOV-…", "new" for a new leg), From → To, the count
   (click it for the refs), "Orders / suppliers" for information, and for a new leg "One movement for the group" / "One
-  per container" (the server's default: one for Sea, Port, Origin and transshipment, one per container for road legs -
-  "One per container: each truck arrives on its own day.") and "Edit…" (`NextLegFields` without the date, plus a Truck
+  per container" (the server's default: one for Sea, Port, Origin and transshipment, one per container for road legs),
+  whose hint follows the stage (`onePerContainerHint`: "each truck arrives on its own day" on a road leg, "each container
+  is cleared on its own day" for Customs, "crosses" for Border, "is delivered" for Delivery), and "Edit…" (`NextLegFields` without the date, plus a Truck
   no. / ETA table per container when one per container). A Complete group where only part of the movement is ticked says
   "MOV-… is completed for all its 30 containers: the 10 not ticked arrive too."; it carries "Then start …" when the
   server proposes a next leg. Under the step, the group's notes: "{n} drafts: confirmed first.", for a new leg "{n}
   without a container number: the shipment can start without it." (the dialog for one container's yellow alert), "{n}
   with typed dates: …". A group that cannot go as it stands (date before its earliest, no To, no type) says why in red
-  and holds the button.
+  and holds the button: "Choose the movement type. Use Edit…" (the ellipsis ends the sentence). A group changed with
+  Edit… is worded as changed everywhere, its row and its result ("Border crossing at Kasumbalesa", not "Next leg from
+  Kasumbalesa").
 - **One date at the top** for every step, and "New legs: Start now / Plan only".
 - **"Cannot move on (n)"**, grouped by the server's reason with counts and the first refs. A delivered container is
   "Delivered: its goods are received next (Receive goods…)", or, when its draft goods receipt already waits, "A draft
@@ -1830,7 +1835,8 @@ replaces "Start shipment…". It is disabled with "None of the ticked containers
   nothing inside. A group going one movement per container is sent in parts of 50 ("Moving on: 150 of 300"), each part
   all or nothing; a group that is one movement is sent whole, so a movement is never cut in two. A Complete or a Start is
   never split either: its first part would complete the movement for everyone.
-- **The results** are `BulkResultsModal` (first column "Step"): OK or the refusal's code, the server's sentence (it
+- **The results** are `BulkResultsModal` (first column "Step"): OK or "Refused" (the API's code, NEXT_STEP_CHANGED,
+  is for the program: it is only the badge's tooltip, in every bulk result), the server's sentence (it
   names the MOV numbers made), the draft goods receipt note, the warnings. Closing it unticks the containers that moved
   and keeps the refused ones ticked.
 

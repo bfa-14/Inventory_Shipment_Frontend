@@ -694,6 +694,17 @@ export function ContainerPage() {
   const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
   const draftReceipt = receipt?.status === 1 ? receipt : null
   const postedReceipt = receipt?.status === 2 ? receipt : null
+  const receiveBlocked = canReceiveNow ? null : container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.'
+  /* DELIVERED, NOT RECEIVED: the next step is "Open goods receipt (draft)" or "Receive goods…", the page's own buttons
+     with their own permissions. On a narrow screen the Route card repeats it as it repeats a leg: the action bar is a
+     whole page below (7,300 px on a phone), and the card's "New movement for this container" was the first thing seen. */
+  const receiptStep: { label: string; disabledReason: string | null; onClick: () => void; colour: string; icon: ReactNode } | null =
+    step?.kind === 'OpenReceipt' && draftReceipt && perm.viewReceipt
+      ? { label: 'Open goods receipt (draft)', disabledReason: null, onClick: () => void navigate(routes.goodsReceipt(draftReceipt.id)), colour: 'green', icon: <IconPackageImport size={14} /> }
+      : step?.kind === 'Receive' && receivable && perm.receive
+        ? { label: 'Receive goods…', disabledReason: receiveBlocked, onClick: () => void openReceive(), colour: 'green', icon: <IconPackageImport size={14} /> }
+        : null
+  const receiptIsStep = receiptStep !== null
   // Why the posted receipt cannot be cancelled: the receipt's own reason, else the closed container's (rule 12).
   const cancelReceiptBlocked = receiptDoc
     ? receiptDoc.canCancel
@@ -764,6 +775,8 @@ export function ContainerPage() {
       variant: 'light',
       colour: 'green',
       visible: saved && draftReceipt !== null && perm.viewReceipt,
+      // Delivered: the goods receipt is the next step, so a phone keeps it beside Save, not in "More actions".
+      pinnedOnPhone: receiptIsStep,
     },
     {
       key: 'receive',
@@ -774,7 +787,8 @@ export function ContainerPage() {
       colour: 'green',
       visible: saved && receivable && perm.receive,
       disabled: !canReceiveNow,
-      disabledReason: container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.',
+      disabledReason: receiveBlocked ?? undefined,
+      pinnedOnPhone: receiptIsStep,
     },
     { key: 'confirm', label: 'Confirm', icon: <IconCheck size={16} />, onClick: () => void confirmPlan(), variant: 'light', loading: busyAction === 'confirm', visible: saved && container.canConfirm && perm.confirm },
     {
@@ -804,9 +818,11 @@ export function ContainerPage() {
       // NARROW SCREENS: the Route card is the top of the page and the action bar its bottom, a whole page away (6,400 px
       // on a phone). The next step is repeated in the card, so it is in the first screen the user sees.
       step={
-        !wide && stepIsMovement && step
-          ? { label: step.label, disabledReason: stepBlocked, onClick: () => nextStep.run(container) }
-          : null
+        wide
+          ? null
+          : stepIsMovement && step
+            ? { label: step.label, disabledReason: stepBlocked, onClick: () => nextStep.run(container) }
+            : receiptStep
       }
     />
   ) : null

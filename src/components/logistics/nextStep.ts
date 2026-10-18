@@ -20,8 +20,28 @@ export interface NextStepContainer extends ContainerShipState {
 /** A draft starts a leg only once confirmed: the reason a reader without containers.confirm reads. */
 export const DRAFT_NOT_CONFIRMABLE = 'This container is a draft: someone who may confirm containers must confirm it first.'
 
-/** The hint under "One movement for the group / One per container". */
-export const ONE_PER_CONTAINER_HINT = 'One per container: each truck arrives on its own day.'
+/**
+ * The hint under "One movement for the group / One per container", by the stage of the leg: a truck only on a road leg,
+ * a customs clearance or a border crossing is a stay of each container, a delivery reaches the warehouse one by one.
+ */
+export function onePerContainerHint(stage: string | null | undefined): string {
+  switch (stage as MovementStage | null | undefined) {
+    case 'Customs':
+      return 'One per container: each container is cleared on its own day.'
+    case 'Border':
+      return 'One per container: each container crosses on its own day.'
+    case 'Delivery':
+      return 'One per container: each container is delivered on its own day.'
+    case 'Port':
+      return 'One per container: each container leaves the port on its own day.'
+    case 'Sea':
+      return 'One per container: each container sails on its own vessel and day.'
+    case 'Origin':
+      return 'One per container: each container is loaded on its own day.'
+    default:
+      return 'One per container: each truck arrives on its own day.'
+  }
+}
 
 /* ── completing a leg: the words by the stage of its type ───────────────────────────────────── */
 

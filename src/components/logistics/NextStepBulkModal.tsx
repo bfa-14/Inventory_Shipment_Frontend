@@ -38,7 +38,7 @@ import { ShownRowsFooter } from '../ui/ShownRows'
 import { useShownRows } from '../ui/useShownRows'
 import { initialLeg, legProblem, retypeLeg, SEA, type LegValues, type StartMode } from './nextLeg'
 import { NextLegFields } from './NextLegFields'
-import { groupRoute, groupStepLabel, ONE_PER_CONTAINER_HINT, proposalSourceText, thenLabel } from './nextStep'
+import { groupRoute, groupStepLabel, onePerContainerHint, proposalSourceText, thenLabel } from './nextStep'
 import { isStay } from './shipStep'
 
 /** The containers one request takes when a group goes one movement per container: a long group in parts, with progress. */
@@ -156,7 +156,8 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
         : `The date is before the last of these containers got here (${dateLabel(earliest)}).`
     if (g.isNewLeg && choice?.leg) {
       const problem = legProblem(choice.leg, types)
-      if (problem) return `${problem} Use Edit….`
+      // The ellipsis ends the sentence: "Choose the movement type. Use Edit…", never "Edit….".
+      if (problem) return `${problem} Use Edit…`
     }
     return null
   }
@@ -169,9 +170,26 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
     setChoices((current) => ({ ...current, [key]: { ...current[key], ...next } }))
   }
 
+  /**
+   * The group as the reader changed it with Edit…: its type, stage and To. The table row and the result row both word
+   * it from this, so a group turned into "Border crossing at Kasumbalesa" is not reported as "Next leg from Kasumbalesa".
+   */
+  function asEdited(g: NextStepGroupDto, choice: GroupChoice | undefined): NextStepGroupDto {
+    const leg = choice?.leg
+    const legType = g.isNewLeg ? (types.find((t) => String(t.id) === leg?.typeId) ?? null) : null
+    if (!legType) return g
+    return {
+      ...g,
+      movementTypeName: legType.typeName,
+      movementStage: legType.stage,
+      isStay: isStay(legType.stage),
+      toName: isStay(legType.stage) ? g.fromName : (ports.find((p) => String(p.id) === leg?.toId)?.portName ?? null),
+    }
+  }
+
   function partsOf(g: NextStepGroupDto, choice: GroupChoice): Part[] {
     const list = members.get(g.groupKey) ?? []
-    const label = groupStepLabel(g)
+    const label = groupStepLabel(asEdited(g, choice))
     if (!g.isNewLeg) {
       return [
         {
@@ -247,7 +265,7 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
         failure = err instanceof ApiError ? err.message : 'The step could not be taken.'
       }
       if (result?.ok) moved.push(...part.body.containerIds)
-      if (result?.ok && part.group.movementStage === 'Delivery') delivered = true
+      if (result?.ok && asEdited(part.group, choices[part.group.groupKey]).movementStage === 'Delivery') delivered = true
       items.push({
         id: index,
         documentNumber: part.label,
@@ -351,18 +369,7 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                       const problem = choice.included ? groupProblem(g, choice) : null
                       const leg = choice.leg
                       const legType = types.find((t) => String(t.id) === leg?.typeId) ?? null
-                      // The group as the reader changed it: its type and To, for the label and the route.
-                      const shown: NextStepGroupDto = legType
-                        ? {
-                            ...g,
-                            movementTypeName: legType.typeName,
-                            movementStage: legType.stage,
-                            isStay: isStay(legType.stage),
-                            toName: isStay(legType.stage)
-                              ? g.fromName
-                              : (ports.find((p) => String(p.id) === leg?.toId)?.portName ?? null),
-                          }
-                        : g
+                      const shown = asEdited(g, choice)
                       const othersArrive = g.kind === 'Complete' && g.movementContainerCount !== null && g.movementContainerCount > g.containers
                       return (
                         <Fragment key={g.groupKey}>
@@ -456,7 +463,7 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                                   />
                                   {choice.onePerContainer ? (
                                     <Text fz="xs" c="dimmed">
-                                      {ONE_PER_CONTAINER_HINT}
+                                      {onePerContainerHint(shown.movementStage)}
                                     </Text>
                                   ) : null}
                                 </Stack>
