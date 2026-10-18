@@ -1749,7 +1749,7 @@ every step, the proposal, many containers at once and the to-do list.
   the top of the page there and the action bar its bottom, a whole page of scrolling away (6,400 px on a phone). The
   card's button is the same label, reason and dialog; a disabled one says its reason under the buttons (a phone shows no
   tooltip). A delivered container's step is its goods receipt: the card then opens with "Open goods receipt (draft)" or
-  "Receive goods…" (green, the page's own rules and permissions), before "Add to a movement..." and "New movement for
+  "Receive goods…" (green, the page's own rules and permissions), before "Add to a movement…" and "New movement for
   this container", and the action bar keeps that button beside Save instead of folding it into "More actions".
 - **The order's and the invoice's Containers cards and the Tracking board have no row menu**: they get no entry (their
   rows link to the container, whose page has the button). Give them the entry if they ever grow a menu.

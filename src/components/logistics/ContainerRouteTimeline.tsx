@@ -71,7 +71,7 @@ export function ContainerRouteTimeline({ container, canManage, onChanged, step }
             {canJoin ? (
               <>
                 <Button size="xs" variant="default" leftSection={<IconRoute size={14} />} onClick={() => setPickOpen(true)}>
-                  Add to a movement...
+                  Add to a movement…
                 </Button>
                 <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}&from=container/${container.id}`)}>
                   New movement for this container
