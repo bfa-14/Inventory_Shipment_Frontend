@@ -22,7 +22,19 @@ interface ContainerSelectionBarProps<T extends SelectableContainer> {
   onSelectedChange(next: T[]): void
   /** After an action: the host reloads its rows. */
   onChanged(): void
+  /**
+   * (82) The way back the movement links of the one-container Next step carry ("?from=shipments" on the Shipments board),
+   * so Back on the movement returns to the page the step was taken on. None: they go back to the Movements list.
+   */
+  returnQuery?: string
 }
+
+/**
+ * (82) The next step reads with View Containers (containers.view): one container's step (GET …/next-step), and the
+ * movement types the bulk dialog builds its new legs from (masterdata/movement-types/lookup) - without them that dialog
+ * never finished loading. A reader without View Containers, possible on the Shipments board, is told so instead.
+ */
+const STEP_NEEDS_VIEW = 'Next step… needs the View Containers permission.'
 
 /**
  * The strip above a container grid: "Select not shipped" / "Select drafts", and once rows are
@@ -31,7 +43,8 @@ interface ContainerSelectionBarProps<T extends SelectableContainer> {
  * EACH ACTION IS SHOWN ONLY WITH ITS PERMISSION, and Delete is live only when every ticked
  * container is still a draft — the server deletes all or nothing, so a mixed selection could only
  * fail; "Next step…" only when one of them can move on (script 81): one ticked container opens its own Next step dialog,
- * several the bulk dialog, which groups them by step and names the ones that cannot move on.
+ * several the bulk dialog, which groups them by step and names the ones that cannot move on - both with View Containers
+ * (script 82: see STEP_NEEDS_VIEW).
  * A dead button stays hoverable (data-disabled, not disabled) so its tooltip can say why.
  * The server's refusals are shown as they come: they name the container.
  */
@@ -40,6 +53,7 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   selected,
   onSelectedChange,
   onChanged,
+  returnQuery,
 }: ContainerSelectionBarProps<T>) {
   const { hasPermission } = useAuth()
   const canConfirm = hasPermission(PERMISSIONS.containersConfirm)
@@ -47,6 +61,7 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
   const canShip = hasPermission(PERMISSIONS.movementsManage)
   const canCharge = hasPermission(PERMISSIONS.containerChargesCreate)
+  const canViewContainers = hasPermission(PERMISSIONS.containersView)
 
   const [busy, setBusy] = useState<'confirm' | 'delete' | null>(null)
   const [numbersFor, setNumbersFor] = useState<T[] | null>(null)
@@ -60,8 +75,11 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   const allDrafts = count > 0 && draftsSelected === count
   // (81) Said before the click: when none of the ticked containers can move on, the button says why.
   const stepRefusals = selected.map((row) => nextStepRefusal(row, canConfirm))
-  const stepBlocked = count > 0 && stepRefusals.every((reason) => reason !== null)
-  const stepBlockedReason = stepBlocked ? `None of the ticked containers can move on: ${stepRefusals[0] ?? ''}` : null
+  const noneCanMove = count > 0 && stepRefusals.every((reason) => reason !== null)
+  // (82) Either dialog reads with View Containers (see STEP_NEEDS_VIEW): said first, whatever is ticked.
+  const withoutView = count > 0 && !canViewContainers
+  const stepBlocked = noneCanMove || withoutView
+  const stepBlockedReason = withoutView ? STEP_NEEDS_VIEW : noneCanMove ? `None of the ticked containers can move on: ${stepRefusals[0] ?? ''}` : null
 
   /** Moved on: the bulk dialog unticks what moved, the refused stay ticked to be looked at again. */
   function stepFinished(movedIds: number[]) {
@@ -208,8 +226,10 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
         <NextStepModal
           containerId={stepFor[0].id}
           containerRef={stepFor[0].containerRef}
+          returnQuery={returnQuery}
           onClose={() => setStepFor(null)}
-          onDone={() => stepFinished([stepFor[0].id])}
+          // (82) split off its movement but not completed: it did not arrive, so it stays ticked (as in the bulk dialog)
+          onDone={(moved) => stepFinished(moved === false ? [] : [stepFor[0].id])}
         />
       ) : stepFor ? (
         <NextStepBulkModal containers={stepFor} onClose={() => setStepFor(null)} onFinished={stepFinished} />

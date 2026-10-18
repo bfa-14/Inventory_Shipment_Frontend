@@ -41,8 +41,16 @@ interface MovementStatusModalProps {
    * containers arrived" - the ticked ones get their own movement, completed; the others stay on this one, in progress.
    */
   allowSplit?: boolean
-  /** After "Only some containers arrived": the host reads this movement again (it carries the others now). */
-  onSplitDone?(result: MovementSplitResultDto): void
+  /**
+   * After "Only some containers arrived": the host reads this movement again (it carries the others now). Null when no
+   * answer came back (a server error, a lost connection): the split may have happened, so the host reads it again too.
+   */
+  onSplitDone?(result: MovementSplitResultDto | null): void
+  /**
+   * (82) The way back the "Open MOV-…" links of its notifications carry - the page's own ("?from=container/12",
+   * "?from=shipments"), so Back on that movement returns where the reader came from.
+   */
+  returnQuery?: string
 }
 
 /** "KTG-2026-0032, KTG-2026-0033 and 9 more". */
@@ -65,9 +73,12 @@ function someRefs(refs: string[]): string {
  * - (82) ON THE MOVEMENT PAGE, "Only some containers arrived" (a movement in progress carrying several): a checklist of
  *   its containers, ticked = arrived, each that cannot leave it disabled with the server's reason. The ticked ones get
  *   their own movement (`complete-some`), completed on the date - a Delivery drafts only their goods receipts - and the
- *   others stay on this one, in progress. Ticking none or every one is said before the click.
+ *   others stay on this one, in progress. Ticking none or every one is said before the click. While it is on, the
+ *   dialog is the movement's ("Complete MOV-…"), never the one container's it was opened from, and "All 12 containers …
+ *   arrive too" is not said. A refusal stays in the dialog; no answer at all (a server error, a lost connection) is never
+ *   read as "nothing split": the page reads its movement again and says to look.
  */
-export function MovementStatusModal({ kind, movementId, movement: given, container, onClose, onDone, allowSplit = false, onSplitDone }: MovementStatusModalProps) {
+export function MovementStatusModal({ kind, movementId, movement: given, container, onClose, onDone, allowSplit = false, onSplitDone, returnQuery = '' }: MovementStatusModalProps) {
   const navigate = useNavigate()
   const canViewReceipts = useAuth().hasPermission(PERMISSIONS.goodsReceiptsView)
   const [loaded, setLoaded] = useState<MovementDto | null>(null)
@@ -104,11 +115,18 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
   const today = todayDateOnly()
   const stay = isStay(movement?.stage)
 
+  /* (82) ONLY SOME ARRIVED: a Complete of a movement in progress that carries several containers. Each container says
+     whether it can leave it (the server's canSplitOff, its reason under it when not); the ticked ones get their own
+     movement, the others stay on this one. Ticking none or every one is said before the click, as the server would. */
+  const splitAvailable = !starting && allowSplit && movement !== null && movement.status === 2 && movement.containers.length > 1
+  const splitting = splitAvailable && someOnly
+
+  // Splitting, the dialog is about the movement and the ticked containers, not the one it was opened from.
   const title = !movement
     ? starting
       ? 'Start movement'
       : 'Complete movement'
-    : container
+    : container && !splitting
       ? `${starting ? `Start ${movement.typeName}` : completeWords(movement.stage, movement.toName).title} - ${container.containerRef}`
       : `${starting ? 'Start' : 'Complete'} ${movement.movementNo}`
 
@@ -130,11 +148,6 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
 
   const others = movement && container ? movement.containers.filter((c) => c.containerId !== container.id).map((c) => c.containerRef) : []
 
-  /* (82) ONLY SOME ARRIVED: a Complete of a movement in progress that carries several containers. Each container says
-     whether it can leave it (the server's canSplitOff, its reason under it when not); the ticked ones get their own
-     movement, the others stay on this one. Ticking none or every one is said before the click, as the server would. */
-  const splitAvailable = !starting && allowSplit && movement !== null && movement.status === 2 && movement.containers.length > 1
-  const splitting = splitAvailable && someOnly
   const total = movement?.containers.length ?? 0
   const someProblem = !splitting
     ? null
@@ -154,11 +167,11 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
     setError(null)
   }
 
-  /** The movement made for the ones that arrived, as a link in the notification (the way back kept). */
-  function movementLink(m: MovementDto | null) {
+  /** The movement made for the ones that arrived, as a link in the notification (the way back kept: `returnQuery`). */
+  function movementLink(m: Pick<MovementDto, 'id' | 'movementNo'> | null) {
     if (!m) return null
     return (
-      <Anchor component="button" type="button" fz="xs" fw={600} onClick={() => void navigate(`/logistics/movements/${m.id}`)}>
+      <Anchor component="button" type="button" fz="xs" fw={600} onClick={() => void navigate(`/logistics/movements/${m.id}${returnQuery}`)}>
         Open {m.movementNo}
       </Anchor>
     )
@@ -171,6 +184,8 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
     try {
       const result = await movementsApi.completeSome(movement.id, { containerIds: [...arrived], date, rowVersion: movement.rowVersion })
       const own = result.movement
+      // Named even when it could not be read back (the database did not answer after the split)
+      const ownRef = own ?? (result.movementId ? { id: result.movementId, movementNo: result.movementNo } : null)
       if (result.ok) {
         notifications.show({
           color: 'green',
@@ -179,7 +194,7 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
           message: (
             <Stack gap={2} data-status-split-done>
               <Text fz="sm">{result.message}</Text>
-              {movementLink(own)}
+              {movementLink(ownRef)}
             </Stack>
           ),
         })
@@ -199,15 +214,32 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
           message: (
             <Stack gap={2} data-status-split-not-completed>
               <Text fz="sm">{result.message}</Text>
-              {movementLink(own)}
+              {movementLink(ownRef)}
             </Stack>
           ),
         })
       }
       onSplitDone?.(result)
     } catch (err) {
-      // Nothing was split: shown in the dialog, which stays open (the date, a container changed meanwhile...).
-      setError(err instanceof ApiError ? err.message : 'The containers could not be completed.')
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        // A refusal (the date, a container changed meanwhile...): nothing was split - shown in the dialog, which stays open.
+        setError(err.message)
+      } else {
+        // NO ANSWER TO READ (a server error, a lost connection): the split may have happened all the same - the server
+        // answers every split it committed - so the movement is read again and the reader told to look, never that
+        // nothing changed.
+        notifications.show({
+          color: 'orange',
+          withBorder: true,
+          autoClose: 20000,
+          message: (
+            <Text fz="sm" data-status-split-unknown>
+              {`${err instanceof ApiError ? err.message : 'The answer did not come back.'} Whether the ticked containers left ${movement.movementNo} is not known: the movement is read again - check which containers are still on it.`}
+            </Text>
+          ),
+        })
+        onSplitDone?.(null)
+      }
     } finally {
       setBusy(false)
     }
@@ -266,7 +298,7 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
             {movement.startDate ? ` · started ${dateLabel(movement.startDate)}` : ''}
             {movement.eta ? ` · ETA ${dateLabel(movement.eta)}` : ''}
           </Text>
-          {others.length > 0 ? (
+          {others.length > 0 && !splitting ? (
             <Alert color="orange" py={6} data-status-others>
               {`All ${formatNumber(movement.containers.length)} containers of ${movement.movementNo} ${starting ? 'start' : 'arrive'} too: ${container?.containerRef}, ${someRefs(others)}.`}
             </Alert>

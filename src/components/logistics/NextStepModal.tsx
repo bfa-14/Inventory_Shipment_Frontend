@@ -38,8 +38,11 @@ interface NextStepModalProps {
    */
   returnQuery?: string
   onClose(): void
-  /** After the step: the host reloads what it shows. */
-  onDone(): void
+  /**
+   * After the step: the host reloads what it shows. `moved` is false when something changed but the step was not taken
+   * as asked - (82) split off its movement but not completed: a host that unticks what moved keeps this one ticked.
+   */
+  onDone(moved?: boolean): void
 }
 
 /** "KTG-2026-0032, KTG-2026-0033 (2 more)". */
@@ -253,9 +256,10 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
       const [result] = await nextStepApi.apply([body])
       if (result && !result.ok && result.splitFromMovementId) {
         // (82) SPLIT BUT NOT COMPLETED: the container is on its own movement now, still in progress - said as a warning
-        // with that movement, never as a step that did nothing; the host reads the container again.
+        // with that movement, never as a step that did nothing; the host reads the container again, and keeps it ticked
+        // (it did not arrive), as the bulk dialog keeps its refused groups.
         announceSplitOnly(result)
-        onDone()
+        onDone(false)
         return
       }
       if (!result?.ok) {

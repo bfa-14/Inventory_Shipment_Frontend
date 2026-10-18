@@ -432,7 +432,11 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                                     <Radio
                                       size="xs"
                                       value="only"
-                                      label={`Only the ${formatNumber(g.containers)} ticked (they get their own movement)`}
+                                      label={
+                                        g.containers === 1
+                                          ? 'Only the ticked one (it gets its own movement)'
+                                          : `Only the ${formatNumber(g.containers)} ticked (they get their own movement)`
+                                      }
                                       disabled={busy}
                                       data-next-step-split-only
                                     />
@@ -449,7 +453,9 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                                   </Text>
                                   {g.splitBlockedReason ? (
                                     <Text fz="xs" c="dimmed" data-next-step-split-blocked>
-                                      {`Only the ticked cannot arrive on their own: ${g.splitBlockedReason}`}
+                                      {g.containers === 1
+                                        ? `Only the ticked one cannot arrive on its own: ${g.splitBlockedReason}`
+                                        : `Only the ticked cannot arrive on their own: ${g.splitBlockedReason}`}
                                     </Text>
                                   ) : null}
                                 </>

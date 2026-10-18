@@ -44,6 +44,22 @@ export function MovementRef({ id, no, canOpen }: { id: number | null | undefined
   )
 }
 
+/**
+ * A group's words as the server gives them, with a ship's movement number linked like every MOV number of the board:
+ * in "MOV-2026-000046 · MSC Aurora V.123 · Chennai → Dar es Salaam · ETA 20/10/2026" the movement opens with
+ * ?from=shipments, for a reader who may view movements. Every other group reads as it comes.
+ */
+export function GroupLabel({ card, canOpenMovements }: { card: Pick<ShipmentCardDto, 'groupKey' | 'groupLabel' | 'activeMovementId' | 'activeMovementNo'>; canOpenMovements: boolean }) {
+  const no = card.activeMovementNo
+  if (!card.groupKey.startsWith('MOV|') || !card.activeMovementId || !no || !card.groupLabel.startsWith(no)) return <>{card.groupLabel}</>
+  return (
+    <>
+      <MovementRef id={card.activeMovementId} no={no} canOpen={canOpenMovements} />
+      {card.groupLabel.slice(no.length)}
+    </>
+  )
+}
+
 /** The order of the card: a link only when it is the container's own and only order (the Containers list's rule). */
 export function OrderRef({ card, canOpen }: { card: ShipmentCardDto; canOpen: boolean }) {
   if (!card.orderNumbers) return null
@@ -58,8 +74,8 @@ export function OrderRef({ card, canOpen }: { card: ShipmentCardDto; canOpen: bo
 
 /**
  * Where the card's container is now, in a line: the leg carrying it (its movement, truck or vessel, ETA - red when
- * late), the stay in progress, since when it stands at its place, or when it was delivered or received. Nothing when
- * the group header says it already (a ship's containers: the group is the ship).
+ * late), the stay in progress, since when it stands at its place, when it was delivered or received, or that it is
+ * followed by typed dates. Nothing when the group header says it already (a ship's containers: the group is the ship).
  */
 export function WhereLine({ card, canOpenMovements }: { card: ShipmentCardDto; canOpenMovements: boolean }) {
   const where = whereOf(card, canOpenMovements)
@@ -101,6 +117,8 @@ function whereOf(card: ShipmentCardDto, canOpenMovements: boolean): ReactNode {
       </>
     )
   }
+  // In transit, at port or cleared by the dates typed on it (no leg yet): the server puts it in that column.
+  if (card.followedByTypedDates) return 'Followed by typed dates'
   if ((card.movementCount ?? 0) === 0) return 'Not moved yet'
   return card.atPlaceSince ? `Since ${dateLabel(card.atPlaceSince)}` : null
 }

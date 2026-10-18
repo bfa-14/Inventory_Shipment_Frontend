@@ -7,7 +7,7 @@ import { formatNumber } from '../../format'
 import { DataTable, type DataTableColumn } from '../../ui/DataTable'
 import { useDataGrid, type GridColumnMeta } from '../../ui/grid/useDataGrid'
 import { nextStepColumnText, type NextStepAction } from '../nextStep'
-import { CardBadges, NextStepLink, OrderRef, PlannedNext, type CardLinks } from './ShipmentCard'
+import { CardBadges, GroupLabel, NextStepLink, OrderRef, PlannedNext, type CardLinks } from './ShipmentCard'
 import { isSelectableCard } from './shipmentBoard'
 
 interface ShipmentsListProps {
@@ -94,7 +94,7 @@ export function ShipmentsList({ cards, titles, selected, onSelectedChange, onOpe
       width: 260,
       render: (row) => (
         <Text fz="sm" style={{ whiteSpace: 'normal' }}>
-          {row.groupLabel}
+          <GroupLabel card={row} canOpenMovements={links.movements} />
         </Text>
       ),
     },

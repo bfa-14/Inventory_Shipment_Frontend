@@ -282,6 +282,9 @@ export interface MovementSplitResultDto {
   originalMovementNo: string
   /** The containers still on the original, in progress. */
   remainingContainerCount: number
+  /** The containers' own movement, always given: `movement` may be null when the database did not answer its read. */
+  movementId: number
+  movementNo: string
   /** The containers' own movement as it is now (a completed Delivery carries goodsReceipts and goodsReceiptsMessage). */
   movement: MovementDto | null
   warnings: string[]

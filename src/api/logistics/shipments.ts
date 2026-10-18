@@ -69,6 +69,11 @@ export interface ShipmentCardDto extends ContainerShipState {
   isLate: boolean
   /** Red "Free time over": the rule of the container page, the Tracking board and the Dashboard. */
   isFreeTimeOver: boolean
+  /**
+   * Followed by typed dates: no leg started or completed, In Transit / At Port / Cleared by the dates typed on it - the
+   * card reads "Followed by typed dates" instead of "Not moved yet". Absent otherwise.
+   */
+  followedByTypedDates?: boolean | null
 
   /** The leg in progress beyond ContainerShipState: the truck or the vessel. */
   activeMovementVehicleOrVessel?: string | null

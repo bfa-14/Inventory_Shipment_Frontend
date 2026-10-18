@@ -23,7 +23,10 @@ interface ShipmentDrawerProps {
   /** Takes the step; the board closes the drawer first, so the step's dialog is the only one on screen. */
   onStep(container: ContainerDto): void
   links: CardLinks
-  /** containers.view: the container (its route) can be read and opened. Without it the drawer says what the card says. */
+  /**
+   * containers.view: the container (its route, its next step) can be read and opened. Without it the drawer says what the
+   * card says, and why the rest is not there.
+   */
   canViewContainer: boolean
 }
 
@@ -102,7 +105,7 @@ export function ShipmentDrawer({ card, columnTitle, onClose, stepOf, onStep, lin
 
         {!canViewContainer ? (
           <Text fz="sm" c="dimmed">
-            Its route and its page need the View Containers permission.
+            Its route, its next step and its page need the View Containers permission.
           </Text>
         ) : error ? (
           <Alert color="red">{error}</Alert>

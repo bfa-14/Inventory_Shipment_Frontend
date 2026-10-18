@@ -197,7 +197,10 @@ export function ShipmentsBoardPage() {
   // A card's step, its drawer's and the selection bar's all end with the board read again.
   const nextStep = useNextStep(reload, 'shipments')
   const [drawerCard, setDrawerCard] = useState<ShipmentCardDto | null>(null)
-  const stepOf = (card: ShipmentCardDto) => nextStep.action(card)
+  // (82) A container's step reads the container (its dialog's GET needs View Containers): without that permission the
+  // board does not offer it - like the drawer's route - and the selection bar says why (the bulk dialog reads the
+  // movement types with it too).
+  const stepOf = (card: ShipmentCardDto) => (canViewContainers ? nextStep.action(card) : null)
 
   /* ── the refresh ─────────────────────────────────────────────────────────────────────────── */
 
@@ -362,7 +365,7 @@ export function ShipmentsBoardPage() {
         </Alert>
       ) : null}
 
-      <ContainerSelectionBar rows={selectable} selected={selectedRows} onSelectedChange={setSelectedRows} onChanged={reload} />
+      <ContainerSelectionBar rows={selectable} selected={selectedRows} onSelectedChange={setSelectedRows} onChanged={reload} returnQuery="?from=shipments" />
 
       {data === null ? (
         loading ? (
@@ -433,7 +436,7 @@ export function ShipmentsBoardPage() {
           card={drawerCard}
           columnTitle={titles[drawerCard.phase] ?? drawerCard.phase}
           onClose={() => setDrawerCard(null)}
-          stepOf={(container: ContainerDto) => nextStep.action(container)}
+          stepOf={(container: ContainerDto) => (canViewContainers ? nextStep.action(container) : null)}
           onStep={(container: ContainerDto) => {
             // The step's dialog is the only one on screen: the drawer closes first.
             setDrawerCard(null)

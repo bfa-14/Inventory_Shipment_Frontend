@@ -68,11 +68,6 @@ export function itemsText(card: Pick<ShipmentCardDto, 'itemCount' | 'itemCode' |
   return `${formatNumber(card.itemCount)} items, ${formatNumber(card.totalQtyBase)} pcs`
 }
 
-/** "Dar es Salaam → Kasumbalesa (12)": a group's header, its count being the containers it holds. */
-export function groupTitle(group: BoardGroup): string {
-  return `${group.label} (${formatNumber(group.cards.length)})`
-}
-
 /** "22 containers · 1,848 pcs": a column's header line. */
 export function columnFigures(column: Pick<ShipmentColumnDto, 'count' | 'pieces'>): string {
   return `${formatNumber(column.count)} container${column.count === 1 ? '' : 's'} · ${formatNumber(column.pieces)} pcs`

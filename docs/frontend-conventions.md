@@ -1877,7 +1877,9 @@ new movement is saved. `useNextStep(onDone, origin)` takes `'container'` (its pa
 invoice's Containers card), `'containers'` or `'shipments'`. Every way into a movement from a container carries
 it: "New movement
 for this container", the MOV-… links of the route card and the "Open MOV-…" links in the notification after a Next step
-(`NextStepModal`'s `returnQuery`). A link without it goes back to the Movements list.
+(`NextStepModal`'s `returnQuery`; the selection bar passes its own, `ContainerSelectionBar`'s `returnQuery` -
+"?from=shipments" on the board), and the movement page's own dialog keeps the page's (`MovementStatusModal`'s
+`returnQuery`: its "Open MOV-…" after a split). A link without it goes back to the Movements list.
 
 **The start date of a movement in progress stays a fact**: the movement page lets it be changed after Start, so its
 field shows the Start dialog's two refusals before the Save - after today, and before `startNotBefore` (which the API
@@ -1899,23 +1901,28 @@ its way, in one column by stage**, each card with its next step. Route `/logisti
   "Show received (30 days)" "Received (30 days)". Each header: the title, "22 containers · 1,848 pcs" (`columnFigures`) and
   "Select all ({n})"; the Received column is read-only ("Read-only: received in the last 30 days.": no boxes, no step).
 - **Groups fold** (the chevron; kept across reloads), each with its own "Select all": a ship "MOV-2026-000046 · MSC Aurora
-  V.123 · Chennai → Dar es Salaam · ETA 20/10/2026 (84)" (one tick takes the whole ship), a road leg "Dar es Salaam →
-  Kasumbalesa (12)", a place "Dar es Salaam (120)", "No port of loading (2)", a warehouse.
-- **A card** (`ShipmentCard`): ref (a button: the drawer from the keyboard), "MSKU1234565 · 40HC", "84 pcs TVS-APACHE-160"
-  / "2 items, 120 pcs" (`itemsText`), the supplier on one line (the whole name on hover), the order on its own line (a
-  link only for the container's own and only order, with `purchase.orders.view`), where it is (`WhereLine`: the leg's
-  "MOV-… · T 123 ABC · ETA 03/10/2026" in red when late, a stay "MOV-… Customs clearance since 04/10/2026", "Since
-  28/09/2026", "Not moved yet", "Delivered 08/10/2026", "Received …"; nothing on a ship's cards, whose group says it), the
-  badges (`CardBadges`: red "Late" and "Free time over" with the last free day on hover, "Draft", "No container no.",
-  "Cleared" in At border / customs, "GRN draft" linked to the draft with `purchase.goodsreceipts.view`, the GRN number once
-  received), "Planned next: MOV-… Inland transport → Kasumbalesa" (`PlannedNext`) and **"Next step: {label}"**
-  (`NextStepLink`): phase 2's `useNextStep(reload, 'shipments')`, hidden without the right to take it, dimmed with its
-  reason in words when blocked. Every MOV number is a link only with `containers.movements.view`, carrying
+  V.123 · Chennai → Dar es Salaam · ETA 20/10/2026 (84)" (one tick takes the whole ship; its movement number a link,
+  `GroupLabel`), a road leg "Dar es Salaam → Kasumbalesa (12)", a place "Dar es Salaam (120)", "No port of loading (2)",
+  a warehouse; the containers followed by typed dates at sea in "Followed by typed dates", after the ships.
+- **A card** (`ShipmentCard`): ref (a button: the drawer from the keyboard), "MSKU1234565 · 40HC", "84 pcs
+  TVS-APACHE-160" / "2 items, 120 pcs" (`itemsText`), the supplier on one line (the whole name on hover), the order on
+  its own line (a link only for the container's own and only order, with `purchase.orders.view`), where it is
+  (`WhereLine`: the leg's "MOV-… · T 123 ABC · ETA 03/10/2026" in red when late, a stay "MOV-… Customs clearance since
+  04/10/2026", "Since 28/09/2026", "Not moved yet", "Followed by typed dates" (`followedByTypedDates`: no leg yet, in
+  the column of the status its typed dates gave it), "Delivered 08/10/2026", "Received …"; nothing on a ship's cards,
+  whose group says it), the badges (`CardBadges`: red "Late" and "Free time over" with the last free day on hover,
+  "Draft", "No container no.", "Cleared" in At border / customs, "GRN draft" linked to the draft with
+  `purchase.goodsreceipts.view`, the GRN number once received), "Planned next: MOV-… Inland transport → Kasumbalesa"
+  (`PlannedNext`) and **"Next step: {label}"** (`NextStepLink`): phase 2's `useNextStep(reload, 'shipments')`, hidden
+  without the right to take it - and without `containers.view`, whose next-step read the dialog needs (then the List
+  shows the step's words, not a link) - dimmed with its reason in words when blocked. Every MOV number of the board -
+  the cards, a ship's group header, the List's Place or leg - is a link only with `containers.movements.view`, carrying
   `?from=shipments`. Clicking a card (not its box, links or step) opens the drawer.
 - **The drawer** (`ShipmentDrawer`, full screen on a phone): the card's facts, the container's own `ContainerRouteTimeline`
   (read when it opens: today's route; `canManage` false, its step button in the card's header) and "Open container".
   Taking the step closes the drawer first, so the step's dialog is the only one on screen. Without `containers.view` it
-  says what the card says and offers no page.
+  says what the card says, offers no step and no page, and says why: "Its route, its next step and its page need the
+  View Containers permission."
 - **Filters on the server** (`useGridQuery`, no Apply): Search ("Ref, container no., B/L, vessel or order no.", typed),
   Supplier and Purchase order (`SearchSelect`, the order only with its view permission), Branch, Place (grouped Sea ports /
   Border posts / Inland places), and the switches "Late only", "With a planned leg", "Show received (30 days)"; Clear
@@ -1924,15 +1931,18 @@ its way, in one column by stage**, each card with its next step. Route `/logisti
   to the cards still on the board** (in the render that brings it). It is the Containers list's own
   `ContainerSelectionBar` (Confirm, "Container numbers…", "Next step…", "Add charge…", Delete, Clear): a card is a
   container row (`api` fills an absent `containerNo` with null for it). After any action the board reads itself again.
+  One ticked container opens its own Next step dialog and two or more the bulk dialog; both read with `containers.view`
+  (the container's step; the movement types the bulk dialog builds new legs from - without them it never finished
+  loading): without it "Next step…" waits (dimmed) with "Next step… needs the View Containers permission."
 - **50 cards a column**, then "Showing 50 of 66 containers. Show 16 more · Show all" (`CARDS_STEP`, `drawColumn`). Only
   the drawing is cut: every group header is drawn (its "Select all" reaches the whole group), the column's "Select all"
-  every container in it, a group cut short says "{n} more in this group: Show 50 more below.", and a folded group draws
-  nothing and uses none of the limit.
+  every container in it, a group cut short says "{n} more in this group: Show 16 more below." (the button's own count,
+  at most 50), and a folded group draws nothing and uses none of the limit.
 - **"Board" / "List"** (a `SegmentedControl` in the header, the choice kept in `localStorage`
   `inventory_shipment.shipments.view`, guarded): the List is the same rows and selection in one `DataTable` with an engine
   (`storeKey` `logistics.shipments`, 50 a page up to 500, every column sorting and filtering in the browser) - Container
-  Ref., Container No., Stage, Place or leg (the group's words), Next step (the label alone, a link), Badges, Supplier, Order
-  No., Qty - for 300 containers or more; a row opens the same drawer.
+  Ref., Container No., Stage, Place or leg (the group's words, a ship's movement number linked), Next step (the label
+  alone, a link), Badges, Supplier, Order No., Qty - for 300 containers or more; a row opens the same drawer.
 - **Wide (62em and up): the columns side by side**, `flex: 1 0 184px` - six fit at 1440 px with the menu open - each body
   scrolling on its own (`max(360px, calc(100dvh - 380px))`) so its header stays in view; a seventh column (Received)
   scrolls sideways **inside the board**, never the page. The body is a plain scrolling `div`, not Mantine's `ScrollArea`,
@@ -1964,24 +1974,34 @@ default everywhere.**
   11 others stay on MOV-…, in progress", the Delivery preview names this container only, and the group goes with
   `splitOff: true`; the Then leg works as after any arrival.
 - **`NextStepBulkModal`**, a Complete group where only part of the movement is ticked: "Complete MOV-… for all its 30
-  containers" (default) / "Only the 20 ticked (they get their own movement)"; its result row reads "{step} (only the
-  ticked)". When the ticked cannot arrive alone the phase 2 sentence stays ("…the 10 not ticked arrive too.", "the one not
-  ticked arrives too.") with "Only the ticked cannot arrive on their own: {reason}".
+  containers" (default) / "Only the 20 ticked (they get their own movement)" ("Only the ticked one (it gets its own
+  movement)" for one); its result row reads "{step} (only the ticked)". When the ticked cannot arrive alone the phase 2
+  sentence stays ("…the 10 not ticked arrive too.", "the one not ticked arrives too.") with "Only the ticked cannot
+  arrive on their own: {reason}" ("Only the ticked one cannot arrive on its own: {reason}").
 - **The movement page's Complete dialog** (`MovementStatusModal` with `allowSplit`, a movement in progress carrying
-  several): the switch "Only some containers arrived" turns on a checklist of its containers (ticked = arrived, a container
-  that cannot leave disabled with its reason), "Arrived: 2 of 12", and the button "Complete 2 of 12 containers"
-  (`POST …/movements/{id}/complete-some`). None ticked: "Tick the containers that arrived."; every one: "Every container
-  of MOV-… is ticked: complete the movement itself (turn off "Only some containers arrived")." - the button waits. After
-  it the page reads its movement again (the others, still in progress) and offers "Continue: Next step…" for the ones
-  that arrived. On a phone (36em and below) the dialog does not focus its date when it opens: the calendar that focus
-  opens covered the switch and the checklist above the date, where a tap picked a day instead.
+  several): the switch "Only some containers arrived" turns on a checklist of its containers (ticked = arrived, a
+  container that cannot leave disabled with its reason), "Arrived: 2 of 12", and the button "Complete 2 of 12
+  containers" (`POST …/movements/{id}/complete-some`). None ticked: "Tick the containers that arrived."; every one:
+  "Every container of MOV-… is ticked: complete the movement itself (turn off "Only some containers arrived")." - the
+  button waits. While the switch is on the dialog is the movement's: its title is "Complete MOV-…" (never the container
+  it was opened from) and "All 12 containers of MOV-… arrive too" is not said. After it the page reads its movement
+  again (the others, still in progress) and offers "Continue: Next step…" for the ones that arrived. The page's buttons
+  that open these dialogs read "Start…", "Complete…" and "Cancel…". On a phone (36em and below) the dialog does not
+  focus its date when it opens: the calendar that focus opens covered the switch and the checklist above the date, where
+  a tap picked a day instead.
 - **The notifications are the server's**: "KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026 with MOV-2026-000052
   (split off MOV-2026-000046). Now At Port. The 11 others are still on MOV-2026-000046." with "Open MOV-…", then the
   Delivery's draft goods receipts (`showDeliveryResult`). **Split but not completed** (`ok` false with
   `splitFromMovementId`, rare: the date is checked before anything is split) is **a warning, never a failure**: an orange
   notification "MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page." with that movement's link
   (the host reloads); in the bulk results the row reads "Refused" with that sentence in orange, and its containers stay
-  ticked. A refusal before the split is the usual error, in the dialog.
+  ticked - so does the container of the selection bar's one-container step (`NextStepModal` calls `onDone(false)`). A
+  refusal before the split is the usual error, in the dialog. No answer at all from `complete-some` (a server error, a
+  lost connection: no 4xx) is never read as "nothing split": an orange notification says it is not known whether the
+  ticked containers left the movement, and the page reads its movement again (`onSplitDone(null)`). The API answers
+  every split it committed, even when the completion failed for no business reason ("…but not completed: the database
+  did not answer (see the API log)."); `movementId` / `movementNo` name the new movement when it could not be read
+  back.
 - **The movement page** shows "Split from" with the original movement linked (`splitFromMovementId`), and its history
   (`history`: "Split off" in orange, "Split from" in violet, with their details) among the stamps in the Activity card.
 

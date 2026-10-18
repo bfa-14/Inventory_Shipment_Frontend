@@ -3,8 +3,8 @@ import { IconChevronDown, IconChevronRight } from '@tabler/icons-react'
 import type { ShipmentCardDto } from '../../../api/logistics/shipments'
 import { formatNumber } from '../../format'
 import type { NextStepAction } from '../nextStep'
-import { ShipmentCard, type CardLinks } from './ShipmentCard'
-import { CARDS_STEP, columnFigures, drawColumn, groupTitle, tickState, type BoardColumn } from './shipmentBoard'
+import { GroupLabel, ShipmentCard, type CardLinks } from './ShipmentCard'
+import { CARDS_STEP, columnFigures, drawColumn, tickState, type BoardColumn } from './shipmentBoard'
 
 interface ShipmentColumnProps {
   column: BoardColumn
@@ -76,7 +76,8 @@ export function ShipmentColumn({
                 {groupFolded ? <IconChevronRight size={14} /> : <IconChevronDown size={14} />}
               </ActionIcon>
               <Text fz="xs" fw={700} style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }} data-shipment-group-title>
-                {groupTitle(group)}
+                {/* a ship's movement number linked, as on its cards (the group's first card carries it) */}
+                {group.cards[0] ? <GroupLabel card={group.cards[0]} canOpenMovements={links.movements} /> : group.label} ({formatNumber(group.cards.length)})
               </Text>
             </Group>
             {readOnly ? null : (
@@ -104,8 +105,9 @@ export function ShipmentColumn({
               />
             ))}
             {notDrawn > 0 ? (
+              // The button's own words: "Show 16 more" when 16 are left to draw in the column.
               <Text fz="xs" c="dimmed" ml={4}>
-                {formatNumber(notDrawn)} more in this group: Show {formatNumber(CARDS_STEP)} more below.
+                {formatNumber(notDrawn)} more in this group: Show {formatNumber(Math.min(CARDS_STEP, hidden))} more below.
               </Text>
             ) : null}
           </Stack>

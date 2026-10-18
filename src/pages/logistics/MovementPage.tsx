@@ -514,15 +514,16 @@ export function MovementPage() {
    * page reads this movement again (without the page-wide loader, the notifications stay readable) and offers the next
    * step of the ones that arrived, as after any arrival.
    */
-  function splitDone(result: MovementSplitResultDto) {
+  function splitDone(result: MovementSplitResultDto | null) {
     setDateDialog(null)
+    // Read again whatever came back - null: no answer, the split may have happened all the same.
     if (movementId !== null) {
       movementsApi
         .get(movementId)
         .then((dto) => show(dto, true))
         .catch(() => void load())
     }
-    if (result.ok && result.movement) offerContinue(result.movement)
+    if (result?.ok && result.movement) offerContinue(result.movement)
   }
 
   /** A leg completed (not a Delivery: its goods are received next): "Continue: Next step…" for its containers. */
@@ -670,10 +671,11 @@ export function MovementPage() {
   const actions: DocumentAction[] = [
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && canManage && movement.canDelete },
-    { key: 'cancel', label: 'Cancel', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.canCancel },
-    { key: 'complete', label: 'Complete', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    // Cancel, Complete and Start open a dialog (a reason, a date): their labels end with the ellipsis.
+    { key: 'cancel', label: 'Cancel…', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.canCancel },
+    { key: 'complete', label: 'Complete…', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
     // (80) A planned movement that cannot start yet says why before the click: the refusal Start would give.
-    { key: 'start', label: 'Start', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', visible: saved && canManage && movement.canStart, disabled: (statusBlocked ?? movement?.startBlockedReason ?? null) !== null, disabledReason: statusBlocked ?? movement?.startBlockedReason ?? undefined },
+    { key: 'start', label: 'Start…', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', visible: saved && canManage && movement.canStart, disabled: (statusBlocked ?? movement?.startBlockedReason ?? null) !== null, disabledReason: statusBlocked ?? movement?.startBlockedReason ?? undefined },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly, disabled: ticked.length === 0, disabledReason: ticked.length === 0 ? 'Tick at least one container.' : undefined },
   ]
 
@@ -890,6 +892,8 @@ export function MovementPage() {
           // (82) "Only some containers arrived": the ticked ones get their own movement, the others stay on this one.
           allowSplit={canManage}
           onSplitDone={splitDone}
+          // its "Open MOV-…" links keep the page's way back
+          returnQuery={fromQuery}
         />
       ) : null}
 
