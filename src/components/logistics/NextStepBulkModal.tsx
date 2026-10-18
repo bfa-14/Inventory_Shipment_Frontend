@@ -531,8 +531,17 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                                   ) : null}
                                 </Stack>
                               ) : (
-                                <Text fz="xs" c="dimmed">
-                                  {g.kind === 'Complete' ? 'Completed' : 'Started'}
+                                <Text fz="xs" c="dimmed" data-next-step-movements>
+                                  {/* (82) Only the ticked arrive: a new movement is completed, this one stays in progress. */}
+                                  {splitChosen(g, choice)
+                                    ? `A new movement, completed; ${g.movementNo ?? 'the movement'} stays in progress with the ${
+                                        (g.movementContainerCount ?? 0) - g.containers === 1
+                                          ? 'other container'
+                                          : `${formatNumber((g.movementContainerCount ?? 0) - g.containers)} others`
+                                      }`
+                                    : g.kind === 'Complete'
+                                      ? 'Completed'
+                                      : 'Started'}
                                 </Text>
                               )}
                             </Table.Td>

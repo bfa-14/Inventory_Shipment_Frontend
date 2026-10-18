@@ -178,9 +178,12 @@ export interface MovementAttachmentDto {
 /** (script 82) What happened to a movement beyond its own stamps: a split, on both movements, newest first. */
 export interface MovementAuditDto {
   id: number
-  /** "Split off" (the original) or "Split from" (the movement of the containers that arrived). */
+  /** "Split off" (the original), "Split from" (the movement of the containers that arrived), "Split undone" (both, when the latter is cancelled). */
   action: string
-  /** "Split off into MOV-2026-000052: KTG-2026-0031" / "Split from MOV-2026-000046: KTG-2026-0031 arrived on its own." */
+  /**
+   * "Split off into MOV-2026-000052: KTG-2026-0031" / "Split from MOV-2026-000046: KTG-2026-0031 arrived on its own." /
+   * "Split undone: KTG-2026-0031 back on MOV-2026-000046" / "Back from MOV-2026-000052 (split undone): KTG-2026-0031".
+   */
   details: string | null
   userId: number | null
   userName: string | null
@@ -231,8 +234,26 @@ export interface MovementDto extends MovementFlags {
   /** (script 82) The movement it was split off, when only part of that one arrived: "Split from MOV-2026-000046". */
   splitFromMovementId?: number | null
   splitFromMovementNo?: string | null
+  /**
+   * (script 82) CANCELLING A SPLIT-OFF MOVEMENT UNDOES THE SPLIT: the movement its containers go back to (the one they were
+   * split from, or where that one's own undone split sent its containers), as its Cancel dialog says it first. Null on a
+   * movement that was not split off.
+   */
+  splitUndoMovementId?: number | null
+  splitUndoMovementNo?: string | null
+  /** That movement's status: 2 in progress (they travel on with it), 3 completed (they arrived with it), 4 cancelled. */
+  splitUndoStatus?: number | null
+  splitUndoEndDate?: string | null
+  splitUndoToName?: string | null
+  /** The stage of its type: a completed Delivery leaves them delivered, not received (no draft goods receipt). */
+  splitUndoStage?: string | null
   /** (script 82) Its history beyond its own stamps (created, started, completed, cancelled): its splits, newest first. */
   history?: MovementAuditDto[]
+  /**
+   * (script 82) Only on the answer to Cancel of a split-off movement: the split was undone - where its containers went and
+   * the server's notification ("MOV-… cancelled, the split undone: KTG-… are back on MOV-…, still in progress.").
+   */
+  splitUndone?: MovementSplitUndoneDto | null
   /**
    * (79) The goods receipt type's "Create goods receipts when a Delivery is completed" (Configuration › Document Types):
    * false, completing a Delivery drafts none - they are made by hand with Receive goods… on each container. Missing (an
@@ -254,6 +275,22 @@ export interface MovementDto extends MovementFlags {
    * Use Receive goods… on each container."), or one container's row ("{ref}: the draft goods receipt was not created…").
    */
   warnings?: string[]
+}
+
+/** (script 82) A cancel that undid a split: the movement the containers went back to, as it is now, and the containers. */
+export interface MovementSplitUndoneDto {
+  movementId: number
+  movementNo: string
+  /** 2 in progress, 3 completed, 4 cancelled. */
+  status: number
+  endDate: string | null
+  toName: string
+  stage: string
+  containerCount: number
+  /** "KTG-2026-0030,KTG-2026-0031": the first ten. */
+  containerRefs: string | null
+  /** The server's notification, shown as it comes. */
+  message: string
 }
 
 /**

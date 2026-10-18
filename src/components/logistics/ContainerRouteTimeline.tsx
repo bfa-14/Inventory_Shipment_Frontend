@@ -26,6 +26,11 @@ interface ContainerRouteTimelineProps {
    * the top of the page and the action bar its bottom, a whole page of scrolling away. Null or absent: not shown.
    */
   step?: { label: string; disabledReason: string | null; onClick: () => void; colour?: string; icon?: ReactNode } | null
+  /**
+   * (82) The way back its movement links carry, so Back on that movement returns where the reader came from: the
+   * container's page by default ("?from=container/12"), the Shipments board from its drawer ("?from=shipments").
+   */
+  returnQuery?: string
 }
 
 /**
@@ -38,10 +43,11 @@ interface ContainerRouteTimelineProps {
  * next movement when there is one. The next step itself is the button next to Save, and on a narrow screen also the
  * card's own first button (`step`), so it is in the first screen the user sees.
  */
-export function ContainerRouteTimeline({ container, canManage, onChanged, step }: ContainerRouteTimelineProps) {
+export function ContainerRouteTimeline({ container, canManage, onChanged, step, returnQuery }: ContainerRouteTimelineProps) {
   const navigate = useNavigate()
   const [pickOpen, setPickOpen] = useState(false)
   const legs = container.movements
+  const backQuery = returnQuery ?? `?from=container/${container.id}`
   // The line is drawn up to the last completed leg; a running leg is the active bullet.
   const active = legs.reduce((last, leg, index) => (leg.status === 2 || leg.status === 3 ? index : last), -1)
   // A container that has arrived, or never set off, cannot join a leg.
@@ -102,7 +108,7 @@ export function ContainerRouteTimeline({ container, canManage, onChanged, step }
               color={stageColour(leg.stage)}
               lineVariant={leg.status === 1 ? 'dashed' : 'solid'}
               bullet={<StageIcon stage={leg.stage} size={16} color="currentColor" />}
-              title={<LegTitle leg={leg} containerId={container.id} />}
+              title={<LegTitle leg={leg} returnQuery={backQuery} />}
             >
               <LegBody leg={leg} />
             </Timeline.Item>
@@ -164,9 +170,10 @@ function WhereNow({ container }: { container: ContainerDto }) {
   )
 }
 
-function LegTitle({ leg, containerId }: { leg: ContainerMovementDto; containerId: number }) {
+function LegTitle({ leg, returnQuery }: { leg: ContainerMovementDto; returnQuery: string }) {
   // The movement's own page needs View Movements (script 75); its number is shown either way. The link carries the way
-  // back (?from=container/12): Back and the breadcrumb of that movement return to this container, not to the list.
+  // back (?from=container/12, or ?from=shipments in the board's drawer): Back and the breadcrumb of that movement return
+  // where the reader came from, not to the list.
   const canOpen = useAuth().hasPermission(PERMISSIONS.movementsView)
   return (
     <Group gap="xs" wrap="wrap">
@@ -177,7 +184,7 @@ function LegTitle({ leg, containerId }: { leg: ContainerMovementDto; containerId
         {STATUS_NAMES[leg.status] ?? leg.status}
       </Badge>
       {canOpen ? (
-        <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}?from=container/${containerId}`} fz="xs">
+        <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}${returnQuery}`} fz="xs">
           {leg.movementNo}
         </Anchor>
       ) : (

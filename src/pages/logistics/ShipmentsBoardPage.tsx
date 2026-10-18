@@ -24,6 +24,7 @@ import { portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import type { BranchLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { ContainerSelectionBar } from '../../components/logistics/ContainerSelectionBar'
+import { WHOLE_BADGE } from '../../components/logistics/movementContainers'
 import { ShipmentColumn } from '../../components/logistics/shipments/ShipmentColumn'
 import { ShipmentDrawer } from '../../components/logistics/shipments/ShipmentDrawer'
 import { ShipmentsList } from '../../components/logistics/shipments/ShipmentsList'
@@ -413,7 +414,8 @@ export function ShipmentsBoardPage() {
                     key={c.phase}
                     value={c.phase}
                     rightSection={
-                      <Badge size="xs" variant="light" color={c.count > 0 ? 'brand' : 'gray'} circle={c.count < 10}>
+                      // The whole count (WHOLE_BADGE): squeezed into the tab, a count of 10 or more drew an empty pill.
+                      <Badge size="xs" variant="light" color={c.count > 0 ? 'brand' : 'gray'} circle={c.count < 10} styles={WHOLE_BADGE}>
                         {formatNumber(c.count)}
                       </Badge>
                     }

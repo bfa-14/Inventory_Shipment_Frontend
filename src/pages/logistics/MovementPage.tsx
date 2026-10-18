@@ -58,6 +58,7 @@ import { fromSaved, type CardContainer } from '../../components/logistics/moveme
 import { StageIcon } from '../../components/logistics/movementStage'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { FROM_LOCKED_HINT, placeOptionGroups } from '../../components/logistics/shipStep'
+import { splitUndoText } from '../../components/logistics/splitUndo'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -570,7 +571,26 @@ export function MovementPage() {
       const result = await movementsApi.cancel(movement.id, reason, movement.rowVersion)
       show(result, true)
       setCancelOpen(false)
-      notify.success(`${result.movementNo} cancelled.`)
+      // (82) A SPLIT-OFF MOVEMENT: the split is undone. The server says where its containers went (that movement's status
+      // as it is now, not as the dialog read it), with a link to that movement that keeps the page's way back.
+      const undone = result.splitUndone
+      if (undone) {
+        notifications.show({
+          color: 'green',
+          withBorder: true,
+          autoClose: 15_000,
+          message: (
+            <Stack gap={2} data-cancel-split-undone>
+              <Text fz="sm">{undone.message}</Text>
+              <Anchor component="button" type="button" fz="xs" fw={600} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/${undone.movementId}${fromQuery}`)}>
+                Open {undone.movementNo}
+              </Anchor>
+            </Stack>
+          ),
+        })
+      } else {
+        notify.success(`${result.movementNo} cancelled.`)
+      }
       // Its automatic draft goods receipts went with it: the menu count follows.
       if (deliveredBefore) void refreshGoodsReceiptsWaiting()
     } catch (err) {
@@ -680,6 +700,11 @@ export function MovementPage() {
   ]
 
   const chargesTotal = (movement?.charges ?? []).filter((c) => c.status === 2).reduce((sum, c) => sum + c.amountBase, 0)
+  // (82) A split-off movement cancelled is empty: its history says where its containers went ("Split undone: KTG-… back on MOV-…").
+  const splitUndoneNote =
+    movement?.status === 4 ? (movement.history?.find((h) => h.action === 'Split undone' && h.details?.startsWith('Split undone:'))?.details ?? null) : null
+  // (82) A split-off movement not cancelled yet: what cancelling it does, said first in its Cancel dialog.
+  const splitUndo = movement ? splitUndoText(movement) : null
 
   const fromPort = ports.find((p) => String(p.id) === values.fromPlaceId)
   const fromName = fromPort ? portLabel(fromPort) : ''
@@ -730,6 +755,12 @@ export function MovementPage() {
       {movement?.status === 4 ? (
         <Alert color="red" mb="md">
           Cancelled by {movement.cancelledByName ?? '—'}: {movement.cancelReason ?? ''}
+          {/* (82) A split-off movement cancelled is empty: its containers went back onto the movement they came from. */}
+          {splitUndoneNote ? (
+            <Text fz="sm" mt={4} data-split-undone-note>
+              {splitUndoneNote}
+            </Text>
+          ) : null}
         </Alert>
       ) : null}
 
@@ -917,6 +948,12 @@ export function MovementPage() {
         confirmLabel="Cancel movement"
         description="The movement is kept as a cancelled record and can no longer be started or changed. It cannot be undone."
       >
+        {/* (82) A split-off movement: cancelling it undoes the split - said first, with where its containers go. */}
+        {cancelOpen && splitUndo ? (
+          <Alert color="orange" py={6} data-cancel-split-undo>
+            {splitUndo}
+          </Alert>
+        ) : null}
         {cancelOpen && movement && movement.status === 3 && movement.stage === DELIVERY ? (
           <DeliveryCancelDrafts movement={movement} canViewReceipts={canViewReceipts} />
         ) : null}

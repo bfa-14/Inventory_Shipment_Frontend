@@ -1876,10 +1876,12 @@ with `?from=shipments` (a card of the Shipments board, script 82) returns to the
 new movement is saved. `useNextStep(onDone, origin)` takes `'container'` (its page, and its row on an order's or an
 invoice's Containers card), `'containers'` or `'shipments'`. Every way into a movement from a container carries
 it: "New movement
-for this container", the MOV-… links of the route card and the "Open MOV-…" links in the notification after a Next step
+for this container", the MOV-… links of the route card (`ContainerRouteTimeline`'s `returnQuery`, "?from=container/12" by
+default - the board's drawer passes "?from=shipments") and the "Open MOV-…" links in the notification after a Next step
 (`NextStepModal`'s `returnQuery`; the selection bar passes its own, `ContainerSelectionBar`'s `returnQuery` -
-"?from=shipments" on the board), and the movement page's own dialog keeps the page's (`MovementStatusModal`'s
-`returnQuery`: its "Open MOV-…" after a split). A link without it goes back to the Movements list.
+"?from=shipments" on the board), and the movement page's own dialogs keep the page's (`MovementStatusModal`'s
+`returnQuery`: its "Open MOV-…" after a split; the "Open MOV-…" after a split undone). A link without it goes back to the
+Movements list.
 
 **The start date of a movement in progress stays a fact**: the movement page lets it be changed after Start, so its
 field shows the Start dialog's two refusals before the Save - after today, and before `startNotBefore` (which the API
@@ -1919,7 +1921,8 @@ its way, in one column by stage**, each card with its next step. Route `/logisti
   the cards, a ship's group header, the List's Place or leg - is a link only with `containers.movements.view`, carrying
   `?from=shipments`. Clicking a card (not its box, links or step) opens the drawer.
 - **The drawer** (`ShipmentDrawer`, full screen on a phone): the card's facts, the container's own `ContainerRouteTimeline`
-  (read when it opens: today's route; `canManage` false, its step button in the card's header) and "Open container".
+  (read when it opens: today's route; `canManage` false, its step button in the card's header; its MOV links carry
+  `?from=shipments`, its `returnQuery`, so Back on that movement returns to the board) and "Open container".
   Taking the step closes the drawer first, so the step's dialog is the only one on screen. Without `containers.view` it
   says what the card says, offers no step and no page, and says why: "Its route, its next step and its page need the
   View Containers permission."
@@ -1948,7 +1951,9 @@ its way, in one column by stage**, each card with its next step. Route `/logisti
   scrolls sideways **inside the board**, never the page. The body is a plain scrolling `div`, not Mantine's `ScrollArea`,
   whose content is laid out as a table: long lines did not wrap and were cut at the column's edge.
 - **Below 62em one column at a time**, picked from a row of pill tabs with the counts ("At sea 22") that scrolls inside
-  itself; the page never scrolls sideways (390 px). The column then has no inner scroll: the page scrolls.
+  itself; the page never scrolls sideways (390 px). Each count keeps its whole number (`WHOLE_BADGE` on the tab's badge:
+  squeezed into the tab, a count of 10 or more drew an empty pill). The column then has no inner scroll: the page
+  scrolls.
 - **Refresh**: the "Refresh" button ("Updated HH:mm" beside it), after every action, and a minute after the last answer -
   looked at every 15 s and when the tab comes back - **only while the tab is visible and no dialog is open** (a Mantine
   Modal or Drawer on screen: `[role="dialog"][aria-modal="true"]`), so nothing is read again under the reader's feet. The
@@ -1975,7 +1980,9 @@ default everywhere.**
   `splitOff: true`; the Then leg works as after any arrival.
 - **`NextStepBulkModal`**, a Complete group where only part of the movement is ticked: "Complete MOV-… for all its 30
   containers" (default) / "Only the 20 ticked (they get their own movement)" ("Only the ticked one (it gets its own
-  movement)" for one); its result row reads "{step} (only the ticked)". When the ticked cannot arrive alone the phase 2
+  movement)" for one); chosen, the row's Movements cell says what happens to the movements - "A new movement, completed;
+  MOV-2026-000046 stays in progress with the 10 others" ("…with the other container" for one), never "Completed", which
+  read as if MOV-… itself were completed; its result row reads "{step} (only the ticked)". When the ticked cannot arrive alone the phase 2
   sentence stays ("…the 10 not ticked arrive too.", "the one not ticked arrives too.") with "Only the ticked cannot
   arrive on their own: {reason}" ("Only the ticked one cannot arrive on its own: {reason}").
 - **The movement page's Complete dialog** (`MovementStatusModal` with `allowSplit`, a movement in progress carrying
@@ -2003,7 +2010,19 @@ default everywhere.**
   did not answer (see the API log)."); `movementId` / `movementNo` name the new movement when it could not be read
   back.
 - **The movement page** shows "Split from" with the original movement linked (`splitFromMovementId`), and its history
-  (`history`: "Split off" in orange, "Split from" in violet, with their details) among the stamps in the Activity card.
+  (`history`: "Split off" in orange, "Split from" in violet, "Split undone" in orange, with their details) among the
+  stamps in the Activity card.
+- **Cancelling a split-off movement undoes the split** (the server's rule: its containers go back onto the movement they
+  were split from). Its **Cancel dialog says it first**, in an orange Alert above the reason (`splitUndoText`,
+  `components/logistics/splitUndo.ts`, from the movement's `splitUndo…`: that movement's number, status, end date, To
+  and stage, and the dialog's own containers): "Cancelling MOV-2026-000073 puts KTG-2026-0030 and KTG-2026-0031 back on
+  MOV-2026-000044, which is still in progress." / "…, which arrived at Dar es Salaam on 17/10/2026: they arrive with it."
+  (by the stage: "cleared customs at …: they are cleared with it", "…delivered to Lubumbashi on …: KTG-… is delivered
+  with it, without a draft goods receipt: use Receive goods… on it") / "…, which is cancelled: they go back to where they
+  were before it." - above a Delivery's own list of the draft goods receipts deleted with it. **The notification after
+  it is the server's** (`splitUndone.message`, green, with "Open MOV-…" that keeps the page's way back), worked out when
+  the cancel ran - that movement may have moved on while the dialog was open. The cancelled record's red Alert adds the
+  line "Split undone: KTG-… back on MOV-…" from its history (it has no container left).
 
 ### Row menus of the order's and the invoice's Containers cards (script 82)
 

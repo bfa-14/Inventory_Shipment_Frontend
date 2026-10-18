@@ -119,6 +119,8 @@ export function ShipmentDrawer({ card, columnTitle, onClose, stepOf, onStep, lin
             // The drawer moves the container with its next step only; joining or making other movements is its page's.
             canManage={false}
             onChanged={() => void load()}
+            // Its movement links keep the way back to the board, as every movement link of the board does.
+            returnQuery="?from=shipments"
             step={
               step
                 ? {
