@@ -21,7 +21,7 @@ import { DeliveryCompletePreview } from './DeliveryReceipts'
 import { showDeliveryResult } from './deliveryNotification'
 import { initialLeg, legDateProblem, legProblem, retypeLeg, SEA, type LegPrefill, type LegValues } from './nextLeg'
 import { NextLegFields } from './NextLegFields'
-import { completeWords, DRAFT_NOT_CONFIRMABLE, movementLine, newLegTitle, proposalSourceText, thenLabel, thenNeedsTo } from './nextStep'
+import { completeWords, DRAFT_NOT_CONFIRMABLE, isMovementStep, movementLine, newLegTitle, proposalSourceText, thenLabel, thenNeedsTo } from './nextStep'
 import { isStay } from './shipStep'
 
 /** How many other containers a line names before "(N more)". */
@@ -162,7 +162,7 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
             ? `The date cannot be before the start of ${step?.movementNo ?? 'the movement'} (${dateLabel(notBefore)}).`
             : `The movement cannot start before the previous leg ended (${dateLabel(notBefore)}).`
           : null
-  const placeProblem = newLeg && leg && tried ? legProblem(leg, types) : null
+  const placeProblem = newLeg && leg && tried ? legProblem(leg, types, place !== null) : null
 
   const others = movement ? movement.containers.filter((c) => c.containerId !== containerId).map((c) => c.containerRef) : []
   const delivery = completing && step?.movementStage === DELIVERY
@@ -203,13 +203,17 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
     if (!leg || !legType) return null
     const sea = legType.stage === SEA
     const stay = isStay(legType.stage)
+    // The From is sent only when the reader chose it: a loading at the supplier, or a container with no place (never
+    // moved, no port of loading: it leaves from any From). Else the server takes where the container is.
+    const fromChosen = (legType.stage === 'Origin' || place === null) && leg.fromId ? Number(leg.fromId) : null
     return {
       key: containerRef,
       kind: kind === 'Ship' ? 'Ship' : 'NextLeg',
       containerIds: [containerId],
       movementTypeId: legType.id,
-      fromPlaceId: legType.stage === 'Origin' && leg.fromId ? Number(leg.fromId) : null,
-      toPlaceId: stay ? (step.placeId ?? null) : leg.toId ? Number(leg.toId) : null,
+      fromPlaceId: fromChosen,
+      expectedPlaceId: step.placeId,
+      toPlaceId: stay ? (step.placeId ?? fromChosen) : leg.toId ? Number(leg.toId) : null,
       startNow: leg.startMode === 'start',
       date: leg.date,
       eta: leg.eta,
@@ -228,7 +232,7 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
   async function submit() {
     setTried(true)
     if (!step || dateProblem || blocked) return
-    if (newLeg && leg && legProblem(leg, types)) return
+    if (newLeg && leg && legProblem(leg, types, place !== null)) return
     const body = request()
     if (!body) return
     setBusy(true)
@@ -289,7 +293,9 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
   const where =
     step && newLeg
       ? neverMoved
-        ? `Not moved yet: leaves from its port of loading ${step.placeName ?? '(none)'}.`
+        ? place
+          ? `Not moved yet: leaves from its port of loading ${step.placeName ?? place.name}.`
+          : 'Not moved yet, and no port of loading: choose where it leaves from.'
         : `Now at ${step.placeName ?? '—'}${step.placeSince ? ` since ${dateLabel(step.placeSince)}` : ''}${step.lastMovementNo ? ` (end of ${step.lastMovementNo})` : ''}.`
       : null
   const typeHint =
@@ -301,10 +307,40 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
           : null
       : null
 
+  // NOT A MOVEMENT: a draft goods receipt waits, the goods are received next, or the journey is over. Opened from a list
+  // of containers (the movement page's "Continue: Next step…") a container may be there: the dialog says what comes
+  // next and where, and has nothing to submit.
+  const notMoving = step !== null && !isMovementStep(kind)
+  const receiptId = step?.goodsReceiptId ?? null
+
   return (
-    <Modal opened onClose={onClose} title={title} size={newLeg ? 'xl' : delivery ? 'lg' : 'md'} fullScreen={phone && newLeg} closeOnClickOutside={!busy} withCloseButton={!busy}>
+    <Modal opened onClose={onClose} title={notMoving ? `Next step - ${containerRef}` : title} size={newLeg ? 'xl' : delivery ? 'lg' : 'md'} fullScreen={phone && newLeg} closeOnClickOutside={!busy} withCloseButton={!busy}>
       {loadError ? (
         <Alert color="red">{loadError}</Alert>
+      ) : notMoving ? (
+        <Stack gap="sm" data-next-step-dialog={kind ?? ''}>
+          <Alert color={kind === 'Done' ? 'gray' : 'blue'} py={6} data-next-step-not-moving>
+            {kind === 'OpenReceipt'
+              ? `A draft goods receipt waits for ${containerRef}${step.goodsReceiptNumber ? ` (${step.goodsReceiptNumber})` : ''}: its goods are received next, with no movement.`
+              : kind === 'Receive'
+                ? `${containerRef} is delivered: its goods are received next, with Receive goods… on the container.`
+                : (step.blockedReason ?? 'This container cannot move on now.')}
+          </Alert>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={onClose}>
+              Close
+            </Button>
+            {kind === 'OpenReceipt' && receiptId !== null && canViewReceipts ? (
+              <Button onClick={() => void navigate(routes.goodsReceipt(receiptId))} data-next-step-open-draft>
+                Open goods receipt (draft)
+              </Button>
+            ) : kind === 'Receive' ? (
+              <Button onClick={() => void navigate(routes.container(containerId))} data-next-step-open-container>
+                Open the container
+              </Button>
+            ) : null}
+          </Group>
+        </Stack>
       ) : !step || ((completing || starting) && !movement) || (newLeg && (!leg || types.length === 0)) ? (
         <Group justify="center" py="md">
           <Loader size="sm" />

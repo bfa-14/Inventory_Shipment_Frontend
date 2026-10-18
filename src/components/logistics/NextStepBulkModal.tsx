@@ -199,6 +199,7 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
       containerIds: part.map((c) => c.id),
       movementTypeId: type?.id ?? null,
       fromPlaceId: type?.stage === 'Origin' && leg?.fromId ? Number(leg.fromId) : null,
+      expectedPlaceId: g.fromPlaceId,
       toPlaceId: stay ? g.fromPlaceId : leg?.toId ? Number(leg.toId) : null,
       startNow: startMode === 'start',
       date,

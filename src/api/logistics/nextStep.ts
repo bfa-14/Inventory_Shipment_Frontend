@@ -233,6 +233,11 @@ export interface NextStepGroupRequest {
   containerIds: number[]
   movementTypeId?: number | null
   fromPlaceId?: number | null
+  /**
+   * A new leg: where the preview saw the containers. Moved since (by someone else, while the dialog stood open), the
+   * server refuses the step as changed instead of making a leg from their new place to the To chosen for the old one.
+   */
+  expectedPlaceId?: number | null
   toPlaceId?: number | null
   startNow?: boolean
   /** 'YYYY-MM-DD'; null = today. */

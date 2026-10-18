@@ -1735,7 +1735,7 @@ every step, the proposal, many containers at once and the to-do list.
 | a movement in progress carries it (`Complete`) | by the stage of its type: "Arrived at Dar es Salaam…" (Sea, Transit), "Cleared customs at Kasumbalesa…", "Crossed the border at Kasumbalesa…", "Left the port of Beira…", "Loaded at the supplier…", "Delivered to Lubumbashi…" | `NextStepModal`: the date named by the stage, "Then start …" |
 | its last leg is completed (`NextLeg`) | the proposed leg: "Inland transport to Kasumbalesa…", for a stay "Customs clearance at Kasumbalesa…", nothing to propose "Next leg from Dar es Salaam…" | `NextStepModal`: the new leg, filled in |
 | delivered, not received (`Receive` / `OpenReceipt`) | "Receive goods…" / "Open goods receipt (draft)" | the goods receipt dialogs, with their own rules and permissions |
-| received, closed or cancelled (`Done`) | "Next step…", disabled: "Received into Main Warehouse: the journey is over." / "This container is cancelled." | - |
+| received, closed or cancelled (`Done`) | "Next step…", disabled: "Received into Main Warehouse: the journey is over." / "This container is cancelled." (the row's entry reads "Next step: journey over") | - |
 
 - **One hook runs it everywhere**: `useNextStep(onDone, origin)` (`components/logistics/useNextStep.tsx`; `origin` is
   `'container'` on the container's page, `'containers'` on the list) gives `action(container)` (null when the reader may
@@ -1776,10 +1776,18 @@ rule of phase 1 holds. A refusal is shown in the dialog as it comes, and the dia
   date", "Departure date", "Delivery date"), today, not before the start, not in the future; "All 12 containers of
   MOV-… arrive too: …" when it carries others (no split); **"Then start …"** for the leg the server proposes after it -
   ticked by default for a stay at the arrival place or the leg after Customs / Border, unticked for a leg that moves, off
-  with a hint when there is no To to propose. A Delivery shows `DeliveryCompletePreview` and "Then open the draft goods
+  with a hint when there is no To to propose, absent when the container's next leg is already planned. A Delivery shows `DeliveryCompletePreview` and "Then open the draft goods
   receipt" instead. Buttons "Record arrival", "Record clearance", "Record crossing", "Record departure", "Record
   delivery", "Record loading". **The Then leg is a second step on the server**: refused, the arrival stays and the
   notification says "Arrival recorded; Customs clearance was not started: {reason}. Use Next step…".
+- **No port of loading** (never moved, none on the container: any From fits it): "Not moved yet, and no port of loading:
+  choose where it leaves from.", the From is a field (required) and is sent as `fromPlaceId`.
+- **Every new leg sends `expectedPlaceId`** (the place the dialog was opened at; the bulk dialog sends its group's From):
+  moved since by someone else, the server refuses it ("KTG-… is now at Kasumbalesa: open Next step… again.") instead of
+  making a leg from the new place to the To chosen for the old one.
+- **Not a movement** (a draft goods receipt waits, goods to receive, journey over: the movement page's "Continue: Next
+  step…" can open the dialog on such a container): the dialog says what comes next and offers "Open goods receipt
+  (draft)" / "Open the container", with nothing to submit.
 - **A planned leg**: its start date; "It also carries KTG-…, KTG-… (2 more): they start with it."; the refusal Start
   would give, in red, with the button off.
 - **The notification is the server's sentence** ("KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026

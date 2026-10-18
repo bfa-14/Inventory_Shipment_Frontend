@@ -133,11 +133,14 @@ export function legDateProblem(values: Pick<LegValues, 'date' | 'startMode'>, no
   return null
 }
 
-/** Why the leg cannot be saved as typed (the type, the To of a leg that moves, the From of a loading), null when it can. */
-export function legProblem(values: LegValues, types: MovementTypeLookupDto[]): string | null {
+/**
+ * Why the leg cannot be saved as typed (the type, the To of a leg that moves, the From of a loading - or of any leg when
+ * the containers have no place: never moved and no port of loading), null when it can.
+ */
+export function legProblem(values: LegValues, types: MovementTypeLookupDto[], placeKnown = true): string | null {
   const type = types.find((t) => String(t.id) === values.typeId) ?? null
   if (!type) return 'Choose the movement type.'
-  if (type.stage === ORIGIN && !values.fromId) return 'Choose where from.'
+  if ((type.stage === ORIGIN || !placeKnown) && !values.fromId) return 'Choose where from.'
   if (!isStay(type.stage) && !values.toId) return 'Choose where to.'
   return null
 }

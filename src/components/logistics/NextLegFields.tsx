@@ -100,7 +100,7 @@ export function NextLegFields({
           />
         )}
         {stay ? (
-          <TextInput label="To" value={`at ${place?.name ?? placeName}`} readOnly description="A stay happens where the container is." inputWrapperOrder={['label', 'input', 'description']} data-next-leg-to-stay />
+          <TextInput label="To" value={`at ${place?.name || placeName || portName(values.fromId) || 'the From'}`} readOnly description="A stay happens where the container is." inputWrapperOrder={['label', 'input', 'description']} data-next-leg-to-stay />
         ) : origin && place ? (
           <TextInput label="To" value={placeName} readOnly description="Loading at the supplier ends at the port of loading." inputWrapperOrder={['label', 'input', 'description']} />
         ) : (

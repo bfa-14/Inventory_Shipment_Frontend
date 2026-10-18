@@ -538,7 +538,9 @@ export function ContainersPage() {
         const stepEntry = {
           key: 'nextStep',
           show: step !== null,
-          label: step ? `Next step: ${step.label}` : '',
+          // A journey over has no next step to name ("Next step: Next step…"): the entry reads like the column, disabled
+          // with the reason.
+          label: step ? (step.kind === 'Done' ? 'Next step: journey over' : `Next step: ${step.label}`) : '',
           icon: <IconRoute size={16} />,
           disabled: step?.disabledReason != null,
           reason: step?.disabledReason ?? undefined,
