@@ -498,16 +498,20 @@ export function ContainersPage() {
         const receipt = containerReceiptOf(row)
         // (80) Its next step first: the same action as the button next to Save on its page.
         const ship = shipStep.action(row)
-        const more = [
-          {
-            key: 'ship',
-            show: ship !== null,
-            label: ship?.label ?? '',
-            icon: <IconRoute size={16} />,
-            disabled: ship?.disabledReason != null,
-            reason: ship?.disabledReason ?? undefined,
-            onClick: () => shipStep.run(row),
-          },
+        const shipEntry = {
+          key: 'ship',
+          show: ship !== null,
+          label: ship?.label ?? '',
+          icon: <IconRoute size={16} />,
+          disabled: ship?.disabledReason != null,
+          reason: ship?.disabledReason ?? undefined,
+          color: undefined as string | undefined,
+          onClick: () => shipStep.run(row),
+        }
+        // Delivered: the goods receipt comes next, so "Next leg…" moves below the receipt entries.
+        const shipAfterDelivery = ship?.step === 'NextLeg' && Boolean(row.deliveredDate)
+        const entries = [
+          ...(shipAfterDelivery ? [] : [shipEntry]),
           {
             key: 'receive',
             show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.canReceive !== false,
@@ -549,7 +553,13 @@ export function ContainersPage() {
           },
           { key: 'delete', show: canDelete && row.canDelete, label: 'Delete', icon: <IconTrash size={16} />, color: 'red', onClick: () => void remove(row) },
           { key: 'export', show: true, label: 'Export', icon: <IconFileSpreadsheet size={16} />, onClick: () => void exportOne(row) },
-        ].filter((a) => a.show)
+        ]
+        if (shipAfterDelivery) {
+          // Right after the goods receipt entries (Receive goods / Goods receipt), before Close, Cancel and the rest.
+          const lastReceipt = Math.max(...entries.map((e, i) => (e.key === 'receive' || e.key === 'receipt' ? i : -1)))
+          entries.splice(lastReceipt + 1, 0, shipEntry)
+        }
+        const more = entries.filter((a) => a.show)
 
         return (
           <Group gap={4} justify="flex-end" wrap="nowrap">

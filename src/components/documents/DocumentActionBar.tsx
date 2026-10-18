@@ -20,6 +20,11 @@ export interface DocumentAction {
   loading?: boolean
   variant?: 'filled' | 'default' | 'light' | 'subtle'
   colour?: string
+  /**
+   * Below 768 px, stays a button beside the primary instead of going into the "⋮" menu: for the one action that IS the
+   * page's next step (a container's "Arrived at Dar es Salaam…"), which nobody looks for in a menu.
+   */
+  pinnedOnPhone?: boolean
 }
 
 interface DocumentActionBarProps {
@@ -50,7 +55,8 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
   if (compact) {
     // The primary is whatever the page marked filled; it is what somebody came to do.
     const primary = shown.find((a) => a.variant === 'filled') ?? shown[shown.length - 1]
-    const rest = shown.filter((a) => a.key !== primary.key)
+    const pinned = shown.filter((a) => a.pinnedOnPhone && a.key !== primary.key)
+    const rest = shown.filter((a) => a.key !== primary.key && !pinned.includes(a))
 
     return (
       <Paper
@@ -61,7 +67,25 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
         bottom={0}
         style={{ zIndex: 3 }}
       >
-        <Group justify="space-between" wrap="nowrap">
+        <Group justify="space-between" wrap="nowrap" gap="xs">
+          {pinned.map((action) => (
+            <Button
+              key={action.key}
+              leftSection={action.icon}
+              variant={action.variant ?? 'light'}
+              color={action.colour}
+              disabled={action.disabled}
+              loading={action.loading}
+              onClick={action.onClick}
+              flex={1}
+              miw={0}
+              title={action.disabled ? action.disabledReason : action.label}
+            >
+              <Text span inherit truncate="end">
+                {action.label}
+              </Text>
+            </Button>
+          ))}
           <Button
             leftSection={primary.icon}
             onClick={primary.onClick}

@@ -60,7 +60,7 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   const shipRefusals = selected.map((row) => shipRefusal(row, canConfirm))
   const shipBlocked = count > 0 && shipRefusals.every((reason) => reason !== null)
   const shipBlockedReason = shipBlocked
-    ? `None of the ticked containers can ship: ${shipRefusals[0]}${count > 1 ? ` (and ${formatNumber(count - 1)} more)` : ''}`
+    ? `None of the ticked containers can ship: ${count > 1 ? `${(shipRefusals[0] ?? '').replace(/\.$/, '')} (and ${formatNumber(count - 1)} more).` : shipRefusals[0]}`
     : null
 
   async function confirmSelected() {

@@ -688,6 +688,10 @@ export function ContainerPage() {
   const shipAction = shipTarget ? shipStep.action(shipTarget) : null
   // Unsaved edits first: the next step reloads the container, and a leg needs what the page shows saved.
   const shipBlocked = shipAction === null ? null : (shipAction.disabledReason ?? (dirty.current ? 'Save your changes first.' : null))
+  /* DELIVERED: the goods receipt is the next step ("Open goods receipt (draft)" / "Receive goods…"), so "Next leg…" leaves
+     the bar - a rare extra leg after a Delivery is still one click away on the route card ("New movement for this
+     container"). */
+  const shipAfterDelivery = shipAction?.step === 'NextLeg' && Boolean(container?.deliveredDate)
   /** Received by a goods receipt: its cancel replaces Cancel Offload, which stays for the offloads of before. */
   const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
   const draftReceipt = receipt?.status === 1 ? receipt : null
@@ -785,9 +789,10 @@ export function ContainerPage() {
       variant: 'light',
       colour: 'indigo',
       // Hidden without containers.movements.manage; disabled with the reason once the journey is over.
-      visible: saved && shipAction !== null,
+      visible: saved && shipAction !== null && !shipAfterDelivery,
       disabled: shipBlocked !== null,
       disabledReason: shipBlocked ?? undefined,
+      pinnedOnPhone: true,
     },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
   ]
