@@ -1973,7 +1973,8 @@ default everywhere.**
   (`POST …/movements/{id}/complete-some`). None ticked: "Tick the containers that arrived."; every one: "Every container
   of MOV-… is ticked: complete the movement itself (turn off "Only some containers arrived")." - the button waits. After
   it the page reads its movement again (the others, still in progress) and offers "Continue: Next step…" for the ones
-  that arrived.
+  that arrived. On a phone (36em and below) the dialog does not focus its date when it opens: the calendar that focus
+  opens covered the switch and the checklist above the date, where a tap picked a day instead.
 - **The notifications are the server's**: "KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026 with MOV-2026-000052
   (split off MOV-2026-000046). Now At Port. The 11 others are still on MOV-2026-000046." with "Open MOV-…", then the
   Delivery's draft goods receipts (`showDeliveryResult`). **Split but not completed** (`ok` false with

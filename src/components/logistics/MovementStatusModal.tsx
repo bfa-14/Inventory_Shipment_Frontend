@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Alert, Anchor, Button, Checkbox, Group, Loader, Modal, ScrollArea, Stack, Switch, Text } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
+import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { IconCheck, IconPlayerPlay } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -77,6 +78,10 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
   /** (82) "Only some containers arrived", and the ones ticked as arrived. */
   const [someOnly, setSomeOnly] = useState(false)
   const [arrived, setArrived] = useState<ReadonlySet<number>>(() => new Set())
+  /* (82) ON A PHONE THE DATE IS NOT FOCUSED WHEN THE DIALOG OPENS: its calendar opened over the dialog, over "Only some
+     containers arrived" and its checklist above the date, where a tap picked a day instead. There the date opens when
+     tapped. Read at once (not in an effect), so the first render already knows. */
+  const phone = useMediaQuery('(max-width: 36em)', false, { getInitialValueInEffect: false })
 
   // Read when it opens, unless the page already has it: the row a list holds has no containers nor row version.
   useEffect(() => {
@@ -337,7 +342,7 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
               setError(null)
             }}
             error={dateProblem ?? undefined}
-            data-autofocus
+            data-autofocus={phone ? undefined : true}
           />
           {error ? (
             <Alert color="red" py={6} data-status-error>
