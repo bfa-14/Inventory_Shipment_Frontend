@@ -305,7 +305,9 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
         : !isStay(legType.stage) && legType.stage !== 'Origin' && !leg.toId
           ? 'Choose the To'
           : null
-      : null
+      : step && leg && !legType && step.proposalSource === 'None'
+        ? 'Choose the type'
+        : null
 
   // NOT A MOVEMENT: a draft goods receipt waits, the goods are received next, or the journey is over. Opened from a list
   // of containers (the movement page's "Continue: Next step…") a container may be there: the dialog says what comes

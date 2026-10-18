@@ -82,7 +82,9 @@ export function proposalSourceText(
   placeName: string | null | undefined,
   hasTo: boolean,
 ): string {
-  if (!hasTo || source === 'None' || !source) return 'Choose the To'
+  // "None": the usual type of the next stage is inactive, so nothing is proposed at all
+  if (source === 'None') return 'Choose the type'
+  if (!hasTo || !source) return 'Choose the To'
   switch (source) {
     case 'History':
       return `Suggested: the usual next leg from ${placeName ?? 'here'} (${formatNumber(legs ?? 0)} earlier leg${legs === 1 ? '' : 's'})`
@@ -195,7 +197,9 @@ export function withRef(ref: string, reason: string): string {
 export function nextStepRefusal(container: NextStepContainer, canConfirm: boolean): string | null {
   const kind = container.nextStepKind
   if (kind === undefined) return null
-  if (kind === 'Receive' || kind === 'OpenReceipt') return `${container.containerRef} is delivered: its goods are received next (Receive goods…).`
+  // A draft goods receipt is opened, not made again: Receive goods… on such a container is refused (63013).
+  if (kind === 'OpenReceipt') return `${container.containerRef} has a draft goods receipt waiting: Open goods receipt (draft).`
+  if (kind === 'Receive') return `${container.containerRef} is delivered: its goods are received next (Receive goods…).`
   if (!isMovementStep(kind)) return withRef(container.containerRef, container.nextStepBlockedReason ?? 'its journey is over')
   if (container.nextStepBlockedReason) return withRef(container.containerRef, container.nextStepBlockedReason)
   if (container.status === 1 && !canConfirm) return `${container.containerRef} is a draft: someone who may confirm containers must confirm it first.`

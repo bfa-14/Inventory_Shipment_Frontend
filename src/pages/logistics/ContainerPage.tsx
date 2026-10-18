@@ -797,7 +797,18 @@ export function ContainerPage() {
 
   const title = container ? `Container ${container.containerRef}` : 'New Container'
   const journey = container ? (
-    <ContainerRouteTimeline container={container} canManage={perm.movements && container.status < 6} onChanged={() => void load()} />
+    <ContainerRouteTimeline
+      container={container}
+      canManage={perm.movements && container.status < 6}
+      onChanged={() => void load()}
+      // NARROW SCREENS: the Route card is the top of the page and the action bar its bottom, a whole page away (6,400 px
+      // on a phone). The next step is repeated in the card, so it is in the first screen the user sees.
+      step={
+        !wide && stepIsMovement && step
+          ? { label: step.label, disabledReason: stepBlocked, onClick: () => nextStep.run(container) }
+          : null
+      }
+    />
   ) : null
 
   return (

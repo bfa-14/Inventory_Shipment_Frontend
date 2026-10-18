@@ -1745,6 +1745,10 @@ every step, the proposal, many containers at once and the to-do list.
   the page's own "Receive goods…" / "Open goods receipt (draft)" are the step); the Containers list puts it **first in the
   row's "…" menu** as "Next step: {label}", its reason under the label like Close and Cancel, and leaves out the receipt
   entry that would say the same thing twice.
+- **On a narrow screen (below 75em) the Route card repeats the step** (`ContainerRouteTimeline`'s `step`): the card is
+  the top of the page there and the action bar its bottom, a whole page of scrolling away (6,400 px on a phone). The
+  card's button is the same label, reason and dialog; a disabled one says its reason under the buttons (a phone shows no
+  tooltip).
 - **The order's and the invoice's Containers cards and the Tracking board have no row menu**: they get no entry (their
   rows link to the container, whose page has the button). Give them the entry if they ever grow a menu.
 - **Start and Complete from the movement side stay one dialog**, `MovementStatusModal`, on the movement page and a row of
@@ -1762,7 +1766,8 @@ rule of phase 1 holds. A refusal is shown in the dialog as it comes, and the dia
   of MOV-2026-000046)." / "Not moved yet: leaves from its port of loading Chennai."; the fields are `NextLegFields`
   (shared with the bulk dialog's "Edit…"): Movement type grouped by stage, the proposal by default, with where it came
   from under it - "Suggested: the usual next leg from Dar es Salaam (5 earlier legs)", "Suggested from the container's
-  ports", "Suggested from the stages", "Choose the To"; changing the type proposes the To again (`retypeLeg`); From
+  ports", "Suggested from the stages", "Choose the To", and "Choose the type" when the usual type of the next stage is
+  inactive (the container still moves on: the reader picks a type); changing the type proposes the To again (`retypeLeg`); From
   read-only ("A container leaves from where it is."); To grouped Sea ports / Border posts / Inland places, replaced by "at
   Kasumbalesa" for a stay; "Start now" / "Plan only"; Start date (today, not after it when starting, not before the end of
   the previous leg); ETA; Carrier (`SearchSelect`); Vehicle / vessel; Reference; Notes; for a sea leg Voyage, B/L No.,
@@ -1779,7 +1784,9 @@ rule of phase 1 holds. A refusal is shown in the dialog as it comes, and the dia
   with a hint when there is no To to propose, absent when the container's next leg is already planned. A Delivery shows `DeliveryCompletePreview` and "Then open the draft goods
   receipt" instead. Buttons "Record arrival", "Record clearance", "Record crossing", "Record departure", "Record
   delivery", "Record loading". **The Then leg is a second step on the server**: refused, the arrival stays and the
-  notification says "Arrival recorded; Customs clearance was not started: {reason}. Use Next step…".
+  notification says "Arrival recorded; Customs clearance was not started: {reason}. Use Next step…" - and when someone
+  planned the next leg meanwhile, which one: "…the next leg was not started: its next leg MOV-2026-000058 (Customs
+  clearance) is already planned. Start it with Next step…".
 - **No port of loading** (never moved, none on the container: any From fits it): "Not moved yet, and no port of loading:
   choose where it leaves from.", the From is a field (required) and is sent as `fromPlaceId`.
 - **Every new leg sends `expectedPlaceId`** (the place the dialog was opened at; the bulk dialog sends its group's From):
@@ -1810,10 +1817,15 @@ replaces "Start shipment…". It is disabled with "None of the ticked containers
   "One per container: each truck arrives on its own day.") and "Edit…" (`NextLegFields` without the date, plus a Truck
   no. / ETA table per container when one per container). A Complete group where only part of the movement is ticked says
   "MOV-… is completed for all its 30 containers: the 10 not ticked arrive too."; it carries "Then start …" when the
-  server proposes a next leg. A group that cannot go as it stands (date before its earliest, no To) says why in red and
-  holds the button.
+  server proposes a next leg. Under the step, the group's notes: "{n} drafts: confirmed first.", for a new leg "{n}
+  without a container number: the shipment can start without it." (the dialog for one container's yellow alert), "{n}
+  with typed dates: …". A group that cannot go as it stands (date before its earliest, no To, no type) says why in red
+  and holds the button.
 - **One date at the top** for every step, and "New legs: Start now / Plan only".
-- **"Cannot move on (n)"**, grouped by the server's reason with counts and the first refs.
+- **"Cannot move on (n)"**, grouped by the server's reason with counts and the first refs. A delivered container is
+  "Delivered: its goods are received next (Receive goods…)", or, when its draft goods receipt already waits, "A draft
+  goods receipt waits: Open goods receipt (draft)" (Receive goods… would refuse it). A missing proposal is never a
+  reason: such containers form a group whose type is chosen with Edit….
 - **"Apply to 285 containers (4 steps)"**: each group runs alone (one refusal never stops the others) and is all or
   nothing inside. A group going one movement per container is sent in parts of 50 ("Moving on: 150 of 300"), each part
   all or nothing; a group that is one movement is sent whole, so a movement is never cut in two. A Complete or a Start is

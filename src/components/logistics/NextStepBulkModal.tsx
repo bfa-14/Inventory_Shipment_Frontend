@@ -406,6 +406,11 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                                   {formatNumber(g.drafts)} draft{g.drafts === 1 ? '' : 's'}: confirmed first.
                                 </Text>
                               ) : null}
+                              {g.isNewLeg && g.withoutContainerNo > 0 ? (
+                                <Text fz="xs" c="yellow.8" data-next-step-group-no-number>
+                                  {formatNumber(g.withoutContainerNo)} without a container number: the shipment can start without it.
+                                </Text>
+                              ) : null}
                               {g.withTypedDates > 0 ? (
                                 <Text fz="xs" c="orange.8">
                                   {formatNumber(g.withTypedDates)} with typed dates: the movements' dates will replace them.

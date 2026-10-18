@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { Alert, Anchor, Badge, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Table, Text, Timeline, Title } from '@mantine/core'
+import { Alert, Anchor, Badge, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Table, Text, Timeline, Title, Tooltip } from '@mantine/core'
 import { IconArrowRight, IconPlus, IconRoute } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { useAuth } from '../../auth/useAuth'
@@ -21,6 +21,11 @@ interface ContainerRouteTimelineProps {
   canManage: boolean
   /** Re-reads the container after it joined a movement. */
   onChanged: () => void
+  /**
+   * The container's next step, shown in the card's header when the page asks for it: on a phone or a tablet the card is
+   * the top of the page and the action bar its bottom, a whole page of scrolling away. Null or absent: not shown.
+   */
+  step?: { label: string; disabledReason: string | null; onClick: () => void } | null
 }
 
 /**
@@ -30,9 +35,10 @@ interface ContainerRouteTimelineProps {
  *
  * WHERE IT IS COMES FIRST (script 80): the card sits at the top of the right column (the top of the page on a phone) and
  * opens with one line - travelling with which movement, at which place since when, or not moved yet - and the planned
- * next movement when there is one. The next step itself is the button next to Save.
+ * next movement when there is one. The next step itself is the button next to Save, and on a narrow screen also the
+ * card's own first button (`step`), so it is in the first screen the user sees.
  */
-export function ContainerRouteTimeline({ container, canManage, onChanged }: ContainerRouteTimelineProps) {
+export function ContainerRouteTimeline({ container, canManage, onChanged, step }: ContainerRouteTimelineProps) {
   const navigate = useNavigate()
   const [pickOpen, setPickOpen] = useState(false)
   const legs = container.movements
@@ -45,17 +51,42 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
     <Paper radius="lg" p="md" withBorder>
       <Group justify="space-between" mb="sm" wrap="wrap" gap="xs">
         <Title order={5}>Route</Title>
-        {canJoin ? (
+        {canJoin || step ? (
           <Group gap="xs">
-            <Button size="xs" variant="default" leftSection={<IconRoute size={14} />} onClick={() => setPickOpen(true)}>
-              Add to a movement...
-            </Button>
-            <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}&from=container/${container.id}`)}>
-              New movement for this container
-            </Button>
+            {step ? (
+              <Tooltip label={step.disabledReason} disabled={!step.disabledReason} withArrow multiline maw={320}>
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="indigo"
+                  leftSection={<IconRoute size={14} />}
+                  disabled={step.disabledReason !== null}
+                  onClick={step.onClick}
+                  data-route-next-step
+                >
+                  {step.label}
+                </Button>
+              </Tooltip>
+            ) : null}
+            {canJoin ? (
+              <>
+                <Button size="xs" variant="default" leftSection={<IconRoute size={14} />} onClick={() => setPickOpen(true)}>
+                  Add to a movement...
+                </Button>
+                <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}&from=container/${container.id}`)}>
+                  New movement for this container
+                </Button>
+              </>
+            ) : null}
           </Group>
         ) : null}
       </Group>
+      {/* A phone shows no tooltip: the reason a step is disabled is said under the buttons. */}
+      {step?.disabledReason ? (
+        <Text fz="xs" c="dimmed" mt={-6} mb="xs">
+          {step.disabledReason}
+        </Text>
+      ) : null}
 
       <WhereNow container={container} />
 
