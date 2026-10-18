@@ -10,6 +10,8 @@ interface BulkResultsModalProps {
   successLabel: string
   /** How a row is named when it has no number: "draft #12". */
   labelOf: (item: BulkActionItemResult) => string
+  /** The first column's heading: "Document" by default ("Step" for the next steps of containers). */
+  itemHeader?: string
   onClose(): void
 }
 
@@ -19,7 +21,7 @@ interface BulkResultsModalProps {
  * A TABLE, NOT A TOAST. "2 of 3 posted" in a notification leaves the reader hunting for the third;
  * the row that failed, with the procedure's own sentence beside it, is what they need to act on.
  */
-export function BulkResultsModal({ opened, title, result, successLabel, labelOf, onClose }: BulkResultsModalProps) {
+export function BulkResultsModal({ opened, title, result, successLabel, labelOf, itemHeader = 'Document', onClose }: BulkResultsModalProps) {
   return (
     <Modal opened={opened} onClose={onClose} title={title} size="lg" centered>
       {result && (
@@ -33,14 +35,14 @@ export function BulkResultsModal({ opened, title, result, successLabel, labelOf,
             <Table verticalSpacing="xs">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th w={170}>Document</Table.Th>
+                  <Table.Th w={170}>{itemHeader}</Table.Th>
                   <Table.Th w={110}>Result</Table.Th>
                   <Table.Th>Message</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {result.results.map((item) => (
-                  <Table.Tr key={item.id}>
+                  <Table.Tr key={item.id} data-bulk-result={item.ok ? 'ok' : 'refused'}>
                     <Table.Td>
                       <Text fz="sm" fw={500}>{item.documentNumber ?? labelOf(item)}</Text>
                     </Table.Td>
@@ -53,7 +55,7 @@ export function BulkResultsModal({ opened, title, result, successLabel, labelOf,
                       {/* DONE, BUT NOT ALL OF IT: a supplier invoice posted whose goods receipt was refused. The row
                           succeeded, and the warning says what is still to do. */}
                       {item.message || !item.warning ? (
-                        <Text fz="sm" c={item.ok ? 'dimmed' : undefined}>
+                        <Text fz="sm" c={item.ok ? 'dimmed' : undefined} style={{ whiteSpace: 'pre-line' }}>
                           {item.message ?? '—'}
                         </Text>
                       ) : null}

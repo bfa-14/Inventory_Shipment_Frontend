@@ -132,7 +132,39 @@ export interface ContainerShipState {
   shipStep?: ContainerShipStep | null
   /** Why the next step cannot be taken now (journey over, a draft, the planned movement's refusal); null when it can. */
   shipStepBlockedReason?: string | null
+  /**
+   * (script 81) The next step, the first that applies: Done (received, closed, cancelled), Complete (a movement in progress
+   * carries it), OpenReceipt (a draft goods receipt waits), StartPlanned (its next planned movement), Ship (never moved),
+   * Receive (its last leg is a completed Delivery), NextLeg (its last leg is completed). `shipStep` stays for phase 1.
+   */
+  nextStepKind?: ContainerNextStepKind | null
+  /** Why the step cannot be taken ("Received into Lubumbashi Warehouse: the journey is over."); null when it can. */
+  nextStepBlockedReason?: string | null
+  /** The proposed new leg (Ship, NextLeg): "Inland transport to Kasumbalesa…", "Customs clearance at Kasumbalesa…". */
+  proposedTypeId?: number | null
+  proposedTypeCode?: string | null
+  proposedTypeName?: string | null
+  proposedStage?: string | null
+  proposedFromPlaceId?: number | null
+  proposedFromName?: string | null
+  /** Null on a leg that moves: "Next leg from {place}…" (no To to suggest). */
+  proposedToPlaceId?: number | null
+  proposedToName?: string | null
+  /** History, Ports, Stages or None. */
+  proposalSource?: NextLegProposalSource | null
+  proposalLegs?: number | null
+  /** A stay (Port, Customs, Border): "{Type} at {place}…". */
+  proposedIsStay?: boolean | null
 }
+
+/** (script 81) See `ContainerShipState.nextStepKind`. */
+export type ContainerNextStepKind = 'Done' | 'Complete' | 'OpenReceipt' | 'StartPlanned' | 'Ship' | 'Receive' | 'NextLeg'
+
+/** (script 81) The values of the Containers list's Next step filter (Receive also lists the open draft receipts). */
+export type ContainerNextStepFilter = 'Ship' | 'StartPlanned' | 'Complete' | 'NextLeg' | 'Receive'
+
+/** (script 81) Where a proposed leg comes from: the usual next leg from here, the container's own ports, the stage order. */
+export type NextLegProposalSource = 'History' | 'Ports' | 'Stages' | 'None'
 
 /** What the STATUS allows. Whether the reader may is a permission, checked beside it. */
 export interface ContainerFlags extends ContainerReceiptRef, ContainerShipState {
@@ -760,6 +792,11 @@ export interface ContainerQuery {
   dateTo?: string
   /** A completed Delivery-stage movement, still in status 2-5 with no posted goods receipt (the drafts included). */
   deliveredNotReceived?: boolean
+  /**
+   * (script 81) The logistics to-do list, worked out on the server: Ship ("Start shipment"), StartPlanned ("Start planned
+   * leg"), Complete ("Arrival due"), NextLeg ("Next leg to plan"), Receive ("Receive goods", open drafts included).
+   */
+  nextStep?: ContainerNextStepFilter
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number

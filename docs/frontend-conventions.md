@@ -1719,65 +1719,131 @@ read-only (`OrderSupplierLine`: a container's goods come from its order lines, s
 saying which; the **Country of origin** as the supplier's country. Both stay editable and clearable: the picks are
 held as `undefined` until the reader changes them, so the defaults arriving later never overwrite a choice.
 
-## A container's next step (script 80: ship from the container)
+## A container's next step (scripts 80 and 81: ship from the container, Next step everywhere)
 
-The owner: "I cannot start the shipment of a specific container in the containers page or any other place". So every
-container has **one action whose label is its next step**, worked out by the server (`shipStep`, `shipStepBlockedReason`
-and the ship state on `ContainerShipState`: the list row and the container carry the same columns) and worded in one
-place, `components/logistics/shipStep.ts`:
+The owner: "I cannot start the shipment of a specific container in the containers page or any other place; make shipment
+more user friendly and flexible". So every container has **one action whose label is its next step**, worked out by the
+server (`nextStepKind`, `nextStepBlockedReason`, the movement in progress or planned and the proposed next leg, on
+`ContainerShipState`: the list row and the container carry the same columns) and worded in one place,
+`components/logistics/nextStep.ts`. Phase 1 (script 80) gave the button; phase 2 (script 81) gives it one dialog for
+every step, the proposal, many containers at once and the to-do list.
 
-| The container | The label | What it opens |
+| The container (`nextStepKind`) | The label | What it opens |
 |---|---|---|
-| never moved | "Start shipment…" | the Start shipment dialog for this one container |
-| its next planned movement waits | "Start Inland transport…" (the type's name) | the Start dialog of that movement |
-| a movement in progress carries it | "Arrived at Dar es Salaam…" (a leg that moves) / "Complete Customs clearance…" (a stay) | the Complete dialog of that movement |
-| its last movement is completed | "Next leg…" | the movement form: From = where it is (locked), the container ticked, Back to where it was offered |
-| received, closed or cancelled | the last label, disabled: "This container is received: its journey is over." | - |
+| never moved (`Ship`) | "Start shipment…" | `NextStepModal`: the proposed first leg (Sea freight, port of loading → port of destination) |
+| its next planned movement waits (`StartPlanned`) | "Start Inland transport…" (the type's name) | `NextStepModal`: that movement's start date |
+| a movement in progress carries it (`Complete`) | by the stage of its type: "Arrived at Dar es Salaam…" (Sea, Transit), "Cleared customs at Kasumbalesa…", "Crossed the border at Kasumbalesa…", "Left the port of Beira…", "Loaded at the supplier…", "Delivered to Lubumbashi…" | `NextStepModal`: the date named by the stage, "Then start …" |
+| its last leg is completed (`NextLeg`) | the proposed leg: "Inland transport to Kasumbalesa…", for a stay "Customs clearance at Kasumbalesa…", nothing to propose "Next leg from Dar es Salaam…" | `NextStepModal`: the new leg, filled in |
+| delivered, not received (`Receive` / `OpenReceipt`) | "Receive goods…" / "Open goods receipt (draft)" | the goods receipt dialogs, with their own rules and permissions |
+| received, closed or cancelled (`Done`) | "Next step…", disabled: "Received into Main Warehouse: the journey is over." / "This container is cancelled." | - |
 
-- **One hook runs it everywhere**: `useShipStep(onDone, origin)` (`components/logistics/useShipStep.tsx`; `origin` is
-  `'container'` on the container's page, `'containers'` on the list) gives `action(container)`
-  (null without `containers.movements.manage`: the entry is then hidden), `run(container)` and the `dialogs` to render.
-  The container page puts it in the action bar **next to Save** (disabled "Save your changes first." while the form has
-  unsaved edits); the Containers list puts it **first in the row's "…" menu**, its reason under the label like Close
-  and Cancel. Phase 2 ("Next step…") will replace the labels, not the hook.
-- **Start and Complete are one dialog**, `MovementStatusModal`, from the movement page, a row of the Movements list
-  ("Start…" / "Complete…" in its Actions column), the container's page and its row. It reads the movement when it opens
-  (a list row has no containers nor row version), refuses a date after today and before the earliest (`startNotBefore`:
-  the end of the previous leg; the start date for a completion) in the field itself, shows a planned movement's
-  `startBlockedReason` as a red alert with the confirm disabled, and - opened from a container - says plainly when the
-  movement carries others: "All 12 containers of MOV-2026-000046 arrive too: …". The notifications after it (who moved,
-  the Delivery's draft goods receipts) are the dialog's, so no host repeats them. The server refuses the same dates.
-- **The route card comes first**: at the top of the right column on a wide screen and at the top of the page on a phone
-  (`useMediaQuery('(min-width: 75em)')` picks the column, since the columns stack below `lg`). It opens with where the
-  container is ("At Dar es Salaam since 12/10/2026.", "Travelling with MOV-… Sea freight: Chennai → Dar es Salaam, ETA
-  …", "Not moved yet: it leaves from its port of loading, Chennai.") and its planned next movement.
-- **Planned movements are shown**: the Movement column of the Containers list gives "Planned: MOV-…" under the current
-  movement - a planned leg decides where the container "is" for its next one.
-- **"Add to a movement…" lists only what it can join** (`movementsApi.joinCandidates`): never a movement that would be
-  refused after the click.
+- **One hook runs it everywhere**: `useNextStep(onDone, origin)` (`components/logistics/useNextStep.tsx`; `origin` is
+  `'container'` on the container's page, `'containers'` on the list) gives `action(container)` (null when the reader may
+  not take the step: `containers.movements.manage` for a movement, `purchase.goodsreceipts.create` to receive, `.view` to
+  open the draft - the entry is then hidden), `run(container)` and the `dialogs` to render. The container page puts it in
+  the action bar **next to Save** (disabled "Save your changes first." while the form has unsaved edits; once delivered
+  the page's own "Receive goods…" / "Open goods receipt (draft)" are the step); the Containers list puts it **first in the
+  row's "…" menu** as "Next step: {label}", its reason under the label like Close and Cancel, and leaves out the receipt
+  entry that would say the same thing twice.
+- **The order's and the invoice's Containers cards and the Tracking board have no row menu**: they get no entry (their
+  rows link to the container, whose page has the button). Give them the entry if they ever grow a menu.
+- **Start and Complete from the movement side stay one dialog**, `MovementStatusModal`, on the movement page and a row of
+  the Movements list ("Start…" / "Complete…"). Its title and date field follow the same words (`completeWords`): "Arrived
+  at Dar es Salaam - KTG-…", "Clearance date".
+
+### The Next step dialog (one container)
+
+`NextStepModal` reads `GET …/containers/{id}/next-step` when it opens and applies the step with `POST
+…/containers/next-step` (one group of one container). The server takes the movement's own Complete / Start, so a
+Delivery still drafts its goods receipts after the commit, and saves a new leg with the movement procedures, so every
+rule of phase 1 holds. A refusal is shown in the dialog as it comes, and the dialog stays open.
+
+- **A new leg** (title "Inland transport to Kasumbalesa - KTG-2026-0031"): "Now at Dar es Salaam since 12/10/2026 (end
+  of MOV-2026-000046)." / "Not moved yet: leaves from its port of loading Chennai."; the fields are `NextLegFields`
+  (shared with the bulk dialog's "Edit…"): Movement type grouped by stage, the proposal by default, with where it came
+  from under it - "Suggested: the usual next leg from Dar es Salaam (5 earlier legs)", "Suggested from the container's
+  ports", "Suggested from the stages", "Choose the To"; changing the type proposes the To again (`retypeLeg`); From
+  read-only ("A container leaves from where it is."); To grouped Sea ports / Border posts / Inland places, replaced by "at
+  Kasumbalesa" for a stay; "Start now" / "Plan only"; Start date (today, not after it when starting, not before the end of
+  the previous leg); ETA; Carrier (`SearchSelect`); Vehicle / vessel; Reference; Notes; for a sea leg Voyage, B/L No.,
+  B/L date prefilled from the container and "Copy vessel, voyage, B/L and ETA to the container" (on). Alerts: blue for
+  a draft (confirmed first; a reader without `containers.confirm` can only plan it), yellow without a container number,
+  orange when the container never moved and has typed dates ("The dispatch and arrival dates typed on this container
+  will be replaced by the movements' dates."). Button "Start Inland transport" / "Plan Inland transport", "Start
+  shipment" / "Plan shipment" for the first leg.
+- **A leg in progress** (title "Arrived at Dar es Salaam - KTG-2026-0031"): "MOV-2026-000046 Sea freight: Chennai → Dar es
+  Salaam, started 20/09/2026, ETA 12/10/2026."; the date named by the stage ("Arrival date", "Clearance date", "Crossing
+  date", "Departure date", "Delivery date"), today, not before the start, not in the future; "All 12 containers of
+  MOV-… arrive too: …" when it carries others (no split); **"Then start …"** for the leg the server proposes after it -
+  ticked by default for a stay at the arrival place or the leg after Customs / Border, unticked for a leg that moves, off
+  with a hint when there is no To to propose. A Delivery shows `DeliveryCompletePreview` and "Then open the draft goods
+  receipt" instead. Buttons "Record arrival", "Record clearance", "Record crossing", "Record departure", "Record
+  delivery", "Record loading". **The Then leg is a second step on the server**: refused, the arrival stays and the
+  notification says "Arrival recorded; Customs clearance was not started: {reason}. Use Next step…".
+- **A planned leg**: its start date; "It also carries KTG-…, KTG-… (2 more): they start with it."; the refusal Start
+  would give, in red, with the button off.
+- **The notification is the server's sentence** ("KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026
+  (MOV-2026-000046). Now At Port. Then Customs clearance at Kasumbalesa started on 17/10/2026 (MOV-2026-000047).") with
+  "Open MOV-…" links that carry the way back, then the Delivery's draft goods receipts (`showDeliveryResult`) and the
+  warnings, each on its own.
+
+### Many containers: the bulk dialog
+
+The selection bar's "Next step…" (the Containers list and the order's Containers card: the shared `ContainerSelectionBar`)
+replaces "Start shipment…". It is disabled with "None of the ticked containers can move on: {first reason}."
+(`nextStepRefusal`) when nothing qualifies; one ticked container opens `NextStepModal`, several `NextStepBulkModal`:
+
+- **One preview call** (`POST …/next-step/preview`) groups the ticked containers by step, movement, type, From and To:
+  containers at different places fall into separate groups by themselves. Title "Next step - 300 containers".
+- **The groups table**, one row each: a checkbox (included), the step ("Arrived at Dar es Salaam", "Inland transport to
+  Kasumbalesa") with where the proposal came from, the movement ("MOV-…", "new" for a new leg), From → To, the count
+  (click it for the refs), "Orders / suppliers" for information, and for a new leg "One movement for the group" / "One
+  per container" (the server's default: one for Sea, Port, Origin and transshipment, one per container for road legs -
+  "One per container: each truck arrives on its own day.") and "Edit…" (`NextLegFields` without the date, plus a Truck
+  no. / ETA table per container when one per container). A Complete group where only part of the movement is ticked says
+  "MOV-… is completed for all its 30 containers: the 10 not ticked arrive too."; it carries "Then start …" when the
+  server proposes a next leg. A group that cannot go as it stands (date before its earliest, no To) says why in red and
+  holds the button.
+- **One date at the top** for every step, and "New legs: Start now / Plan only".
+- **"Cannot move on (n)"**, grouped by the server's reason with counts and the first refs.
+- **"Apply to 285 containers (4 steps)"**: each group runs alone (one refusal never stops the others) and is all or
+  nothing inside. A group going one movement per container is sent in parts of 50 ("Moving on: 150 of 300"), each part
+  all or nothing; a group that is one movement is sent whole, so a movement is never cut in two. A Complete or a Start is
+  never split either: its first part would complete the movement for everyone.
+- **The results** are `BulkResultsModal` (first column "Step"): OK or the refusal's code, the server's sentence (it
+  names the MOV numbers made), the draft goods receipt note, the warnings. Closing it unticks the containers that moved
+  and keeps the refused ones ticked.
+
+### The Next step column and the movement page
+
+- **The Containers list has a "Next step" column** (the label without "…", a gray reason when the step is blocked) whose
+  funnel (`NextStepFilterPopover`, one value with "(All)") and the advanced filter "Next step" are two ways into the
+  server's `nextStep` parameter: "Start shipment" / "Start planned leg" / "Arrival due" / "Next leg to plan" / "Receive
+  goods". It is the logistics to-do list, so it works on every container, not only the rows loaded; the column's own
+  meta is `filterable: false` so the browser does not filter it a second time. The phase 1 Movement column ("Planned:
+  MOV-…") stays.
+- **After a Complete on the movement page** (not a Delivery: its goods are received next), a notification offers
+  "Continue: Next step…" for its containers: the bulk dialog, or the container's own dialog when it carries one.
+- **Cancelling a leg that is not the latest of one of its containers is refused by the server** (70010, "MOV-… is not
+  the last leg of KTG-…: cancel MOV-… first."); the page shows it as it comes.
 
 ### The locked From
 
 **A container leaves from where it is**: the To of its latest movement, else its port of loading (`placeId` /
 `placeName`). Wherever a leg is made for known containers, the From is that place and is **not editable**: a read-only
-field with the hint `FROM_LOCKED_HINT`, "A container leaves from where it is." - in the Start shipment dialog (the place
-most of the ticked containers are at; the others are left out with "KTG-… is at Beira, not at Chennai: ship it from
-there.") and in the movement form opened from one container (`/logistics/movements/new?containerId=12&from=container/12`).
+field with the hint `FROM_LOCKED_HINT`, "A container leaves from where it is." - in the Next step dialogs (one container,
+and each group of the bulk dialog, where containers at another place fall into a group of their own) and in the movement
+form opened from one container (`/logistics/movements/new?containerId=12&from=container/12`).
 Two exceptions: **Loading at the supplier** ends at the port of loading, so its To is locked instead and its From is
 free; a container with no place at all (never moved, no port of loading) gets a free From. A **stay** (Port, Customs,
 Border) starts with To = From. Every place picker is grouped **Sea ports / Border posts / Inland places**
 (`placeOptionGroups`), so a border post is never taken for the sea port of the same town.
 
-**The selection bar says before the click** whether "Start shipment…" can do anything: disabled with "None of the ticked
-containers can ship: {the first reason} (and N more)" when no ticked container can, and the dialog lists in orange
-"Left out (n)" the ones it leaves out (`shipRefusal`: received, travelling, a next movement already planned, a draft the
-reader may not confirm, at another place) and ships the rest.
-
 **Back follows the way in**: a movement page opened with `?from=container/12` returns to that container (its Back and
 its breadcrumb), one opened with `?from=containers` (the list's "Next leg…") returns to the Containers list, and both
-keep the parameter when a new movement is saved. Every way into a movement from a container carries it: "Next leg…",
-"New movement for this container", the MOV-… links of the route card and the movement link in the notification after
-"Start shipment…" (`StartShipmentModal`'s `returnQuery`). A link without it goes back to the Movements list.
+keep the parameter when a new movement is saved. Every way into a movement from a container carries it: "New movement
+for this container", the MOV-… links of the route card and the "Open MOV-…" links in the notification after a Next step
+(`NextStepModal`'s `returnQuery`). A link without it goes back to the Movements list.
 
 **The start date of a movement in progress stays a fact**: the movement page lets it be changed after Start, so its
 field shows the Start dialog's two refusals before the Save - after today, and before `startNotBefore` (which the API

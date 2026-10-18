@@ -90,7 +90,8 @@ import {
   WAREHOUSE_PROPOSED_HINT,
 } from '../../components/logistics/containerReceipt'
 import { ReceiveContainerModal } from '../../components/logistics/ReceiveContainerModal'
-import { useShipStep } from '../../components/logistics/useShipStep'
+import { isMovementStep } from '../../components/logistics/nextStep'
+import { useNextStep } from '../../components/logistics/useNextStep'
 import { cancelDescription } from '../../components/purchase/goodsReceipts/goodsReceiptModel'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
@@ -231,9 +232,10 @@ export function ContainerPage() {
     void load()
   }, [load])
 
-  /* (80) THE NEXT STEP OF ITS JOURNEY, one button next to Save: "Start shipment…", "Start Inland transport…", "Arrived
-     at Dar es Salaam…", "Next leg…" - the same action as the row's "…" menu on the Containers list. */
-  const shipStep = useShipStep(() => void load(), 'container')
+  /* (81) THE NEXT STEP OF ITS JOURNEY, one button next to Save: "Start shipment…", "Start Inland transport…", "Arrived
+     at Dar es Salaam…", "Cleared customs at Kasumbalesa…", "Inland transport to Kasumbalesa…" - one dialog, already
+     filled in, the same as the row's "…" menu on the Containers list. */
+  const nextStep = useNextStep(() => void load(), 'container')
 
   /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
      files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the
@@ -681,17 +683,13 @@ export function ContainerPage() {
   }
 
   const saved = container !== null
-  /** The container as the next-step dialogs read it (its place, its movements). */
-  const shipTarget = container
-    ? { ...container, currentMovementStatus: container.activeMovementId ? 2 : null, currentMovementNo: container.activeMovementNo ?? null }
-    : null
-  const shipAction = shipTarget ? shipStep.action(shipTarget) : null
+  const step = container ? nextStep.action(container) : null
   // Unsaved edits first: the next step reloads the container, and a leg needs what the page shows saved.
-  const shipBlocked = shipAction === null ? null : (shipAction.disabledReason ?? (dirty.current ? 'Save your changes first.' : null))
-  /* DELIVERED: the goods receipt is the next step ("Open goods receipt (draft)" / "Receive goods…"), so "Next leg…" leaves
-     the bar - a rare extra leg after a Delivery is still one click away on the route card ("New movement for this
-     container"). */
-  const shipAfterDelivery = shipAction?.step === 'NextLeg' && Boolean(container?.deliveredDate)
+  const stepBlocked = step === null ? null : (step.disabledReason ?? (dirty.current ? 'Save your changes first.' : null))
+  /* DELIVERED: the goods receipt is the next step - "Open goods receipt (draft)" / "Receive goods…" below are that step,
+     with their own rules; a rare extra leg after a Delivery is still one click away on the route card ("New movement
+     for this container"). */
+  const stepIsMovement = step !== null && (isMovementStep(step.kind) || step.kind === 'Done')
   /** Received by a goods receipt: its cancel replaces Cancel Offload, which stays for the offloads of before. */
   const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
   const draftReceipt = receipt?.status === 1 ? receipt : null
@@ -781,17 +779,17 @@ export function ContainerPage() {
     { key: 'confirm', label: 'Confirm', icon: <IconCheck size={16} />, onClick: () => void confirmPlan(), variant: 'light', loading: busyAction === 'confirm', visible: saved && container.canConfirm && perm.confirm },
     {
       key: 'ship',
-      label: shipAction?.label ?? 'Start shipment…',
+      label: step?.label ?? 'Next step…',
       icon: <IconRoute size={16} />,
       onClick: () => {
-        if (shipTarget) shipStep.run(shipTarget)
+        if (container) nextStep.run(container)
       },
       variant: 'light',
       colour: 'indigo',
       // Hidden without containers.movements.manage; disabled with the reason once the journey is over.
-      visible: saved && shipAction !== null && !shipAfterDelivery,
-      disabled: shipBlocked !== null,
-      disabledReason: shipBlocked ?? undefined,
+      visible: saved && stepIsMovement,
+      disabled: stepBlocked !== null,
+      disabledReason: stepBlocked ?? undefined,
       pinnedOnPhone: true,
     },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
@@ -1088,7 +1086,7 @@ export function ContainerPage() {
         />
       ) : null}
 
-      {shipStep.dialogs}
+      {nextStep.dialogs}
 
       {receiveOpen && container ? (
         <ReceiveContainerModal

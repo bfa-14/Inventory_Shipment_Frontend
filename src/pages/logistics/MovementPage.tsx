@@ -22,6 +22,7 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
+import { notifications } from '@mantine/notifications'
 import {
   IconArrowLeft,
   IconBan,
@@ -51,6 +52,8 @@ import { DeliveryCancelDrafts } from '../../components/logistics/DeliveryReceipt
 import { MovementContainersCard } from '../../components/logistics/MovementContainersCard'
 import { MovementDocumentsCard } from '../../components/logistics/MovementDocumentsCard'
 import { MovementStatusModal } from '../../components/logistics/MovementStatusModal'
+import { NextStepBulkModal } from '../../components/logistics/NextStepBulkModal'
+import { NextStepModal } from '../../components/logistics/NextStepModal'
 import { fromSaved, type CardContainer } from '../../components/logistics/movementContainers'
 import { StageIcon } from '../../components/logistics/movementStage'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
@@ -190,6 +193,8 @@ export function MovementPage() {
   const [saving, setSaving] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [dateDialog, setDateDialog] = useState<'start' | 'complete' | null>(null)
+  /** (81) "Continue: Next step…" after a Complete: the containers that arrived, on to their next step. */
+  const [continueFor, setContinueFor] = useState<{ id: number; containerRef: string }[] | null>(null)
   /** (80) Opened from a container ("Next leg…"): where it is. The From is that place, locked: a container leaves from where it is. */
   const [lockedFrom, setLockedFrom] = useState<{ id: number; name: string } | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -476,10 +481,47 @@ export function MovementPage() {
     }
   }
 
-  /** Started or completed in the dialog, which said what moved: the page shows the movement as it is now. */
+  /**
+   * Started or completed in the dialog, which said what moved: the page shows the movement as it is now. (81) A leg
+   * completed (not a Delivery: its goods are received next) offers its containers' next step at once - "Continue: Next
+   * step…" opens the bulk dialog for them, or the container's own dialog when it carries one.
+   */
   function statusDone(result: MovementDto) {
+    const completed = dateDialog === 'complete'
     show(result, true)
     setDateDialog(null)
+    if (!completed || result.status !== 3 || result.stage === DELIVERY || !canManage || result.containers.length === 0) return
+    const arrived = result.containers.map((c) => ({ id: c.containerId, containerRef: c.containerRef }))
+    const id = `continue-${result.id}-${Date.now()}`
+    notifications.show({
+      id,
+      color: 'blue',
+      withBorder: true,
+      autoClose: 15_000,
+      message: (
+        <Text fz="sm" data-continue-next-step>
+          {arrived.length === 1 ? `${arrived[0].containerRef} is at ${result.toName}.` : `${formatNumber(arrived.length)} containers are at ${result.toName}.`}{' '}
+          <Anchor
+            component="button"
+            type="button"
+            fz="sm"
+            fw={600}
+            onClick={() => {
+              notifications.hide(id)
+              setContinueFor(arrived)
+            }}
+          >
+            Continue: Next step…
+          </Anchor>
+        </Text>
+      ),
+    })
+  }
+
+  /** Back from the containers' next step: the movement as it is now (a Then leg does not change it, a new leg neither). */
+  function continueDone() {
+    setContinueFor(null)
+    void load()
   }
 
   async function cancelMovement(reason: string) {
@@ -796,6 +838,17 @@ export function MovementPage() {
           onClose={() => setDateDialog(null)}
           onDone={statusDone}
         />
+      ) : null}
+
+      {continueFor && continueFor.length === 1 ? (
+        <NextStepModal
+          containerId={continueFor[0].id}
+          containerRef={continueFor[0].containerRef}
+          onClose={() => setContinueFor(null)}
+          onDone={continueDone}
+        />
+      ) : continueFor ? (
+        <NextStepBulkModal containers={continueFor} onClose={() => setContinueFor(null)} onFinished={continueDone} />
       ) : null}
 
       <CancelReasonModal

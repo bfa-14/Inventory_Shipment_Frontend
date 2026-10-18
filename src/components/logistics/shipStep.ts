@@ -1,11 +1,10 @@
-import type { ContainerShipState, ContainerShipStep } from '../../api/logistics/containers'
+import type { ContainerShipState } from '../../api/logistics/containers'
 import { SINGLE_PLACE_STAGES, type MovementStage } from '../../api/masterdata/movementTypes'
 import { portLabel, type PortLookupDto } from '../../api/masterdata/ports'
 
 /**
- * A container's next step (script 80): the one button of its page and the first entry of its row's "…" menu. The server
- * says which step it is (`shipStep`) and why it cannot be taken now (`shipStepBlockedReason`); this file only words it,
- * so the page and the list can never disagree.
+ * Where a container is and how its legs are placed (script 80): the stays, the grouped place pickers, the locked From.
+ * The words of its next step are in `nextStep.ts` (script 81).
  */
 
 /** What the label and the dialogs read of a container: a list row and the container page both carry it. */
@@ -15,83 +14,9 @@ export interface ShipStepContainer extends ContainerShipState {
   status: number
 }
 
-export interface ShipAction {
-  /** Null = the journey is over (received, closed, cancelled): the action is shown disabled. */
-  step: ContainerShipStep | null
-  label: string
-  /** Why it cannot be taken now; null when it can. */
-  disabledReason: string | null
-  /** The movement it starts or completes. */
-  movementId: number | null
-}
-
-/** A draft ships only with someone who may confirm it: the shipment confirms it first. */
-export const DRAFT_NEEDS_CONFIRM = 'This container is a draft: someone who may confirm containers must confirm it first.'
-
 /** A stay happens at one place - a port call, customs clearance, a border crossing: its To is its From. */
 export function isStay(stage: string | null | undefined): boolean {
   return stage != null && SINGLE_PLACE_STAGES.includes(stage as MovementStage)
-}
-
-/** "Arrived at Dar es Salaam…" for a leg that moves, "Complete Customs clearance…" for a stay. */
-export function completeLabel(stage: string | null | undefined, typeName: string | null | undefined, toName: string | null | undefined): string {
-  return isStay(stage) || !toName ? `Complete ${typeName ?? 'movement'}…` : `Arrived at ${toName}…`
-}
-
-/**
- * The container's next step as a button: "Start shipment…" (never moved), "Start Inland transport…" (its next planned
- * movement), "Arrived at Dar es Salaam…" / "Complete Customs clearance…" (a movement in progress carries it), "Next leg…"
- * (its last movement is completed). Null when the API does not say (an older one).
- */
-export function shipActionOf(container: ShipStepContainer, options: { canConfirm: boolean }): ShipAction | null {
-  if (container.shipStep === undefined && container.movementCount === undefined) return null
-  const step = container.shipStep ?? null
-  const blocked = container.shipStepBlockedReason ?? null
-  switch (step) {
-    case 'Complete':
-      return {
-        step,
-        label: completeLabel(container.activeMovementStage, container.activeMovementTypeName, container.activeMovementToName),
-        disabledReason: blocked,
-        movementId: container.activeMovementId ?? null,
-      }
-    case 'Start':
-      return {
-        step,
-        label: `Start ${container.plannedMovementTypeName ?? 'movement'}…`,
-        disabledReason: blocked,
-        movementId: container.plannedMovementId ?? null,
-      }
-    case 'Ship':
-      return {
-        step,
-        label: 'Start shipment…',
-        disabledReason: blocked ?? (container.status === 1 && !options.canConfirm ? DRAFT_NEEDS_CONFIRM : null),
-        movementId: null,
-      }
-    case 'NextLeg':
-      return { step, label: 'Next leg…', disabledReason: blocked, movementId: null }
-    default:
-      return {
-        step: null,
-        label: (container.movementCount ?? 0) === 0 ? 'Start shipment…' : 'Next leg…',
-        disabledReason: blocked ?? 'This container cannot move on now.',
-        movementId: null,
-      }
-  }
-}
-
-/**
- * Why a ticked container cannot go on a new shipment (the selection bar's "Start shipment…"), null when it can: the
- * refusals the server would give after the click, said before it.
- */
-export function shipRefusal(container: ShipStepContainer & { containerNo?: string | null }, canConfirm: boolean): string | null {
-  if (container.status >= 6) return `${container.containerRef} is already received, closed or cancelled.`
-  if (container.activeMovementId) return `${container.containerRef} is travelling with ${container.activeMovementNo ?? 'a movement'}: complete it first.`
-  if (container.plannedMovementId)
-    return `${container.containerRef} already has its next movement planned (${container.plannedMovementNo ?? 'planned'}): start that one.`
-  if (container.status === 1 && !canConfirm) return `${container.containerRef} is a draft: someone who may confirm containers must confirm it first.`
-  return null
 }
 
 /** The order the place pickers group by: sea ports, then border posts, then inland places (then anything else). */

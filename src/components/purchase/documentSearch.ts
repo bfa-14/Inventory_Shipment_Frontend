@@ -96,3 +96,9 @@ export async function resolveMovement(value: string): Promise<SearchOption | nul
   const m = await movementsApi.get(Number(value))
   return { value: String(m.id), label: `${m.movementNo} - ${m.typeName}` }
 }
+
+/** Carriers (shipping lines, truckers…): active parties of any kind, by code or name. */
+export const loadCarriers: SearchOptionsLoader = async (search) => {
+  const parties = await partiesApi.lookup({ activeOnly: true, search: search || undefined, top: FIRST_MATCHES })
+  return parties.map((p) => ({ value: String(p.id), label: `${p.partyCode} - ${p.partyName}` }))
+}

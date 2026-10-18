@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Group, Paper, Text, Tooltip } from '@mantine/core'
-import { IconCheck, IconHash, IconReceipt2, IconShip, IconTrash, IconX } from '@tabler/icons-react'
+import { IconCheck, IconHash, IconReceipt2, IconRoute, IconTrash, IconX } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { containersApi } from '../../api/logistics/containers'
 import { useAuth } from '../../auth/useAuth'
@@ -10,9 +10,10 @@ import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { ContainerNumbersModal } from './ContainerNumbersModal'
 import { NewChargeModal } from './NewChargeModal'
-import { StartShipmentModal } from './StartShipmentModal'
+import { NextStepBulkModal } from './NextStepBulkModal'
+import { NextStepModal } from './NextStepModal'
 import { DRAFT, isNotShipped, type SelectableContainer } from './containerSelection'
-import { shipRefusal } from './shipStep'
+import { nextStepRefusal } from './nextStep'
 
 interface ContainerSelectionBarProps<T extends SelectableContainer> {
   /** The containers on screen: what the quick selectors pick from. */
@@ -29,7 +30,8 @@ interface ContainerSelectionBarProps<T extends SelectableContainer> {
  *
  * EACH ACTION IS SHOWN ONLY WITH ITS PERMISSION, and Delete is live only when every ticked
  * container is still a draft — the server deletes all or nothing, so a mixed selection could only
- * fail; "Start shipment…" only when one of them can ship (script 80), and its dialog names the ones it leaves out.
+ * fail; "Next step…" only when one of them can move on (script 81): one ticked container opens its own Next step dialog,
+ * several the bulk dialog, which groups them by step and names the ones that cannot move on.
  * A dead button stays hoverable (data-disabled, not disabled) so its tooltip can say why.
  * The server's refusals are shown as they come: they name the container.
  */
@@ -48,7 +50,7 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
 
   const [busy, setBusy] = useState<'confirm' | 'delete' | null>(null)
   const [numbersFor, setNumbersFor] = useState<T[] | null>(null)
-  const [shipFor, setShipFor] = useState<T[] | null>(null)
+  const [stepFor, setStepFor] = useState<T[] | null>(null)
   const [chargeFor, setChargeFor] = useState<number[] | null>(null)
 
   const notShipped = rows.filter(isNotShipped)
@@ -56,12 +58,18 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   const count = selected.length
   const draftsSelected = selected.filter((row) => row.status === DRAFT).length
   const allDrafts = count > 0 && draftsSelected === count
-  // (80) Said before the click: when none of the ticked containers can go on a new shipment, the button says why.
-  const shipRefusals = selected.map((row) => shipRefusal(row, canConfirm))
-  const shipBlocked = count > 0 && shipRefusals.every((reason) => reason !== null)
-  const shipBlockedReason = shipBlocked
-    ? `None of the ticked containers can ship: ${count > 1 ? `${(shipRefusals[0] ?? '').replace(/\.$/, '')} (and ${formatNumber(count - 1)} more).` : shipRefusals[0]}`
-    : null
+  // (81) Said before the click: when none of the ticked containers can move on, the button says why.
+  const stepRefusals = selected.map((row) => nextStepRefusal(row, canConfirm))
+  const stepBlocked = count > 0 && stepRefusals.every((reason) => reason !== null)
+  const stepBlockedReason = stepBlocked ? `None of the ticked containers can move on: ${stepRefusals[0] ?? ''}` : null
+
+  /** Moved on: the bulk dialog unticks what moved, the refused stay ticked to be looked at again. */
+  function stepFinished(movedIds: number[]) {
+    const moved = new Set(movedIds)
+    setStepFor(null)
+    onSelectedChange(selected.filter((row) => !moved.has(row.id)))
+    onChanged()
+  }
 
   async function confirmSelected() {
     const go = await confirm({
@@ -148,19 +156,20 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
                 </Button>
               )}
               {canShip && (
-                <Tooltip label={shipBlockedReason} disabled={!shipBlocked} withArrow multiline maw={320}>
+                <Tooltip label={stepBlockedReason} disabled={!stepBlocked} withArrow multiline maw={320}>
                   <Button
                     size="xs"
                     variant="light"
-                    leftSection={<IconShip size={14} />}
+                    leftSection={<IconRoute size={14} />}
                     disabled={busy !== null}
-                    data-disabled={shipBlocked || undefined}
-                    data-ship-blocked={shipBlockedReason ?? undefined}
+                    data-disabled={stepBlocked || undefined}
+                    data-step-blocked={stepBlockedReason ?? undefined}
+                    data-next-step-bulk-button
                     onClick={() => {
-                      if (!shipBlocked) setShipFor(selected)
+                      if (!stepBlocked) setStepFor(selected)
                     }}
                   >
-                    Start shipment…
+                    Next step…
                   </Button>
                 </Tooltip>
               )}
@@ -195,16 +204,15 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
         </Paper>
       ) : null}
 
-      {shipFor ? (
-        <StartShipmentModal
-          containers={shipFor}
-          onClose={() => setShipFor(null)}
-          onShipped={() => {
-            setShipFor(null)
-            onSelectedChange([])
-            onChanged()
-          }}
+      {stepFor && stepFor.length === 1 ? (
+        <NextStepModal
+          containerId={stepFor[0].id}
+          containerRef={stepFor[0].containerRef}
+          onClose={() => setStepFor(null)}
+          onDone={() => stepFinished([stepFor[0].id])}
         />
+      ) : stepFor ? (
+        <NextStepBulkModal containers={stepFor} onClose={() => setStepFor(null)} onFinished={stepFinished} />
       ) : null}
 
       {/* The "New charge" dialog with the ticked containers, one amount on each by default. */}

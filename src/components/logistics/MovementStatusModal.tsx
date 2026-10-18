@@ -13,7 +13,8 @@ import { formatNumber, todayDateOnly } from '../format'
 import { notify } from '../ui/notify'
 import { DeliveryCompletePreview } from './DeliveryReceipts'
 import { showDeliveryResult } from './deliveryNotification'
-import { completeLabel, isStay } from './shipStep'
+import { completeWords } from './nextStep'
+import { isStay } from './shipStep'
 
 /** The stage whose completion brings the containers to the warehouse: a draft goods receipt for each (rule 5). */
 const DELIVERY = 'Delivery'
@@ -88,7 +89,7 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
       ? 'Start movement'
       : 'Complete movement'
     : container
-      ? `${starting ? `Start ${movement.typeName}` : completeLabel(movement.stage, movement.typeName, movement.toName).replace(/…$/, '')} - ${container.containerRef}`
+      ? `${starting ? `Start ${movement.typeName}` : completeWords(movement.stage, movement.toName).title} - ${container.containerRef}`
       : `${starting ? 'Start' : 'Complete'} ${movement.movementNo}`
 
   // The earliest date: the end of the previous leg (start), the start (complete).
@@ -184,7 +185,7 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
             </Alert>
           ) : null}
           <DateInput
-            label={starting ? 'Start date' : stay ? 'End date' : 'Arrival date'}
+            label={starting ? 'Start date' : completeWords(movement.stage, movement.toName).dateLabel}
             withAsterisk
             valueFormat="DD/MM/YYYY"
             value={date}
