@@ -8,7 +8,6 @@ import {
   Grid,
   Group,
   Loader,
-  Modal,
   Paper,
   ScrollArea,
   Select,
@@ -47,14 +46,15 @@ import { AuditTrail, type AuditEntry } from '../../components/documents/AuditTra
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel } from '../../components/documents/documentKind'
-import { formatMoney, formatNumber, todayDateOnly } from '../../components/format'
-import { DeliveryCancelDrafts, DeliveryCompletePreview } from '../../components/logistics/DeliveryReceipts'
-import { showDeliveryResult } from '../../components/logistics/deliveryNotification'
+import { formatMoney, formatNumber } from '../../components/format'
+import { DeliveryCancelDrafts } from '../../components/logistics/DeliveryReceipts'
 import { MovementContainersCard } from '../../components/logistics/MovementContainersCard'
 import { MovementDocumentsCard } from '../../components/logistics/MovementDocumentsCard'
+import { MovementStatusModal } from '../../components/logistics/MovementStatusModal'
 import { fromSaved, type CardContainer } from '../../components/logistics/movementContainers'
 import { StageIcon } from '../../components/logistics/movementStage'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
+import { FROM_LOCKED_HINT, placeOptionGroups } from '../../components/logistics/shipStep'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -95,8 +95,6 @@ const EMPTY: FormValues = {
   reference: '',
   notes: '',
 }
-
-type Option = { value: string; label: string }
 
 const CHARGE_STATUSES: Record<number, { label: string; colour: string }> = {
   1: { label: 'Draft', colour: 'gray' },
@@ -192,6 +190,8 @@ export function MovementPage() {
   const [saving, setSaving] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [dateDialog, setDateDialog] = useState<'start' | 'complete' | null>(null)
+  /** (80) Opened from a container ("Next leg…"): where it is. The From is that place, locked: a container leaves from where it is. */
+  const [lockedFrom, setLockedFrom] = useState<{ id: number; name: string } | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [chargeOpen, setChargeOpen] = useState(false)
 
@@ -276,13 +276,25 @@ export function MovementPage() {
     partiesApi.lookup({ activeOnly: false }).then(setCarriers).catch(() => {})
   }, [])
 
-  // /new?containerId=12&containerId=15 - "New movement for this container" on the container page.
+  // (80) ?from=container/12: opened from that container's page - Back returns there, and the dialogs name it.
+  const fromMatch = /^container\/(\d+)$/.exec(searchParams.get('from') ?? '')
+  const fromContainerId = fromMatch ? Number(fromMatch[1]) : null
+  const fromQuery = fromContainerId === null ? '' : `?from=container/${fromContainerId}`
+
+  // /new?containerId=12&containerId=15 - "New movement for this container" / "Next leg…" on the container page.
   const preset = searchParams.getAll('containerId').join(',')
   useEffect(() => {
     if (!isNew || !preset) return
     const ids = [...new Set(preset.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))]
     Promise.all(ids.map((cid) => containersApi.get(cid).catch(() => null)))
-      .then((list) =>
+      .then((list) => {
+        // (80) One container: the movement leaves from where it is - its From is filled and locked (the To of its
+        // latest movement, else its port of loading). A stay (customs, a port call, a border) takes it as its To too.
+        const only = list.length === 1 ? list[0] : null
+        if (only && only.placeId != null && only.placeName) {
+          setLockedFrom({ id: only.placeId, name: only.placeName })
+          form.setFieldValue('fromPlaceId', String(only.placeId))
+        }
         setTicked(
           list
             .filter((c) => c !== null)
@@ -303,9 +315,11 @@ export function MovementPage() {
                 place: null,
               }
             }),
-        ),
-      )
+        )
+      })
       .catch(() => {})
+    // form is stable for the life of the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, preset])
 
   // The tab close React Router never sees.
@@ -349,24 +363,16 @@ export function MovementPage() {
 
   const type = types.find((t) => String(t.id) === values.movementTypeId) ?? null
   const singlePlace = type !== null && SINGLE_PLACE_STAGES.includes(type.stage)
+  // Loading at the supplier ends at the port of loading: its From is the supplier's, so it is not locked.
+  const fromLocked = lockedFrom !== null && String(lockedFrom.id) === values.fromPlaceId && type?.stage !== 'Origin'
 
   /* ── options ─────────────────────────────────────────────────────────────────────────────── */
 
   const typeOptions = types
     .filter((t) => t.isActive || String(t.id) === values.movementTypeId)
     .map((t) => ({ value: String(t.id), label: `${t.typeCode} - ${t.typeName}` }))
-  const placeOptions = useMemo(() => {
-    // Grouped by kind, so a border post is not mistaken for the sea port of the same town.
-    const chosen = [values.fromPlaceId, values.toPlaceId]
-    const kinds = new Map<string, Option[]>()
-    for (const p of ports) {
-      if (!p.isActive && !chosen.includes(String(p.id))) continue
-      const list = kinds.get(p.kind) ?? []
-      list.push({ value: String(p.id), label: `${p.portCode} - ${portLabel(p)}` })
-      kinds.set(p.kind, list)
-    }
-    return [...kinds].map(([group, items]) => ({ group, items }))
-  }, [ports, values.fromPlaceId, values.toPlaceId])
+  // Grouped Sea / Border / Inland, so a border post is not mistaken for the sea port of the same town.
+  const placeOptions = useMemo(() => placeOptionGroups(ports, [values.fromPlaceId, values.toPlaceId]), [ports, values.fromPlaceId, values.toPlaceId])
   const carrierOptions = carriers
     .filter((c) => c.isActive || String(c.id) === values.carrierPartyId)
     .map((c) => ({ value: String(c.id), label: `${c.partyCode} - ${c.partyName}` }))
@@ -441,7 +447,8 @@ export function MovementPage() {
       const saved = movementId === null ? await movementsApi.create(payload) : await movementsApi.update(movementId, payload)
       show(saved)
       notify.success(movementId === null ? `Movement ${saved.movementNo} created.` : `${saved.movementNo} saved.`)
-      if (movementId === null) void navigate(`${MOVEMENTS_ROUTE}/${saved.id}`, { replace: true })
+      // The way back to the container goes along (?from=container/12).
+      if (movementId === null) void navigate(`${MOVEMENTS_ROUTE}/${saved.id}${fromQuery}`, { replace: true })
       return saved
     } catch (err) {
       fail(err, 'The movement could not be saved.')
@@ -451,46 +458,10 @@ export function MovementPage() {
     }
   }
 
-  /** Start / complete: unsaved edits are saved (or given up) first, then the containers that moved are named. */
-  async function changeStatus(kind: 'start' | 'complete', date: string | null) {
-    let current = movement
-    if (!current) return
-    if (dirty.current) {
-      const go = await confirm({ title: 'Unsaved changes', message: 'Save your changes first?', confirmLabel: 'Save and continue' })
-      if (!go) return
-      current = await save()
-      if (!current) return
-    }
-    const before = new Map(current.containers.map((c) => [c.containerId, c.containerStatusName]))
-    setBusyAction(kind)
-    try {
-      const result =
-        kind === 'start'
-          ? await movementsApi.start(current.id, date, current.rowVersion)
-          : await movementsApi.complete(current.id, date, current.rowVersion)
-      show(result, true)
-      setDateDialog(null)
-      notify.success(kind === 'start' ? `${result.movementNo} started.` : `${result.movementNo} completed.`)
-      const changes = result.containers
-        .filter((c) => before.has(c.containerId) && before.get(c.containerId) !== c.containerStatusName)
-        .map((c) => `${c.containerRef}: ${before.get(c.containerId)} -> ${c.containerStatusName}`)
-      if (changes.length > 0) notify.info(changes.join('; '))
-      // A Delivery: the drafts created, linked, and the containers that got none, with the reason (rule 5).
-      if (kind === 'complete' && (result.goodsReceipts?.length || result.warnings?.length)) {
-        showDeliveryResult(result.goodsReceipts, result.warnings, {
-          canViewReceipts,
-          navigate: (to) => void navigate(to),
-        })
-        void refreshGoodsReceiptsWaiting()
-      } else if (kind === 'complete' && result.goodsReceiptsAutomatic === false && result.goodsReceiptsMessage) {
-        // (79) The goods receipt type makes them by hand: none was drafted, and the answer says what to do instead.
-        notify.info(result.goodsReceiptsMessage)
-      }
-    } catch (err) {
-      fail(err, kind === 'start' ? 'The movement could not be started.' : 'The movement could not be completed.')
-    } finally {
-      setBusyAction(null)
-    }
+  /** Started or completed in the dialog, which said what moved: the page shows the movement as it is now. */
+  function statusDone(result: MovementDto) {
+    show(result, true)
+    setDateDialog(null)
   }
 
   async function cancelMovement(reason: string) {
@@ -536,7 +507,8 @@ export function MovementPage() {
       if (!go) return
     }
     dirty.current = false
-    void navigate(MOVEMENTS_ROUTE)
+    // (80) Opened from a container: Back returns to it, not to the Movements list.
+    void navigate(fromContainerId !== null ? `${CONTAINERS_ROUTE}/${fromContainerId}` : MOVEMENTS_ROUTE)
   }
 
   /* ── fields: an input on a form, text on a record ────────────────────────────────────────── */
@@ -583,6 +555,14 @@ export function MovementPage() {
   }
 
   const saved = movement !== null
+  /** The container the page was opened from, as the Start / Complete dialog names it. */
+  const fromContainerRef =
+    fromContainerId === null
+      ? null
+      : (movement?.containers.find((c) => c.containerId === fromContainerId)?.containerRef ??
+        ticked.find((c) => c.containerId === fromContainerId)?.containerRef ??
+        null)
+  const fromContainer = fromContainerId !== null && fromContainerRef ? { id: fromContainerId, containerRef: fromContainerRef } : null
   // Start and Complete act on the saved movement: never with changes on the page, never without a saved container.
   const statusBlocked = unsaved
     ? 'Save your changes first.'
@@ -593,8 +573,9 @@ export function MovementPage() {
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && canManage && movement.canDelete },
     { key: 'cancel', label: 'Cancel', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.canCancel },
-    { key: 'complete', label: 'Complete', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', loading: busyAction === 'complete', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
-    { key: 'start', label: 'Start', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', loading: busyAction === 'start', visible: saved && canManage && movement.canStart, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    { key: 'complete', label: 'Complete', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    // (80) A planned movement that cannot start yet says why before the click: the refusal Start would give.
+    { key: 'start', label: 'Start', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', visible: saved && canManage && movement.canStart, disabled: (statusBlocked ?? movement?.startBlockedReason ?? null) !== null, disabledReason: statusBlocked ?? movement?.startBlockedReason ?? undefined },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly, disabled: ticked.length === 0, disabledReason: ticked.length === 0 ? 'Tick at least one container.' : undefined },
   ]
 
@@ -612,7 +593,11 @@ export function MovementPage() {
             ? `${movement.typeName} · ${movement.fromName}${movement.toPlaceId === movement.fromPlaceId ? '' : ` → ${movement.toName}`}`
             : 'The number is assigned when the movement is first saved.'
         }
-        breadcrumbs={[{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]}
+        breadcrumbs={
+          fromContainerId !== null
+            ? [{ label: fromContainerRef ?? 'Container', to: `${CONTAINERS_ROUTE}/${fromContainerId}` }, { label: movement?.movementNo ?? 'New movement' }]
+            : [{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]
+        }
         actions={
           movement ? (
             <Group gap="xs">
@@ -668,6 +653,8 @@ export function MovementPage() {
                 <ViewField label="Stage" value={type ? `${type.stage} - ${stageExplanation(type.stage, receiptsAutomatic)}` : null} />
                 {readOnly ? (
                   <ViewField label="From" value={placeLabel(values.fromPlaceId)} />
+                ) : fromLocked ? (
+                  <ViewField label="From" value={placeLabel(values.fromPlaceId) ?? lockedFrom?.name ?? null} hint={FROM_LOCKED_HINT} />
                 ) : (
                   <Select label="From" withAsterisk data={placeOptions} searchable nothingFoundMessage="No place matches" value={values.fromPlaceId} onChange={pickFrom} error={form.errors.fromPlaceId} />
                 )}
@@ -780,12 +767,13 @@ export function MovementPage() {
       </div>
 
       {dateDialog && movement ? (
-        <StatusDateModal
+        <MovementStatusModal
           kind={dateDialog}
+          movementId={movement.id}
           movement={movement}
-          busy={busyAction === dateDialog}
+          container={fromContainer}
           onClose={() => setDateDialog(null)}
-          onConfirm={(date) => void changeStatus(dateDialog, date)}
+          onDone={statusDone}
         />
       ) : null}
 
@@ -885,73 +873,6 @@ function ChargesTable({ movement }: { movement: MovementDto }) {
   )
 }
 
-/**
- * The date a movement started or ended - today unless the reader says otherwise. Completing a movement of the Delivery
- * stage also says what happens to each container's goods: a draft goods receipt (rule 5).
- */
-function StatusDateModal({
-  kind,
-  movement,
-  busy,
-  onClose,
-  onConfirm,
-}: {
-  kind: 'start' | 'complete'
-  movement: MovementDto
-  busy: boolean
-  onClose: () => void
-  onConfirm: (date: string) => void
-}) {
-  const [date, setDate] = useState<string | null>(todayDateOnly())
-  const starting = kind === 'start'
-  const delivery = !starting && movement.stage === DELIVERY
-
-  return (
-    <Modal
-      opened
-      onClose={onClose}
-      title={`${starting ? 'Start' : 'Complete'} ${movement.movementNo}`}
-      size={delivery ? 'lg' : 'md'}
-      closeOnClickOutside={!busy}
-      withCloseButton={!busy}
-    >
-      <Stack>
-        {delivery ? (
-          <DeliveryCompletePreview movement={movement} />
-        ) : (
-          <Text fz="sm">
-            {starting
-              ? 'The containers on the movement set off: their status, dates and location follow the stage of the movement type.'
-              : 'The containers arrive: their status, dates and location follow the stage of the movement type.'}
-          </Text>
-        )}
-        <DateInput
-          label={starting ? 'Start date' : 'End date'}
-          withAsterisk
-          valueFormat="DD/MM/YYYY"
-          value={date}
-          onChange={(next) => setDate(next ? String(next).slice(0, 10) : null)}
-          data-autofocus
-        />
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            color={starting ? undefined : 'green'}
-            leftSection={starting ? <IconPlayerPlay size={16} /> : <IconCheck size={16} />}
-            disabled={!date}
-            loading={busy}
-            onClick={() => date && onConfirm(date)}
-          >
-            {starting ? 'Start movement' : 'Complete movement'}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  )
-}
-
 /** The two ways into the card's containers: both list what is at the From, so both wait for one. */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -964,8 +885,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-/** A value on a record: label above, text below - never a disabled input. */
-function ViewField({ label, value, dimmed }: { label: string; value: string | null; dimmed?: boolean }) {
+/** A value on a record: label above, text below - never a disabled input. A hint says why it cannot change. */
+function ViewField({ label, value, dimmed, hint }: { label: string; value: string | null; dimmed?: boolean; hint?: string }) {
   return (
     <div>
       <Text fz="sm" fw={500} mb={2}>
@@ -974,6 +895,11 @@ function ViewField({ label, value, dimmed }: { label: string; value: string | nu
       <Text fz="sm" c={dimmed || !value ? 'dimmed' : undefined}>
         {value ?? '—'}
       </Text>
+      {hint ? (
+        <Text fz="xs" c="dimmed" mt={2} data-from-locked>
+          {hint}
+        </Text>
+      ) : null}
     </div>
   )
 }

@@ -1,18 +1,23 @@
+import type { ShipStepContainer } from './shipStep'
+
 /**
  * Ticking containers on a grid: what the selection bar reads of a row, its quick selectors and the
  * refresh of a selection after a reload. Kept apart from the bar so the component file only exports
  * components.
  */
 
-/** What the bar reads of a container: a container list row carries all of it. */
-export interface SelectableContainer {
+/**
+ * What the bar reads of a container: a container list row carries all of it, the container page too (script 80: its
+ * place and movements, so "Start shipment…" leaves from where it is and leaves out the ones that cannot ship).
+ */
+export interface SelectableContainer extends ShipStepContainer {
   id: number
   containerRef: string
   containerNo: string | null
   status: number
-  /** 1 planned, 2 in progress, 3 completed; null without a movement. */
-  currentMovementStatus: number | null
-  currentMovementNo: string | null
+  /** 1 planned, 2 in progress, 3 completed; null without a movement (the list's Movement column). */
+  currentMovementStatus?: number | null
+  currentMovementNo?: string | null
   /** What "Start shipment" shows as its default route. */
   portOfLoadingName: string | null
   portOfDestinationName: string | null

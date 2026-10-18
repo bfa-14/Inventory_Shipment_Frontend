@@ -84,8 +84,58 @@ export interface ContainerReceiptRef {
   goodsReceiptStatusName?: string | null
 }
 
+/**
+ * (script 80) The next step of a container's journey, worked out by the server: Complete (a movement in progress carries
+ * it), Start (its next planned movement waits), Ship (it never moved), NextLeg (its last movement is completed). Null
+ * once received, closed or cancelled.
+ */
+export type ContainerShipStep = 'Ship' | 'Start' | 'Complete' | 'NextLeg'
+
+/**
+ * (script 80) Where a container is and the movements that decide its next step, the same on the list row and the
+ * container: the button on its page and the row's "…" menu read it. Optional: an older API sends none of it.
+ */
+export interface ContainerShipState {
+  /** Its movements, cancelled ones left out: 0 = never moved. */
+  movementCount?: number
+  /** Where its next leg leaves from: the To of its latest movement, else its port of loading; null = any place fits it. */
+  placeId?: number | null
+  placeName?: string | null
+  /** The end date of that latest movement once completed: "at Dar es Salaam since 12/10/2026". */
+  placeSince?: string | null
+  /** The movement in progress carrying it, and how many containers it carries. */
+  activeMovementId?: number | null
+  activeMovementNo?: string | null
+  activeMovementTypeName?: string | null
+  activeMovementStage?: string | null
+  activeMovementFromName?: string | null
+  activeMovementToName?: string | null
+  activeMovementStartDate?: string | null
+  activeMovementEta?: string | null
+  activeMovementContainerCount?: number | null
+  /** Its next planned movement ("Planned: MOV-…" on the list). */
+  plannedMovementId?: number | null
+  plannedMovementNo?: string | null
+  plannedMovementTypeName?: string | null
+  plannedMovementStage?: string | null
+  plannedMovementFromName?: string | null
+  plannedMovementToName?: string | null
+  plannedMovementDate?: string | null
+  plannedMovementContainerCount?: number | null
+  /** Why that planned movement cannot start yet (the refusal Start would give); null when it can. */
+  plannedMovementBlockedReason?: string | null
+  /** Its earliest start: the end date of the previous leg. */
+  plannedMovementNotBefore?: string | null
+  lastMovementId?: number | null
+  lastMovementNo?: string | null
+  lastMovementEndDate?: string | null
+  shipStep?: ContainerShipStep | null
+  /** Why the next step cannot be taken now (journey over, a draft, the planned movement's refusal); null when it can. */
+  shipStepBlockedReason?: string | null
+}
+
 /** What the STATUS allows. Whether the reader may is a permission, checked beside it. */
-export interface ContainerFlags extends ContainerReceiptRef {
+export interface ContainerFlags extends ContainerReceiptRef, ContainerShipState {
   status: ContainerStatusCode
   statusName: string
   canEdit: boolean

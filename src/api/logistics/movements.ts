@@ -38,6 +38,16 @@ export interface MovementFlags {
   canComplete: boolean
   canCancel: boolean
   canDelete: boolean
+  /**
+   * (script 80) A planned movement: the refusal Start would give now (no container, a draft, a container travelling, its
+   * previous leg not completed, not at the From); null when it can start. Optional: an older API sends none.
+   */
+  startBlockedReason?: string | null
+  /** The earliest start date: the latest end of its containers' previous movements (refused before it, 70018). */
+  startNotBefore?: string | null
+  /** The movement that ended on that date, and where: "MOV-2026-000046 reached Dar es Salaam". */
+  startNotBeforeMovementNo?: string | null
+  startNotBeforePlaceName?: string | null
 }
 
 export interface MovementListDto extends MovementFlags {
@@ -219,6 +229,34 @@ export interface MovementDto extends MovementFlags {
   warnings?: string[]
 }
 
+/** (script 80) A planned movement a container can join: after its latest movement and at its place (`GET join-candidates`). */
+export interface MovementJoinCandidateDto {
+  id: number
+  movementNo: string
+  movementTypeId: number
+  typeCode: string
+  typeName: string
+  stage: string
+  fromPlaceId: number
+  fromCode: string
+  fromName: string
+  toPlaceId: number
+  toCode: string
+  toName: string
+  plannedDate: string | null
+  eta: string | null
+  status: MovementStatusCode
+  carrierPartyId: number | null
+  carrierName: string | null
+  vehicleOrVessel: string | null
+  containerCount: number
+  /** "KTG-2026-0006 +1" */
+  containerRefs: string | null
+  /** What the save says of the container there: "Not moved yet - port of loading: Chennai.", "Draft: confirm it…". */
+  note: string | null
+  rowVersion: string
+}
+
 export interface SaveMovementRequest {
   movementTypeId: number
   fromPlaceId: number
@@ -260,8 +298,12 @@ export interface ShipContainersRequest {
   containerIds: number[]
   /** Null = SEA. */
   movementTypeId?: number | null
-  /** Null = the containers' common ports (Sea only). */
+  /**
+   * Null = where the containers are (script 80): the place they are all at once one of them moved, else (Sea, none moved)
+   * their common port of loading.
+   */
   fromPlaceId?: number | null
+  /** Null = the common port of destination (Sea, none moved), the From for a stay (Port, Customs, Border). */
   toPlaceId?: number | null
   /** Null = today (the planned date when startNow is false). */
   startDate?: string | null
@@ -386,7 +428,10 @@ export const movementsApi = {
   update: (id: number, payload: SaveMovementRequest) =>
     request<MovementDto>(`${BASE}/${id}`, { method: 'PUT', body: payload }),
 
-  /** date = start date (default today). 409 CONTAINER_BUSY when a container travels with another movement. */
+  /**
+   * date = start date (default today). 409 CONTAINER_BUSY when a container travels with another movement,
+   * START_BEFORE_PREVIOUS_LEG before its previous leg ended; 400 for a date in the future (script 80).
+   */
   start: (id: number, date: string | null, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/start`, { method: 'POST', body: { date, rowVersion } }),
 
@@ -403,6 +448,10 @@ export const movementsApi = {
 
   /** Planned only. */
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
+
+  /** (script 80) The planned movements the container can join, newest first ("Add to a movement…"). */
+  joinCandidates: (containerId: number, signal?: AbortSignal) =>
+    request<MovementJoinCandidateDto[]>(`${BASE}/join-candidates${toQueryString({ containerId })}`, { signal }),
 
   /** 409 CONTAINER_BUSY names a container travelling with another movement; nothing is created then. */
   shipContainers: (payload: ShipContainersRequest) =>

@@ -1719,6 +1719,62 @@ read-only (`OrderSupplierLine`: a container's goods come from its order lines, s
 saying which; the **Country of origin** as the supplier's country. Both stay editable and clearable: the picks are
 held as `undefined` until the reader changes them, so the defaults arriving later never overwrite a choice.
 
+## A container's next step (script 80: ship from the container)
+
+The owner: "I cannot start the shipment of a specific container in the containers page or any other place". So every
+container has **one action whose label is its next step**, worked out by the server (`shipStep`, `shipStepBlockedReason`
+and the ship state on `ContainerShipState`: the list row and the container carry the same columns) and worded in one
+place, `components/logistics/shipStep.ts`:
+
+| The container | The label | What it opens |
+|---|---|---|
+| never moved | "Start shipment…" | the Start shipment dialog for this one container |
+| its next planned movement waits | "Start Inland transport…" (the type's name) | the Start dialog of that movement |
+| a movement in progress carries it | "Arrived at Dar es Salaam…" (a leg that moves) / "Complete Customs clearance…" (a stay) | the Complete dialog of that movement |
+| its last movement is completed | "Next leg…" | the movement form: From = where it is (locked), the container ticked, Back to the container |
+| received, closed or cancelled | the last label, disabled: "This container is received: its journey is over." | - |
+
+- **One hook runs it everywhere**: `useShipStep(onDone)` (`components/logistics/useShipStep.tsx`) gives `action(container)`
+  (null without `containers.movements.manage`: the entry is then hidden), `run(container)` and the `dialogs` to render.
+  The container page puts it in the action bar **next to Save** (disabled "Save your changes first." while the form has
+  unsaved edits); the Containers list puts it **first in the row's "…" menu**, its reason under the label like Close
+  and Cancel. Phase 2 ("Next step…") will replace the labels, not the hook.
+- **Start and Complete are one dialog**, `MovementStatusModal`, from the movement page, a row of the Movements list
+  ("Start…" / "Complete…" in its Actions column), the container's page and its row. It reads the movement when it opens
+  (a list row has no containers nor row version), refuses a date after today and before the earliest (`startNotBefore`:
+  the end of the previous leg; the start date for a completion) in the field itself, shows a planned movement's
+  `startBlockedReason` as a red alert with the confirm disabled, and - opened from a container - says plainly when the
+  movement carries others: "All 12 containers of MOV-2026-000046 arrive too: …". The notifications after it (who moved,
+  the Delivery's draft goods receipts) are the dialog's, so no host repeats them. The server refuses the same dates.
+- **The route card comes first**: at the top of the right column on a wide screen and at the top of the page on a phone
+  (`useMediaQuery('(min-width: 75em)')` picks the column, since the columns stack below `lg`). It opens with where the
+  container is ("At Dar es Salaam since 12/10/2026.", "Travelling with MOV-… Sea freight: Chennai → Dar es Salaam, ETA
+  …", "Not moved yet: it leaves from its port of loading, Chennai.") and its planned next movement.
+- **Planned movements are shown**: the Movement column of the Containers list gives "Planned: MOV-…" under the current
+  movement - a planned leg decides where the container "is" for its next one.
+- **"Add to a movement…" lists only what it can join** (`movementsApi.joinCandidates`): never a movement that would be
+  refused after the click.
+
+### The locked From
+
+**A container leaves from where it is**: the To of its latest movement, else its port of loading (`placeId` /
+`placeName`). Wherever a leg is made for known containers, the From is that place and is **not editable**: a read-only
+field with the hint `FROM_LOCKED_HINT`, "A container leaves from where it is." - in the Start shipment dialog (the place
+most of the ticked containers are at; the others are left out with "KTG-… is at Beira, not at Chennai: ship it from
+there.") and in the movement form opened from one container (`/logistics/movements/new?containerId=12&from=container/12`).
+Two exceptions: **Loading at the supplier** ends at the port of loading, so its To is locked instead and its From is
+free; a container with no place at all (never moved, no port of loading) gets a free From. A **stay** (Port, Customs,
+Border) starts with To = From. Every place picker is grouped **Sea ports / Border posts / Inland places**
+(`placeOptionGroups`), so a border post is never taken for the sea port of the same town.
+
+**The selection bar says before the click** whether "Start shipment…" can do anything: disabled with "None of the ticked
+containers can ship: {the first reason} (and N more)" when no ticked container can, and the dialog lists in orange
+"Left out (n)" the ones it leaves out (`shipRefusal`: received, travelling, a next movement already planned, a draft the
+reader may not confirm, at another place) and ships the rest.
+
+**Back follows the way in**: a movement page opened with `?from=container/12` returns to that container (its Back and
+its breadcrumb), and keeps the parameter when a new movement is saved.
+
 ## Checklist for a new page
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.

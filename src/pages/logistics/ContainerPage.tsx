@@ -21,6 +21,7 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
+import { useMediaQuery } from '@mantine/hooks'
 import {
   IconArrowBackUp,
   IconArrowLeft,
@@ -32,6 +33,7 @@ import {
   IconLockOpen,
   IconPackageImport,
   IconPrinter,
+  IconRoute,
   IconTrash,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -88,6 +90,7 @@ import {
   WAREHOUSE_PROPOSED_HINT,
 } from '../../components/logistics/containerReceipt'
 import { ReceiveContainerModal } from '../../components/logistics/ReceiveContainerModal'
+import { useShipStep } from '../../components/logistics/useShipStep'
 import { cancelDescription } from '../../components/purchase/goodsReceipts/goodsReceiptModel'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
@@ -180,6 +183,9 @@ export function ContainerPage() {
     dirty.current = true
   }
 
+  // The route goes to the top of the right column, and to the top of the page on a phone (the columns stack there).
+  const wide = useMediaQuery('(min-width: 75em)', true, { getInitialValueInEffect: false })
+
   const form = useForm<ContainerFormValues>({
     initialValues: emptyValues(null),
     onValuesChange: markDirty,
@@ -224,6 +230,10 @@ export function ContainerPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  /* (80) THE NEXT STEP OF ITS JOURNEY, one button next to Save: "Start shipment…", "Start Inland transport…", "Arrived
+     at Dar es Salaam…", "Next leg…" - the same action as the row's "…" menu on the Containers list. */
+  const shipStep = useShipStep(() => void load())
 
   /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
      files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the
@@ -671,6 +681,13 @@ export function ContainerPage() {
   }
 
   const saved = container !== null
+  /** The container as the next-step dialogs read it (its place, its movements). */
+  const shipTarget = container
+    ? { ...container, currentMovementStatus: container.activeMovementId ? 2 : null, currentMovementNo: container.activeMovementNo ?? null }
+    : null
+  const shipAction = shipTarget ? shipStep.action(shipTarget) : null
+  // Unsaved edits first: the next step reloads the container, and a leg needs what the page shows saved.
+  const shipBlocked = shipAction === null ? null : (shipAction.disabledReason ?? (dirty.current ? 'Save your changes first.' : null))
   /** Received by a goods receipt: its cancel replaces Cancel Offload, which stays for the offloads of before. */
   const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
   const draftReceipt = receipt?.status === 1 ? receipt : null
@@ -758,10 +775,27 @@ export function ContainerPage() {
       disabledReason: container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.',
     },
     { key: 'confirm', label: 'Confirm', icon: <IconCheck size={16} />, onClick: () => void confirmPlan(), variant: 'light', loading: busyAction === 'confirm', visible: saved && container.canConfirm && perm.confirm },
+    {
+      key: 'ship',
+      label: shipAction?.label ?? 'Start shipment…',
+      icon: <IconRoute size={16} />,
+      onClick: () => {
+        if (shipTarget) shipStep.run(shipTarget)
+      },
+      variant: 'light',
+      colour: 'indigo',
+      // Hidden without containers.movements.manage; disabled with the reason once the journey is over.
+      visible: saved && shipAction !== null,
+      disabled: shipBlocked !== null,
+      disabledReason: shipBlocked ?? undefined,
+    },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
   ]
 
   const title = container ? `Container ${container.containerRef}` : 'New Container'
+  const journey = container ? (
+    <ContainerRouteTimeline container={container} canManage={perm.movements && container.status < 6} onChanged={() => void load()} />
+  ) : null
 
   return (
     <div>
@@ -832,6 +866,7 @@ export function ContainerPage() {
       <Grid gap="md">
         <Grid.Col span={{ base: 12, lg: 8 }}>
           <Stack gap="md">
+            {wide ? null : journey}
             <Section title="1. Identification">
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
                 <ViewField label="Container Ref." value={container?.containerRef ?? 'Assigned on save'} dimmed={!container} />
@@ -984,14 +1019,12 @@ export function ContainerPage() {
 
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Stack gap="md">
+            {wide ? journey : null}
             <ContainerCapacityCard typeLabel={type ? `${type.typeCode} - ${type.typeName}` : null} fill={fill} totalOil={totalOil} />
             {container ? <ContainerCostCard container={container} baseCurrencyCode="USD" /> : null}
             {/* Keyed on the movements, so the map reloads when the route changes. */}
             {container ? (
               <ContainerRouteMapCard key={container.movements.map((m) => `${m.movementId}:${m.status}`).join(',')} containerId={container.id} />
-            ) : null}
-            {container ? (
-              <ContainerRouteTimeline container={container} canManage={perm.movements && container.status < 6} onChanged={() => void load()} />
             ) : null}
             {container ? (
               <Paper radius="lg" p="md" withBorder>
@@ -1049,6 +1082,8 @@ export function ContainerPage() {
           }
         />
       ) : null}
+
+      {shipStep.dialogs}
 
       {receiveOpen && container ? (
         <ReceiveContainerModal

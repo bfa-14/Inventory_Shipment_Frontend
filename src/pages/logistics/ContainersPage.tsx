@@ -31,6 +31,7 @@ import {
   IconPencil,
   IconPlus,
   IconPrinter,
+  IconRoute,
   IconTableExport,
   IconTrash,
 } from '@tabler/icons-react'
@@ -56,6 +57,7 @@ import { ContainerReceiptCell } from '../../components/logistics/ContainerReceip
 import { containerReceiptOf, receiptBlocksCancelText, RECEIVABLE_STATUSES } from '../../components/logistics/containerReceipt'
 import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
+import { useShipStep } from '../../components/logistics/useShipStep'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
@@ -144,7 +146,8 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'totalQtyBase', kind: 'number', summary: 'sum' },
   { accessor: 'fillPct', kind: 'number', text: (r) => (r.fillPct === null ? '' : formatNumber(r.fillPct, 1)) },
   { accessor: 'chargesPostedBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.chargesPostedBase, 2) },
-  { accessor: 'currentMovementNo', text: (r) => r.currentMovementNo ?? '' },
+  // (80) a planned next movement too: "MOV-2026-000046 · Planned: MOV-2026-000051"
+  { accessor: 'currentMovementNo', text: (r) => [r.currentMovementNo, r.plannedMovementNo ? `Planned: ${r.plannedMovementNo}` : null].filter(Boolean).join(' · ') },
   { accessor: 'blNo', text: (r) => r.blNo ?? '' },
   { accessor: 'dispatchDate', kind: 'date' },
   { accessor: 'eta', kind: 'date' },
@@ -237,6 +240,8 @@ export function ContainersPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  // (80) A container's next step from its row: the same action as the button next to Save on its page.
+  const shipStep = useShipStep(() => void load())
   // The ticked rows as they are now: a reload after a bulk action brings their new status.
   const selectedRows = refreshSelection(selected, data?.items ?? [])
   const rows = useMemo(() => data?.items ?? [], [data])
@@ -342,6 +347,16 @@ export function ContainersPage() {
     )
   }
 
+  const movementLink = (id: number, no: string, size: 'sm' | 'xs' = 'sm') =>
+    canOpenMovements ? (
+      <Anchor component={Link} to={`/logistics/movements/${id}`} fz={size} style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+        {no}
+      </Anchor>
+    ) : (
+      <Text span fz={size} style={{ whiteSpace: 'nowrap' }}>
+        {no}
+      </Text>
+    )
   const dash = <Text fz="sm" c="dimmed">—</Text>
   const text = (value: string | null) => (value ? <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{value}</Text> : dash)
 
@@ -419,15 +434,18 @@ export function ContainersPage() {
       accessor: 'currentMovementNo',
       title: 'Movement',
       width: 160,
+      // The movement in progress, else the last completed one - and (80) its planned next movement, which decides where
+      // the container "is" for its next leg and was invisible here.
       render: (row) =>
-        row.currentMovementId ? (
-          canOpenMovements ? (
-            <Anchor component={Link} to={`/logistics/movements/${row.currentMovementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-              {row.currentMovementNo}
-            </Anchor>
-          ) : (
-            <Text span fz="sm" style={{ whiteSpace: 'nowrap' }}>{row.currentMovementNo}</Text>
-          )
+        row.currentMovementId || row.plannedMovementId ? (
+          <Stack gap={0}>
+            {row.currentMovementId ? movementLink(row.currentMovementId, row.currentMovementNo ?? '') : null}
+            {row.plannedMovementId ? (
+              <Text fz="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }} data-planned-movement>
+                Planned: {movementLink(row.plannedMovementId, row.plannedMovementNo ?? '', 'xs')}
+              </Text>
+            ) : null}
+          </Stack>
         ) : (
           dash
         ),
@@ -478,7 +496,18 @@ export function ContainersPage() {
       textAlign: 'right',
       render: (row) => {
         const receipt = containerReceiptOf(row)
+        // (80) Its next step first: the same action as the button next to Save on its page.
+        const ship = shipStep.action(row)
         const more = [
+          {
+            key: 'ship',
+            show: ship !== null,
+            label: ship?.label ?? '',
+            icon: <IconRoute size={16} />,
+            disabled: ship?.disabledReason != null,
+            reason: ship?.disabledReason ?? undefined,
+            onClick: () => shipStep.run(row),
+          },
           {
             key: 'receive',
             show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.canReceive !== false,
@@ -720,6 +749,8 @@ export function ContainersPage() {
         confirmLabel="Cancel container"
         description="The container is cancelled and its invoices are free to load elsewhere. No stock moves."
       />
+
+      {shipStep.dialogs}
 
       {/* One row of the file = one charge on one container; the Charges column changes with what is posted. */}
       <ImportContainerChargesWizard

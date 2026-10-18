@@ -6,7 +6,7 @@ import { ApiError } from '../../api/http'
 import { useAuth } from '../../auth/useAuth'
 import { PERMISSIONS } from '../../navigation'
 import type { ContainerDto, ContainerMovementDto } from '../../api/logistics/containers'
-import { movementsApi, movementStatusColour, type MovementListDto } from '../../api/logistics/movements'
+import { movementsApi, movementStatusColour, type MovementJoinCandidateDto } from '../../api/logistics/movements'
 import { dateLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber, todayDateOnly } from '../format'
 import { notify } from '../ui/notify'
@@ -27,6 +27,10 @@ interface ContainerRouteTimelineProps {
  * The container's route, leg by leg, oldest first: what kind of leg, from where to where, when, with
  * whom, and what it cost. A leg whose ETA has passed while it is still planned or running shows the
  * ETA in red - that is the leg to chase.
+ *
+ * WHERE IT IS COMES FIRST (script 80): the card sits at the top of the right column (the top of the page on a phone) and
+ * opens with one line - travelling with which movement, at which place since when, or not moved yet - and the planned
+ * next movement when there is one. The next step itself is the button next to Save.
  */
 export function ContainerRouteTimeline({ container, canManage, onChanged }: ContainerRouteTimelineProps) {
   const navigate = useNavigate()
@@ -46,12 +50,14 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
             <Button size="xs" variant="default" leftSection={<IconRoute size={14} />} onClick={() => setPickOpen(true)}>
               Add to a movement...
             </Button>
-            <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}`)}>
+            <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}&from=container/${container.id}`)}>
               New movement for this container
             </Button>
           </Group>
         ) : null}
       </Group>
+
+      <WhereNow container={container} />
 
       {legs.length === 0 ? (
         <Text c="dimmed" fz="sm" ta="center" py="sm">
@@ -84,6 +90,46 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
         />
       ) : null}
     </Paper>
+  )
+}
+
+/** "Travelling with MOV-… Sea freight: Chennai → Dar es Salaam, ETA …", "At Dar es Salaam since …", "Not moved yet: …". */
+function WhereNow({ container }: { container: ContainerDto }) {
+  if (container.movementCount === undefined) return null
+  const now =
+    container.status >= 6
+      ? null
+      : container.activeMovementId
+        ? `Travelling with ${container.activeMovementNo} ${container.activeMovementTypeName ?? ''}: ${container.activeMovementFromName ?? ''}${
+            container.activeMovementToName && container.activeMovementToName !== container.activeMovementFromName ? ` → ${container.activeMovementToName}` : ''
+          }${container.activeMovementEta ? `, ETA ${dateLabel(container.activeMovementEta)}` : ''}.`
+        : (container.movementCount ?? 0) === 0
+          ? container.placeName
+            ? `Not moved yet: it leaves from its port of loading, ${container.placeName}.`
+            : 'Not moved yet, and no port of loading: any place can be its first From.'
+          : container.plannedMovementId && container.plannedMovementFromName
+            ? // Its place is the planned leg's To already (the From of a leg after it); it is still where that leg leaves from.
+              `At ${container.plannedMovementFromName}${container.lastMovementEndDate ? ` since ${dateLabel(container.lastMovementEndDate)}` : ''}.`
+            : container.placeName
+              ? `At ${container.placeName}${container.placeSince ? ` since ${dateLabel(container.placeSince)}` : ''}.`
+              : null
+  const planned = container.plannedMovementId
+    ? `Next: ${container.plannedMovementNo} ${container.plannedMovementTypeName ?? ''} (planned${container.plannedMovementDate ? ` ${dateLabel(container.plannedMovementDate)}` : ''}).`
+    : null
+  if (!now && !planned) return null
+  return (
+    <Stack gap={2} mb="sm" data-where-now>
+      {now ? (
+        <Text fz="sm" fw={600}>
+          {now}
+        </Text>
+      ) : null}
+      {planned ? (
+        <Text fz="sm" c="dimmed">
+          {planned}
+        </Text>
+      ) : null}
+    </Stack>
   )
 }
 
@@ -153,28 +199,28 @@ function DateBit({ label, value, colour }: { label: string; value: string | null
   )
 }
 
-/** The planned movements this container can still join; picking one adds it and leaves the rest alone. */
+/**
+ * The planned movements this container can really join (script 80, `join-candidates`): after its latest movement and at
+ * its place, so the save never refuses it for where it is. Picking one adds it and leaves the rest alone.
+ */
 function AddToMovementModal({ container, onClose, onAdded }: { container: ContainerDto; onClose: () => void; onAdded: () => void }) {
-  const [rows, setRows] = useState<MovementListDto[] | null>(null)
+  const [rows, setRows] = useState<MovementJoinCandidateDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
     movementsApi
-      .list({ status: 1, pageSize: 50, sortBy: 'MovementNo', sortDir: 'desc' }, controller.signal)
-      .then((result) => {
-        const already = new Set(container.movements.map((m) => m.movementId))
-        setRows(result.items.filter((m) => !already.has(m.id)))
-      })
+      .joinCandidates(container.id, controller.signal)
+      .then((list) => setRows(list))
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setError(err instanceof ApiError ? err.message : 'The planned movements could not be loaded.')
       })
     return () => controller.abort()
-  }, [container.movements])
+  }, [container.id])
 
-  async function add(row: MovementListDto) {
+  async function add(row: MovementJoinCandidateDto) {
     setBusyId(row.id)
     try {
       // Re-read, so the save carries the movement's current fields and row version, not the list's.
@@ -183,9 +229,10 @@ function AddToMovementModal({ container, onClose, onAdded }: { container: Contai
         movementTypeId: movement.movementTypeId,
         fromPlaceId: movement.fromPlaceId,
         toPlaceId: movement.toPlaceId,
-        plannedDate: movement.plannedDate,
-        startDate: movement.startDate,
-        eta: movement.eta,
+        // The API reads plain dates: "2026-10-15T00:00:00" as it comes back was refused ("Planned Date is not a valid date.").
+        plannedDate: movement.plannedDate?.slice(0, 10) ?? null,
+        startDate: movement.startDate?.slice(0, 10) ?? null,
+        eta: movement.eta?.slice(0, 10) ?? null,
         carrierPartyId: movement.carrierPartyId,
         vehicleOrVessel: movement.vehicleOrVessel,
         voyageNo: movement.voyageNo,
@@ -213,7 +260,7 @@ function AddToMovementModal({ container, onClose, onAdded }: { container: Contai
         </Group>
       ) : rows.length === 0 ? (
         <Text c="dimmed" fz="sm" ta="center" py="md">
-          No planned movement to join. Create a new movement for this container instead.
+          {`No planned movement can take ${container.containerRef}${container.placeName ? ` at ${container.placeName}` : ''}. Use the button next to Save for its next leg instead.`}
         </Text>
       ) : (
         <ScrollArea type="auto" mah={420}>

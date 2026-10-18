@@ -12,6 +12,7 @@ import { ContainerNumbersModal } from './ContainerNumbersModal'
 import { NewChargeModal } from './NewChargeModal'
 import { StartShipmentModal } from './StartShipmentModal'
 import { DRAFT, isNotShipped, type SelectableContainer } from './containerSelection'
+import { shipRefusal } from './shipStep'
 
 interface ContainerSelectionBarProps<T extends SelectableContainer> {
   /** The containers on screen: what the quick selectors pick from. */
@@ -28,7 +29,8 @@ interface ContainerSelectionBarProps<T extends SelectableContainer> {
  *
  * EACH ACTION IS SHOWN ONLY WITH ITS PERMISSION, and Delete is live only when every ticked
  * container is still a draft — the server deletes all or nothing, so a mixed selection could only
- * fail. A dead button stays hoverable (data-disabled, not disabled) so its tooltip can say why.
+ * fail; "Start shipment…" only when one of them can ship (script 80), and its dialog names the ones it leaves out.
+ * A dead button stays hoverable (data-disabled, not disabled) so its tooltip can say why.
  * The server's refusals are shown as they come: they name the container.
  */
 export function ContainerSelectionBar<T extends SelectableContainer>({
@@ -54,6 +56,12 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   const count = selected.length
   const draftsSelected = selected.filter((row) => row.status === DRAFT).length
   const allDrafts = count > 0 && draftsSelected === count
+  // (80) Said before the click: when none of the ticked containers can go on a new shipment, the button says why.
+  const shipRefusals = selected.map((row) => shipRefusal(row, canConfirm))
+  const shipBlocked = count > 0 && shipRefusals.every((reason) => reason !== null)
+  const shipBlockedReason = shipBlocked
+    ? `None of the ticked containers can ship: ${shipRefusals[0]}${count > 1 ? ` (and ${formatNumber(count - 1)} more)` : ''}`
+    : null
 
   async function confirmSelected() {
     const go = await confirm({
@@ -140,9 +148,21 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
                 </Button>
               )}
               {canShip && (
-                <Button size="xs" variant="light" leftSection={<IconShip size={14} />} disabled={busy !== null} onClick={() => setShipFor(selected)}>
-                  Start shipment…
-                </Button>
+                <Tooltip label={shipBlockedReason} disabled={!shipBlocked} withArrow multiline maw={320}>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftSection={<IconShip size={14} />}
+                    disabled={busy !== null}
+                    data-disabled={shipBlocked || undefined}
+                    data-ship-blocked={shipBlockedReason ?? undefined}
+                    onClick={() => {
+                      if (!shipBlocked) setShipFor(selected)
+                    }}
+                  >
+                    Start shipment…
+                  </Button>
+                </Tooltip>
               )}
               {canCharge && (
                 <Button size="xs" variant="light" leftSection={<IconReceipt2 size={14} />} disabled={busy !== null} onClick={() => setChargeFor(selected.map((row) => row.id))}>
