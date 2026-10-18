@@ -28,8 +28,8 @@ function completedWords(stage: string | null | undefined, toName: string, subjec
       return { did: `ended at ${toName}`, then: `${subject} ${s('are', 'is')} loaded with it` }
     case 'Delivery':
       return {
-        did: `delivered to ${toName}`,
-        then: `${subject} ${s('are', 'is')} delivered with it, without a draft goods receipt: use Receive goods… on ${s('each container', 'it')}`,
+        did: `reached ${toName}`,
+        then: `${subject} ${s('are', 'is')} delivered with it, without a draft goods receipt. Use Receive goods… on ${s('each container', 'it')}`,
       }
     default:
       return { did: `arrived at ${toName}`, then: `${subject} ${s('arrive', 'arrives')} with it` }

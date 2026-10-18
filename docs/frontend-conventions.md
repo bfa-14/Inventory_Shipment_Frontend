@@ -2017,8 +2017,8 @@ default everywhere.**
   `components/logistics/splitUndo.ts`, from the movement's `splitUndo…`: that movement's number, status, end date, To
   and stage, and the dialog's own containers): "Cancelling MOV-2026-000073 puts KTG-2026-0030 and KTG-2026-0031 back on
   MOV-2026-000044, which is still in progress." / "…, which arrived at Dar es Salaam on 17/10/2026: they arrive with it."
-  (by the stage: "cleared customs at …: they are cleared with it", "…delivered to Lubumbashi on …: KTG-… is delivered
-  with it, without a draft goods receipt: use Receive goods… on it") / "…, which is cancelled: they go back to where they
+  (by the stage: "cleared customs at …: they are cleared with it", "…reached Lubumbashi on …: KTG-… is delivered
+  with it, without a draft goods receipt. Use Receive goods… on it") / "…, which is cancelled: they go back to where they
   were before it." - above a Delivery's own list of the draft goods receipts deleted with it. **The notification after
   it is the server's** (`splitUndone.message`, green, with "Open MOV-…" that keeps the page's way back), worked out when
   the cancel ran - that movement may have moved on while the dialog was open. The cancelled record's red Alert adds the
