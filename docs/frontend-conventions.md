@@ -1731,10 +1731,11 @@ place, `components/logistics/shipStep.ts`:
 | never moved | "Start shipment…" | the Start shipment dialog for this one container |
 | its next planned movement waits | "Start Inland transport…" (the type's name) | the Start dialog of that movement |
 | a movement in progress carries it | "Arrived at Dar es Salaam…" (a leg that moves) / "Complete Customs clearance…" (a stay) | the Complete dialog of that movement |
-| its last movement is completed | "Next leg…" | the movement form: From = where it is (locked), the container ticked, Back to the container |
+| its last movement is completed | "Next leg…" | the movement form: From = where it is (locked), the container ticked, Back to where it was offered |
 | received, closed or cancelled | the last label, disabled: "This container is received: its journey is over." | - |
 
-- **One hook runs it everywhere**: `useShipStep(onDone)` (`components/logistics/useShipStep.tsx`) gives `action(container)`
+- **One hook runs it everywhere**: `useShipStep(onDone, origin)` (`components/logistics/useShipStep.tsx`; `origin` is
+  `'container'` on the container's page, `'containers'` on the list) gives `action(container)`
   (null without `containers.movements.manage`: the entry is then hidden), `run(container)` and the `dialogs` to render.
   The container page puts it in the action bar **next to Save** (disabled "Save your changes first." while the form has
   unsaved edits); the Containers list puts it **first in the row's "…" menu**, its reason under the label like Close
@@ -1773,7 +1774,14 @@ containers can ship: {the first reason} (and N more)" when no ticked container c
 reader may not confirm, at another place) and ships the rest.
 
 **Back follows the way in**: a movement page opened with `?from=container/12` returns to that container (its Back and
-its breadcrumb), and keeps the parameter when a new movement is saved.
+its breadcrumb), one opened with `?from=containers` (the list's "Next leg…") returns to the Containers list, and both
+keep the parameter when a new movement is saved. Every way into a movement from a container carries it: "Next leg…",
+"New movement for this container", the MOV-… links of the route card and the movement link in the notification after
+"Start shipment…" (`StartShipmentModal`'s `returnQuery`). A link without it goes back to the Movements list.
+
+**The start date of a movement in progress stays a fact**: the movement page lets it be changed after Start, so its
+field shows the Start dialog's two refusals before the Save - after today, and before `startNotBefore` (which the API
+also gives for a movement in progress) - and the Save refuses both as well (70000 / 70018).
 
 ## Checklist for a new page
 

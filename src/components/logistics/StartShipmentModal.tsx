@@ -21,6 +21,11 @@ interface StartShipmentModalProps {
   containers: SelectableContainer[]
   onClose(): void
   onShipped(movement: ShippedMovementDto): void
+  /**
+   * The way back the movement link of the notification carries ("?from=container/12", "?from=containers"), so that
+   * Back on the movement returns to the page the dialog was opened from. Empty: Back goes to the Movements list.
+   */
+  returnQuery?: string
 }
 
 const DEFAULT_TYPE_CODE = 'SEA'
@@ -73,7 +78,7 @@ function commonPlace(containers: SelectableContainer[]): { id: number; name: str
  * TO MAY STAY EMPTY for a sea leg of containers that never moved: the server takes their common port of destination,
  * shown as the hint.
  */
-export function StartShipmentModal({ containers, onClose, onShipped }: StartShipmentModalProps) {
+export function StartShipmentModal({ containers, onClose, onShipped, returnQuery = '' }: StartShipmentModalProps) {
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
   const canConfirm = hasPermission(PERMISSIONS.containersConfirm)
@@ -209,7 +214,7 @@ export function StartShipmentModal({ containers, onClose, onShipped }: StartShip
         autoClose: 6000,
         message: (
           <Text fz="sm">
-            <Anchor component="button" type="button" fz="sm" fw={600} onClick={() => void navigate(`/logistics/movements/${movement.id}`)}>
+            <Anchor component="button" type="button" fz="sm" fw={600} onClick={() => void navigate(`/logistics/movements/${movement.id}${returnQuery}`)}>
               {movement.movementNo}
             </Anchor>{' '}
             {verb} with {formatNumber(movement.containerCount)} container{movement.containerCount === 1 ? '' : 's'}

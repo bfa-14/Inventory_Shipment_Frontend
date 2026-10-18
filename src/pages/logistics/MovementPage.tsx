@@ -46,7 +46,7 @@ import { AuditTrail, type AuditEntry } from '../../components/documents/AuditTra
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel } from '../../components/documents/documentKind'
-import { formatMoney, formatNumber } from '../../components/format'
+import { formatMoney, formatNumber, todayDateOnly } from '../../components/format'
 import { DeliveryCancelDrafts } from '../../components/logistics/DeliveryReceipts'
 import { MovementContainersCard } from '../../components/logistics/MovementContainersCard'
 import { MovementDocumentsCard } from '../../components/logistics/MovementDocumentsCard'
@@ -277,9 +277,14 @@ export function MovementPage() {
   }, [])
 
   // (80) ?from=container/12: opened from that container's page - Back returns there, and the dialogs name it.
-  const fromMatch = /^container\/(\d+)$/.exec(searchParams.get('from') ?? '')
+  // ?from=containers: opened from a row of the Containers list ("Next leg…" in its "…" menu) - Back returns to the list.
+  const fromParam = searchParams.get('from') ?? ''
+  const fromMatch = /^container\/(\d+)$/.exec(fromParam)
   const fromContainerId = fromMatch ? Number(fromMatch[1]) : null
-  const fromQuery = fromContainerId === null ? '' : `?from=container/${fromContainerId}`
+  const fromContainersList = fromContainerId === null && fromParam === 'containers'
+  const fromQuery = fromContainerId !== null ? `?from=container/${fromContainerId}` : fromContainersList ? '?from=containers' : ''
+  /** Where Back (and a delete) returns: the page the movement was opened from. */
+  const backTo = fromContainerId !== null ? `${CONTAINERS_ROUTE}/${fromContainerId}` : fromContainersList ? CONTAINERS_ROUTE : MOVEMENTS_ROUTE
 
   // /new?containerId=12&containerId=15 - "New movement for this container" / "Next leg…" on the container page.
   const preset = searchParams.getAll('containerId').join(',')
@@ -403,6 +408,19 @@ export function MovementPage() {
     if (changed) markDirty()
   }
 
+  // (80) THE START DATE OF A MOVEMENT IN PROGRESS STAYS A FACT, as in its Start dialog: never in the future, never before
+  // the previous leg of one of its containers ended (the server refuses both on Save; the field says it first). The
+  // earliest start is the saved containers'; a container just ticked is checked by the server.
+  const startNotBefore = inProgress ? (movement?.startNotBefore?.slice(0, 10) ?? null) : null
+  const startDateProblem =
+    !inProgress || !values.startDate
+      ? null
+      : values.startDate > todayDateOnly()
+        ? 'The start date cannot be in the future: start the movement on the day it really leaves.'
+        : startNotBefore && values.startDate < startNotBefore
+          ? `The movement cannot start before ${movement?.startNotBeforeMovementNo ?? 'the previous leg'} reached ${movement?.startNotBeforePlaceName ?? 'its From'} on ${dateLabel(startNotBefore)}.`
+          : null
+
   function toRequest(v: FormValues, rowVersion: string | null): SaveMovementRequest {
     return {
       movementTypeId: Number(v.movementTypeId),
@@ -437,7 +455,7 @@ export function MovementPage() {
     const invalid = form.validate().hasErrors
     // Checked here rather than in the form's rules, which cannot see the status of the movement.
     if (inProgress && !values.startDate) form.setFieldError('startDate', 'The start date of a movement in progress is required.')
-    if (invalid || (inProgress && !values.startDate)) {
+    if (invalid || (inProgress && !values.startDate) || startDateProblem !== null) {
       notify.error('Check the highlighted fields.')
       return null
     }
@@ -495,7 +513,7 @@ export function MovementPage() {
       await movementsApi.remove(movement.id)
       dirty.current = false
       notify.success('Movement deleted.')
-      void navigate(MOVEMENTS_ROUTE)
+      void navigate(backTo)
     } catch (err) {
       fail(err, 'The movement could not be deleted.')
     }
@@ -507,8 +525,9 @@ export function MovementPage() {
       if (!go) return
     }
     dirty.current = false
-    // (80) Opened from a container: Back returns to it, not to the Movements list.
-    void navigate(fromContainerId !== null ? `${CONTAINERS_ROUTE}/${fromContainerId}` : MOVEMENTS_ROUTE)
+    // (80) Opened from a container (its page or its row on the Containers list): Back returns there, not to the
+    // Movements list.
+    void navigate(backTo)
   }
 
   /* ── fields: an input on a form, text on a record ────────────────────────────────────────── */
@@ -528,7 +547,7 @@ export function MovementPage() {
         clearable={!required}
         value={values[key]}
         onChange={(next) => form.setFieldValue(key, next ? String(next).slice(0, 10) : null)}
-        error={form.errors[key]}
+        error={form.errors[key] ?? (key === 'startDate' ? startDateProblem : null)}
       />
     )
   }
@@ -596,7 +615,9 @@ export function MovementPage() {
         breadcrumbs={
           fromContainerId !== null
             ? [{ label: fromContainerRef ?? 'Container', to: `${CONTAINERS_ROUTE}/${fromContainerId}` }, { label: movement?.movementNo ?? 'New movement' }]
-            : [{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]
+            : fromContainersList
+              ? [{ label: 'Containers', to: CONTAINERS_ROUTE }, { label: movement?.movementNo ?? 'New movement' }]
+              : [{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]
         }
         actions={
           movement ? (

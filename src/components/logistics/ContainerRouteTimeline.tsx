@@ -71,7 +71,7 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
               color={stageColour(leg.stage)}
               lineVariant={leg.status === 1 ? 'dashed' : 'solid'}
               bullet={<StageIcon stage={leg.stage} size={16} color="currentColor" />}
-              title={<LegTitle leg={leg} />}
+              title={<LegTitle leg={leg} containerId={container.id} />}
             >
               <LegBody leg={leg} />
             </Timeline.Item>
@@ -133,8 +133,9 @@ function WhereNow({ container }: { container: ContainerDto }) {
   )
 }
 
-function LegTitle({ leg }: { leg: ContainerMovementDto }) {
-  // The movement's own page needs View Movements (script 75); its number is shown either way.
+function LegTitle({ leg, containerId }: { leg: ContainerMovementDto; containerId: number }) {
+  // The movement's own page needs View Movements (script 75); its number is shown either way. The link carries the way
+  // back (?from=container/12): Back and the breadcrumb of that movement return to this container, not to the list.
   const canOpen = useAuth().hasPermission(PERMISSIONS.movementsView)
   return (
     <Group gap="xs" wrap="wrap">
@@ -145,7 +146,7 @@ function LegTitle({ leg }: { leg: ContainerMovementDto }) {
         {STATUS_NAMES[leg.status] ?? leg.status}
       </Badge>
       {canOpen ? (
-        <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}`} fz="xs">
+        <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}?from=container/${containerId}`} fz="xs">
           {leg.movementNo}
         </Anchor>
       ) : (

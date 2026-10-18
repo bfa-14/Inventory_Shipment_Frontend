@@ -43,7 +43,10 @@ export interface MovementFlags {
    * previous leg not completed, not at the From); null when it can start. Optional: an older API sends none.
    */
   startBlockedReason?: string | null
-  /** The earliest start date: the latest end of its containers' previous movements (refused before it, 70018). */
+  /**
+   * The earliest start date: the latest end of its containers' previous movements (refused before it, 70018). Also on a
+   * movement in progress, whose start date the page lets the user change (the Save refuses an earlier one).
+   */
   startNotBefore?: string | null
   /** The movement that ended on that date, and where: "MOV-2026-000046 reached Dar es Salaam". */
   startNotBeforeMovementNo?: string | null

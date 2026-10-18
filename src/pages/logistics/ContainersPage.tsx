@@ -241,7 +241,7 @@ export function ContainersPage() {
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
   // (80) A container's next step from its row: the same action as the button next to Save on its page.
-  const shipStep = useShipStep(() => void load())
+  const shipStep = useShipStep(() => void load(), 'containers')
   // The ticked rows as they are now: a reload after a bulk action brings their new status.
   const selectedRows = refreshSelection(selected, data?.items ?? [])
   const rows = useMemo(() => data?.items ?? [], [data])

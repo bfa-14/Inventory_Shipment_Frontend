@@ -233,7 +233,7 @@ export function ContainerPage() {
 
   /* (80) THE NEXT STEP OF ITS JOURNEY, one button next to Save: "Start shipment…", "Start Inland transport…", "Arrived
      at Dar es Salaam…", "Next leg…" - the same action as the row's "…" menu on the Containers list. */
-  const shipStep = useShipStep(() => void load())
+  const shipStep = useShipStep(() => void load(), 'container')
 
   /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
      files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the

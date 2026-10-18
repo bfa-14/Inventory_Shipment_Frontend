@@ -9,6 +9,13 @@ import { StartShipmentModal } from './StartShipmentModal'
 
 const MOVEMENTS_ROUTE = '/logistics/movements'
 
+/**
+ * Where the step was offered: the container's own page, or its row on the Containers list. The movement form and the
+ * notification's movement link carry it (?from=container/12 or ?from=containers), so Back on the movement returns
+ * there - never to a page the user did not come from.
+ */
+export type ShipStepOrigin = 'container' | 'containers'
+
 type Open =
   | { kind: 'ship'; container: SelectableContainer }
   | { kind: 'start' | 'complete'; container: SelectableContainer; movementId: number }
@@ -22,12 +29,15 @@ type Open =
  * - "Arrived at Dar es Salaam…" / "Complete Customs clearance…" (a movement in progress carries it): the Complete
  *   dialog, which says when the movement carries other containers too;
  * - "Next leg…" (its last movement is completed): the movement form, From = where it is (locked), the container ticked,
- *   and Back returning to the container.
+ *   and Back returning to where the step was offered (the container's page, or the Containers list).
  *
  * `action(container)` is null without containers.movements.manage (the entry is then hidden): a reader who may not move
  * containers is not shown a door. A disabled action carries its reason.
  */
-export function useShipStep(onDone: () => void): {
+export function useShipStep(
+  onDone: () => void,
+  origin: ShipStepOrigin,
+): {
   action: (container: SelectableContainer) => ShipAction | null
   run: (container: SelectableContainer) => void
   dialogs: ReactNode
@@ -37,6 +47,8 @@ export function useShipStep(onDone: () => void): {
   const canManage = hasPermission(PERMISSIONS.movementsManage)
   const canConfirm = hasPermission(PERMISSIONS.containersConfirm)
   const [open, setOpen] = useState<Open | null>(null)
+
+  const returnQuery = (container: SelectableContainer) => (origin === 'container' ? `?from=container/${container.id}` : '?from=containers')
 
   function action(container: SelectableContainer): ShipAction | null {
     return canManage ? shipActionOf(container, { canConfirm }) : null
@@ -54,7 +66,7 @@ export function useShipStep(onDone: () => void): {
         if (next.movementId !== null) setOpen({ kind: next.step === 'Start' ? 'start' : 'complete', container, movementId: next.movementId })
         break
       case 'NextLeg':
-        void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}&from=container/${container.id}`)
+        void navigate(`${MOVEMENTS_ROUTE}/new${returnQuery(container)}&containerId=${container.id}`)
         break
       default:
         break
@@ -68,7 +80,7 @@ export function useShipStep(onDone: () => void): {
 
   const dialogs =
     open?.kind === 'ship' ? (
-      <StartShipmentModal containers={[open.container]} onClose={() => setOpen(null)} onShipped={finished} />
+      <StartShipmentModal containers={[open.container]} onClose={() => setOpen(null)} onShipped={finished} returnQuery={returnQuery(open.container)} />
     ) : open ? (
       <MovementStatusModal
         kind={open.kind}
