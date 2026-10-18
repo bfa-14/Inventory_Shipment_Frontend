@@ -1751,8 +1751,9 @@ every step, the proposal, many containers at once and the to-do list.
   tooltip). A delivered container's step is its goods receipt: the card then opens with "Open goods receipt (draft)" or
   "Receive goods…" (green, the page's own rules and permissions), before "Add to a movement…" and "New movement for
   this container", and the action bar keeps that button beside Save instead of folding it into "More actions".
-- **The order's and the invoice's Containers cards and the Tracking board have no row menu**: they get no entry (their
-  rows link to the container, whose page has the button). Give them the entry if they ever grow a menu.
+- **The order's and the invoice's Containers cards have a row "…" menu (script 82)**, `ContainerRowMenu`: "Next step:
+  {label}" first, then "Open container" (see **Row menus of the order's and the invoice's Containers cards** below). The
+  Tracking board has no row menu: its rows open the container. The Shipments board's cards carry the step themselves.
 - **Start and Complete from the movement side stay one dialog**, `MovementStatusModal`, on the movement page and a row of
   the Movements list ("Start…" / "Complete…"). Its title and date field follow the same words (`completeWords`): "Arrived
   at Dar es Salaam - KTG-…", "Clearance date".
@@ -1780,8 +1781,10 @@ rule of phase 1 holds. A refusal is shown in the dialog as it comes, and the dia
   shipment" / "Plan shipment" for the first leg.
 - **A leg in progress** (title "Arrived at Dar es Salaam - KTG-2026-0031"): "MOV-2026-000046 Sea freight: Chennai → Dar es
   Salaam, started 20/09/2026, ETA 12/10/2026."; the date named by the stage ("Arrival date", "Clearance date", "Crossing
-  date", "Departure date", "Delivery date"), today, not before the start, not in the future; "All 12 containers of
-  MOV-… arrive too: …" when it carries others (no split); **"Then start …"** for the leg the server proposes after it -
+  date", "Departure date", "Delivery date"), today, not before the start, not in the future; when it carries others,
+  **"Which containers?"** (script 82, see **Only part of a movement arrived** below) - "All 12 containers of MOV-…" with
+  "All 12 containers of MOV-… arrive too: …", or "Only KTG-…: it leaves MOV-… and gets its own movement";
+  **"Then start …"** for the leg the server proposes after it -
   ticked by default for a stay at the arrival place or the leg after Customs / Border, unticked for a leg that moves, off
   with a hint when there is no To to propose, absent when the container's next leg is already planned. A Delivery shows `DeliveryCompletePreview` and "Then open the draft goods
   receipt" instead. Buttons "Record arrival", "Record clearance", "Record crossing", "Record departure", "Record
@@ -1818,9 +1821,11 @@ replaces "Start shipment…". It is disabled with "None of the ticked containers
   per container" (the server's default: one for Sea, Port, Origin and transshipment, one per container for road legs),
   whose hint follows the stage (`onePerContainerHint`: "each truck arrives on its own day" on a road leg, "each container
   is cleared on its own day" for Customs, "crosses" for Border, "is delivered" for Delivery), and "Edit…" (`NextLegFields` without the date, plus a Truck
-  no. / ETA table per container when one per container). A Complete group where only part of the movement is ticked says
-  "MOV-… is completed for all its 30 containers: the 10 not ticked arrive too."; it carries "Then start …" when the
-  server proposes a next leg. Under the step, the group's notes: "{n} drafts: confirmed first.", for a new leg "{n}
+  no. / ETA table per container when one per container). A Complete group where only part of the movement is ticked
+  offers "Complete MOV-… for all its 30 containers" / "Only the 20 ticked (they get their own movement)" (script 82), or,
+  when the ticked cannot arrive alone, says "MOV-… is completed for all its 30 containers: the 10 not ticked arrive too."
+  with the server's reason; it carries "Then start …" when the server proposes a next leg. Under the step, the group's
+  notes: "{n} drafts: confirmed first.", for a new leg "{n}
   without a container number: the shipment can start without it." (the dialog for one container's yellow alert), "{n}
   with typed dates: …". A group that cannot go as it stands (date before its earliest, no To, no type) says why in red
   and holds the button: "Choose the movement type. Use Edit…" (the ellipsis ends the sentence). A group changed with
@@ -1866,14 +1871,129 @@ Border) starts with To = From. Every place picker is grouped **Sea ports / Borde
 (`placeOptionGroups`), so a border post is never taken for the sea port of the same town.
 
 **Back follows the way in**: a movement page opened with `?from=container/12` returns to that container (its Back and
-its breadcrumb), one opened with `?from=containers` (the list's "Next leg…") returns to the Containers list, and both
-keep the parameter when a new movement is saved. Every way into a movement from a container carries it: "New movement
+its breadcrumb), one opened with `?from=containers` (the list's "Next leg…") returns to the Containers list, one opened
+with `?from=shipments` (a card of the Shipments board, script 82) returns to the board, and all keep the parameter when a
+new movement is saved. `useNextStep(onDone, origin)` takes `'container'` (its page, and its row on an order's or an
+invoice's Containers card), `'containers'` or `'shipments'`. Every way into a movement from a container carries
+it: "New movement
 for this container", the MOV-… links of the route card and the "Open MOV-…" links in the notification after a Next step
 (`NextStepModal`'s `returnQuery`). A link without it goes back to the Movements list.
 
 **The start date of a movement in progress stays a fact**: the movement page lets it be changed after Start, so its
 field shows the Start dialog's two refusals before the Save - after today, and before `startNotBefore` (which the API
 also gives for a movement in progress) - and the Save refuses both as well (70000 / 70018).
+
+## The Shipments board (script 82: Logistics › Shipments)
+
+The owner: "make shipment more user friendly and flexible". Phase 3 of the container-first design: **every container on
+its way, in one column by stage**, each card with its next step. Route `/logistics/shipments`
+(`pages/logistics/ShipmentsBoardPage.tsx`), first in the Logistics menu (icon `board`), permission
+`containers.shipments.view` (`PERMISSIONS.shipmentsView`); the pieces are in `components/logistics/shipments/`
+(`shipmentBoard.ts` the arithmetic, `ShipmentCard`, `ShipmentColumn`, `ShipmentDrawer`, `ShipmentsList`), the API in
+`api/logistics/shipments.ts` (`GET api/logistics/shipments/board`).
+
+- **The column, the group and their order are the server's** (`phase`, `groupKey`, `groupLabel`, `groupOrder`, decided by
+  `logistics.fn_Container_BoardPhase` from the same movements as the next step), never worked out here:
+  `boardColumns(columns, cards)` only gathers the cards it placed. Columns, left to right, with their titles as the server
+  gives them: "At supplier", "At sea", "At port", "On the road", "At border / customs", "Delivered, to receive", and with
+  "Show received (30 days)" "Received (30 days)". Each header: the title, "22 containers · 1,848 pcs" (`columnFigures`) and
+  "Select all ({n})"; the Received column is read-only ("Read-only: received in the last 30 days.": no boxes, no step).
+- **Groups fold** (the chevron; kept across reloads), each with its own "Select all": a ship "MOV-2026-000046 · MSC Aurora
+  V.123 · Chennai → Dar es Salaam · ETA 20/10/2026 (84)" (one tick takes the whole ship), a road leg "Dar es Salaam →
+  Kasumbalesa (12)", a place "Dar es Salaam (120)", "No port of loading (2)", a warehouse.
+- **A card** (`ShipmentCard`): ref (a button: the drawer from the keyboard), "MSKU1234565 · 40HC", "84 pcs TVS-APACHE-160"
+  / "2 items, 120 pcs" (`itemsText`), the supplier on one line (the whole name on hover), the order on its own line (a
+  link only for the container's own and only order, with `purchase.orders.view`), where it is (`WhereLine`: the leg's
+  "MOV-… · T 123 ABC · ETA 03/10/2026" in red when late, a stay "MOV-… Customs clearance since 04/10/2026", "Since
+  28/09/2026", "Not moved yet", "Delivered 08/10/2026", "Received …"; nothing on a ship's cards, whose group says it), the
+  badges (`CardBadges`: red "Late" and "Free time over" with the last free day on hover, "Draft", "No container no.",
+  "Cleared" in At border / customs, "GRN draft" linked to the draft with `purchase.goodsreceipts.view`, the GRN number once
+  received), "Planned next: MOV-… Inland transport → Kasumbalesa" (`PlannedNext`) and **"Next step: {label}"**
+  (`NextStepLink`): phase 2's `useNextStep(reload, 'shipments')`, hidden without the right to take it, dimmed with its
+  reason in words when blocked. Every MOV number is a link only with `containers.movements.view`, carrying
+  `?from=shipments`. Clicking a card (not its box, links or step) opens the drawer.
+- **The drawer** (`ShipmentDrawer`, full screen on a phone): the card's facts, the container's own `ContainerRouteTimeline`
+  (read when it opens: today's route; `canManage` false, its step button in the card's header) and "Open container".
+  Taking the step closes the drawer first, so the step's dialog is the only one on screen. Without `containers.view` it
+  says what the card says and offers no page.
+- **Filters on the server** (`useGridQuery`, no Apply): Search ("Ref, container no., B/L, vessel or order no.", typed),
+  Supplier and Purchase order (`SearchSelect`, the order only with its view permission), Branch, Place (grouped Sea ports /
+  Border posts / Inland places), and the switches "Late only", "With a planned leg", "Show received (30 days)"; Clear
+  Filters.
+- **The selection is ids**, ticked on cards, a group or a column, held by the page and **narrowed at every settled answer
+  to the cards still on the board** (in the render that brings it). It is the Containers list's own
+  `ContainerSelectionBar` (Confirm, "Container numbers…", "Next step…", "Add charge…", Delete, Clear): a card is a
+  container row (`api` fills an absent `containerNo` with null for it). After any action the board reads itself again.
+- **50 cards a column**, then "Showing 50 of 66 containers. Show 16 more · Show all" (`CARDS_STEP`, `drawColumn`). Only
+  the drawing is cut: every group header is drawn (its "Select all" reaches the whole group), the column's "Select all"
+  every container in it, a group cut short says "{n} more in this group: Show 50 more below.", and a folded group draws
+  nothing and uses none of the limit.
+- **"Board" / "List"** (a `SegmentedControl` in the header, the choice kept in `localStorage`
+  `inventory_shipment.shipments.view`, guarded): the List is the same rows and selection in one `DataTable` with an engine
+  (`storeKey` `logistics.shipments`, 50 a page up to 500, every column sorting and filtering in the browser) - Container
+  Ref., Container No., Stage, Place or leg (the group's words), Next step (the label alone, a link), Badges, Supplier, Order
+  No., Qty - for 300 containers or more; a row opens the same drawer.
+- **Wide (62em and up): the columns side by side**, `flex: 1 0 184px` - six fit at 1440 px with the menu open - each body
+  scrolling on its own (`max(360px, calc(100dvh - 380px))`) so its header stays in view; a seventh column (Received)
+  scrolls sideways **inside the board**, never the page. The body is a plain scrolling `div`, not Mantine's `ScrollArea`,
+  whose content is laid out as a table: long lines did not wrap and were cut at the column's edge.
+- **Below 62em one column at a time**, picked from a row of pill tabs with the counts ("At sea 22") that scrolls inside
+  itself; the page never scrolls sideways (390 px). The column then has no inner scroll: the page scrolls.
+- **Refresh**: the "Refresh" button ("Updated HH:mm" beside it), after every action, and a minute after the last answer -
+  looked at every 15 s and when the tab comes back - **only while the tab is visible and no dialog is open** (a Mantine
+  Modal or Drawer on screen: `[role="dialog"][aria-modal="true"]`), so nothing is read again under the reader's feet. The
+  selection survives it.
+- **No drag-and-drop, on purpose**: every move writes a movement with its dates, so every move goes through the Next step
+  dialogs.
+- **The answer carries only what the board, the List and the drawer read, without its empty fields** (5,000 cards are
+  3.6 MB of JSON; they were 11.9 MB, 45% of it nulls): an absent field reads as null - test with `??` or truthiness,
+  never `=== null`.
+
+### Only part of a movement arrived (script 82: the split choice in three dialogs)
+
+A movement in progress can be completed for **some** of its containers: those get their own movement - a copy with the
+same header and start date, already in progress - which is completed (a Delivery drafts only their goods receipts); the
+others stay on it, in progress. The server says whether a container can leave its movement and why not (`canSplitOff` /
+`splitOffBlockedReason` on the next step, the preview's rows and the movement's containers; `splitPossible` /
+`splitBlockedReason` on a preview group); the dialogs show it before the click and send the choice. **"All" stays the
+default everywhere.**
+
+- **`NextStepModal`**, a Complete of a movement that carries other containers: "Which containers?" - "All 12 containers of
+  MOV-2026-000046" (the default, with the orange "…arrive too: …") / "Only KTG-2026-0031: it leaves MOV-2026-000046 and
+  gets its own movement" (disabled, the server's reason as its description, when it cannot). Chosen, a blue line says "the
+  11 others stay on MOV-…, in progress", the Delivery preview names this container only, and the group goes with
+  `splitOff: true`; the Then leg works as after any arrival.
+- **`NextStepBulkModal`**, a Complete group where only part of the movement is ticked: "Complete MOV-… for all its 30
+  containers" (default) / "Only the 20 ticked (they get their own movement)"; its result row reads "{step} (only the
+  ticked)". When the ticked cannot arrive alone the phase 2 sentence stays ("…the 10 not ticked arrive too.", "the one not
+  ticked arrives too.") with "Only the ticked cannot arrive on their own: {reason}".
+- **The movement page's Complete dialog** (`MovementStatusModal` with `allowSplit`, a movement in progress carrying
+  several): the switch "Only some containers arrived" turns on a checklist of its containers (ticked = arrived, a container
+  that cannot leave disabled with its reason), "Arrived: 2 of 12", and the button "Complete 2 of 12 containers"
+  (`POST …/movements/{id}/complete-some`). None ticked: "Tick the containers that arrived."; every one: "Every container
+  of MOV-… is ticked: complete the movement itself (turn off "Only some containers arrived")." - the button waits. After
+  it the page reads its movement again (the others, still in progress) and offers "Continue: Next step…" for the ones
+  that arrived.
+- **The notifications are the server's**: "KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026 with MOV-2026-000052
+  (split off MOV-2026-000046). Now At Port. The 11 others are still on MOV-2026-000046." with "Open MOV-…", then the
+  Delivery's draft goods receipts (`showDeliveryResult`). **Split but not completed** (`ok` false with
+  `splitFromMovementId`, rare: the date is checked before anything is split) is **a warning, never a failure**: an orange
+  notification "MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page." with that movement's link
+  (the host reloads); in the bulk results the row reads "Refused" with that sentence in orange, and its containers stay
+  ticked. A refusal before the split is the usual error, in the dialog.
+- **The movement page** shows "Split from" with the original movement linked (`splitFromMovementId`), and its history
+  (`history`: "Split off" in orange, "Split from" in violet, with their details) among the stamps in the Activity card.
+
+### Row menus of the order's and the invoice's Containers cards (script 82)
+
+`ContainerRowMenu` (`components/logistics/`) is the "…" `ActionIcon` at the end of each container row of
+`OrderContainersCard` and `ShippedInvoiceContainersCard` (the first row of a container on the invoice, beside Unlink):
+"Next step: {label}" first - phase 2's dialog through `useNextStep(…, 'container')`, read from the container list row
+(the order's list, or `containersApi.list({ purchaseDocumentId })` for the invoice, every page, with `containers.view`);
+hidden without the right to take it, disabled with its reason under the label (a disabled menu item has no tooltip) -
+then "Open container". **A click on the menu is the menu's**: it stops there and never reaches the row. After a step the
+card reads its containers again (the order's host reloads the order; the invoice's card its summary and its rows). The
+order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_BADGE`) beside the extra column.
 
 ## Checklist for a new page
 

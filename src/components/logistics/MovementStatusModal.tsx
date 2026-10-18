@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Alert, Button, Group, Loader, Modal, Stack, Text } from '@mantine/core'
+import { Alert, Anchor, Button, Checkbox, Group, Loader, Modal, ScrollArea, Stack, Switch, Text } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
+import { notifications } from '@mantine/notifications'
 import { IconCheck, IconPlayerPlay } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
-import { movementsApi, type MovementDto } from '../../api/logistics/movements'
+import { movementsApi, type MovementDto, type MovementSplitResultDto } from '../../api/logistics/movements'
 import { useAuth } from '../../auth/useAuth'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
@@ -34,6 +35,13 @@ interface MovementStatusModalProps {
   onClose(): void
   /** After the start or the completion: the host shows the movement as it is now, or reloads its rows. */
   onDone(result: MovementDto): void
+  /**
+   * (82) The movement page: a Complete of a movement in progress that carries several containers offers "Only some
+   * containers arrived" - the ticked ones get their own movement, completed; the others stay on this one, in progress.
+   */
+  allowSplit?: boolean
+  /** After "Only some containers arrived": the host reads this movement again (it carries the others now). */
+  onSplitDone?(result: MovementSplitResultDto): void
 }
 
 /** "KTG-2026-0032, KTG-2026-0033 and 9 more". */
@@ -53,8 +61,12 @@ function someRefs(refs: string[]): string {
  *   MOV-2026-000046 arrive too" - completing it from one container's page moves every container on it.
  * - A Delivery shows what happens to each container's goods (the draft goods receipts), and the notifications after it
  *   say what did - every completion goes through the API's Complete, which drafts them after the commit.
+ * - (82) ON THE MOVEMENT PAGE, "Only some containers arrived" (a movement in progress carrying several): a checklist of
+ *   its containers, ticked = arrived, each that cannot leave it disabled with the server's reason. The ticked ones get
+ *   their own movement (`complete-some`), completed on the date - a Delivery drafts only their goods receipts - and the
+ *   others stay on this one, in progress. Ticking none or every one is said before the click.
  */
-export function MovementStatusModal({ kind, movementId, movement: given, container, onClose, onDone }: MovementStatusModalProps) {
+export function MovementStatusModal({ kind, movementId, movement: given, container, onClose, onDone, allowSplit = false, onSplitDone }: MovementStatusModalProps) {
   const navigate = useNavigate()
   const canViewReceipts = useAuth().hasPermission(PERMISSIONS.goodsReceiptsView)
   const [loaded, setLoaded] = useState<MovementDto | null>(null)
@@ -62,6 +74,9 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
   const [date, setDate] = useState<string | null>(todayDateOnly())
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /** (82) "Only some containers arrived", and the ones ticked as arrived. */
+  const [someOnly, setSomeOnly] = useState(false)
+  const [arrived, setArrived] = useState<ReadonlySet<number>>(() => new Set())
 
   // Read when it opens, unless the page already has it: the row a list holds has no containers nor row version.
   useEffect(() => {
@@ -110,7 +125,94 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
 
   const others = movement && container ? movement.containers.filter((c) => c.containerId !== container.id).map((c) => c.containerRef) : []
 
+  /* (82) ONLY SOME ARRIVED: a Complete of a movement in progress that carries several containers. Each container says
+     whether it can leave it (the server's canSplitOff, its reason under it when not); the ticked ones get their own
+     movement, the others stay on this one. Ticking none or every one is said before the click, as the server would. */
+  const splitAvailable = !starting && allowSplit && movement !== null && movement.status === 2 && movement.containers.length > 1
+  const splitting = splitAvailable && someOnly
+  const total = movement?.containers.length ?? 0
+  const someProblem = !splitting
+    ? null
+    : arrived.size === 0
+      ? 'Tick the containers that arrived.'
+      : arrived.size === total
+        ? `Every container of ${movement?.movementNo ?? 'the movement'} is ticked: complete the movement itself (turn off "Only some containers arrived").`
+        : null
+
+  function tick(containerId: number, on: boolean) {
+    setArrived((current) => {
+      const next = new Set(current)
+      if (on) next.add(containerId)
+      else next.delete(containerId)
+      return next
+    })
+    setError(null)
+  }
+
+  /** The movement made for the ones that arrived, as a link in the notification (the way back kept). */
+  function movementLink(m: MovementDto | null) {
+    if (!m) return null
+    return (
+      <Anchor component="button" type="button" fz="xs" fw={600} onClick={() => void navigate(`/logistics/movements/${m.id}`)}>
+        Open {m.movementNo}
+      </Anchor>
+    )
+  }
+
+  async function completeSome() {
+    if (!movement || !date || dateProblem || someProblem) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await movementsApi.completeSome(movement.id, { containerIds: [...arrived], date, rowVersion: movement.rowVersion })
+      const own = result.movement
+      if (result.ok) {
+        notifications.show({
+          color: 'green',
+          withBorder: true,
+          autoClose: 10000,
+          message: (
+            <Stack gap={2} data-status-split-done>
+              <Text fz="sm">{result.message}</Text>
+              {movementLink(own)}
+            </Stack>
+          ),
+        })
+        // A Delivery: the drafts made for the containers that arrived, and the ones that got none (rule 5).
+        if (own && (own.goodsReceipts?.length || result.warnings.length)) {
+          showDeliveryResult(own.goodsReceipts, result.warnings, { canViewReceipts, navigate: (to) => void navigate(to) })
+          void refreshGoodsReceiptsWaiting()
+        } else if (own?.goodsReceiptsAutomatic === false && own.goodsReceiptsMessage) {
+          notify.info(own.goodsReceiptsMessage)
+        }
+      } else {
+        // SPLIT BUT NOT COMPLETED: they are on their own movement now, in progress - a warning, with that movement.
+        notifications.show({
+          color: 'orange',
+          withBorder: true,
+          autoClose: 20000,
+          message: (
+            <Stack gap={2} data-status-split-not-completed>
+              <Text fz="sm">{result.message}</Text>
+              {movementLink(own)}
+            </Stack>
+          ),
+        })
+      }
+      onSplitDone?.(result)
+    } catch (err) {
+      // Nothing was split: shown in the dialog, which stays open (the date, a container changed meanwhile...).
+      setError(err instanceof ApiError ? err.message : 'The containers could not be completed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function confirmIt() {
+    if (splitting) {
+      await completeSome()
+      return
+    }
     if (!movement || !date || dateProblem || blocked) return
     setBusy(true)
     setError(null)
@@ -164,8 +266,48 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
               {`All ${formatNumber(movement.containers.length)} containers of ${movement.movementNo} ${starting ? 'start' : 'arrive'} too: ${container?.containerRef}, ${someRefs(others)}.`}
             </Alert>
           ) : null}
+          {splitAvailable ? (
+            <Switch
+              label="Only some containers arrived"
+              description={`The ticked containers get their own movement, completed on the date below; the others stay on ${movement.movementNo}, in progress.`}
+              checked={someOnly}
+              onChange={(e) => {
+                setSomeOnly(e.currentTarget.checked)
+                setError(null)
+              }}
+              data-status-some-only
+            />
+          ) : null}
+          {splitting ? (
+            <Stack gap={4} data-status-some-list>
+              <Text fz="sm" fw={600}>
+                {`Arrived: ${formatNumber(arrived.size)} of ${formatNumber(total)}`}
+              </Text>
+              <ScrollArea.Autosize mah={280} type="auto" offsetScrollbars="y">
+                <Stack gap={6}>
+                  {movement.containers.map((c) => (
+                    <Checkbox
+                      key={c.containerId}
+                      label={`${c.containerRef}${c.containerNo ? ` · ${c.containerNo}` : ''}`}
+                      description={c.canSplitOff === false ? (c.splitOffBlockedReason ?? 'It cannot arrive on its own now.') : undefined}
+                      disabled={c.canSplitOff === false || busy}
+                      checked={arrived.has(c.containerId)}
+                      onChange={(e) => tick(c.containerId, e.currentTarget.checked)}
+                      data-status-some-container={c.containerRef}
+                    />
+                  ))}
+                </Stack>
+              </ScrollArea.Autosize>
+              {someProblem ? (
+                <Text fz="xs" c={arrived.size === 0 ? 'dimmed' : 'red.7'} data-status-some-problem>
+                  {someProblem}
+                </Text>
+              ) : null}
+            </Stack>
+          ) : null}
           {delivery ? (
-            <DeliveryCompletePreview movement={movement} />
+            // Only some arrive: only their draft goods receipts are announced.
+            <DeliveryCompletePreview movement={splitting ? { ...movement, containers: movement.containers.filter((c) => arrived.has(c.containerId)) } : movement} />
           ) : (
             <Text fz="sm">
               {starting
@@ -209,11 +351,12 @@ export function MovementStatusModal({ kind, movementId, movement: given, contain
             <Button
               color={starting ? undefined : 'green'}
               leftSection={starting ? <IconPlayerPlay size={16} /> : <IconCheck size={16} />}
-              disabled={!date || dateProblem !== null || blocked !== null || wrongStatus}
+              disabled={!date || dateProblem !== null || blocked !== null || wrongStatus || someProblem !== null}
               loading={busy}
               onClick={() => void confirmIt()}
+              data-status-confirm
             >
-              {starting ? 'Start movement' : 'Complete movement'}
+              {starting ? 'Start movement' : splitting ? `Complete ${formatNumber(arrived.size)} of ${formatNumber(total)} containers` : 'Complete movement'}
             </Button>
           </Group>
         </Stack>

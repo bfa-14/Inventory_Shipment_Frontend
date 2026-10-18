@@ -42,9 +42,12 @@ const ACTION_COLOURS: Record<string, string> = {
   Confirmed: 'teal',
   Offloaded: 'green',
   OffloadCancelled: 'orange',
-  // Movements (built on the page from their stamps).
+  // Movements (built on the page from their stamps), and (82) a movement that arrived in parts: the original lost
+  // containers to a movement of their own, the new one came from it.
   Started: 'blue',
   Completed: 'green',
+  'Split off': 'orange',
+  'Split from': 'violet',
 }
 
 /**

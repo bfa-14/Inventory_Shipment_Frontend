@@ -125,6 +125,15 @@ export interface ContainerNextStepDto {
   canMove: boolean
   /** Its group in the preview's groups: an opaque key. */
   groupKey: string | null
+
+  /* (script 82) only part of its movement arrived */
+  /**
+   * A Complete of a movement that carries other containers: this one can arrive alone - it leaves the movement and gets
+   * its own ("Only KTG-2026-0031: it leaves MOV-2026-000046 and gets its own movement"). Absent from an older API.
+   */
+  canSplitOff?: boolean
+  /** Why not ("KTG-… already has the next leg MOV-… planned: complete MOV-… for every container, or take it off MOV-… first."). */
+  splitOffBlockedReason?: string | null
 }
 
 /** Ticked containers that move on together: the same step, movement, type, From and To. */
@@ -182,6 +191,13 @@ export interface NextStepGroupDto {
   thenSource: NextLegProposalSource | null
   thenLegs: number | null
   thenDefault: boolean
+  /**
+   * (script 82) A Complete group of only part of its movement whose ticked containers can arrive alone: "Only the 20
+   * ticked (they get their own movement)" sends `splitOff`. Absent from an older API.
+   */
+  splitPossible?: boolean
+  /** Why not, on a Complete group ("Every container of MOV-… is ticked: complete the movement itself."). */
+  splitBlockedReason?: string | null
 }
 
 /** The ticked containers that cannot move on, by reason ("Received, closed or cancelled (12)"). */
@@ -254,6 +270,12 @@ export interface NextStepGroupRequest {
   perContainer?: NextStepLegContainerRequest[] | null
   copyToContainers?: boolean
   then?: NextStepThenRequest | null
+  /**
+   * (script 82) A Complete only, when the preview says `splitPossible` / `canSplitOff`: ONLY THESE CONTAINERS ARRIVED.
+   * They leave the movement for their own (a copy with the same header and start), which is completed - a Delivery
+   * drafts their goods receipts - while the others stay on it, in progress.
+   */
+  splitOff?: boolean
 }
 
 export interface NextStepMovementDto {
@@ -285,6 +307,15 @@ export interface NextStepGroupResultDto {
   goodsReceiptsMessage: string | null
   /** Beside a step that was applied: a draft goods receipt not made, a Then leg refused ("Arrival recorded; …"). */
   warnings: string[]
+  /**
+   * (script 82) A split (splitOff): the movement the containers left; `movements[0]` is then their own. With ok false it
+   * means SPLIT BUT NOT COMPLETED - "MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page." -
+   * the containers are on their own movement, still in progress.
+   */
+  splitFromMovementId?: number | null
+  splitFromMovementNo?: string | null
+  /** The containers still on `splitFromMovementNo`, in progress. */
+  remainingContainerCount?: number | null
 }
 
 export const nextStepApi = {

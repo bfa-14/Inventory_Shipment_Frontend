@@ -45,6 +45,7 @@ import { ContainersPage } from './pages/logistics/ContainersPage'
 import { ContainerChargesPage } from './pages/logistics/ContainerChargesPage'
 import { MovementPage } from './pages/logistics/MovementPage'
 import { MovementsPage } from './pages/logistics/MovementsPage'
+import { ShipmentsBoardPage } from './pages/logistics/ShipmentsBoardPage'
 import { TrackingPage } from './pages/logistics/TrackingPage'
 import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
 import { PaymentMethodsPage } from './pages/masterdata/PaymentMethodsPage'
@@ -174,6 +175,10 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.trackingView} />}>
                 <Route path="/logistics/tracking" element={<TrackingPage />} />
+              </Route>
+              {/* The Shipments board (script 82): a screen of its own; its cards open the container's next step. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.shipmentsView} />}>
+                <Route path="/logistics/shipments" element={<ShipmentsBoardPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementsManage} />}>
                 <Route path="/logistics/movements/new" element={<MovementPage />} />

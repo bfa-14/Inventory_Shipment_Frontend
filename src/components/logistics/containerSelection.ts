@@ -18,9 +18,12 @@ export interface SelectableContainer extends ShipStepContainer {
   /** 1 planned, 2 in progress, 3 completed; null without a movement (the list's Movement column). */
   currentMovementStatus?: number | null
   currentMovementNo?: string | null
-  /** What "Start shipment" shows as its default route. */
-  portOfLoadingName: string | null
-  portOfDestinationName: string | null
+  /**
+   * What phase 1's "Start shipment" showed as its default route. Optional since the Next step dialogs read the
+   * container's own step (script 81), so a card of the Shipments board, which leaves them out, is a selectable row too.
+   */
+  portOfLoadingName?: string | null
+  portOfDestinationName?: string | null
 }
 
 export const DRAFT = 1

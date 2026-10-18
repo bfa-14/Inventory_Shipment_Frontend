@@ -9,10 +9,17 @@ import { NextStepModal } from './NextStepModal'
 const CONTAINERS_ROUTE = '/logistics/containers'
 
 /**
- * Where the step was offered: the container's own page, or its row on the Containers list. The notification's movement
- * links carry it (?from=container/12 or ?from=containers), so Back on the movement returns there.
+ * Where the step was offered: the container's own page (or its row on an order's or an invoice's Containers card), its
+ * row on the Containers list, or its card on the Shipments board. The notification's movement links carry it
+ * (?from=container/12, ?from=containers, ?from=shipments), so Back on the movement returns there.
  */
-export type NextStepOrigin = 'container' | 'containers'
+export type NextStepOrigin = 'container' | 'containers' | 'shipments'
+
+/** The way back a movement link carries, by where the step was offered. */
+function returnQueryOf(origin: NextStepOrigin, containerId: number): string {
+  if (origin === 'container') return `?from=container/${containerId}`
+  return origin === 'shipments' ? '?from=shipments' : '?from=containers'
+}
 
 /** What the hook reads of a container beyond its step: its goods receipt, for "Open goods receipt (draft)". */
 export interface NextStepTarget extends NextStepContainer {
@@ -70,7 +77,7 @@ export function useNextStep(
     <NextStepModal
       containerId={open.id}
       containerRef={open.containerRef}
-      returnQuery={origin === 'container' ? `?from=container/${open.id}` : '?from=containers'}
+      returnQuery={returnQueryOf(origin, open.id)}
       onClose={() => setOpen(null)}
       onDone={() => {
         setOpen(null)

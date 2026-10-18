@@ -57,6 +57,11 @@ interface GroupChoice {
   included: boolean
   onePerContainer: boolean
   then: boolean
+  /**
+   * (82) A Complete group of only part of its movement: the ticked containers arrive alone and get their own movement
+   * (true), or the movement is completed for every container it carries (false, the default).
+   */
+  splitOff: boolean
   /** A new leg: its type, To, carrier, vessel… (the shared date and Start now / Plan only are the dialog's). */
   leg: LegValues | null
   /** One per container: each container's truck no. and ETA, else the group's. */
@@ -81,6 +86,10 @@ interface Part {
  *
  * ONE DATE FOR EVERY GROUP, at the top: the day the containers arrived, cleared or left - never in the future for what
  * starts now or is recorded, never before a group's earliest.
+ *
+ * (82) A COMPLETE GROUP OF ONLY PART OF ITS MOVEMENT offers "Complete MOV-… for all its 30 containers" (the default) or
+ * "Only the 20 ticked (they get their own movement)" when the server says they can arrive alone; when they cannot, the
+ * sentence that the others arrive too stays, with the server's reason.
  *
  * EACH GROUP RUNS ALONE AND IS ALL OR NOTHING INSIDE: one refusal never stops the others. A group going one movement
  * per container is sent in parts of 50 ("Moving on: 150 of 300"), each part all or nothing; a group that is one movement
@@ -115,6 +124,7 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
             included: true,
             onePerContainer: g.onePerContainer,
             then: g.thenContainers > 0 && g.thenDefault,
+            splitOff: false,
             leg: g.isNewLeg ? initialLeg({ typeId: g.movementTypeId, toPlaceId: g.toPlaceId, stage: g.movementStage, placeId: g.fromPlaceId }, {}) : null,
             perContainer: {},
           }
@@ -187,9 +197,15 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
     }
   }
 
+  /** The reader chose "Only the {n} ticked" on a group that can do it. */
+  function splitChosen(g: NextStepGroupDto, choice: GroupChoice): boolean {
+    return g.kind === 'Complete' && choice.splitOff && g.splitPossible === true && g.movementContainerCount !== null && g.movementContainerCount > g.containers
+  }
+
   function partsOf(g: NextStepGroupDto, choice: GroupChoice): Part[] {
     const list = members.get(g.groupKey) ?? []
-    const label = groupStepLabel(asEdited(g, choice))
+    const split = splitChosen(g, choice)
+    const label = `${groupStepLabel(asEdited(g, choice))}${split ? ' (only the ticked)' : ''}`
     if (!g.isNewLeg) {
       return [
         {
@@ -203,6 +219,8 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
             containerIds: list.map((c) => c.id),
             date,
             then: g.kind === 'Complete' && choice.then && g.thenContainers > 0 ? { startNow: true, date } : null,
+            // Only the ticked arrived: they get their own movement, completed; the others stay on it, in progress.
+            splitOff: split || undefined,
           },
         },
       ]
@@ -266,13 +284,16 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
       }
       if (result?.ok) moved.push(...part.body.containerIds)
       if (result?.ok && asEdited(part.group, choices[part.group.groupKey]).movementStage === 'Delivery') delivered = true
+      // (82) SPLIT BUT NOT COMPLETED: refused as a step (they did not arrive, they stay ticked), and the server's sentence
+      // says in orange what did happen: they are on their own movement now, in progress.
+      const splitOnly = result !== null && !result.ok && Boolean(result.splitFromMovementId)
       items.push({
         id: index,
         documentNumber: part.label,
         ok: result?.ok ?? false,
         code: result?.ok ? null : (result?.code ?? 'Refused'),
-        message: result ? [result.message, result.ok ? result.goodsReceiptsMessage : null].filter(Boolean).join('\n') : failure,
-        warning: result?.warnings.length ? result.warnings.join(' ') : null,
+        message: splitOnly ? null : result ? [result.message, result.ok ? result.goodsReceiptsMessage : null].filter(Boolean).join('\n') : failure,
+        warning: splitOnly ? (result?.message ?? null) : result?.warnings.length ? result.warnings.join(' ') : null,
       })
       done += part.body.containerIds.length
       setProgress({ done, total })
@@ -392,10 +413,46 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
                                   {proposalSourceText(g.proposalSource, g.proposalLegs, g.placeName ?? g.fromName, g.toPlaceId !== null || g.isStay)}
                                 </Text>
                               ) : null}
-                              {othersArrive ? (
-                                <Text fz="xs" c="orange.8" data-next-step-others>
-                                  {`${g.movementNo} is completed for all its ${formatNumber(g.movementContainerCount ?? 0)} containers: the ${formatNumber((g.movementContainerCount ?? 0) - g.containers)} not ticked arrive too.`}
-                                </Text>
+                              {othersArrive && g.splitPossible ? (
+                                // (82) Only part of the movement is ticked and they can arrive alone: the reader chooses.
+                                <Radio.Group
+                                  value={choice.splitOff ? 'only' : 'all'}
+                                  onChange={(next) => patch(g.groupKey, { splitOff: next === 'only' })}
+                                  mt={4}
+                                  data-next-step-split
+                                >
+                                  <Stack gap={4}>
+                                    <Radio
+                                      size="xs"
+                                      value="all"
+                                      label={`Complete ${g.movementNo} for all its ${formatNumber(g.movementContainerCount ?? 0)} containers`}
+                                      disabled={busy}
+                                      data-next-step-split-all
+                                    />
+                                    <Radio
+                                      size="xs"
+                                      value="only"
+                                      label={`Only the ${formatNumber(g.containers)} ticked (they get their own movement)`}
+                                      disabled={busy}
+                                      data-next-step-split-only
+                                    />
+                                  </Stack>
+                                </Radio.Group>
+                              ) : othersArrive ? (
+                                <>
+                                  <Text fz="xs" c="orange.8" data-next-step-others>
+                                    {`${g.movementNo} is completed for all its ${formatNumber(g.movementContainerCount ?? 0)} containers: ${
+                                      (g.movementContainerCount ?? 0) - g.containers === 1
+                                        ? 'the one not ticked arrives too.'
+                                        : `the ${formatNumber((g.movementContainerCount ?? 0) - g.containers)} not ticked arrive too.`
+                                    }`}
+                                  </Text>
+                                  {g.splitBlockedReason ? (
+                                    <Text fz="xs" c="dimmed" data-next-step-split-blocked>
+                                      {`Only the ticked cannot arrive on their own: ${g.splitBlockedReason}`}
+                                    </Text>
+                                  ) : null}
+                                </>
                               ) : null}
                               {g.kind === 'Complete' && g.thenContainers > 0 ? (
                                 <Checkbox

@@ -7,6 +7,8 @@ export const PERMISSIONS = {
   statementView: 'sales.statement.view',
   movementsView: 'containers.movements.view',
   trackingView: 'containers.tracking.view',
+  // Logistics › Shipments, the board of every container on its way (script 82).
+  shipmentsView: 'containers.shipments.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -284,10 +286,12 @@ export const NAVIGATION: NavSection[] = [
   },
   {
     // THE SHIPMENT BETWEEN THE ORDER AND THE WAREHOUSE: containers loaded from purchase orders, the
-    // movements they travel with, the charges that make their real cost, and the tracking board.
+    // movements they travel with, the charges that make their real cost, and the tracking board. The Shipments board
+    // comes first (script 82): where every container is, by stage, and what each does next.
     title: 'LOGISTICS',
     breadcrumb: 'Logistics',
     items: [
+      { label: 'Shipments', to: '/logistics/shipments', permission: PERMISSIONS.shipmentsView, icon: 'board' },
       { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
       { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsView, icon: 'ship' },
       { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },

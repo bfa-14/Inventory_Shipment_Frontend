@@ -37,7 +37,7 @@ import {
 import { ApiError } from '../../api/http'
 import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { containersApi } from '../../api/logistics/containers'
-import { movementsApi, movementStatusColour, type MovementDto, type SaveMovementRequest } from '../../api/logistics/movements'
+import { movementsApi, movementStatusColour, type MovementDto, type MovementSplitResultDto, type SaveMovementRequest } from '../../api/logistics/movements'
 import { movementTypesApi, SINGLE_PLACE_STAGES, stageExplanation, type MovementTypeLookupDto } from '../../api/masterdata/movementTypes'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
@@ -70,6 +70,7 @@ import { useDocumentTypes } from '../../hooks/useDocumentTypes'
 const DELIVERY = 'Delivery'
 
 const CONTAINERS_ROUTE = '/logistics/containers'
+const SHIPMENTS_ROUTE = '/logistics/shipments'
 
 interface FormValues {
   movementTypeId: string | null
@@ -136,7 +137,10 @@ function keepDetails(saved: CardContainer, before: CardContainer | undefined, ke
   }
 }
 
-/** What happened to the movement, newest first, from the stamps the movement carries. */
+/**
+ * What happened to the movement, newest first: the stamps the movement carries, and (82) its history beyond them - a
+ * split, "Split off into MOV-…: KTG-…" on the original, "Split from MOV-…: KTG-… arrived on its own." on the new one.
+ */
 function auditOf(dto: MovementDto): AuditEntry[] {
   const entries: (AuditEntry | null)[] = [
     { action: 'Created', details: null, userName: dto.createdByName, atUtc: dto.createdAtUtc },
@@ -144,6 +148,7 @@ function auditOf(dto: MovementDto): AuditEntry[] {
     dto.startedAtUtc ? { action: 'Started', details: dto.startDate ? `Start date ${dateLabel(dto.startDate)}` : null, userName: dto.startedByName, atUtc: dto.startedAtUtc } : null,
     dto.completedAtUtc ? { action: 'Completed', details: dto.endDate ? `End date ${dateLabel(dto.endDate)}` : null, userName: dto.completedByName, atUtc: dto.completedAtUtc } : null,
     dto.cancelledAtUtc ? { action: 'Cancelled', details: dto.cancelReason, userName: dto.cancelledByName, atUtc: dto.cancelledAtUtc } : null,
+    ...(dto.history ?? []).map((h) => ({ action: h.action, details: h.details, userName: h.userName, atUtc: h.atUtc })),
   ]
   return entries.filter((e): e is AuditEntry => e !== null).sort((a, b) => b.atUtc.localeCompare(a.atUtc))
 }
@@ -283,13 +288,23 @@ export function MovementPage() {
 
   // (80) ?from=container/12: opened from that container's page - Back returns there, and the dialogs name it.
   // ?from=containers: opened from a row of the Containers list ("Next leg…" in its "…" menu) - Back returns to the list.
+  // (82) ?from=shipments: opened from a card of the Shipments board - Back returns to the board.
   const fromParam = searchParams.get('from') ?? ''
   const fromMatch = /^container\/(\d+)$/.exec(fromParam)
   const fromContainerId = fromMatch ? Number(fromMatch[1]) : null
   const fromContainersList = fromContainerId === null && fromParam === 'containers'
-  const fromQuery = fromContainerId !== null ? `?from=container/${fromContainerId}` : fromContainersList ? '?from=containers' : ''
+  const fromShipments = fromContainerId === null && fromParam === 'shipments'
+  const fromQuery =
+    fromContainerId !== null ? `?from=container/${fromContainerId}` : fromContainersList ? '?from=containers' : fromShipments ? '?from=shipments' : ''
   /** Where Back (and a delete) returns: the page the movement was opened from. */
-  const backTo = fromContainerId !== null ? `${CONTAINERS_ROUTE}/${fromContainerId}` : fromContainersList ? CONTAINERS_ROUTE : MOVEMENTS_ROUTE
+  const backTo =
+    fromContainerId !== null
+      ? `${CONTAINERS_ROUTE}/${fromContainerId}`
+      : fromContainersList
+        ? CONTAINERS_ROUTE
+        : fromShipments
+          ? SHIPMENTS_ROUTE
+          : MOVEMENTS_ROUTE
 
   // /new?containerId=12&containerId=15 - "New movement for this container" / "Next leg…" on the container page.
   const preset = searchParams.getAll('containerId').join(',')
@@ -490,7 +505,29 @@ export function MovementPage() {
     const completed = dateDialog === 'complete'
     show(result, true)
     setDateDialog(null)
-    if (!completed || result.status !== 3 || result.stage === DELIVERY || !canManage || result.containers.length === 0) return
+    if (!completed) return
+    offerContinue(result)
+  }
+
+  /**
+   * (82) Only some containers arrived: they are completed on their own movement, the others stay here, in progress. The
+   * page reads this movement again (without the page-wide loader, the notifications stay readable) and offers the next
+   * step of the ones that arrived, as after any arrival.
+   */
+  function splitDone(result: MovementSplitResultDto) {
+    setDateDialog(null)
+    if (movementId !== null) {
+      movementsApi
+        .get(movementId)
+        .then((dto) => show(dto, true))
+        .catch(() => void load())
+    }
+    if (result.ok && result.movement) offerContinue(result.movement)
+  }
+
+  /** A leg completed (not a Delivery: its goods are received next): "Continue: Next step…" for its containers. */
+  function offerContinue(result: MovementDto) {
+    if (result.status !== 3 || result.stage === DELIVERY || !canManage || result.containers.length === 0) return
     const arrived = result.containers.map((c) => ({ id: c.containerId, containerRef: c.containerRef }))
     const id = `continue-${result.id}-${Date.now()}`
     notifications.show({
@@ -659,7 +696,9 @@ export function MovementPage() {
             ? [{ label: fromContainerRef ?? 'Container', to: `${CONTAINERS_ROUTE}/${fromContainerId}` }, { label: movement?.movementNo ?? 'New movement' }]
             : fromContainersList
               ? [{ label: 'Containers', to: CONTAINERS_ROUTE }, { label: movement?.movementNo ?? 'New movement' }]
-              : [{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]
+              : fromShipments
+                ? [{ label: 'Shipments', to: SHIPMENTS_ROUTE }, { label: movement?.movementNo ?? 'New movement' }]
+                : [{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]
         }
         actions={
           movement ? (
@@ -739,6 +778,17 @@ export function MovementPage() {
                 {inProgress || movement?.startDate ? dateField('startDate', 'Start date', inProgress) : null}
                 {dateField('eta', 'ETA')}
                 {movement?.endDate ? <ViewField label="End date" value={dateLabel(movement.endDate)} /> : null}
+                {/* (82) Only part of that movement arrived: these containers came on with a movement of their own. */}
+                {movement?.splitFromMovementId && movement.splitFromMovementNo ? (
+                  <div data-split-from>
+                    <Text fz="sm" fw={500} mb={2}>
+                      Split from
+                    </Text>
+                    <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${movement.splitFromMovementId}${fromQuery}`} fz="sm">
+                      {movement.splitFromMovementNo}
+                    </Anchor>
+                  </div>
+                ) : null}
                 {readOnly ? (
                   <ViewField label="Carrier" value={carrierOptions.find((o) => o.value === values.carrierPartyId)?.label ?? movement?.carrierName ?? null} />
                 ) : (
@@ -837,6 +887,9 @@ export function MovementPage() {
           container={fromContainer}
           onClose={() => setDateDialog(null)}
           onDone={statusDone}
+          // (82) "Only some containers arrived": the ticked ones get their own movement, the others stay on this one.
+          allowSplit={canManage}
+          onSplitDone={splitDone}
         />
       ) : null}
 

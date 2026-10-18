@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Alert, Anchor, Button, Checkbox, Group, Loader, Modal, Stack, Text } from '@mantine/core'
+import { Alert, Anchor, Button, Checkbox, Group, Loader, Modal, Radio, Stack, Text } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -59,7 +59,10 @@ function someRefs(refs: string[]): string {
  * - A LEG IN PROGRESS ("Arrived at Dar es Salaam…", "Cleared customs at Kasumbalesa…"): the date named by the stage, the
  *   containers that arrive too, and "Then start …" for the leg proposed after it - a second step once the arrival is
  *   committed, so a refusal there never undoes the arrival. A Delivery shows its draft goods receipts and can open the
- *   container's draft afterwards.
+ *   container's draft afterwards. (82) When the movement carries other containers, "Which containers?": all of them (the
+ *   default), or only this one - it leaves the movement for its own, completed on the date, the others stay on it in
+ *   progress (disabled with the server's reason when it cannot, a later leg already planned). Split but not completed
+ *   (rare: the date is checked first) is said as a warning with that movement, never as a step that did nothing.
  *
  * Every step goes through the API's next step, which takes the movement's own Complete / Start (the Delivery's goods
  * receipts are drafted after the commit) or saves a new leg with the movement procedures: the server's refusal is shown
@@ -81,6 +84,8 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
   const [leg, setLeg] = useState<LegValues | null>(null)
   const [date, setDate] = useState<string | null>(todayDateOnly())
   const [then, setThen] = useState(false)
+  /** (82) A movement that carries other containers: all of them arrive (the default), or only this one, split off. */
+  const [which, setWhich] = useState<'all' | 'only'>('all')
   const [openReceipt, setOpenReceipt] = useState(true)
   const [tried, setTried] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -165,6 +170,11 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
   const placeProblem = newLeg && leg && tried ? legProblem(leg, types, place !== null) : null
 
   const others = movement ? movement.containers.filter((c) => c.containerId !== containerId).map((c) => c.containerRef) : []
+  /* (82) ONLY THIS ONE ARRIVED: offered on a Complete of a movement that carries others, disabled with the server's
+     reason when the container cannot leave it (a later leg already planned...). */
+  const splitOffered = completing && others.length > 0
+  const splitBlocked = step?.canSplitOff === false ? (step.splitOffBlockedReason ?? 'This container cannot arrive on its own now.') : null
+  const splitOff = splitOffered && which === 'only' && step?.canSplitOff === true
   const delivery = completing && step?.movementStage === DELIVERY
   const receiptsAutomatic = movement?.goodsReceiptsAutomatic !== false
   const blocked = step?.blockedReason ?? (starting ? (movement?.startBlockedReason ?? null) : null)
@@ -198,6 +208,8 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
         containerIds: [containerId],
         date,
         then: completing && then && thenOffered ? { startNow: true, date } : null,
+        // Only this container arrived: it leaves the movement for its own, which is completed; the others stay on it.
+        splitOff: splitOff || undefined,
       }
     }
     if (!leg || !legType) return null
@@ -239,6 +251,13 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
     setError(null)
     try {
       const [result] = await nextStepApi.apply([body])
+      if (result && !result.ok && result.splitFromMovementId) {
+        // (82) SPLIT BUT NOT COMPLETED: the container is on its own movement now, still in progress - said as a warning
+        // with that movement, never as a step that did nothing; the host reads the container again.
+        announceSplitOnly(result)
+        onDone()
+        return
+      }
       if (!result?.ok) {
         // Shown in the dialog, which stays open: the reader changes the date, or reads why and cancels.
         setError(result?.message ?? 'The step could not be taken.')
@@ -251,6 +270,26 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
     } finally {
       setBusy(false)
     }
+  }
+
+  /** "MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page.", with that movement's link. */
+  function announceSplitOnly(result: NextStepGroupResultDto) {
+    const own = result.movements[0]
+    notifications.show({
+      color: 'orange',
+      withBorder: true,
+      autoClose: 20000,
+      message: (
+        <Stack gap={2} data-next-step-split-not-completed>
+          <Text fz="sm">{result.message}</Text>
+          {own ? (
+            <Anchor component="button" type="button" fz="xs" fw={600} onClick={() => void navigate(`/logistics/movements/${own.id}${returnQuery}`)}>
+              Open {own.movementNo}
+            </Anchor>
+          ) : null}
+        </Stack>
+      ),
+    })
   }
 
   /** The server's sentence, with its movements as links; then the Delivery's draft goods receipts and the warnings. */
@@ -382,11 +421,32 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
                 The dispatch and arrival dates typed on this container will be replaced by the movements' dates.
               </Alert>
             ) : null}
-            {others.length > 0 ? (
+            {splitOffered ? (
+              <Radio.Group label="Which containers?" value={which} onChange={(next) => setWhich(next as 'all' | 'only')} data-next-step-which>
+                <Stack gap={6} mt={6}>
+                  <Radio value="all" label={`All ${formatNumber(movement?.containers.length ?? 0)} containers of ${step.movementNo}`} data-next-step-which-all />
+                  <Radio
+                    value="only"
+                    label={`Only ${containerRef}: it leaves ${step.movementNo} and gets its own movement`}
+                    description={splitBlocked ?? undefined}
+                    disabled={splitBlocked !== null}
+                    data-next-step-which-only
+                  />
+                </Stack>
+              </Radio.Group>
+            ) : null}
+            {others.length > 0 && !splitOff ? (
               <Alert color="orange" py={6} data-next-step-others>
                 {completing
                   ? `All ${formatNumber(movement?.containers.length ?? 0)} containers of ${step.movementNo} arrive too: ${containerRef}, ${someRefs(others)}.`
                   : `It also carries ${someRefs(others)}: they start with it.`}
+              </Alert>
+            ) : null}
+            {splitOff ? (
+              <Alert color="blue" py={6} data-next-step-split-note>
+                {`${containerRef} leaves ${step.movementNo} for a movement of its own, completed on the date below; the ${
+                  others.length === 1 ? 'other container stays' : `${formatNumber(others.length)} others stay`
+                } on ${step.movementNo}, in progress.`}
               </Alert>
             ) : null}
             {blocked ? (
@@ -414,7 +474,10 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
               />
             ) : (
               <>
-                {delivery && movement ? <DeliveryCompletePreview movement={movement} /> : null}
+                {delivery && movement ? (
+                  // Only this one arrives: only its draft goods receipt is announced.
+                  <DeliveryCompletePreview movement={splitOff ? { ...movement, containers: movement.containers.filter((c) => c.containerId === containerId) } : movement} />
+                ) : null}
                 <DateInput
                   label={completing ? words.dateLabel : 'Start date'}
                   withAsterisk

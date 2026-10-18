@@ -2,13 +2,18 @@ import { useEffect, useState } from 'react'
 import { Alert, Anchor, Badge, Button, Group, Loader, Paper, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
 import { IconBox, IconBoxMultiple, IconLink, IconUnlink } from '@tabler/icons-react'
 import { Link } from 'react-router'
+import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
-import { containerStatusColour } from '../../api/logistics/containers'
+import { containersApi, containerStatusColour, type ContainerListDto } from '../../api/logistics/containers'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import type { PurchaseDocumentDto } from '../../api/purchase/documents'
 import { invoiceContainersApi, type InvoiceContainerSummaryDto } from '../../api/purchase/invoiceContainers'
 import { formatNumber } from '../format'
 import { AddContainerModal } from '../logistics/AddContainerModal'
 import { AutoPlanModal } from '../logistics/AutoPlanModal'
+import { ContainerRowMenu } from '../logistics/ContainerRowMenu'
+import { useNextStep } from '../logistics/useNextStep'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { ShownRowsFooter } from '../ui/ShownRows'
@@ -69,8 +74,11 @@ export function ShippedInvoiceContainersCard({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [unlinking, setUnlinking] = useState<number | null>(null)
+  /** (82) Moves on after a container's next step from its row: the card reads its containers again (their status). */
+  const [stepped, setStepped] = useState(0)
+  const canViewContainers = useAuth().hasPermission(PERMISSIONS.containersView)
 
-  // Read again whenever the invoice changes on the server (a new row version).
+  // Read again whenever the invoice changes on the server (a new row version), and after a container moved on.
   useEffect(() => {
     if (pendingSwitch) return
     const controller = new AbortController()
@@ -84,7 +92,30 @@ export function ShippedInvoiceContainersCard({
         if (!controller.signal.aborted) setLoadError(err instanceof ApiError ? err.message : 'The containers could not be loaded.')
       })
     return () => controller.abort()
-  }, [invoice.id, invoice.rowVersion, pendingSwitch])
+  }, [invoice.id, invoice.rowVersion, pendingSwitch, stepped])
+
+  /* (82) EACH CONTAINER'S NEXT STEP, from its row's "…" menu: the summary says what the invoice holds in it, the
+     container list (every page, for this invoice) says where each container is and what it does next - the Containers
+     list's own row. Asked only with containers.view, as the container itself is. */
+  const nextStep = useNextStep(() => setStepped((n) => n + 1), 'container')
+  const [listRows, setListRows] = useState<ContainerListDto[]>([])
+  const linkedCount = summary?.containers.length ?? 0
+  useEffect(() => {
+    if (!canViewContainers || linkedCount === 0) return
+    const controller = new AbortController()
+    fetchAllPages(
+      (page, pageSize) => containersApi.list({ purchaseDocumentId: invoice.id, page, pageSize, sortBy: 'ContainerRef', sortDir: 'asc' }, controller.signal),
+      { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE },
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setListRows(result.items)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setListRows([])
+      })
+    return () => controller.abort()
+  }, [invoice.id, invoice.rowVersion, stepped, canViewContainers, linkedCount])
+  const listById = new Map(listRows.map((row) => [row.id, row]))
 
   /* THE STATE IS THE SERVER'S (script 47): whether the invoice can take containers, and the first rule that says no -
      the same sentence the add and the link would refuse with. Nothing is guessed here from the lines or the status. */
@@ -294,6 +325,7 @@ export function ShippedInvoiceContainersCard({
                     <Table.Th ta="right">Pieces</Table.Th>
                     <Table.Th ta="right">Share of the container</Table.Th>
                     <Table.Th w={110} />
+                    {canViewContainers ? <Table.Th w={44} aria-label="Actions" /> : null}
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -338,6 +370,21 @@ export function ShippedInvoiceContainersCard({
                             </Button>
                           )}
                         </Table.Td>
+                        {canViewContainers ? (
+                          <Table.Td>
+                            {first ? (
+                              <ContainerRowMenu
+                                containerId={c.containerId}
+                                containerRef={c.containerRef}
+                                step={listById.has(c.containerId) ? nextStep.action(listById.get(c.containerId) as ContainerListDto) : null}
+                                onStep={() => {
+                                  const row = listById.get(c.containerId)
+                                  if (row) nextStep.run(row)
+                                }}
+                              />
+                            ) : null}
+                          </Table.Td>
+                        ) : null}
                       </Table.Tr>
                     )
                   })}
@@ -348,6 +395,8 @@ export function ShippedInvoiceContainersCard({
           <ShownRowsFooter limit={shownContainers.limit} total={containerRows.length} noun="rows" more={shownContainers.more} all={shownContainers.all} />
         </>
       )}
+
+      {nextStep.dialogs}
 
       {dialog === 'link' && (
         <LinkContainersModal invoiceId={invoice.id} rowVersion={invoice.rowVersion} onClose={() => setDialog(null)} onLinked={(next) => changed(next)} />

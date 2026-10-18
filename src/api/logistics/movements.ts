@@ -107,6 +107,13 @@ export interface MovementContainerDto extends MovementContainerReceiptInfo {
   draftChargesBase: number | null
   attachmentCount: number
   containerRowVersion: string
+  /**
+   * (script 82) "Only some containers arrived" in the Complete dialog: the movement is in progress, carries other
+   * containers, and this one has no later leg, so it can arrive alone. Absent from an older API.
+   */
+  canSplitOff?: boolean
+  /** Why not ("KTG-… already has the next leg MOV-… planned: complete MOV-… for every container, or take it off MOV-… first."). */
+  splitOffBlockedReason?: string | null
 }
 
 /**
@@ -168,6 +175,18 @@ export interface MovementAttachmentDto {
   createdByName: string | null
 }
 
+/** (script 82) What happened to a movement beyond its own stamps: a split, on both movements, newest first. */
+export interface MovementAuditDto {
+  id: number
+  /** "Split off" (the original) or "Split from" (the movement of the containers that arrived). */
+  action: string
+  /** "Split off into MOV-2026-000052: KTG-2026-0031" / "Split from MOV-2026-000046: KTG-2026-0031 arrived on its own." */
+  details: string | null
+  userId: number | null
+  userName: string | null
+  atUtc: string
+}
+
 export interface MovementDto extends MovementFlags {
   id: number
   documentTypeId: number
@@ -209,6 +228,11 @@ export interface MovementDto extends MovementFlags {
   updatedByName: string | null
   rowVersion: string
   isLate: boolean
+  /** (script 82) The movement it was split off, when only part of that one arrived: "Split from MOV-2026-000046". */
+  splitFromMovementId?: number | null
+  splitFromMovementNo?: string | null
+  /** (script 82) Its history beyond its own stamps (created, started, completed, cancelled): its splits, newest first. */
+  history?: MovementAuditDto[]
   /**
    * (79) The goods receipt type's "Create goods receipts when a Delivery is completed" (Configuration › Document Types):
    * false, completing a Delivery drafts none - they are made by hand with Receive goods… on each container. Missing (an
@@ -230,6 +254,37 @@ export interface MovementDto extends MovementFlags {
    * Use Receive goods… on each container."), or one container's row ("{ref}: the draft goods receipt was not created…").
    */
   warnings?: string[]
+}
+
+/**
+ * (script 82) "Only some containers arrived": the ticked containers of a movement in progress leave it for their own, which
+ * is completed on the date; the others stay on it, in progress.
+ */
+export interface CompleteSomeRequest {
+  /** Some of the movement's containers, not all. */
+  containerIds: number[]
+  /** 'YYYY-MM-DD'; null = today. Never in the future, never before the start. */
+  date: string | null
+  rowVersion: string | null
+}
+
+/**
+ * (script 82) The answer to "Only some containers arrived": the split is committed. `ok` false = SPLIT BUT NOT COMPLETED
+ * ("MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page."), `movement` then the new movement,
+ * in progress - shown as a warning, never as a failure of the whole.
+ */
+export interface MovementSplitResultDto {
+  ok: boolean
+  code: string | null
+  /** "KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026 with MOV-2026-000052 (split off MOV-2026-000046). Now At Port. The 11 others are still on MOV-2026-000046." */
+  message: string
+  originalMovementId: number
+  originalMovementNo: string
+  /** The containers still on the original, in progress. */
+  remainingContainerCount: number
+  /** The containers' own movement as it is now (a completed Delivery carries goodsReceipts and goodsReceiptsMessage). */
+  movement: MovementDto | null
+  warnings: string[]
 }
 
 /** (script 80) A planned movement a container can join: after its latest movement and at its place (`GET join-candidates`). */
@@ -444,6 +499,15 @@ export const movementsApi = {
    */
   complete: (id: number, date: string | null, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/complete`, { method: 'POST', body: { date, rowVersion } }),
+
+  /**
+   * (script 82) Only the ticked containers arrived: they get their own movement, completed on the date; the others stay on
+   * this one, in progress. Refusals before anything is split are ProblemDetails: 400 VALIDATION (none ticked, one not on
+   * the movement, a date in the future or before the start), 404, 409 CONCURRENCY or INVALID_STATUS (not in progress,
+   * every container ticked, a container with a later leg).
+   */
+  completeSome: (id: number, body: CompleteSomeRequest) =>
+    request<MovementSplitResultDto>(`${BASE}/${id}/complete-some`, { method: 'POST', body }),
 
   /** A completed Delivery: its automatic draft goods receipts are deleted with it. */
   cancel: (id: number, reason: string, rowVersion: string | null) =>
