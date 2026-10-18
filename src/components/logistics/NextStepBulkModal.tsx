@@ -17,6 +17,7 @@ import {
   TextInput,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
+import { useMediaQuery } from '@mantine/hooks'
 import { IconPencil } from '@tabler/icons-react'
 import type { BulkActionItemResult, BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
@@ -98,6 +99,8 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [results, setResults] = useState<{ result: BulkActionResult; moved: number[] } | null>(null)
   const ids = useMemo(() => containers.map((c) => c.id), [containers])
+  // A phone gets the whole screen: the groups table scrolls sideways inside it.
+  const phone = useMediaQuery('(max-width: 36em)')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -285,6 +288,7 @@ export function NextStepBulkModal({ containers, onClose, onFinished }: NextStepB
         onClose={onClose}
         title={`Next step - ${formatNumber(containers.length)} containers`}
         size="95rem"
+        fullScreen={phone}
         closeOnClickOutside={!busy}
         withCloseButton={!busy}
       >
@@ -559,12 +563,13 @@ function GroupLegModal({ group, choice, members, types, ports, onClose, onSave }
   const [perContainer, setPerContainer] = useState(choice.perContainer)
   const [tried, setTried] = useState(false)
   const shown = useShownRows(members.length)
+  const phone = useMediaQuery('(max-width: 36em)')
   const place = group.fromPlaceId !== null ? { id: group.fromPlaceId, name: group.fromName ?? group.placeName ?? '' } : null
   const proposal = { typeId: group.movementTypeId, toPlaceId: group.toPlaceId, placeId: group.fromPlaceId }
   const problem = legProblem(leg, types)
 
   return (
-    <Modal opened onClose={onClose} title={`${groupStepLabel(group)} - ${formatNumber(members.length)} containers`} size="xl">
+    <Modal opened onClose={onClose} title={`${groupStepLabel(group)} - ${formatNumber(members.length)} containers`} size="xl" fullScreen={phone}>
       <form
         onSubmit={(e) => {
           e.preventDefault()

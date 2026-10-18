@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Alert, Anchor, Button, Checkbox, Group, Loader, Modal, Stack, Text } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
+import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { IconCheck, IconPlayerPlay, IconRoute } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -69,6 +70,8 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
   const { hasPermission } = useAuth()
   const canConfirm = hasPermission(PERMISSIONS.containersConfirm)
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
+  // A new leg's form is long: a phone gets the whole screen for it.
+  const phone = useMediaQuery('(max-width: 36em)')
 
   const [step, setStep] = useState<ContainerNextStepDto | null>(null)
   const [movement, setMovement] = useState<MovementDto | null>(null)
@@ -299,7 +302,7 @@ export function NextStepModal({ containerId, containerRef, returnQuery = '', onC
       : null
 
   return (
-    <Modal opened onClose={onClose} title={title} size={newLeg ? 'xl' : delivery ? 'lg' : 'md'} closeOnClickOutside={!busy} withCloseButton={!busy}>
+    <Modal opened onClose={onClose} title={title} size={newLeg ? 'xl' : delivery ? 'lg' : 'md'} fullScreen={phone && newLeg} closeOnClickOutside={!busy} withCloseButton={!busy}>
       {loadError ? (
         <Alert color="red">{loadError}</Alert>
       ) : !step || ((completing || starting) && !movement) || (newLeg && (!leg || types.length === 0)) ? (
