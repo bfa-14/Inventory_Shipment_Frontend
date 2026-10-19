@@ -180,12 +180,12 @@ export function SalesInvoicesPage() {
     }
   }
 
-  async function cancelInvoice(reason: string) {
+  async function cancelInvoice(reason: string, cancelDate: string | null) {
     const row = cancelling
     if (!row) return
     setCancelBusy(true)
     try {
-      await salesInvoicesApi.cancel(row.id, reason, row.rowVersion)
+      await salesInvoicesApi.cancel(row.id, reason, row.rowVersion, cancelDate)
       notify.success('Invoice cancelled.')
       setCancelling(null)
       await load()
@@ -420,7 +420,8 @@ export function SalesInvoicesPage() {
         onClose={() => setCancelling(null)}
         documentLabel={cancelling ? label(cancelling) : ''}
         busy={cancelBusy}
-        onConfirm={(reason) => void cancelInvoice(reason)}
+        withDate={{ minDate: cancelling?.documentDate?.slice(0, 10) ?? null }}
+        onConfirm={(reason, cancelDate) => void cancelInvoice(reason, cancelDate)}
         description={
           cancelling?.receiptNumber
             ? `Cancelling writes the opposite stock movements AND reverses this cash sale's receipt ${cancelling.receiptNumber}, with the same reason. The invoice and the receipt stay in place as a record. It cannot be undone.`

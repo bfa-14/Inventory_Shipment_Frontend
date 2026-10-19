@@ -26,7 +26,7 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
-import { isoDate, stamp } from '../../components/documents/documentKind'
+import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber, reasonSentence } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
@@ -902,11 +902,11 @@ export function SalesInvoicePage() {
     }
   }
 
-  async function cancelInvoice(reason: string) {
+  async function cancelInvoice(reason: string, cancelDate: string | null) {
     if (!invoice) return
     setCancelBusy(true)
     try {
-      applyInvoice(await salesInvoicesApi.cancel(invoice.id, reason, invoice.rowVersion))
+      applyInvoice(await salesInvoicesApi.cancel(invoice.id, reason, invoice.rowVersion, cancelDate))
       notify.success('Invoice cancelled.')
       setCancelOpen(false)
     } catch (error) {
@@ -1002,7 +1002,10 @@ export function SalesInvoicePage() {
       )}
       {invoice && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${invoice.documentNumber ?? 'draft'}`}>
-          Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{reasonSentence(invoice.cancelReason)}
+          {invoice.cancelDate
+            ? `Cancelled on ${dateLabel(invoice.cancelDate)} by ${invoice.cancelledByName ?? 'unknown'} (entered ${stamp(invoice.cancelledAtUtc)}).`
+            : `Cancelled by ${invoice.cancelledByName ?? 'unknown'} on ${stamp(invoice.cancelledAtUtc)}.`}
+          {reasonSentence(invoice.cancelReason)}
         </Alert>
       )}
 
@@ -1143,7 +1146,8 @@ export function SalesInvoicePage() {
         onClose={() => setCancelOpen(false)}
         documentLabel={invoice?.documentNumber ?? `draft #${invoice?.id}`}
         busy={cancelBusy}
-        onConfirm={(reason) => void cancelInvoice(reason)}
+        withDate={{ minDate: invoice?.documentDate?.slice(0, 10) ?? null }}
+        onConfirm={(reason, cancelDate) => void cancelInvoice(reason, cancelDate)}
         description={
           invoice?.receiptStatus === 'Posted'
             ? `Cancelling writes the opposite stock movements AND reverses this cash sale's receipt ${invoice.receiptNumber ?? ''}, with the same reason. The invoice and the receipt stay in place as a record. It cannot be undone.`
