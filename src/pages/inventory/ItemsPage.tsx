@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconEye, IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
@@ -22,6 +22,7 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { saveItemSequence } from './itemSequence'
 import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
 
 /** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
@@ -117,6 +118,13 @@ export function ItemsPage() {
     storeKey: 'inventory.items',
     sort: [{ accessor: 'itemCode', direction: 'asc' }],
   })
+
+  /* PREVIOUS / NEXT ON THE ITEM PAGE walk these rows: every row that survives the filters, in the order on screen
+     (itemSequence.ts). Remembered on each change, so whichever way an item is opened from here it finds them. */
+  useEffect(() => {
+    if (loading) return
+    saveItemSequence(engine.rows.map((i) => ({ id: i.id, itemCode: i.itemCode, isActive: i.isActive })))
+  }, [engine.rows, loading])
 
   function exportCsv() {
     downloadCsv(

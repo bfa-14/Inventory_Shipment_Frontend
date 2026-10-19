@@ -2051,6 +2051,31 @@ then "Open container". **A click on the menu is the menu's**: it stops there and
 card reads its containers again (the order's host reloads the order; the invoice's card its summary and its rows). The
 order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_BADGE`) beside the extra column.
 
+## Item Definition: the sticky item header, Previous / Next, Note and Link (script 87)
+
+- **The whole page header is frozen** under the app's fixed header (`top: var(--app-shell-header-offset, 64px)`,
+  `zIndex: 3`, the page's own `CONTENT_BG` stretched over the page padding, a thin line under it): breadcrumbs, the
+  code with its Active / Inactive and BIVAC badges (`PageHeader`'s `titleExtra`), "{name} · {family} · {brand}", and
+  the actions. `PageHeader truncateTitle` keeps the code and the name on one line each, cut with an ellipsis. Nothing
+  above the page may clip overflow, or `position: sticky` stops working.
+- **Previous / Next sit first among the actions**, before Edit Item, in view mode only: moving away from half-typed
+  changes is what Cancel / Save is for. Below 576 px the header keeps one row of buttons: the arrows without their
+  words (the target code is their tooltip / `aria-label`), Edit Item, and a compact "…" (`MoreActionsMenu compact`)
+  that also holds Copy Item and Back to list.
+- **An item opens at the top** (`window.scrollTo(0, 0)` in a layout effect, once per item): the router keeps the
+  window's scroll, so an item opened from far down the list used to open half-way down.
+- **Previous / Next follow the list the reader came from** (`pages/inventory/itemSequence.ts`): `ItemsPage` writes its
+  filtered, sorted rows (id, code, active) to sessionStorage on every change; the item page steps to the nearest
+  ACTIVE row either side, disabled at both ends (no wrap-around). An item that list does not hold (opened from a link,
+  a document, a new tab) steps through every active item by code, placed by its own code, so an inactive item still
+  finds its neighbours. Activate / Deactivate / Delete on the item page update the remembered list.
+- **Note**: a textarea (2,000 characters, counter) right under the Description (same column, a 2 px gap in edit mode),
+  shown read-only with its line breaks (`Field multiline`).
+- **Link**: beside the Default Warehouse, with its "Open link" button; `type="url"`, checked when leaving the field and on Save: an absolute `http://` / `https://` address with a
+  host and no spaces (`isWebAddress`; the API and `inventory.usp_Item_SetNotes` refuse the rest). "Open link" is
+  disabled while the field is empty or invalid and opens a new tab with `noopener,noreferrer`; in view mode the address
+  is also a plain link with `rel="noopener noreferrer"`.
+
 ## Checklist for a new page
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.
