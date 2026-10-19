@@ -688,11 +688,17 @@ export function MovementPage() {
     : (movement?.containers.length ?? 0) === 0
       ? 'Tick at least one container, then save.'
       : null
+  // (83) Why its Cancel would be refused now, in the server's words (a later leg of one of its containers, a container
+  // offloaded): null when it can be cancelled.
+  const cancelBlocked = movement && !movement.canCancel ? (movement.cancelBlockedReason ?? 'This movement cannot be cancelled.') : null
   const actions: DocumentAction[] = [
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && canManage && movement.canDelete },
     // Cancel, Complete and Start open a dialog (a reason, a date): their labels end with the ellipsis.
-    { key: 'cancel', label: 'Cancel…', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.canCancel },
+    // (83) A movement its Cancel would refuse keeps "Cancel…", disabled with the reason, instead of a dialog refused after
+    // the reason is typed; only a cancelled movement has none. On a phone it then goes into the menu, its reason under
+    // its label, even on a completed movement where it is the last action.
+    { key: 'cancel', label: 'Cancel…', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.status !== 4, disabled: cancelBlocked !== null, disabledReason: cancelBlocked ?? undefined, menuWhenDisabled: true },
     { key: 'complete', label: 'Complete…', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
     // (80) A planned movement that cannot start yet says why before the click: the refusal Start would give.
     { key: 'start', label: 'Start…', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', visible: saved && canManage && movement.canStart, disabled: (statusBlocked ?? movement?.startBlockedReason ?? null) !== null, disabledReason: statusBlocked ?? movement?.startBlockedReason ?? undefined },

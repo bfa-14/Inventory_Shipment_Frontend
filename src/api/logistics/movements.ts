@@ -36,6 +36,11 @@ export interface MovementFlags {
   canEdit: boolean
   canStart: boolean
   canComplete: boolean
+  /**
+   * The status allows it (planned, in progress or completed). (script 83) On the movement itself (`MovementDto`) also
+   * false when its Cancel would be refused now, with `cancelBlockedReason`; the list row stays the status alone (the
+   * Movements list offers no Cancel).
+   */
   canCancel: boolean
   canDelete: boolean
   /**
@@ -247,6 +252,12 @@ export interface MovementDto extends MovementFlags {
   splitUndoToName?: string | null
   /** The stage of its type: a completed Delivery leaves them delivered, not received (no draft goods receipt). */
   splitUndoStage?: string | null
+  /**
+   * (script 83) The refusal its Cancel would give now, in the server's words ("MOV-… is not the last leg of KTG-…: cancel
+   * MOV-… first.", "Container KTG-… is already offloaded: its route can no longer change.", "The movement is already
+   * cancelled."); null when it can be cancelled. The page disables "Cancel…" with it. Absent from an older API.
+   */
+  cancelBlockedReason?: string | null
   /** (script 82) Its history beyond its own stamps (created, started, completed, cancelled): its splits, newest first. */
   history?: MovementAuditDto[]
   /**

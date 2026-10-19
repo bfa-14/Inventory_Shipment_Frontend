@@ -1486,7 +1486,7 @@ copied.
 | `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
 | `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. |
-| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. |
+| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. Below 768 px the big button is the action marked `filled`, else the last one shown; `pinnedOnPhone` keeps an action beside it as a button, and `menuWhenDisabled` sends an action into the menu while it is disabled (a big greyed button says nothing on a phone, which has no tooltip: a completed movement's "Cancel…"), the action before it then taking the big button. |
 | `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
 | `CancelReasonModal` | Asks why a posted document is being cancelled. |
 
@@ -1855,8 +1855,14 @@ replaces "Start shipment…". It is disabled with "None of the ticked containers
   MOV-…") stays.
 - **After a Complete on the movement page** (not a Delivery: its goods are received next), a notification offers
   "Continue: Next step…" for its containers: the bulk dialog, or the container's own dialog when it carries one.
-- **Cancelling a leg that is not the latest of one of its containers is refused by the server** (70010, "MOV-… is not
-  the last leg of KTG-…: cancel MOV-… first."); the page shows it as it comes.
+- **"Cancel…" says why before the click (script 83).** The movement's `canCancel` and `cancelBlockedReason` are the
+  server's (`fn_Movement_CancelBlock`: the refusals of the Cancel itself, in its words): a later leg of one of its
+  containers ("MOV-… is not the last leg of KTG-…: cancel MOV-… first."), a container already received or closed
+  ("Container KTG-… is already offloaded: its route can no longer change."). The movement page keeps "Cancel…" on every
+  movement that is not cancelled, disabled with that reason (a tooltip on a wide screen; the dimmed line under its label
+  in a phone's "More actions" menu), so its dialog - the reason, the split-undo sentence, a Delivery's drafts - opens
+  only when the Cancel will go through. A refusal that still comes (someone changed the movement meanwhile) is shown as
+  it comes. The Movements list offers no Cancel: a list row's `canCancel` is the status alone.
 
 ### The locked From
 

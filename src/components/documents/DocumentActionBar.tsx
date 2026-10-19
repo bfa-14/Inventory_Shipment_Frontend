@@ -25,6 +25,12 @@ export interface DocumentAction {
    * page's next step (a container's "Arrived at Dar es Salaam…"), which nobody looks for in a menu.
    */
   pinnedOnPhone?: boolean
+  /**
+   * Below 768 px, never the big button while disabled: it goes into the "⋮" menu, where its reason is read (a phone
+   * shows no tooltip). For a secondary action that would otherwise be the last one shown, and that nobody can press
+   * then anyway: a completed movement's "Cancel…" refused by a later leg.
+   */
+  menuWhenDisabled?: boolean
 }
 
 interface DocumentActionBarProps {
@@ -46,6 +52,12 @@ interface DocumentActionBarProps {
  * edge and the end of the reason, the part that says what to do, was cut off. The menu is held
  * inside the screen and the reason sits on its own line under the label; on a wide screen the
  * tooltip wraps for the same reason.
+ *
+ * A DISABLED ACTION MARKED menuWhenDisabled IS NOT THE PHONE'S BIG BUTTON. A phone shows no tooltip,
+ * so as the last action shown it was a big greyed button that said nothing (a completed movement's
+ * "Cancel…" with a later leg); it goes into the menu with its reason, and the action before it takes
+ * the big button. Opt-in: elsewhere the last action shown is chosen on purpose (a container's
+ * pinned next step).
  */
 export function DocumentActionBar({ actions }: DocumentActionBarProps) {
   const compact = useMediaQuery('(max-width: 768px)')
@@ -53,8 +65,12 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
   if (shown.length === 0) return null
 
   if (compact) {
-    // The primary is whatever the page marked filled; it is what somebody came to do.
-    const primary = shown.find((a) => a.variant === 'filled') ?? shown[shown.length - 1]
+    // The primary is whatever the page marked filled; it is what somebody came to do. Else the last action, passing over
+    // one disabled and marked menuWhenDisabled (it goes into the menu, its reason under its label).
+    const primary =
+      shown.find((a) => a.variant === 'filled') ??
+      shown.findLast((a) => !(a.disabled && a.menuWhenDisabled)) ??
+      shown[shown.length - 1]
     const pinned = shown.filter((a) => a.pinnedOnPhone && a.key !== primary.key)
     const rest = shown.filter((a) => a.key !== primary.key && !pinned.includes(a))
 
