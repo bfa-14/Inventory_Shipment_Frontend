@@ -161,7 +161,7 @@ function LoadItems({ onClose, context, families, brands, existingItemIds, onAdd 
     <Stack gap="md">
       <Text fz="sm" c="dimmed">
         Live figures for <b>{context.warehouseName}</b> — Lead Time (Month) {formatNumber(context.leadTimeMonths, Number.isInteger(context.leadTimeMonths) ? 0 : 2)},
-        monthly sales from the last {formatNumber(context.monthsOfHistory)} month(s).
+        monthly sales = the busiest month of the last {formatNumber(context.monthsOfHistory)} month(s).
       </Text>
 
       <Grid align="flex-end">
