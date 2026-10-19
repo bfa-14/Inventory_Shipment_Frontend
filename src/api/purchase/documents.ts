@@ -185,6 +185,31 @@ export interface ContainerLineQuantity {
   quantityBase: number
 }
 
+/** One order line to invoice, in pieces (script 86: "Create Purchase Invoice" ticks the order's lines). */
+export interface SourceLineQuantity {
+  sourceLineId: number
+  quantityBase: number
+}
+
+/**
+ * A line of a purchase order that can still be invoiced (script 86, `invoice-candidates`): ordered, invoiced by posted
+ * invoices, in draft invoices, and available = what Create may take from it. Pieces (base units).
+ */
+export interface OrderInvoiceCandidateDto {
+  lineId: number
+  lineNumber: number
+  itemId: number
+  itemCode: string
+  itemName: string
+  warehouseId: number
+  warehouseCode: string
+  warehouseName: string
+  orderedBase: number
+  invoicedBase: number
+  inDraftsBase: number
+  availableBase: number
+}
+
 export interface PurchaseDocumentListDto {
   id: number
   documentTypeCode: PurchaseDocumentTypeCode
@@ -726,11 +751,24 @@ export const purchaseDocumentsApi = {
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 
-  /** Purchase invoice drafts holding what remains to receive on the posted order: one per item, or one for every item. */
-  createInvoice: (id: number, documentDate?: string | null, references?: InvoiceReferences, onePerItem: OnePerItemChoice = null) =>
+  /** The order's lines still to invoice, each with what is still available (script 86); `includeAll` = every line. */
+  invoiceCandidates: (orderId: number, includeAll = false) =>
+    request<OrderInvoiceCandidateDto[]>(`${BASE}/${orderId}/invoice-candidates?includeAll=${includeAll}`),
+
+  /**
+   * Purchase invoice drafts from the posted order: one per item, or one for every item. `lines` = the order lines and
+   * pieces to take (script 86); none = everything that remains to invoice.
+   */
+  createInvoice: (
+    id: number,
+    documentDate?: string | null,
+    references?: InvoiceReferences,
+    onePerItem: OnePerItemChoice = null,
+    lines?: SourceLineQuantity[],
+  ) =>
     request<CreatedPurchaseInvoicesDto>(`${BASE}/${id}/create-invoice`, {
       method: 'POST',
-      body: { documentDate: documentDate ?? null, ...referencesBody(references), onePerItem },
+      body: { documentDate: documentDate ?? null, lines: lines ?? [], ...referencesBody(references), onePerItem },
     }),
 
   /**

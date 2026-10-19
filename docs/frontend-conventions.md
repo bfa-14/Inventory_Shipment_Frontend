@@ -984,6 +984,16 @@ in **cost mode**:
     Both take the exporter's ref. and the commercial invoice no., copied to every invoice. One invoice opens as
     before; several are listed in `CreatedInvoicesModal` (Open links, "Go to the order's invoices"; `onePerItem`
     false shows Lines instead of Item).
+  - **The two dialogs are built the same way** (script 86): Document Date (`DatePickerInput`, not in the future,
+    today by default), the two references, then a grid of what can still be invoiced, each row ticked with its
+    available quantity in pcs - a `NumberInput` (`max` = available, "Max n" and Create disabled above it) the reader
+    may lower, or untick the row - then the switch and its line. "Create Invoice from Containers…" groups the
+    container lines by container (Item, Order, Loaded, Invoiced, In drafts, Available; `containersApi.invoiceCandidates`);
+    "Create Purchase Invoice" heads its grid with the order (number, supplier, its Saved / Partially posted / Posted
+    badge) and lists the order lines (#, Item, Warehouse, Ordered, Invoiced, In drafts, Available;
+    `purchaseDocumentsApi.invoiceCandidates`, which leaves out the lines with nothing available) and sends the ticked
+    rows as `lines` [{ sourceLineId, quantityBase }] to `create-invoice`. Both draw 200 rows at a time
+    (`useShownRows`).
   - On an invoice of one item with a line, the item select offers only that item (`PurchaseLinesGrid`
     `onlyItemId`) and the quick search refuses another, with `ONE_ITEM_HINT`. Such a draft holding several items
     (made before) shows an orange Alert and **Split by item**, which lists the invoices in the same modal. An
