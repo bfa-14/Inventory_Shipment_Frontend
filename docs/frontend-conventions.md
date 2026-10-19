@@ -143,6 +143,14 @@ panel's top margin), so a full-size card looks exactly as approved. The switch d
 shown the card carries `.login-card--env-switch`: its 1034:772 height becomes a minimum, and on screens of about
 900–1130px, where the scaled-down card would cut the footer off, it grows instead.
 
+## The menu's groups and their order
+
+`src/navigation.ts`, in the owner's order: Home and Dashboard on top, then **Reports** (Shortages, Stock Valuation,
+Sales Profit, Customer Statement, Out-of-Stock Sales), **Logistics**, **Purchase**, **Inventory**, **Sales** and
+**Configurations** (the former Backoffice and Configuration groups: Master Data, Users & Permissions, Document Types,
+Charge Types, Container Types, Settings). A page moved to another group keeps its address and its permission; its
+breadcrumb, the menu search and the Spotlight follow the menu by themselves.
+
 ## Finding a page: the menu search and the Spotlight
 
 There are two ways to reach a screen by typing, and **both read `src/navigation.ts` through
@@ -156,7 +164,7 @@ page to `navigation.ts` adds it to both; nothing else is needed.
 
 | The query names… | What stays |
 |---|---|
-| a section (`title` **or** `breadcrumb` — "backoffice", "setup") | that section, whole |
+| a section (`title` **or** `breadcrumb` — "configurations", "reports") | that section, whole |
 | a group ("master data") | the group and **every** child, because the group is what was asked for |
 | anything else | only the items whose label matches, inside the groups that hold them |
 
@@ -170,7 +178,7 @@ replaced by a search `ActionIcon`: it expands the sidebar and puts the cursor in
 **The Spotlight** (`AppSpotlight`, rendered once by `AppShell`) is the header's "Search anything..." box and
 **Ctrl+K / Cmd+K**. It lists every page the user may open — `navLeaves(visibleNavigation(hasPermission,
 false))`, so items with no route and the modules that are not built yet are absent by construction. Each
-action carries the page's label, its place in the menu as the description ("Setup › Master Data" — Spotlight's
+action carries the page's label, its place in the menu as the description ("Configurations › Master Data" — Spotlight's
 own filter matches it, so "setup" finds every back-office page), and its `NavIcon`; sub-items borrow their
 group's icon. The header box is `readOnly` and opens the palette on click, Enter or Space — it looks like a
 field, so it has to answer like one. `tagsToIgnore={[]}` overrides Mantine's default of standing the
@@ -594,7 +602,7 @@ for the life of the draft. The wizard resets itself by remounting on `opened`.
 
 ## Document type configuration
 
-`Configuration › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
+`Configurations › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
 `inventory.documenttypes.manage`) edits the document kinds: name, prefix, number length, number on
 post, number per branch, **year in number** (a checkbox: `SHR-2026-000001`, one sequence per year), requires reason, default pricing (Cost / PriceList / None), price editable, active.
 Code, family, stock direction and **BIVAC items only** are read-only — the procedures branch on them (see
@@ -1525,7 +1533,7 @@ copied.
 
 1. Add a `DocumentKind` for it (title, route, colour, direction, five permission codes, and optionally
    the Reference No. placeholder). Rules about cost, numbering, the reason and which items a line may
-   hold belong to the document **type** (Configuration › Document Types), not to the kind.
+   hold belong to the document **type** (Configurations › Document Types), not to the kind.
 2. Add the permission codes to `src/navigation.ts` and the menu entries.
 3. Add three routes in `src/App.tsx` pointing at `StockDocumentsPage` / `StockDocumentPage` — or at a
    family-specific page that reuses the same components when its header needs more fields.
@@ -1545,7 +1553,7 @@ with "BIVAC Item" ticked** in Item Definition.
 - **The rule belongs to the type, not to the page.** `DocumentTypeDto.bivacItemsOnly`
   (`inventory.DocumentTypes.BivacItemsOnly`) says it. The page reads it through `useDocumentTypes()` and never
   compares the code with `'BIV_OUT'`, so another type given the flag behaves the same with no change here.
-  Configuration › Document Types shows it read-only: a "BIVAC items only" column, and the line "BIVAC items only:
+  Configurations › Document Types shows it read-only: a "BIVAC items only" column, and the line "BIVAC items only:
   Yes: every line must be an item with "BIVAC Item" ticked." in the edit dialog of a type that has it. The
   script that creates the type sets it.
 - **Both pickers are narrowed.**
