@@ -707,6 +707,10 @@ export interface ItemDetailsDto {
   lastSupplierId: number | null
   lastSupplierName: string | null
   lastPurchaseAtUtc: string | null
+  /** Free text, several lines (script 87). */
+  note?: string | null
+  /** An http(s) web address, opened in a new tab (script 87). */
+  link?: string | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -779,6 +783,10 @@ export interface SaveItemRequest {
   weightKg?: number | null
   /** Per BASE unit, in cubic metres; needed by charges allocated by volume. */
   volumeCbm?: number | null
+  /** Free text, several lines, up to 2000 characters; null clears it. */
+  note?: string | null
+  /** An absolute http:// or https:// address, up to 500 characters; null clears it. */
+  link?: string | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }
