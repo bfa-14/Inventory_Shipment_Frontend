@@ -52,9 +52,9 @@ const CHART = {
   pink: '#e15ad8',
   cyan: '#33d6d0',
   blue: '#3d7ff0',
-  grid: 'rgba(255, 255, 255, 0.08)',
-  text: '#9a9cab',
-  slices: ['#33d6d0', '#3d7ff0', '#b26cf2', '#e15ad8', '#ffb547', '#5b6189'],
+  grid: 'var(--mantine-color-gray-2)',
+  text: 'var(--mantine-color-dimmed)',
+  slices: ['#33d6d0', '#3d7ff0', '#b26cf2', '#e15ad8', '#ffb547', '#adb5bd'],
 }
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -183,7 +183,6 @@ export function DashboardPage() {
             <Select
               aria-label="Branch"
               placeholder="All branches"
-              className={css.select}
               w={phone ? '100%' : 200}
               data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))}
               value={branchId}
@@ -192,7 +191,6 @@ export function DashboardPage() {
               searchable
             />
             <SegmentedControl
-              classNames={{ root: css.segmented, indicator: css.segmentedIndicator }}
               value={period}
               onChange={(next) => setFilter('period', next === 'month' ? null : next)}
               data={DASHBOARD_PERIODS.map((p) => ({ value: p.value, label: p.label }))}
@@ -209,7 +207,7 @@ export function DashboardPage() {
         )}
 
         {loading && !data && (
-          <Group justify="center" py={80}><Loader color="violet" /></Group>
+          <Group justify="center" py={80}><Loader /></Group>
         )}
 
         {data && (
@@ -419,7 +417,7 @@ function Donut({ title, slices, ccy, empty }: { title: string; slices: { label: 
         <div className={css.donut}>
           <DonutChart data={data} size={150} thickness={22} strokeWidth={0} paddingAngle={2}
             chartLabel={`${compact(total)} ${ccy}`} tooltipDataSource="segment" valueFormatter={(v) => `${formatNumber(v, 2)} ${ccy}`}
-            styles={{ label: { fill: '#f1f2f6', fontSize: 13, fontWeight: 700 } }} />
+            styles={{ label: { fontSize: 13, fontWeight: 700 } }} />
           <div className={css.legend}>
             {data.map((s) => (
               <div key={s.name} className={css.legendRow}>
