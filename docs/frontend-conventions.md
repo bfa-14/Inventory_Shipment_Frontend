@@ -914,8 +914,11 @@ Receive dialogs).
   − going out."). A saved order's figures are the server's (`usp_TransferOrder_Get`, the item's on each of its lines); a
   draft being typed reads where To and From stand WITHOUT it (`/availability`) and adds what its form's lines of the item
   order, in pcs (`withLevelsAfter`), so a quantity typed moves Projected at once. Read, the fifteen columns still fit a
-  1440 screen (the widths are hints, headers wrap, an item code never breaks) and **Item Name keeps its 130 px** (script
-  90's rule: never squeezed to a word a line - the figure columns and Notes give up their room first); the draft's form
+  1440 screen (the widths are hints, headers wrap, and a long item code may break after a hyphen, as in 90: kept on one
+  line, a 15-character code made a released order scroll sideways) and **Item Name keeps its 130 px** (script 90's rule:
+  never squeezed to a word a line - the figure columns and Notes give up their room first, and Min, Max and Projected
+  pad 6 px a side, which gives back what a released order's tick column takes). Should long warehouse codes in the
+  headers still need more, the table scrolls sideways a little rather than squeeze Item Name; the draft's form
   scrolls inside its card, as before. On a phone the card says "Min 20 · Max 60 · Projected 60 at LUB-01" and the reasons as dimmed lines.
 - **Fill to Max… and Add items below Min…** (`TransferLinesToolbar` in the Lines card's title row, a draft and Create
   Transfer Orders; stacked full width on a phone). The server's rule only, shown before it is applied: a preview

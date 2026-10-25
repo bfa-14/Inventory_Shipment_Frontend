@@ -72,6 +72,10 @@ interface TransferLinesGridProps {
 /* A ROW'S TOOLTIP DRAWS NO PORTAL (frontend-conventions, "Lists of any length"): a 200-line import mounts one per row. */
 const ROW_TOOLTIP = { withinPortal: false, floatingStrategy: 'fixed' } as const
 
+/* (91) THE LEVEL COLUMNS' SIDE PADDING (Min, Max, Projected): short right-aligned figures need less than the table's 10 px,
+   and the 24 px it gives back keeps a read order's columns on a 1440 screen with Item Name at its 130 px. */
+const LEVEL_PX = 6
+
 /** "= 24 pcs", dimmed under Ordered when the line's unit is not the base unit. */
 function inPieces(line: TransferLineForm) {
   if ((line.packingFormula || 1) === 1) return null
@@ -180,8 +184,8 @@ export function TransferLinesGrid({
           fz="sm"
           fw={500}
           tabIndex={-1}
-          // A code is one word: never broken at its hyphens when the columns are narrowed (91).
-          style={{ whiteSpace: 'nowrap' }}
+          // The code may break after a hyphen, as in 90: kept on one line it widened a read order past a 1440 screen
+          // once the level columns show (a 15-character code made a released order scroll sideways).
         >
           {line.itemCode}
         </Anchor>
@@ -581,10 +585,13 @@ export function TransferLinesGrid({
   /* (91) THREE MORE COLUMNS while the levels show. A draft's form already scrolls inside its card: it gets their room.
      Read, the columns still fit a 1440 screen: the widths below are hints the table narrows (headers wrap), and it
      scrolls only below that. Item Name keeps its 130 px whatever shows (script 90's rule: never squeezed to a word a
-     line); the figure columns and Notes give up their room first. */
+     line); the figure columns and Notes give up their room first, and the three level columns pad 6 px a side instead
+     of 10 (LEVEL_PX: 24 px back, what a released order's tick column takes at 1440). A long item code breaks after a
+     hyphen rather than widen the table; long warehouse codes in the headers can still make it scroll a little: Item
+     Name is not squeezed for them. */
   const minWidth = editable ? 1330 + (showLevels ? 230 : 0) : showLevels ? 1120 : 1100
   const levelHeader = (title: string, hint: string, width: number) => (
-    <Table.Th w={width} ta="right">
+    <Table.Th w={width} ta="right" px={LEVEL_PX}>
       <Tooltip label={hint} multiline w={260} withArrow>
         <span>{title}</span>
       </Tooltip>
@@ -653,9 +660,21 @@ export function TransferLinesGrid({
                 <Table.Td>{unitControl(line, index)}</Table.Td>
                 <Table.Td ta="right">{availableCell(line)}</Table.Td>
                 <Table.Td ta="right">{stockCell(line)}</Table.Td>
-                {showLevels && <Table.Td ta="right">{levelCell(line, line.toMinBase)}</Table.Td>}
-                {showLevels && <Table.Td ta="right">{levelCell(line, line.toMaxBase)}</Table.Td>}
-                {showLevels && <Table.Td ta="right">{projectedCell(line)}</Table.Td>}
+                {showLevels && (
+                  <Table.Td ta="right" px={LEVEL_PX}>
+                    {levelCell(line, line.toMinBase)}
+                  </Table.Td>
+                )}
+                {showLevels && (
+                  <Table.Td ta="right" px={LEVEL_PX}>
+                    {levelCell(line, line.toMaxBase)}
+                  </Table.Td>
+                )}
+                {showLevels && (
+                  <Table.Td ta="right" px={LEVEL_PX}>
+                    {projectedCell(line)}
+                  </Table.Td>
+                )}
                 <Table.Td>{orderedControl(line, index)}</Table.Td>
                 <Table.Td ta="right">{formatNumber(line.dispatchedBase)}</Table.Td>
                 <Table.Td ta="right">{formatNumber(line.receivedBase)}</Table.Td>
