@@ -191,7 +191,9 @@ modifier in the hint is read from the reader's own platform.
 | Component | Purpose |
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
-| `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
+| `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. Its close button is named "Close". |
+| `confirmAction({ ...confirm options, run, describeError }): Promise<T \| null>` | A confirmation that DOES the action (script 90): the cursor on the confirm button (Enter confirms; on the close button for a `danger` one), the dialog open and its button loading while `run` works (nothing closes it then), a refusal shown red in the dialog as `describeError` words it, the action's answer back (null for no). The transfer order's Release, Send for approval…, Approve, Withdraw, Create return… and Delete. |
+| `useCalendarEscape()` | `{ calendarOpen, calendar(name) }`: a dialog with date fields passes `closeOnEscape={!calendarOpen}` and each `DateInput` `popoverProps={calendar('…')}`, so Escape closes an open calendar, not the dialog and what was typed in it (Mantine closes every modal on Escape, and a `DateInput` does not stop it). The transfer dialogs and `CancelReasonModal`'s date. |
 | `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on draggable widths and the header's right-click column chooser, and names where they are remembered), `summaryRecords` (the filtered rows the footer totals — see **The summary row**). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
@@ -755,7 +757,22 @@ Receive dialogs).
 - **The dialogs post directly.** There are no draft dispatches or receipts: Dispatch…, Receive… and Dispatch and
   receive… post what they show, each in one transaction (Dispatch and receive needs both rights, and posts both or
   neither). They are xl, full screen below 48em, and their disabled button says why (`FormModal`'s `fullScreen` and
-  `saveDisabledReason`).
+  `saveDisabledReason`). They open with the cursor on the first quantity ("Dispatch now", "Received now"; a date field
+  focused first opened its calendar over the lines), their tables fit the xl dialog at 1440 (no row scrolls sideways),
+  and Escape on an open calendar closes the calendar only (`useCalendarEscape`; Change ETA… and Reverse…'s date too).
+- **The confirmations do the action** (`confirmAction`): Enter confirms, and a refusal ("…modified by another user…",
+  a line's sentence) stays red in the dialog, as it comes, marked on the page too; Delete keeps the cursor off its button.
+- **The lines grid takes any length** (an import of 200 lines): Item and Unit are `LazySelect`s, a row's tooltips draw
+  no portal, the lines are drawn in steps of 200 (`useShownRows`, "Showing 200 of 250 lines. Show 50 more · Show all";
+  a new line or one with a problem always shows). On a phone a draft's card names each box ("Item", "Unit", "Ordered",
+  "Notes") and says under Available who else takes some ("{n} on hand · {c} promised to other orders"), which a wide
+  screen shows on hover.
+- **The "Dispatches and receipts" card keeps its Actions column in view** (sticky, as `pinLastColumn`) when its twelve
+  columns are wider than the card; on a phone each card is a button (`aria-expanded`) that opens its lines.
+- **Another order's link goes through the unsaved-changes guard**: "Return of …" and "Returns: …" ask "Leave without
+  saving?" when the page holds changes (a return is a draft somebody types into), as Back and Print dispatch note do.
+- **The import has no error file** in its transfer mode: the sales import's file has sales columns and its own right;
+  every row's reason is on screen.
 - **Receipt before dispatch.** Reverse… undoes one whole dispatch or receipt, with a reason and a "Reversal date"; a
   dispatch whose goods were received or written off waits for that receipt ("TRD-… has goods received by TRR-…: reverse
   that receipt first."): the row's Reverse… is disabled with the server's `reverseBlockedReason`. Goods turned back
@@ -767,7 +784,8 @@ Receive dialogs).
 - **The approval switch** (Configuration › Document Types, TRO, "Needs approval before release", off by default). On,
   Release is hidden and "Send for approval…" (for approvers also "Approve & release") takes its place; the order waits,
   locked, and its approvers - the users holding Approve Transfer Orders - see the menu's count
-  (`useTransfersWaiting`) and the list's "Waiting for approval" switch, and are emailed.
+  (`useTransfersWaiting`) and the list's "Waiting for approval" switch, and are emailed (those who also hold View
+  Transfer Orders: the email's link opens the order).
 - **One rule per button** (`transferAbilities.ts`): the reader's permission hides, the server's `abilities.{action}`
   (allowed, reason) disables with its sentence, in `DocumentActionBar`; while the page has unsaved changes the actions
   that change the order say "Save your changes first.".
@@ -788,7 +806,8 @@ Receive dialogs).
 - **The Email log links by category.** `TransferApproval`, `TransferApproved` and `TransferRejected` ("Transfer approval
   request", "Transfer approved", "Transfer rejected") are about a transfer order: their Document cell reads "Transfer
   order #{id}" and opens it (`isTransferCategory`, `api/emails.ts`), as text for a reader without
-  `inventory.transfers.view`. Every other category keeps its purchase-order link.
+  `inventory.transfers.view`. Every other category keeps its purchase-order link, "Order #{id}". The column filters and
+  exports those same words (a text column now): the bare number was one value for two documents.
 - **The dispatch note** (`TransferDispatchPrintPage`, "Print dispatch note" on a dispatch's row): like the goods
   receipt's count sheet, outside the shell, A4 portrait, the browser's print dialog at once: "Dispatch note {TRD}", the
   transfer order, From → To, the dates, "Waybill / truck", the lines in pcs, the total, and three signature boxes
