@@ -32,6 +32,10 @@ function documentRoute(m: ItemStockMovementDto, can: (permission: string) => boo
     case 'GRN': return gated(PERMISSIONS.goodsReceiptsView, routes.goodsReceipt(m.documentId))
     // container offloading (before goods receipts) received the goods against the container
     case 'CNT': return gated(PERMISSIONS.containersView, `/logistics/containers/${m.documentId}`)
+    // (90) a transfer's dispatch or receipt lives on its order: the row's id is the posting's, the order is named apart
+    case 'TRD':
+    case 'TRR':
+      return m.transferOrderId ? gated(PERMISSIONS.transfersView, routes.transferOrder(m.transferOrderId)) : null
     default: return null
   }
 }
@@ -53,8 +57,13 @@ export function ItemStockMovementsPage() {
   const canViewContainers = hasPermission(PERMISSIONS.containersView)
   const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
-  /** Where a goods receipt row's source opens: its container, else its order, else its invoice (with the view right). */
+  const canViewTransfers = hasPermission(PERMISSIONS.transfersView)
+  /**
+   * Where a goods receipt row's source opens: its container, else its order, else its invoice (with the view right).
+   * (90) A transfer's row names its order (TRO-…), which opens the order.
+   */
   const sourceRoute = (m: ItemStockMovementDto): string | null => {
+    if (m.transferOrderId) return canViewTransfers ? routes.transferOrder(m.transferOrderId) : null
     if (m.sourceContainerId) return canViewContainers ? routes.container(m.sourceContainerId) : null
     if (m.sourcePurchaseOrderId) return canViewOrders ? `/purchase/orders/${m.sourcePurchaseOrderId}` : null
     if (m.sourceInvoiceId) return canViewInvoices ? `/purchase/invoices/${m.sourceInvoiceId}` : null
@@ -204,7 +213,8 @@ export function ItemStockMovementsPage() {
                                 ) : (
                                   <Text fz="sm" fw={500}>{m.documentNumber ?? `#${m.documentId}`}</Text>
                                 )}
-                                {/* A goods receipt names what brought the goods: "GRN-BR-002-000001 · KTG-2026-0031", both links. */}
+                                {/* A goods receipt names what brought the goods: "GRN-BR-002-000001 · KTG-2026-0031", both links;
+                                    a transfer's dispatch or receipt its order: "TRD-BR-003-000004 · TRO-BR-003-000012". */}
                                 {m.sourceReference ? (
                                   <>
                                     <Text fz="sm" c="dimmed">·</Text>

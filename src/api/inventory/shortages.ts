@@ -28,6 +28,12 @@ export interface ShortageFigures {
   currentInventoryBase: number
   /** Marked as shipped on open purchase orders for the warehouse, not yet received. */
   transitBase: number
+  /**
+   * (90) Goods on the way to the warehouse (its tree) from other warehouses: dispatched by transfer orders, not received
+   * or written off yet. Part of Stock + Transit and of every figure after it. 0 on a plan saved before transfers;
+   * missing from an older API, which means 0.
+   */
+  transfersInBase?: number
   /** Still to receive on open purchase orders, EXCLUDING what is already in transit. */
   outstandingOrderBase: number
   stockPlusTransitBase: number

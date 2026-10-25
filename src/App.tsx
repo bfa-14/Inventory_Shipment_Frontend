@@ -26,6 +26,9 @@ import { ShortagesPage } from './pages/inventory/ShortagesPage'
 import { StockValuationPage } from './pages/inventory/StockValuationPage'
 import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
 import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
+import { TransferDispatchPrintPage } from './pages/inventory/TransferDispatchPrintPage'
+import { TransferOrderPage } from './pages/inventory/TransferOrderPage'
+import { TransferOrdersPage } from './pages/inventory/TransferOrdersPage'
 import { LoginPage } from './pages/LoginPage'
 import { PublicPurchaseApprovalPage } from './pages/public/PublicPurchaseApprovalPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
@@ -107,6 +110,10 @@ export default function App() {
             {/* The goods receipt on paper, for signing at the gate (a draft prints as the count sheet). */}
             <Route element={<ProtectedRoute permission={PERMISSIONS.goodsReceiptsView} />}>
               <Route path="/purchase/goods-receipts/:id/print" element={<GoodsReceiptPrintPage />} />
+            </Route>
+            {/* A transfer's dispatch note on paper, for the truck (script 90): no costs, three signatures. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.transfersView} />}>
+              <Route path="/inventory/transfers/:id/dispatches/:postingId/print" element={<TransferDispatchPrintPage />} />
             </Route>
 
             <Route element={<AppShell />}>
@@ -224,6 +231,15 @@ export default function App() {
                 <Route path="/inventory/bivac-out" element={<StockDocumentsPage kind={BIVAC_OUT} />} />
                 <Route path="/inventory/bivac-out/new" element={<StockDocumentPage kind={BIVAC_OUT} />} />
                 <Route path="/inventory/bivac-out/:id" element={<StockDocumentPage kind={BIVAC_OUT} />} />
+              </Route>
+              {/* Transfer orders (script 90): the list and the order sit behind the view permission; "new" also needs
+                  the create one, which the page checks itself - kept under the same route as /:id so the first save
+                  turns /new into /:id without remounting the page, as the goods receipt does. Every action (release,
+                  approval, dispatch, receipt, reversal…) is checked on the page and by the API. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.transfersView} />}>
+                <Route path="/inventory/transfers" element={<TransferOrdersPage />} />
+                <Route path="/inventory/transfers/new" element={<TransferOrderPage />} />
+                <Route path="/inventory/transfers/:id" element={<TransferOrderPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>

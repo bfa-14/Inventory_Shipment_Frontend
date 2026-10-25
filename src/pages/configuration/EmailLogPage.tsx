@@ -22,6 +22,7 @@ import {
   categoryLabel,
   EMAIL_CATEGORIES,
   emailsApi,
+  isTransferCategory,
   type EmailDto,
   type EmailListDto,
   type EmailStatus,
@@ -34,7 +35,9 @@ import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDa
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { useAuth } from '../../auth/useAuth'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
 interface Filters {
@@ -75,6 +78,8 @@ function StatusBadge({ status }: { status: EmailStatus }) {
  * and none of its links can act on the page around it.
  */
 export function EmailLogPage() {
+  const { hasPermission } = useAuth()
+  const canViewTransfers = hasPermission(PERMISSIONS.transfersView)
   const [openId, setOpenId] = useState<number | null>(null)
   const [queueing, setQueueing] = useState(false)
 
@@ -155,9 +160,27 @@ export function EmailLogPage() {
     {
       accessor: 'relatedDocumentId',
       title: 'Document',
-      width: 120,
+      width: 150,
+      /* THE CATEGORY SAYS WHAT THE DOCUMENT IS. A transfer order's emails (90) name the transfer order, opened only by a
+         reader who may view transfers (the name alone otherwise: a link must never lead to the Forbidden page); every
+         other email is about a purchase order, as before. */
       render: (r) =>
-        r.relatedDocumentId ? (
+        !r.relatedDocumentId ? (
+          '-'
+        ) : isTransferCategory(r.category) ? (
+          canViewTransfers ? (
+            <Anchor
+              component={Link}
+              to={routes.transferOrder(r.relatedDocumentId)}
+              fz="sm"
+              onClick={(event) => event.stopPropagation()}
+            >
+              Transfer order #{r.relatedDocumentId}
+            </Anchor>
+          ) : (
+            <Text fz="sm">Transfer order #{r.relatedDocumentId}</Text>
+          )
+        ) : (
           <Anchor
             component={Link}
             to={routes.purchaseOrder(r.relatedDocumentId)}
@@ -166,8 +189,6 @@ export function EmailLogPage() {
           >
             Order #{r.relatedDocumentId}
           </Anchor>
-        ) : (
-          '-'
         ),
     },
   ]

@@ -31,6 +31,8 @@ import {
   type ImportValidatedRow,
   type ImportValidationResult,
 } from '../../api/sales/invoiceImport'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import { formatMoney, formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
@@ -77,8 +79,18 @@ export interface ImportInvoiceItemsWizardProps {
   /**
    * invoice: rows are priced against the header's price list and discounts apply.
    * stock: nothing is priced — the price column is the UNIT COST and discounts do not exist.
+   * transfer (a transfer order, script 90): no money and no warehouse at all - the order holds both ends - so the
+   * preview has neither column, the rows are checked by the transfer's own `validate` against its From, and the last
+   * step says the lines are on the draft, not saved yet. No import log is written (the transfer has none).
    */
-  mode?: 'invoice' | 'stock'
+  mode?: 'invoice' | 'stock' | 'transfer'
+  /**
+   * The family's own validation of the file, in place of the sales import's (a transfer's `import-validate` against
+   * its From). It answers the same rows and verdicts.
+   */
+  validate?: (file: File) => Promise<ImportValidationResult>
+  /** The family's own template, in place of the sales import's (a transfer's Transfer_Order_Lines_Template.xlsx). */
+  downloadTemplate?: () => Promise<void>
   /** The host's draft id, recorded on the audit row so it can be attached to the document later. */
   draftReference?: string | null
   /**
@@ -86,7 +98,8 @@ export interface ImportInvoiceItemsWizardProps {
    * rows above them for the same item and warehouse — come back as Errors.
    */
   checkStock?: boolean
-  onImported: (lines: ImportedLine[]) => void
+  /** The usable rows, and the name of the file they came from (a transfer's draft says it: "… added from {file}."). */
+  onImported: (lines: ImportedLine[], fileName: string) => void
   /**
    * The family's import-create. With splitByWarehouse false: ONE new document holding every row, each
    * keeping the warehouse the file named. With it true: one new document per warehouse, in the order
@@ -152,7 +165,8 @@ type Phase = 'appending' | 'groups' | 'creating' | 'created'
  *
  * THE HOST OWNS THE LINES. This component returns them through onImported and writes only the audit
  * row; whichever screen opened it adds them to its own draft and saves them with everything else.
- * That is what lets one wizard serve the Sales Invoice, Inventory In and Inventory Out screens.
+ * That is what lets one wizard serve the Sales Invoice, Inventory In and Inventory Out screens - and, in
+ * transfer mode, a transfer order's draft (no warehouse, no money, the transfer's own validation and template).
  */
 export function ImportInvoiceItemsWizard(props: ImportInvoiceItemsWizardProps) {
   /*
@@ -183,9 +197,18 @@ function ImportWizardBody({
   heldItemId = null,
   onDocumentsCreated,
   onSwitchWarehouse,
+  validate: validateFile,
+  downloadTemplate: downloadOwnTemplate,
 }: ImportInvoiceItemsWizardProps) {
   const fullScreen = useMediaQuery('(max-width: 768px)')
   const isStock = mode === 'stock'
+  const isTransfer = mode === 'transfer'
+  // Nothing priced: an inventory document's cost, or a transfer, which has none.
+  const unpriced = mode !== 'invoice'
+  /* THE ERROR FILE IS THE SALES IMPORT'S (sales.invoices.import). A transfer is imported with its own right, so the
+     file is offered there only to a reader who also holds that one; the reasons are on screen either way. */
+  const { hasPermission } = useAuth()
+  const errorFileOffered = !isTransfer || hasPermission(PERMISSIONS.invoicesImport)
 
   const [step, setStep] = useState(0)
   const [file, setFile] = useState<File | null>(null)
@@ -305,7 +328,8 @@ function ImportWizardBody({
 
   async function downloadTemplate() {
     try {
-      await invoiceImportApi.downloadTemplate(documentTypeCode)
+      if (downloadOwnTemplate) await downloadOwnTemplate()
+      else await invoiceImportApi.downloadTemplate(documentTypeCode)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The template could not be downloaded.')
     }
@@ -316,14 +340,16 @@ function ImportWizardBody({
 
     setValidating(true)
     try {
-      const answer = await invoiceImportApi.validate(file, {
-        branchId: header.branchId,
-        warehouseId: header.warehouseId,
-        // Stock mode sends no price list at all — see the class remark.
-        priceListId: isStock ? null : header.priceListId,
-        checkStock: !isStock && checkStock,
-        documentTypeCode,
-      })
+      const answer = validateFile
+        ? await validateFile(file)
+        : await invoiceImportApi.validate(file, {
+            branchId: header.branchId,
+            warehouseId: header.warehouseId,
+            // Stock mode sends no price list at all — see the class remark.
+            priceListId: unpriced ? null : header.priceListId,
+            checkStock: !unpriced && checkStock,
+            documentTypeCode,
+          })
       setResult(answer)
       setFilter('all')
       setStep(1)
@@ -355,7 +381,8 @@ function ImportWizardBody({
    * entry says what came to IT rather than repeating the whole file.
    */
   async function logImport(invoiceId?: number, part?: { warehouseId: number; rows: number; warnings: number }) {
-    if (!result) return
+    // A transfer keeps no import log: its audit says what was saved, once the draft is saved.
+    if (!result || isTransfer) return
     try {
       await invoiceImportApi.log({
         branchId: header.branchId,
@@ -435,7 +462,7 @@ function ImportWizardBody({
 
     await logImport()
 
-    onImported(importable.map(toLine))
+    onImported(importable.map(toLine), result?.fileName ?? '')
     setImporting(false)
     setImported(true)
   }
@@ -507,19 +534,21 @@ function ImportWizardBody({
   }
 
   const skipped = result?.errorRows ?? 0
-  const importLabel = importable.length === 0
-    ? 'Import Valid Rows'
-    : skipped > 0
-      ? `Import ${importable.length} Row(s), Skip ${skipped}`
-      : `Import Valid Rows (${importable.length})`
+  const importLabel = isTransfer
+    ? `Add ${formatNumber(importable.length)} line${importable.length === 1 ? '' : 's'}`
+    : importable.length === 0
+      ? 'Import Valid Rows'
+      : skipped > 0
+        ? `Import ${importable.length} Row(s), Skip ${skipped}`
+        : `Import Valid Rows (${importable.length})`
 
-  const columnCount = isStock ? 11 : 12
+  const columnCount = isTransfer ? 9 : isStock ? 11 : 12
 
   return (
     <Modal
       opened={opened}
       onClose={() => void requestClose()}
-      title={isStock ? 'Import Stock Lines from Excel' : 'Import Invoice Items from Excel'}
+      title={isTransfer ? 'Import Transfer Lines from Excel' : isStock ? 'Import Stock Lines from Excel' : 'Import Invoice Items from Excel'}
       size="xl"
       fullScreen={fullScreen}
       centered={!fullScreen}
@@ -534,7 +563,12 @@ function ImportWizardBody({
         <Stack>
           <Alert color="blue" title="Use the standard template">
             <Group justify="space-between" align="center" wrap="wrap" gap="sm">
-              {allowSplitByWarehouse && importCreate ? (
+              {isTransfer ? (
+                <Text size="sm">
+                  The transfer&apos;s own template: Item Code / Barcode, Unit, Quantity and Notes. No warehouse or cost: they
+                  come from the order. A blank Unit is the item&apos;s base unit; a box&apos;s barcode takes the box.
+                </Text>
+              ) : allowSplitByWarehouse && importCreate ? (
                 <Text size="sm">
                   One template for every document type. Rows may name a warehouse; a file naming several
                   warehouses becomes one {noun} whose lines each keep their own, or one {noun} per warehouse
@@ -547,7 +581,7 @@ function ImportWizardBody({
                 </Text>
               )}
               <Button variant="light" size="xs" onClick={() => void downloadTemplate()}>
-                Download Template
+                {isTransfer ? 'Download the template' : 'Download Template'}
               </Button>
             </Group>
           </Alert>
@@ -667,13 +701,15 @@ function ImportWizardBody({
                   <Table.Th>Item Code</Table.Th>
                   <Table.Th>Item Name</Table.Th>
                   <Table.Th>Unit</Table.Th>
-                  <Table.Th>Warehouse</Table.Th>
+                  {/* A transfer's warehouses are the order's: no row has one of its own. */}
+                  {!isTransfer && <Table.Th>Warehouse</Table.Th>}
                   {/* What the shelf holds, beside what the row asks of it. Base units, like the check. */}
                   <Table.Th ta="right">On Hand</Table.Th>
                   <Table.Th ta="right">Qty</Table.Th>
-                  <Table.Th ta="right">{isStock ? 'Unit Cost' : 'Price'}</Table.Th>
+                  {/* A transfer moves no money. */}
+                  {!isTransfer && <Table.Th ta="right">{isStock ? 'Unit Cost' : 'Price'}</Table.Th>}
                   {/* An inventory document has no discounts, so the column is not there to explain. */}
-                  {!isStock && <Table.Th ta="right">Discount %</Table.Th>}
+                  {!unpriced && <Table.Th ta="right">Discount %</Table.Th>}
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Message</Table.Th>
                 </Table.Tr>
@@ -692,7 +728,7 @@ function ImportWizardBody({
                       <Table.Td>{row.itemCode ?? row.itemRef ?? '—'}</Table.Td>
                       <Table.Td>{row.itemName ?? '—'}</Table.Td>
                       <Table.Td>{row.unitTypeName ?? '—'}</Table.Td>
-                      <Table.Td>{row.warehouseCode ?? '—'}</Table.Td>
+                      {!isTransfer && <Table.Td>{row.warehouseCode ?? '—'}</Table.Td>}
                       <Table.Td ta="right">
                         {row.onHandBase == null ? (
                           '—'
@@ -703,8 +739,8 @@ function ImportWizardBody({
                         )}
                       </Table.Td>
                       <Table.Td ta="right">{row.quantity == null ? '—' : formatNumber(row.quantity)}</Table.Td>
-                      <Table.Td ta="right">{money(row.unitPrice)}</Table.Td>
-                      {!isStock && <Table.Td ta="right">{row.discountPercent}</Table.Td>}
+                      {!isTransfer && <Table.Td ta="right">{money(row.unitPrice)}</Table.Td>}
+                      {!unpriced && <Table.Td ta="right">{row.discountPercent}</Table.Td>}
                       <Table.Td>
                         <Badge color={STATUS_COLOURS[row.status]} variant="light">
                           {row.status}
@@ -735,7 +771,7 @@ function ImportWizardBody({
             <Button variant="default" onClick={() => void requestClose()}>
               Cancel
             </Button>
-            {(result.errorRows > 0 || result.warningRows > 0) && (
+            {errorFileOffered && (result.errorRows > 0 || result.warningRows > 0) && (
               <Button variant="light" onClick={() => void downloadErrorReport()}>
                 Download Error File
               </Button>
@@ -762,7 +798,18 @@ function ImportWizardBody({
             </Stack>
           )}
 
-          {imported && importable.length > 0 && (
+          {/* A TRANSFER'S LINES ARE ON THE DRAFT, NOT SAVED: the last step says so, and what was left out. */}
+          {imported && importable.length > 0 && isTransfer && (
+            <Alert color="green" title="Lines added" data-import-transfer>
+              {formatNumber(importable.length)} line{importable.length === 1 ? '' : 's'} added from {result.fileName}. Save the order to
+              keep them.
+              {result.errorRows > 0
+                ? ` ${formatNumber(result.errorRows)} row(s) with errors were not added.`
+                : ''}
+            </Alert>
+          )}
+
+          {imported && importable.length > 0 && !isTransfer && (
             <Alert color="green" title="Import complete">
               {importable.length} item(s) imported successfully. {result.warningRows} row(s) with warning
               and {result.errorRows} row(s) with error were not imported.
@@ -778,9 +825,11 @@ function ImportWizardBody({
                   {result.errorRows} row(s) contain errors and were not imported. Please correct the
                   errors in your Excel file and try again.
                 </Text>
-                <Button variant="light" size="xs" onClick={() => void downloadErrorReport()}>
-                  Download Error File
-                </Button>
+                {errorFileOffered && (
+                  <Button variant="light" size="xs" onClick={() => void downloadErrorReport()}>
+                    Download Error File
+                  </Button>
+                )}
               </Stack>
             </Alert>
           )}

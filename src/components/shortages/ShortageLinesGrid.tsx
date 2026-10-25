@@ -5,7 +5,7 @@ import { Link } from 'react-router'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../ui/DataTable'
-import { derive, type ShortageDerived, type ShortageLine } from './shortageMath'
+import { derive, STOCK_PLUS_TRANSIT_HINT, TRANSFERS_IN_HINT, type ShortageDerived, type ShortageLine } from './shortageMath'
 
 /** A line with its place on the document and every derived cell — what the grid sorts and draws. */
 type Row = ShortageLine & ShortageDerived & { lineNo: number }
@@ -52,7 +52,7 @@ function compare(a: Row, b: Row, status: DataTableSortStatus<Row>): number {
  * clicked (and when lines are added or removed) and kept until the next click — a row can be out
  * of place by its new value, and clicking the header again puts it right.
  *
- * WIDE ON PURPOSE, SCROLLING INSIDE ITS CARD. Nineteen columns is the customer's study; the "#" and
+ * WIDE ON PURPOSE, SCROLLING INSIDE ITS CARD. Twenty columns is the customer's study; the "#" and
  * Item columns stay put while the rest scroll (`.shortage-lines` in app.css), so a figure at the far
  * right is still a figure *of something*.
  */
@@ -119,8 +119,24 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
         </Tooltip>
       ),
       sortable: true, width: 125, textAlign: 'right', render: (row) => number(row.transitBase) },
+    // (90) Goods transfer orders are bringing from another warehouse: counted with the transit, never bought twice.
+    {
+      accessor: 'transfersInBase',
+      title: (
+        <Tooltip label={TRANSFERS_IN_HINT} multiline w={260} withArrow>
+          <span>Transfers in</span>
+        </Tooltip>
+      ),
+      sortable: true, width: 135, textAlign: 'right', render: (row) => number(row.transfersInBase) },
     { accessor: 'outstandingOrderBase', title: 'Outstanding Order Qty', sortable: true, width: 200, textAlign: 'right', render: (row) => number(row.outstandingOrderBase) },
-    { accessor: 'stockPlusTransitBase', title: 'Stock + Transit', sortable: true, width: 150, textAlign: 'right', render: (row) => number(row.stockPlusTransitBase) },
+    {
+      accessor: 'stockPlusTransitBase',
+      title: (
+        <Tooltip label={STOCK_PLUS_TRANSIT_HINT} withArrow>
+          <span>Stock + Transit</span>
+        </Tooltip>
+      ),
+      sortable: true, width: 150, textAlign: 'right', render: (row) => number(row.stockPlusTransitBase) },
     { accessor: 'totalExpectedStockBase', title: 'Total Expected Stock', sortable: true, width: 185, textAlign: 'right', render: (row) => <Text fz="sm" fw={500}>{formatNumber(row.totalExpectedStockBase)}</Text> },
     {
       accessor: 'effectiveMonthlySales',

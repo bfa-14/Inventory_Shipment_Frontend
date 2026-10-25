@@ -15,6 +15,8 @@ const PURCHASE_LISTS: Record<PurchaseDocumentTypeCode, string> = {
 
 const GOODS_RECEIPTS = '/purchase/goods-receipts'
 
+const TRANSFER_ORDERS = '/inventory/transfers'
+
 export const routes = {
   purchaseOrders: PURCHASE_LISTS.PO,
   purchaseOrder: (id: number) => `${PURCHASE_LISTS.PO}/${id}`,
@@ -32,6 +34,16 @@ export const routes = {
   /** "+ New › Without an order": a receipt typed by hand, for the supplier chosen in the chooser. */
   newGoodsReceipt: (supplierId?: number | null) =>
     `${GOODS_RECEIPTS}/new${supplierId ? `?supplierId=${supplierId}` : ''}`,
+
+  /*
+   * TRANSFER ORDERS (script 90): stock moved between two warehouses. Their dispatches and receipts are not pages of
+   * their own - they live on the order - except the dispatch note, which is printed (outside the shell, like the goods
+   * receipt's count sheet).
+   */
+  transferOrders: TRANSFER_ORDERS,
+  newTransferOrder: `${TRANSFER_ORDERS}/new`,
+  transferOrder: (id: number) => `${TRANSFER_ORDERS}/${id}`,
+  transferDispatchPrint: (id: number, postingId: number) => `${TRANSFER_ORDERS}/${id}/dispatches/${postingId}/print`,
 
   container: (id: number) => `/logistics/containers/${id}`,
   movement: (id: number) => `/logistics/movements/${id}`,

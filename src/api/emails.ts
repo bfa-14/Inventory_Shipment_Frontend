@@ -16,8 +16,17 @@ export const EMAIL_CATEGORIES: { value: string; label: string }[] = [
   { value: 'PurchaseOrderApproved', label: 'Order approved' },
   { value: 'PurchaseOrderRejected', label: 'Order rejected' },
   { value: 'PurchaseOrderToSupplier', label: 'Order to the supplier' },
+  // (90) transfer orders: the approvers' request, and the requester told of the decision
+  { value: 'TransferApproval', label: 'Transfer approval request' },
+  { value: 'TransferApproved', label: 'Transfer approved' },
+  { value: 'TransferRejected', label: 'Transfer rejected' },
   { value: 'Test', label: 'Test' },
 ]
+
+/** (90) An email about a transfer order: its related document is the order, not a purchase order. */
+export function isTransferCategory(category: string): boolean {
+  return category.startsWith('Transfer')
+}
 
 export function categoryLabel(category: string): string {
   return EMAIL_CATEGORIES.find((c) => c.value === category)?.label ?? category
@@ -30,7 +39,7 @@ export interface EmailListDto {
   ccAddresses: string | null
   subject: string
   category: string
-  /** The purchase order the email is about, when there is one. */
+  /** The document the email is about, when there is one: a purchase order, or a transfer order (isTransferCategory). */
   relatedDocumentId: number | null
   status: EmailStatus
   attempts: number

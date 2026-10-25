@@ -6,7 +6,7 @@ import { ApiError } from '../../api/http'
 import { shortagesApi, type ShortageDocumentDto } from '../../api/inventory/shortages'
 import { dateLabel, stamp, unitLabel } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { SHORTAGES_ROUTE } from '../../components/shortages/shortageMath'
+import { SHORTAGES_ROUTE, STOCK_PLUS_TRANSIT_HINT, TRANSFERS_IN_HINT } from '../../components/shortages/shortageMath'
 import { TestingMarker } from '../../environment/TestingMarker'
 
 /**
@@ -111,8 +111,10 @@ export function ShortagePrintPage() {
             <th className="left">Item</th>
             <th>Current Inventory</th>
             <th>Transit Qty</th>
+            {/* (90) goods on the way from other warehouses by transfer orders */}
+            <th title={TRANSFERS_IN_HINT}>Transfers in</th>
             <th>Outstanding Order Qty</th>
-            <th>Stock + Transit</th>
+            <th title={STOCK_PLUS_TRANSIT_HINT}>Stock + Transit</th>
             <th>Total Expected Stock</th>
             <th>Expected Monthly Sales</th>
             <th>Lead Time (Month)</th>
@@ -136,6 +138,7 @@ export function ShortagePrintPage() {
               </td>
               <td>{formatNumber(line.currentInventoryBase)}</td>
               <td>{formatNumber(line.transitBase)}</td>
+              <td>{formatNumber(line.transfersInBase ?? 0)}</td>
               <td>{formatNumber(line.outstandingOrderBase)}</td>
               <td>{formatNumber(line.stockPlusTransitBase)}</td>
               <td>{formatNumber(line.totalExpectedStockBase)}</td>
@@ -157,7 +160,7 @@ export function ShortagePrintPage() {
           ))}
           {document.lines.length === 0 && (
             <tr>
-              <td colSpan={16} className="left">This plan has no lines.</td>
+              <td colSpan={17} className="left">This plan has no lines.</td>
             </tr>
           )}
         </tbody>

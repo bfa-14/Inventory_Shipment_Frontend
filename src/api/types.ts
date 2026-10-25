@@ -226,6 +226,12 @@ export interface WarehouseDto {
   isActive: boolean
   /** Sales invoices selling more than it holds: true allows (after a warning), false refuses, null follows the global setting. */
   allowOutOfStockOverride: boolean | null
+  /**
+   * (90) The branch's "On the way" warehouse: where transferred goods sit between their dispatch and their receipt.
+   * Made and kept by the system (one per branch, never a parent, never deactivated); only its name and address are
+   * edited. Missing from an older API, which means false.
+   */
+  isTransit?: boolean
   createdAtUtc: string
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
@@ -293,6 +299,11 @@ export interface WarehouseLookupDto {
   childCount: number
   /** Already used in transactions: it cannot be chosen as a parent (script 71). */
   isUsed: boolean
+  /**
+   * (90) An On the way warehouse. The lookup lists them only when asked (`includeTransit`: Stock Valuation), or the one
+   * named by `includeId`; missing from an older API, which means false.
+   */
+  isTransit?: boolean
 }
 
 // ----- master data: currencies -----
@@ -984,7 +995,7 @@ export interface ItemStockBalanceDto {
 export interface ItemStockMovementDto {
   id: number
   movementDate: string
-  /** Inventory | Sales | Purchase - with the type and id, what the row links to. */
+  /** Inventory | Sales | Purchase | Transfer (90) - with the type and id, what the row links to. */
   documentFamily: string
   documentTypeCode: string
   documentTypeName: string | null
@@ -1014,6 +1025,12 @@ export interface ItemStockMovementDto {
   sourceContainerId?: number | null
   sourcePurchaseOrderId?: number | null
   sourceInvoiceId?: number | null
+  /**
+   * (90) A transfer's dispatch (TRD) or receipt (TRR): the order it belongs to, which both the row's number and its
+   * sourceReference (the order's TRO number) open - a dispatch or a receipt has no page of its own. Its counterparty
+   * reads "LKS-01 → LUB-01".
+   */
+  transferOrderId?: number | null
 }
 
 /** An item's stock statement: brought forward, the movements, and what is left. */

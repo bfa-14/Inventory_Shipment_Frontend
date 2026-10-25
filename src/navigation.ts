@@ -71,6 +71,19 @@ export const PERMISSIONS = {
   bivacOutPost: 'inventory.bivacout.post',
   bivacOutCancel: 'inventory.bivacout.cancel',
   bivacOutDelete: 'inventory.bivacout.delete',
+  // Transfer orders (script 90): stock moved between two warehouses of any branch, dispatched onto the hidden "On the
+  // way" warehouse of the destination branch and received from it. Approve is the decision's own right (when Document
+  // Types asks for approval); dispatch and receive are separate because two warehouses, often two people, do them.
+  transfersView: 'inventory.transfers.view',
+  transfersCreate: 'inventory.transfers.create',
+  transfersDelete: 'inventory.transfers.delete',
+  transfersRelease: 'inventory.transfers.release',
+  transfersApprove: 'inventory.transfers.approve',
+  transfersDispatch: 'inventory.transfers.dispatch',
+  transfersReceive: 'inventory.transfers.receive',
+  transfersClose: 'inventory.transfers.close',
+  transfersCancel: 'inventory.transfers.cancel',
+  transfersReverse: 'inventory.transfers.reverse',
   invoicesImport: 'sales.invoices.import',
   invoicesPriceOverride: 'sales.invoices.priceoverride',
   invoicesView: 'sales.invoices.view',
@@ -172,7 +185,7 @@ export interface NavItem {
    */
   requires?: 'canApproveInApp'
   /** A live count shown in red beside the label (see NavFacts), hidden at 0: what waits for the reader. */
-  countOf?: 'pendingApprovals' | 'draftGoodsReceipts'
+  countOf?: 'pendingApprovals' | 'draftGoodsReceipts' | 'transfersWaiting'
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
   /**
@@ -195,6 +208,11 @@ export interface NavFacts {
   pendingApprovals: number
   /** Draft goods receipts waiting to be posted (GET api/purchase/goods-receipts/waiting, useGoodsReceiptsWaiting). */
   draftGoodsReceipts: number
+  /**
+   * Transfer orders waiting for approval (GET api/inventory/transfers/waiting, useTransfersWaiting): asked only for a
+   * reader holding Approve Transfer Orders, 0 for everybody else.
+   */
+  transfersWaiting: number
 }
 
 export interface NavSection {
@@ -309,6 +327,15 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
       // An Inventory Out of BIVAC items only (script 66): its own list, numbers (BIV-) and permissions.
       { label: 'BIVAC Out', to: '/inventory/bivac-out', permission: PERMISSIONS.bivacOutView, icon: 'box' },
+      // Stock moved between warehouses (script 90) without changing its cost; the count is the orders waiting for the
+      // reader's approval.
+      {
+        label: 'Transfer Orders',
+        to: '/inventory/transfers',
+        permission: PERMISSIONS.transfersView,
+        icon: 'movement',
+        countOf: 'transfersWaiting',
+      },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
     ],

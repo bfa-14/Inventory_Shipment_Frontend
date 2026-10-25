@@ -100,6 +100,15 @@ function emptyLine(warehouseId: number | null): EditableLine {
 }
 
 /**
+ * (90) THE TRANSFER REASONS STILL EXIST, AND STILL WORK: an Inventory In or Out may be "Transfer in" / "Transfer out".
+ * Chosen, a gray hint under the Reason points at the transfer orders, which move the goods without changing their
+ * cost and follow them on the way. Nothing is refused: a reader who means an adjustment keeps it.
+ */
+const TRANSFER_REASON_CODES = new Set(['TRF_IN', 'TRF_OUT'])
+const TRANSFER_REASON_HINT =
+  'Moving stock between your own warehouses? Inventory › Transfer Orders moves it without changing its cost and follows it on the way.'
+
+/**
  * One Inventory In, Inventory Out or BIVAC Out document: create it, edit it while it is a draft, read it
  * once it is posted.
  *
@@ -886,6 +895,11 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         readOnly={!editable}
         errors={errors}
         referencePlaceholder={kind.referencePlaceholder}
+        reasonHint={
+          TRANSFER_REASON_CODES.has(reasons.find((r) => String(r.id) === header.reasonId)?.reasonCode ?? '')
+            ? TRANSFER_REASON_HINT
+            : null
+        }
       />
 
       <Paper radius="lg" p="md" withBorder>

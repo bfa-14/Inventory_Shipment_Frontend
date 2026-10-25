@@ -39,7 +39,7 @@ const GRID_COLUMNS: GridColumnMeta<DocumentTypeDto>[] = [
   { accessor: 'defaultPricing', text: pricingText },
   { accessor: 'priceEditable', kind: 'boolean', text: (t) => yesNo(t.priceEditable) },
   { accessor: 'bivacItemsOnly', kind: 'boolean', text: (t) => yesNo(t.bivacItemsOnly) },
-  // (79) the switches of the purchase invoice and goods receipt types, "-" on the others
+  // (79) the switches of the purchase invoice and goods receipt types, (90) the transfer order's approval, "-" on the others
   { accessor: 'effects', value: effectsText, text: effectsText },
   { accessor: 'isActive', kind: 'boolean', text: (t) => (t.isActive ? 'Active' : 'Inactive') },
 ]

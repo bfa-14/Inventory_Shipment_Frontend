@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { Alert, Group, Loader, SegmentedControl, Select } from '@mantine/core'
+import { Alert, Group, Loader, SegmentedControl, Select, Tooltip } from '@mantine/core'
 import { AreaChart, BarChart, DonutChart, LineChart } from '@mantine/charts'
 import { useMediaQuery } from '@mantine/hooks'
 import {
@@ -212,7 +212,7 @@ export function DashboardPage() {
 
         {data && (
           <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 120ms' }}>
-            <Board data={data} ccy={ccy} />
+            <Board data={data} ccy={ccy} branchChosen={branchId !== null} />
           </div>
         )}
       </div>
@@ -226,7 +226,7 @@ export function DashboardPage() {
 
 /* ── the board ─────────────────────────────────────────────────────────────────────────────────── */
 
-function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
+function Board({ data, ccy, branchChosen }: { data: DashboardSummaryDto; ccy: string; branchChosen: boolean }) {
   const { hasPermission } = useAuth()
   // Script 75: the statement and the valuation have their own permissions; fall back to the lists.
   const receivablesTo = hasPermission(PERMISSIONS.statementView) ? '/sales/receipts/statement' : '/sales/invoices'
@@ -290,7 +290,10 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   if (inventory) {
     pills.push(
       <Pill key="inventory" to={valuationTo} icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
-        label="Inventory value" value={money(inventory.valueBase)} chip={{ text: `${inventory.itemsInStock} items`, className: css.chipDim }} />,
+        label="Inventory value" value={money(inventory.valueBase)} chip={{ text: `${inventory.itemsInStock} items`, className: css.chipDim }}
+        // (90) A branch's stock counts what transfers have dispatched to it and it has not received yet: those goods
+        // sit in its On the way warehouse. The company's figure never moves during a transfer, so it needs no word.
+        tooltip={branchChosen ? "Includes goods on the way to this branch's warehouses (transfer orders)." : undefined} />,
     )
   }
   if (onTheWay) {
@@ -385,15 +388,17 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   )
 }
 
-function Pill({ to, icon, colour, label, value, chip }: {
+function Pill({ to, icon, colour, label, value, chip, tooltip }: {
   to: string
   icon: ReactNode
   colour: string
   label: string
   value: string
   chip: { text: string; className: string }
+  /** What the figure includes, on hover; left out, the pill has no tooltip. */
+  tooltip?: string
 }) {
-  return (
+  const pill = (
     <Link to={to} className={css.pill}>
       <span className={css.pillIcon} style={{ color: colour, background: `${colour}26` }}>{icon}</span>
       <span className={css.pillText}>
@@ -403,6 +408,7 @@ function Pill({ to, icon, colour, label, value, chip }: {
       <span className={`${css.chip} ${chip.className}`}>{chip.text}</span>
     </Link>
   )
+  return tooltip ? <Tooltip label={tooltip} withArrow multiline w={280}>{pill}</Tooltip> : pill
 }
 
 function Donut({ title, slices, ccy, empty }: { title: string; slices: { label: string; valueBase: number }[]; ccy: string; empty: string }) {

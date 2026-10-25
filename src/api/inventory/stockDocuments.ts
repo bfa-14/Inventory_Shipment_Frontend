@@ -61,6 +61,11 @@ export interface DocumentTypeDto {
   affectsOnHand: boolean
   /** (79) GRN: completing a Delivery movement drafts a goods receipt per container (true on the other types). */
   autoCreateOnDelivery: boolean
+  /**
+   * (90) TRO: a transfer order is sent for approval and released when an approver approves it (false on the other
+   * types). Missing from an older API, which means false.
+   */
+  needsApproval?: boolean
   isActive: boolean
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */
@@ -82,6 +87,8 @@ export interface UpdateDocumentTypeRequest {
   affectsItemCost?: boolean
   affectsOnHand?: boolean
   autoCreateOnDelivery?: boolean
+  /** (90) Sent only for TRO, like the switches of 79; the server refuses it on another type (62000). */
+  needsApproval?: boolean
   isActive: boolean
   rowVersion: string | null
 }

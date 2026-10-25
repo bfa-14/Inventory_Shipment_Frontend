@@ -49,6 +49,14 @@ const ACTION_COLOURS: Record<string, string> = {
   'Split off': 'orange',
   'Split from': 'violet',
   'Split undone': 'orange',
+  // (90) Transfer orders: waiting is yellow as its status, a step back orange, the goods moving green.
+  SentForApproval: 'yellow',
+  ApprovedAndReleased: 'green',
+  BackToDraft: 'orange',
+  NothingMoreSent: 'teal',
+  DispatchedAndReceived: 'green',
+  ReturnCreated: 'teal',
+  ReturnOf: 'teal',
 }
 
 /**
@@ -66,6 +74,17 @@ const ACTION_LABELS: Record<string, string> = {
   FileDeleted: 'File deleted',
   OffloadCancelled: 'Offload cancelled',
   ChequeStatus: 'Cheque status',
+  // (90) Transfer orders: the codes whose words are not the code split up ("EtaChanged" would read "Eta changed",
+  // "ReturnOf" "Return of"); the others are written out so a transfer's trail reads the same wherever it is shown.
+  SentForApproval: 'Sent for approval',
+  ApprovedAndReleased: 'Approved and released',
+  BackToDraft: 'Back to draft',
+  NothingMoreSent: 'Nothing more will be sent',
+  DispatchedAndReceived: 'Dispatched and received',
+  EtaChanged: 'ETA changed',
+  ReturnCreated: 'Return created',
+  ReturnOf: 'Return',
+  DetailsUpdated: 'Details updated',
 }
 
 /** "CostAdjusted" -> "Cost adjusted", "POCreated" -> "PO created": the map first, else the code split into words. */

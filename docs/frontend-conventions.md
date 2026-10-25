@@ -202,7 +202,7 @@ modifier in the hint is read from the reader's own platform.
 | `FilterBar` + `FilterBar.Col` | Bordered `Paper` with a responsive `Grid` for filter controls. **No Apply/Filter button** — see **Filtering**. |
 | `RowActions({ label, edit, toggleStatus, custom, remove })` | Subtle `ActionIcon`s with tooltips. Each action takes `visible`, `disabled`, `disabledReason`, `onClick`. `custom` adds page-specific icons (`{ icon, tooltip, color }`) between the standard ones and Delete, through the same tooltip/disabled wrapper. |
 | `MoreActionsMenu({ actions })` | The "More Actions" dropdown. |
-| `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. Opens with the cursor in the first field and gives the focus back on close — see **Modals and the keyboard**. |
+| `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. Opens with the cursor in the first field and gives the focus back on close — see **Modals and the keyboard**. Optional, all off by default (script 90): `closeOnEscape` (default `true`; an outer dialog passes `false` while an inner one is open), `fullScreen` (a phone: not centred then), `saveDisabledReason` (while `saveDisabled`: the Save button's tooltip, a dimmed line above the footer below 48em). A submit bubbling up from a dialog opened on top of it is ignored. |
 | `SearchSelect({ load, value, onChange, selected?, resolve? })` / `SearchMultiSelect({ load, value, onChange, selected })` | A dropdown that **searches the server as it is typed** (debounced, abandoned requests aborted), for the lists without a ceiling: orders, invoices, containers, movements, parties. `load(search, signal)` answers the first matches (a stable function: module level or `useCallback`; the shared ones are in `components/purchase/documentSearch.ts`); `selected` keeps a known option (a default, a preset) in the list; `resolve(value)` finds the label of a value kept from the last visit. See **Lists of any length**. |
 
 ## Modals and the keyboard
@@ -224,6 +224,19 @@ no page may re-implement it:
 - **Enter submits.** The body is a real `<form>` with a real `type="submit"` button, so Enter in any
   single-line field — including the last — submits it. Nothing else is needed; a `Textarea` keeps Enter for
   its own newline, which is right.
+- **Only the dialog's own form submits it.** A dialog opened on top of another lives in a portal, but its submit
+  still bubbles up the React tree to the dialog under it, which would then post too. `FormModal` ignores a submit
+  whose target is not its own form (`event.target !== event.currentTarget`), as Item Definition already did. No
+  dialog held another form before script 90, so none of them changed.
+
+Three options, all off by default (script 90, the transfer order's large dialogs that post, and the dialogs opened on
+top of them); left out, a dialog is exactly what it was:
+
+| Prop | What it does |
+|---|---|
+| `closeOnEscape` (default `true`) | `false` keeps Escape from closing the dialog (it never closes while saving). Mantine 9.5 closes EVERY open modal on one Escape, so an outer dialog passes `false` while an inner one is open: Escape then closes the inner one only. |
+| `fullScreen` | The whole screen, not centred: the Dispatch, Receive and Dispatch and receive dialogs pass it below 48em. |
+| `saveDisabledReason` | Why Save is disabled, while `saveDisabled` is true: the button's tooltip on a wide screen and, below 48em (a phone shows no tooltip), a dimmed line above the footer - the rule of `DocumentActionBar`. Enter does not submit through it. |
 
 A form modal that does not use `FormModal` gets none of this, which is the reason not to write one.
 
@@ -367,6 +380,10 @@ Conventions:
 - The last visible column cannot be unticked: a grid of no columns is a blank rectangle with a
   paging footer under it.
 - A column can start hidden with `defaultToggle: false` on its definition.
+- A title may be a node - a caption inside a `Tooltip` that explains it (script 90: Sales Profit's "COGS adjustments
+  (USD)"). The chooser, the filter dialog, the footer menu and the CSV header then name the column by the text inside
+  the node (`captionOf` in `DataTable.tsx`; the tooltip's label is a prop, never part of the name), and only a node
+  without text falls back to the accessor in words.
 
 A reader can hide a column whose funnel is set, which would otherwise leave a filter narrowing the
 rows with nothing on screen saying so. The "N column filters in effect" strip above the table is what
@@ -616,23 +633,30 @@ override permission (sales). The pages no longer hard-code `INV_IN` / `INV_OUT` 
 keeps the direction only (the fallback while the configuration loads). Document numbers run per branch
 (`IN-KLW-000012`): the number column is 190 px and never truncates.
 
-**What a type does** (script 79). Three switches, each meaningful on ONE type, described in one place,
-`pages/configuration/documentTypeEffects.ts` (`EFFECT_TEXT`, `stockText`, `stockSentence`, `effectsText`):
+**What a type does** (script 79; the fourth switch came with script 90). Switches each meaningful on ONE type,
+described in one place, `pages/configuration/documentTypeEffects.ts` (`EFFECT_TEXT`, `stockText`, `stockSentence`,
+`effectsText`):
 
 | Type | Field | Default | The form's switch |
 |---|---|---|---|
 | PINV | `affectsItemCost` | true | "Affects item cost": the invoice's price becomes the cost of the goods received against it |
 | PINV | `affectsOnHand` | false | "Affects on-hand (receive the goods when posted)": posting also receives its goods with a goods receipt |
 | GRN | `autoCreateOnDelivery` | true | "Create goods receipts when a Delivery is completed" |
+| TRO | `needsApproval` | false | "Needs approval before release": a transfer order is sent for approval and released when an approver approves it (script 90; see **Inventory transfers**) |
 
 - The form shows a switch, with its one-line description, only on its own type, under "What it does", and SENDS it only
   for that type (`undefined` otherwise): the request fields are nullable, so an older form never turns one off, and the
   server refuses one sent for another type (62000). Under the invoice's two: "Each invoice keeps the values it was
   posted with…".
 - The list has one **What it does** column ("Item cost: yes · Receives on posting: no", "On Delivery: automatic" /
-  "by hand", a dimmed "-" elsewhere) with its grid text, so it filters and exports like the others.
+  "by hand", "Approval: yes" / "no", a dimmed "-" elsewhere) with its grid text, so it filters and exports like the
+  others.
 - The **Stock** column says what really happens: for PINV "None (goods receipts)" or "In, through a goods receipt at
-  posting" (green); the stored `stockDirection` is never changed (old invoices read it).
+  posting" (green); the stored `stockDirection` is never changed (old invoices read it). The transfer types are stored
+  with direction 0 (a dispatch and a receipt each write two legs, which one direction cannot say), and read TRO "None (an
+  order)", TRD "Out of the source, onto On the way", TRR "From On the way into the destination" (blue).
+- Turning the TRO switch never changes an order already waiting or released: orders waiting stay waiting (an approver
+  approves them, or the requester withdraws and releases).
 - Where the switches show elsewhere, a missing field (an older API) means today's behaviour:
   - the invoice: `document.affectsCost === false` -> the "Cost of received goods" card says why it is empty
     (`NO_COST_INVOICE_TEXT`) and the posted invoice's Charges card offers no late charge
@@ -654,6 +678,8 @@ keeps the direction only (the fallback while the configuration loads). Document 
   - the movement: `goodsReceiptsAutomatic === false` -> the Complete dialog of a Delivery shows
     `DELIVERY_BY_HAND_TEXT` instead of the per-container preview, the answer's `goodsReceiptsMessage` is shown as an
     info notification, and the Cancel dialog says the movement created no draft when it has none.
+- A saved setting is kept: since script 89 the seed values are applied only to a type nobody has saved (before, five
+  seeds reset Price / cost editable, Number per branch and the pricing of twelve types at every start).
 
 ## The warehouse is a line's, not the document's
 
@@ -697,6 +723,85 @@ be a parent"; the current parent stays selectable.
 The import creates ONE document however many warehouses the file names — or, on Sales Invoice and
 Inventory In when the reader asks for it, one document per warehouse; see below. Each row keeps the
 warehouse the file gave it.
+
+## Inventory transfers: the warehouses are the document's
+
+**Inventory › Transfer Orders** (script 90; `/inventory/transfers`, `/new`, `/:id`, and the dispatch note
+`/:id/dispatches/:postingId/print` outside the shell; permissions `inventory.transfers.view / create / delete / release /
+approve / dispatch / receive / close / cancel / reverse`) moves stock from one warehouse to another of any branch without
+changing its cost. A **dispatch** (TRD, numbered by the source branch) takes the pieces out of From onto the hidden **On
+the way** warehouse of the destination branch; a **transfer receipt** (TRR, numbered by the destination branch) takes them
+from there into To. The client is `src/api/inventory/transfers.ts`; the pieces are in `src/components/transfers/`
+(`transferStatus.ts`, `transferAbilities.ts`, the header, lines and postings cards, the approval notice, the Dispatch and
+Receive dialogs).
+
+- **The exception to "the warehouse is a line's".** From and To are on the HEADER, and every line leaves From and goes
+  to To ("The warehouses are the order's: every line leaves From and goes to To."). A transfer is one journey between
+  two places - one truck, one dispatch note, one receipt at the other end - and a warehouse per line would make one
+  order of several journeys. From and To are leaves of any branch, grouped by branch with the order's first, never an On
+  the way warehouse, never the same one; a held warehouse no longer allowed stays shown and marked as
+  `lineWarehouses.ts` does. The number is given at the first save, by From's branch then.
+- **Stored and shown statuses** (`transferStatus.ts`). Stored: Draft, Waiting for approval, Released, Cancelled. A
+  released order SHOWS, the first that applies, Released, Partly dispatched, Dispatched, Partly received, Closed
+  ("Nothing more will be sent"), Received: the server's `displayStatus`, from its counters, as purchase orders show Saved
+  / Partially posted / Posted. Colours: Draft gray, Waiting for approval yellow, Released blue, Partly dispatched
+  orange, Dispatched indigo, Partly received orange, Received green, Closed teal, Cancelled red; a reversed dispatch or
+  receipt orange. Beside the status a red filled "Late" badge, and an orange "{n} lost" badge once goods were written
+  off.
+- **Ordered in the unit, every counter in pcs.** Ordered is typed in the line's unit ("= 24 pcs" dimmed when it is not
+  the base unit); Dispatched, Received, To dispatch, Not sent and Lost are pcs. **On the way is never a column of the
+  lines grid**: it belongs to a dispatch, so it is on the totals row (Ordered, Dispatched, Received, On the way, Not
+  sent, Lost) and on each dispatch of the "Dispatches and receipts" card.
+- **The dialogs post directly.** There are no draft dispatches or receipts: Dispatch…, Receive… and Dispatch and
+  receive… post what they show, each in one transaction (Dispatch and receive needs both rights, and posts both or
+  neither). They are xl, full screen below 48em, and their disabled button says why (`FormModal`'s `fullScreen` and
+  `saveDisabledReason`).
+- **Receipt before dispatch.** Reverse… undoes one whole dispatch or receipt, with a reason and a "Reversal date"; a
+  dispatch whose goods were received or written off waits for that receipt ("TRD-… has goods received by TRR-…: reverse
+  that receipt first."): the row's Reverse… is disabled with the server's `reverseBlockedReason`. Goods turned back
+  before they arrive: reverse their dispatch. Goods sent back after they arrived: Create return… (a new order the
+  other way).
+- **Late** is the server's, in UTC: a dispatch with pieces on the way after its ETA, or a released order with something
+  still to dispatch after its Expected arrival. A red filled "Late" badge and the list's "Late only" switch; never
+  "Overdue".
+- **The approval switch** (Configuration › Document Types, TRO, "Needs approval before release", off by default). On,
+  Release is hidden and "Send for approval…" (for approvers also "Approve & release") takes its place; the order waits,
+  locked, and its approvers - the users holding Approve Transfer Orders - see the menu's count
+  (`useTransfersWaiting`) and the list's "Waiting for approval" switch, and are emailed.
+- **One rule per button** (`transferAbilities.ts`): the reader's permission hides, the server's `abilities.{action}`
+  (allowed, reason) disables with its sentence, in `DocumentActionBar`; while the page has unsaved changes the actions
+  that change the order say "Save your changes first.".
+- **On the way warehouses** (`isTransit`, one per branch, made and kept by the system). No picker offers them but Stock
+  Valuation's (`warehousesApi.lookup(activeOnly, branchId, includeId, includeTransit = true)`: "OTW-BR-002 - On the way
+  to BR-002 (transfers)"). The Warehouses page shows them with an "On the way" badge and offers neither Deactivate nor
+  Delete; their form edits Name and Address, the rest is text with "Managed by transfers: the On the way warehouse of
+  {branch}." (`pages/masterdata/transitWarehouse.ts`); the Parent picker never lists them.
+- **The barcode's unit, on this page only.** `QuickItemSearch` passes `onPick(item, term)` the text scanned; the
+  transfer page takes the unit whose barcode it is, else the base unit, and a second scan of the same item and unit adds
+  1. Every other page ignores `term`.
+- **Values only with the permission.** Without `inventory.valuation.view` the server sends the order's
+  `onTheWayValueBase`, a posting's `valueBase` / `lostValueBase` and a line's `unitCostBase` / `lossUnitCostBase` as null,
+  never 0: the page then leaves the figure out ("—" in a value column), it never shows a 0 that is not one. The
+  dispatch note never shows a cost.
+- **`CancelReasonModal`'s `withDate.label`** names the date field when it is not a cancellation's: Reverse… passes
+  `{ minDate: the posting date, label: 'Reversal date' }`; the sales cancel of script 84 keeps "Cancellation date".
+- **The Email log links by category.** `TransferApproval`, `TransferApproved` and `TransferRejected` ("Transfer approval
+  request", "Transfer approved", "Transfer rejected") are about a transfer order: their Document cell reads "Transfer
+  order #{id}" and opens it (`isTransferCategory`, `api/emails.ts`), as text for a reader without
+  `inventory.transfers.view`. Every other category keeps its purchase-order link.
+- **The dispatch note** (`TransferDispatchPrintPage`, "Print dispatch note" on a dispatch's row): like the goods
+  receipt's count sheet, outside the shell, A4 portrait, the browser's print dialog at once: "Dispatch note {TRD}", the
+  transfer order, From → To, the dates, "Waybill / truck", the lines in pcs, the total, and three signature boxes
+  ("Dispatched by", "Driver", "Received by").
+- **`FormModal`'s options** (`closeOnEscape`, `fullScreen`, `saveDisabledReason`, and the nested form's submit ignored)
+  came with these dialogs: see **Modals and the keyboard**.
+- **Around them.** The item statement opens a TRD or TRR row, and its TRO, on the order (`transferOrderId`; the
+  counterparty reads "LKS-01 → LUB-01"). Shortages count what is on the way to a warehouse as **Transfers in** (see
+  **Shortage plans**). The Dashboard's Inventory value of one branch says, on hover, that it includes goods on the way
+  to that branch's warehouses (its "Stock value by warehouse" chart shows an On the way slice). Inventory In / Out show
+  a gray hint under the reason "Transfer in" / "Transfer out" (TRF_IN / TRF_OUT): "Moving stock between your own
+  warehouses? Inventory › Transfer Orders moves it without changing its cost and follows it on the way." Sales Profit's
+  COGS adjustments header says, on hover, that adjustments stay in the branch that received the goods.
 
 ## Bulk actions
 
@@ -1244,20 +1349,26 @@ Per line, in **base units** (only Required Qty is in the purchase unit, shown as
 
 | Cell | Formula |
 |---|---|
-| Stock + Transit | Current Inventory + Transit |
-| Total Expected Stock | Current Inventory + Transit + Outstanding Order |
-| Expected Monthly Sales | sales of the last *Months of history* (default 3) in the warehouse ÷ months; **overridable per line** |
+| Stock + Transit | Current Inventory + Transit + Transfers in (the header's tooltip says so) |
+| Total Expected Stock | Current Inventory + Transit + Transfers in + Outstanding Order |
+| Expected Monthly Sales | the **busiest month** of the last *Months of history* (default 3): the history cut into one-month blocks counted back from today, the net sales (sales less returns) of the block that sold the most, in the warehouse and every warehouse under it (script 85; it was the average before); **overridable per line** |
 | Expected Requirement | Expected Monthly Sales × Lead Time (Month) |
 | Shortage Qty | max(0, Requirement − Total Expected Stock), rounded up — red when > 0 |
 | Coverage (months) | Total Expected Stock ÷ Expected Monthly Sales — red when < Lead Time, "—" when nothing sells |
 | Required Qty | typed; defaults to the shortage rounded up to whole purchase units |
 | Container Requirement | Required Qty × packing ÷ PC per Container (the item's *PC per Container*, overridable per line) |
 
-The live figures come from `inventory.fn_Shortage_Live` (last changed by script 65, goods receipts), for the
-plan's warehouse and every warehouse under it:
+The live figures come from `inventory.fn_Shortage_Live` (last changed by script 85, the busiest month; script 65
+brought goods receipts), for the plan's warehouse and every warehouse under it:
 
 - **Transit** = pieces loaded in containers that have left the supplier (In Transit, At Port, Cleared: statuses 3-5)
   and are not received yet, counted on the warehouse of their order line.
+- **Transfers in** (script 90, `fn_Shortage_Live` re-created) = goods on the way to the warehouse (its tree) from
+  other warehouses: dispatched by transfer orders to it, not received or written off yet. A column after Transit on
+  the plan, in Load items and on paper, with the tooltip "Goods on the way to this warehouse from other warehouses
+  (transfer orders), not received yet." (`TRANSFERS_IN_HINT`); `derive()` adds it to Stock + Transit. Transfers OUT
+  are not demand: counting them would buy twice. A plan saved before script 90 has 0 there, so its figures are
+  unchanged.
 - **Outstanding Order** = max(0, what approved orders still bring − Transit). What an order still brings is its
   lines' **outstanding** (`outstandingBase`, the same number as the item's "On order"): on an approved order ordered −
   received − settled short, never below 0. Posted
@@ -1301,8 +1412,13 @@ utilization (91.88 %, with a bar).
 
 **Create Purchase Order** is disabled on a draft with the tooltip "Post the plan first" (`DocumentAction.disabledReason`)
 and live on a posted plan: confirm → `POST {id}/create-purchase-order` → a notify naming the PO → the PO draft
-opens. The order takes the plan's supplier, branch and warehouse and every line with a Required Qty above zero,
-in the purchase unit; NOTHING_TO_ORDER when there is none. The PO shows a **"Source: Shortage SHR-…" chip**
+opens. The order takes the plan's supplier and branch and every line with a Required Qty above zero, in the
+purchase unit; NOTHING_TO_ORDER when there is none. Each line goes to the plan's warehouse when it is at the bottom
+of the tree. For a plan made for a parent warehouse (script 62) each line goes to the item's default warehouse when it
+is an active warehouse at the bottom of the plan's tree, else to the first of those (the plan's branch first, then by
+code); the order's header takes its first line's warehouse and its Notes say so (script 89; before, the purchase
+validation refused the parent). A tree without an active warehouse at the bottom is refused with the server's
+VALIDATION message, shown as it comes. The PO shows a **"Source: Shortage SHR-…" chip**
 linking back, and the plan's **Purchase orders** card lists every order made from it (number, date, status,
 amount); the audit trail shows Created / Updated / Recalculated / Posted / POCreated.
 
@@ -1417,6 +1533,9 @@ is a document with its own Draft → Posted → Cancelled life rather than an ed
   received so far, and the company's stock decides the stock part (the goods receipts' cost adjustments, cause
   "Landed cost adjustment …"); pieces not received yet simply take the new invoice cost when they arrive. A "Shipped
   in containers" invoice takes no adjustment (67012): its charges are the containers'.
+- On an invoice posted before goods receipts the quantity still in stock is worked out per item on the company's stock
+  (every warehouse) since script 89; it was each line's warehouse. The Split table's Remaining is the line's share of
+  the item's pieces still held, rounded so that the lines add up.
 - Cancelling writes the reversal and rebuilds the item costs.
 
 ## Sales profit
@@ -1506,7 +1625,7 @@ copied.
 | `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. |
 | `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. Below 768 px the big button is the action marked `filled`, else the last one shown; `pinnedOnPhone` keeps an action beside it as a button, and `menuWhenDisabled` sends an action into the menu while it is disabled (a big greyed button says nothing on a phone, which has no tooltip: a completed movement's "Cancel…"), the action before it then taking the big button. |
 | `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
-| `CancelReasonModal` | Asks why a posted document is being cancelled. |
+| `CancelReasonModal` | Asks why a posted document is being cancelled. `withDate: { minDate?, label? }` also asks the date it counts on (script 84; `label` names the field when it is not a cancellation's, "Reversal date" of a transfer, script 90). |
 
 ### The rules that are easy to get wrong
 

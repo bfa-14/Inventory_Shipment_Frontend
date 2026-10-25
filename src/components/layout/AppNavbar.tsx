@@ -21,6 +21,7 @@ import { katangaLogo } from '../../assets'
 import { useAuth } from '../../auth/useAuth'
 import { useApprovalsMe } from '../../hooks/useApprovalsMe'
 import { useGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
+import { useTransfersWaiting } from '../../hooks/useTransfersWaiting'
 import { findLeaf, isGroup, navLeaves, searchNavigation, visibleNavigation, type NavFacts, type NavItem } from '../../navigation'
 import { NavIcon } from './NavIcon'
 import { useShowComingSoon } from './useComingSoon'
@@ -45,10 +46,12 @@ export function AppNavbar({ collapsed, onToggleCollapsed, onNavigate }: AppNavba
   const [showComingSoon] = useShowComingSoon()
   const approvals = useApprovalsMe()
   const draftGoodsReceipts = useGoodsReceiptsWaiting()
+  const transfersWaiting = useTransfersWaiting()
   const facts: NavFacts = {
     canApproveInApp: approvals?.canApproveInApp === true,
     pendingApprovals: approvals?.pendingCount ?? 0,
     draftGoodsReceipts,
+    transfersWaiting,
   }
   const allSections = visibleNavigation(hasPermission, showComingSoon, facts)
 

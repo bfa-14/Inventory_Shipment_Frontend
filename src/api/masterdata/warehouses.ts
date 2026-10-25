@@ -32,11 +32,14 @@ export const warehousesApi = {
   /**
    * Warehouses for a dropdown. Readable by any signed-in user.
    * `includeId` keeps one warehouse in the list even when it is inactive.
+   * `includeTransit` (90) adds the branches' On the way warehouses, which no other picker offers: stock is never put
+   * there by hand, only Stock Valuation shows what sits in one. Left out, the parameter is not sent.
    */
-  lookup: (activeOnly = true, branchId?: number, includeId?: number) => {
+  lookup: (activeOnly = true, branchId?: number, includeId?: number, includeTransit = false) => {
     const params = new URLSearchParams({ activeOnly: String(activeOnly) })
     if (branchId !== undefined) params.set('branchId', String(branchId))
     if (includeId !== undefined) params.set('includeId', String(includeId))
+    if (includeTransit) params.set('includeTransit', 'true')
     return request<WarehouseLookupDto[]>(`/api/masterdata/warehouses/lookup?${params.toString()}`)
   },
 

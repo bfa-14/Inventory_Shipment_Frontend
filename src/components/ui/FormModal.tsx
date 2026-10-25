@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
-import { Button, Group, Modal, Stack } from '@mantine/core'
+import { Button, Group, Modal, Stack, Text, Tooltip } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 
 interface FormModalProps {
   opened: boolean
@@ -25,6 +26,22 @@ interface FormModalProps {
    * would press is disabled.
    */
   saveDisabled?: boolean
+  /*
+   * (90) THREE MORE OPTIONS, ALL OFF BY DEFAULT, for the large dialogs that post (a transfer's Dispatch, Receive and
+   * Dispatch and receive) and the dialogs opened on top of them. Left out, the dialog is exactly what it always was.
+   */
+  /**
+   * False keeps Escape from closing the dialog (it never does while saving). Mantine closes EVERY open modal on one
+   * Escape, so an outer dialog passes false while an inner one is open: Escape then closes the inner one only.
+   */
+  closeOnEscape?: boolean
+  /** The whole screen (a phone): the large dialogs pass it below 48em. Not centred then. */
+  fullScreen?: boolean
+  /**
+   * Why Save is disabled, while `saveDisabled` is true: the button's tooltip on a wide screen and, below 48em (a phone
+   * shows no tooltip), a dimmed line above the footer - the rule of DocumentActionBar.
+   */
+  saveDisabledReason?: string
 }
 
 /** Everything a reader can type into or press, in the order the browser would tab through it. */
@@ -82,9 +99,16 @@ export function FormModal({
   size = 'lg',
   readOnly = false,
   saveDisabled = false,
+  closeOnEscape = true,
+  fullScreen = false,
+  saveDisabledReason,
 }: FormModalProps) {
   const openerRef = useRef<HTMLElement | null>(null)
   const timerRef = useRef<number | undefined>(undefined)
+  const phone = useMediaQuery('(max-width: 48em)')
+  // The reason is said only while Save is disabled, and only by a dialog that gives one.
+  const reason = saveDisabled && saveDisabledReason ? saveDisabledReason : null
+  const tooltipSave = reason !== null && !phone && !readOnly
 
   // Read on the render that opens the dialog - before the modal exists, and so before anything has
   // taken the focus away from the button that was pressed.
@@ -126,16 +150,25 @@ export function FormModal({
       onClose={onClose}
       title={title}
       size={size}
+      fullScreen={fullScreen}
+      centered={!fullScreen}
       trapFocus
       returnFocus={false}
       closeOnClickOutside={!saving}
-      closeOnEscape={!saving}
+      closeOnEscape={closeOnEscape && !saving}
       withCloseButton={!saving}
     >
       <form
         ref={attachForm}
         onSubmit={(event) => {
           event.preventDefault()
+          /* ONLY THIS DIALOG'S OWN FORM SUBMITS IT. A dialog opened on top of it (rendered in a portal) bubbles its
+             submit up the React tree to here, which would post this one too: ignored, as the item page does. No
+             dialog held another form before script 90, so for them nothing changes. */
+          if (event.target !== event.currentTarget) return
+          // Enter while Save is disabled with its reason: that Save is not a disabled button (its tooltip needs the
+          // hover), so the browser would submit through it. A plain disabled Save stops Enter by itself.
+          if (tooltipSave) return
           onSubmit()
         }}
         noValidate
@@ -143,12 +176,26 @@ export function FormModal({
         <Stack gap="md">
           {children}
 
+          {/* A phone shows no tooltip: the reason Save is disabled stands above the footer. */}
+          {reason && phone && !readOnly ? (
+            <Text fz="xs" c="dimmed" ta="right">
+              {reason}
+            </Text>
+          ) : null}
+
           {/* A native submit button: Enter in any single-line field submits the form. */}
           <Group className={FOOTER_CLASS} justify="flex-end" gap="sm" mt="xs">
             <Button variant="default" onClick={onClose} disabled={saving}>
               {cancelLabel}
             </Button>
-            {readOnly ? null : (
+            {readOnly ? null : tooltipSave ? (
+              // data-disabled rather than disabled: a disabled button swallows the hover the tooltip needs.
+              <Tooltip label={reason} withArrow multiline w={280}>
+                <Button type="submit" data-disabled aria-disabled onClick={(event) => event.preventDefault()}>
+                  {saveLabel}
+                </Button>
+              </Tooltip>
+            ) : (
               <Button type="submit" loading={saving} disabled={saveDisabled}>
                 {saveLabel}
               </Button>

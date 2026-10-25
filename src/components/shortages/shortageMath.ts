@@ -3,10 +3,10 @@ import type { ShortageDocumentLineDto, ShortageLiveRowDto } from '../../api/inve
 /**
  * One line of a shortage plan while it is on the page.
  *
- * THREE INPUTS FROM THE SERVER, THREE FROM THE PLANNER, EVERYTHING ELSE DERIVED. Current inventory,
- * transit, outstanding order and the computed monthly sales are the server's figures and are never
- * edited here; the planner types a manual monthly sales figure, a required quantity and a PC per
- * container. {@link derive} turns the six (and the header's lead time) into every other cell, with
+ * FIGURES FROM THE SERVER, THREE INPUTS FROM THE PLANNER, EVERYTHING ELSE DERIVED. Current inventory,
+ * transit, transfers in (90), outstanding order and the computed monthly sales are the server's figures and
+ * are never edited here; the planner types a manual monthly sales figure, a required quantity and a PC per
+ * container. {@link derive} turns them (and the header's lead time) into every other cell, with
  * the same formulas the database uses — so the grid answers as it is typed, and the API's values
  * replace the page's on the next save.
  */
@@ -19,6 +19,8 @@ export interface ShortageLine {
   itemName: string
   currentInventoryBase: number
   transitBase: number
+  /** (90) On the way to the plan's warehouse by transfer orders: counted like stock in transit. */
+  transfersInBase: number
   outstandingOrderBase: number
   /** Computed from the sales history; shown greyed when there is no override. */
   expectedMonthlySalesBase: number
@@ -60,18 +62,19 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
 /**
  * The rule, per line, in base units:
  *
- *   Stock + Transit       = Current Inventory + Transit
- *   Total Expected Stock  = Current Inventory + Transit + Outstanding Order
+ *   Stock + Transit       = Current Inventory + Transit + Transfers in (90: goods on the way from another warehouse)
+ *   Total Expected Stock  = Current Inventory + Transit + Transfers in + Outstanding Order
  *   Expected Requirement  = Expected Monthly Sales × Lead Time (Month)
  *   Shortage              = max(0, Requirement − Total Expected Stock), rounded UP to a whole unit
  *   Coverage (months)     = Total Expected Stock ÷ Expected Monthly Sales
  *   Container Requirement = Required Qty × packing ÷ PC per Container
  */
 export function derive(
-  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'>,
+  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'transfersInBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'>,
   leadTimeMonths: number,
 ): ShortageDerived {
-  const stockPlusTransitBase = line.currentInventoryBase + line.transitBase
+  // A plan saved before transfers has 0 transfers in: its figures stay what they were.
+  const stockPlusTransitBase = line.currentInventoryBase + line.transitBase + line.transfersInBase
   const totalExpectedStockBase = stockPlusTransitBase + line.outstandingOrderBase
   const effectiveMonthlySales = line.expectedMonthlySalesManual ?? line.expectedMonthlySalesBase
   const requirement = effectiveMonthlySales * (leadTimeMonths > 0 ? leadTimeMonths : 0)
@@ -142,6 +145,7 @@ export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
     itemName: dto.itemName,
     currentInventoryBase: dto.currentInventoryBase,
     transitBase: dto.transitBase,
+    transfersInBase: dto.transfersInBase ?? 0,
     outstandingOrderBase: dto.outstandingOrderBase,
     expectedMonthlySalesBase: dto.expectedMonthlySalesBase,
     expectedMonthlySalesManual: dto.expectedMonthlySalesManual,
@@ -169,6 +173,7 @@ export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
     itemName: row.itemName,
     currentInventoryBase: row.currentInventoryBase,
     transitBase: row.transitBase,
+    transfersInBase: row.transfersInBase ?? 0,
     outstandingOrderBase: row.outstandingOrderBase,
     expectedMonthlySalesBase: row.expectedMonthlySalesBase,
     expectedMonthlySalesManual: null,
@@ -183,6 +188,12 @@ export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
     notes: '',
   }
 }
+
+/** (90) The "Transfers in" column's tooltip, on the plan, in Load items and on paper. */
+export const TRANSFERS_IN_HINT = 'Goods on the way to this warehouse from other warehouses (transfer orders), not received yet.'
+
+/** (90) The "Stock + Transit" header's tooltip: the column has counted the transfers in since script 90. */
+export const STOCK_PLUS_TRANSIT_HINT = 'Stock + Transit + Transfers in'
 
 /** Draft grey, Posted green. */
 export const SHORTAGE_STATUS_COLOURS: Record<string, string> = { Draft: 'gray', Posted: 'green' }

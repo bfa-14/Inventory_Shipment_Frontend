@@ -14,9 +14,10 @@ interface CancelReasonModalProps {
   onConfirm: (reason: string, date: string | null) => void
   /**
    * Ask for the date the cancellation counts on, next to the reason: today unless the reader changes it,
-   * never in the future, never before `minDate` (the document's own date). Off unless asked for.
+   * never in the future, never before `minDate` (the document's own date). Off unless asked for. `label` names the
+   * field when the date is not a cancellation's ("Reversal date" of a transfer's dispatch or receipt, script 90).
    */
-  withDate?: { minDate?: string | null }
+  withDate?: { minDate?: string | null; label?: string }
   /** What the red button says; "Cancel document" unless the caller names its own verb. */
   confirmLabel?: string
   /** What the cancellation does, when it is not the stock document's reversal. */
@@ -93,7 +94,7 @@ function ReasonForm({
         <Group align="flex-start" gap="sm" wrap="wrap">
           {withDate && (
             <DateInput
-              label="Cancellation date"
+              label={withDate.label ?? 'Cancellation date'}
               withAsterisk
               w={170}
               valueFormat="DD/MM/YYYY"

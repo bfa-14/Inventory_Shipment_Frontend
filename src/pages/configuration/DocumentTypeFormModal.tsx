@@ -6,7 +6,7 @@ import { ApiError } from '../../api/http'
 import { inventoryLookupsApi, type DocumentTypeDto } from '../../api/inventory/stockDocuments'
 import { numberInputValue } from '../../components/format'
 import { FormModal } from '../../components/ui/FormModal'
-import { CAPTURED_NOTE, EFFECT_TEXT, GOODS_RECEIPT_TYPE, INVOICE_TYPE, stockSentence } from './documentTypeEffects'
+import { CAPTURED_NOTE, EFFECT_TEXT, GOODS_RECEIPT_TYPE, INVOICE_TYPE, stockSentence, TRANSFER_ORDER_TYPE } from './documentTypeEffects'
 
 interface DocumentTypeFormModalProps {
   type: DocumentTypeDto
@@ -27,6 +27,7 @@ interface FormValues {
   affectsItemCost: boolean
   affectsOnHand: boolean
   autoCreateOnDelivery: boolean
+  needsApproval: boolean
   isActive: boolean
 }
 
@@ -46,7 +47,8 @@ const PRICING_OPTIONS = [
  * change is said, in the warning, to apply to new documents only.
  *
  * (79) WHAT THE TYPE DOES: the switches of documentTypeEffects.ts, shown only on the type they belong to (the purchase
- * invoice's two, the goods receipt's one) and sent only for it - an older form, or another type, never touches them.
+ * invoice's two, the goods receipt's one, the transfer order's approval of script 90) and sent only for it - an older
+ * form, or another type, never touches them.
  */
 export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFormModalProps) {
   const [saving, setSaving] = useState(false)
@@ -54,6 +56,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
   const [stale, setStale] = useState(false)
   const isInvoice = type.code === INVOICE_TYPE
   const isGoodsReceipt = type.code === GOODS_RECEIPT_TYPE
+  const isTransferOrder = type.code === TRANSFER_ORDER_TYPE
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -69,6 +72,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
       affectsItemCost: type.affectsItemCost ?? true,
       affectsOnHand: type.affectsOnHand ?? false,
       autoCreateOnDelivery: type.autoCreateOnDelivery ?? true,
+      needsApproval: type.needsApproval ?? false,
       isActive: type.isActive,
     },
     validate: {
@@ -100,6 +104,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
         affectsItemCost: isInvoice ? values.affectsItemCost : undefined,
         affectsOnHand: isInvoice ? values.affectsOnHand : undefined,
         autoCreateOnDelivery: isGoodsReceipt ? values.autoCreateOnDelivery : undefined,
+        needsApproval: isTransferOrder ? values.needsApproval : undefined,
         isActive: values.isActive,
         rowVersion: type.rowVersion,
       })
@@ -193,7 +198,7 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
           </Stack>
         </Grid.Col>
 
-        {(isInvoice || isGoodsReceipt) && (
+        {(isInvoice || isGoodsReceipt || isTransferOrder) && (
           <Grid.Col span={12}>
             <Stack gap="xs" mt="xs">
               <Text fz="sm" fw={600}>
@@ -221,6 +226,13 @@ export function DocumentTypeFormModal({ type, onClose, onSaved }: DocumentTypeFo
                   label={EFFECT_TEXT.autoCreateOnDelivery.label}
                   description={EFFECT_TEXT.autoCreateOnDelivery.description}
                   {...form.getInputProps('autoCreateOnDelivery', { type: 'checkbox' })}
+                />
+              )}
+              {isTransferOrder && (
+                <Switch
+                  label={EFFECT_TEXT.needsApproval.label}
+                  description={EFFECT_TEXT.needsApproval.description}
+                  {...form.getInputProps('needsApproval', { type: 'checkbox' })}
                 />
               )}
             </Stack>

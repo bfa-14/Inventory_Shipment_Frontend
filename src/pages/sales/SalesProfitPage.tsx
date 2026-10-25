@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Paper, Select, SimpleGrid, Text } from '@mantine/core'
+import { Alert, Button, Paper, Select, SimpleGrid, Text, Tooltip } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { IconFileExport, IconFilterOff } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -136,6 +136,10 @@ const GRID_COLUMNS: GridColumnMeta<SalesProfitRowDto>[] = [
   { accessor: 'grossProfitPct', text: (r) => percent(r.grossProfitPct) },
   { accessor: 'cogsAdjustmentsBase', kind: 'number', text: (r) => formatNumber(r.cogsAdjustmentsBase, 2) },
 ]
+
+/** (90) The COGS adjustments header's tooltip. */
+const COGS_ADJUSTMENTS_BRANCH_HINT =
+  'Cost adjustments are counted in the branch that received the goods, even if a transfer moved them since.'
 
 /**
  * What selling the goods earned, grouped the way the reader asks for.
@@ -345,7 +349,13 @@ export function SalesProfitPage() {
       ? [
           {
             accessor: 'cogsAdjustmentsBase',
-            title: 'COGS adjustments (USD)',
+            // (90) An adjustment is booked where the goods were received: a transfer since does not move it (that
+            // would need each piece followed, which no module does), and the header says so.
+            title: (
+              <Tooltip label={COGS_ADJUSTMENTS_BRANCH_HINT} withArrow multiline w={300}>
+                <span>COGS adjustments (USD)</span>
+              </Tooltip>
+            ),
             width: 180,
             textAlign: 'right',
             footer: amountFooter(totals.cogsAdjustmentsBase),
