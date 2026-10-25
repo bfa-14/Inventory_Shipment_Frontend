@@ -580,7 +580,8 @@ export function TransferLinesGrid({
   const columnCount = 11 + (showLevels ? 3 : 0) + (selectable ? 1 : 0) + (editable ? 1 : 0)
   /* (91) THREE MORE COLUMNS while the levels show. A draft's form already scrolls inside its card: it gets their room.
      Read, the columns still fit a 1440 screen: the widths below are hints the table narrows (headers wrap), and it
-     scrolls only below that. */
+     scrolls only below that. Item Name keeps its 130 px whatever shows (script 90's rule: never squeezed to a word a
+     line); the figure columns and Notes give up their room first. */
   const minWidth = editable ? 1330 + (showLevels ? 230 : 0) : showLevels ? 1120 : 1100
   const levelHeader = (title: string, hint: string, width: number) => (
     <Table.Th w={width} ta="right">
@@ -601,7 +602,7 @@ export function TransferLinesGrid({
               {selectable && <Table.Th w={36} />}
               <Table.Th w={52}>#</Table.Th>
               <Table.Th w={editable ? 220 : 130}>Item Code</Table.Th>
-              <Table.Th miw={showLevels && !editable ? 90 : 130}>Item Name</Table.Th>
+              <Table.Th miw={130}>Item Name</Table.Th>
               <Table.Th w={editable ? 130 : 100}>Unit</Table.Th>
               <Table.Th w={115} ta="right">
                 {availableTitle}

@@ -43,6 +43,10 @@ export interface StockLevelFormModalProps {
  * overwritten. A warehouse that already has a level says so before the click ("LUB-01 already has Min 10 / Max 40: it is
  * replaced."). The server's sentences are shown as they come, in the dialog; its message after a save as a notification.
  */
+/** A level is at most 1,000,000,000 pcs (the server's rule, CK_ItemWarehouseLevels_Range): said here before the click. */
+const MAX_LEVEL = 1_000_000_000
+const TOO_BIG = 'Min and Max can be at most 1,000,000,000 pcs.'
+
 export function StockLevelFormModal(props: StockLevelFormModalProps) {
   // Keyed on opened: every opening is a fresh form, never the half-typed values of the last one.
   return <StockLevelForm key={props.opened ? 'open' : 'closed'} {...props} />
@@ -127,7 +131,9 @@ function StockLevelForm({ opened, item, warehouse, existing, source, onClose, on
     if (itemId === null) next.item = 'Choose an item.'
     if (warehouseIds.length === 0) next.warehouses = 'Choose at least one warehouse.'
     if (min === '' || !Number.isInteger(min) || min < 0) next.min = 'Min must be a whole number, 0 or more.'
+    else if (min > MAX_LEVEL) next.min = TOO_BIG
     if (max !== '' && (!Number.isInteger(max) || max < 0)) next.max = 'Max must be a whole number, 0 or more.'
+    else if (max !== '' && max > MAX_LEVEL) next.max = TOO_BIG
     else if (max !== '' && min !== '' && max < min) next.max = 'Max cannot be less than Min.'
     setErrors(next)
     return Object.keys(next).length === 0
@@ -225,6 +231,8 @@ function StockLevelForm({ opened, item, warehouse, existing, source, onClose, on
           label="Min (pcs)"
           withAsterisk
           min={0}
+          max={MAX_LEVEL}
+          clampBehavior="none"
           step={1}
           allowDecimal={false}
           allowNegative={false}
@@ -246,6 +254,8 @@ function StockLevelForm({ opened, item, warehouse, existing, source, onClose, on
           placeholder="No maximum"
           description="Fill to Max fills up to Max; with no Max, up to Min."
           min={0}
+          max={MAX_LEVEL}
+          clampBehavior="none"
           step={1}
           allowDecimal={false}
           allowNegative={false}

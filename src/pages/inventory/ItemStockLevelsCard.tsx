@@ -13,6 +13,7 @@ import {
   inactiveWarehouseText,
   levelPhoneLine,
   levelWarehouseText,
+  localDay,
   removeLevelQuestion,
   updatedText,
 } from '../../components/stockLevels/stockLevelStatus'
@@ -26,6 +27,11 @@ export interface ItemStockLevelsCardProps {
   /** Item Definition's Minimum / Maximum Quantity AS SAVED: the company's, compared with the warehouses' Min. */
   companyMin: number | null
   companyMax: number | null
+  /**
+   * The item itself has been read (its code and company figures are known). Until then the company line is a skeleton
+   * and "Set levels…" waits: it would name no item and claim a Minimum Quantity of 0.
+   */
+  itemLoaded: boolean
   /** inventory.stocklevels.edit: Set levels…, the pencil and the trash. */
   canEdit: boolean
 }
@@ -48,7 +54,14 @@ type Dialog =
  * TWO MIN / MAX, NEVER ONE. The company line above the table keeps Item Definition's Minimum / Maximum Quantity in view
  * (the company's, the Dashboard's), and says when the warehouses' own Min add up to more than the company Maximum.
  */
-export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, canEdit }: ItemStockLevelsCardProps) {
+export function ItemStockLevelsCard({
+  itemId,
+  itemCode,
+  companyMin,
+  companyMax,
+  itemLoaded,
+  canEdit,
+}: ItemStockLevelsCardProps) {
   const phone = useMediaQuery('(max-width: 48em)')
   const [rows, setRows] = useState<StockLevelRowDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -80,7 +93,7 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
   async function removeLevel(row: StockLevelRowDto) {
     const go = await confirm({
       title: 'Remove stock level',
-      message: removeLevelQuestion(itemCode, row.warehouseCode),
+      message: removeLevelQuestion(row.itemCode || itemCode, row.warehouseCode),
       confirmLabel: 'Remove',
       danger: true,
     })
@@ -99,6 +112,9 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
   }
 
   const levels = rows ?? []
+  /** The item's code: the page's, else the rows' own (they may arrive before the item has been read). */
+  const code = itemCode || levels[0]?.itemCode || ''
+
   const minSum = levels.reduce((sum, r) => sum + (r.minQuantityBase ?? 0), 0)
   const aboveCompanyMax = companyMax !== null && minSum > companyMax
 
@@ -113,7 +129,7 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
           them.
         </Text>
       </Box>
-      {canEdit && itemId !== null ? (
+      {canEdit && itemId !== null && itemLoaded ? (
         <Button
           type="button"
           variant="light"
@@ -138,6 +154,19 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
       </Card>
     )
   }
+
+  /**
+   * THE ACTIONS COLUMN STAYS IN VIEW. The table fits the card at 1440; where the card is narrower than the table's 700 px
+   * it scrolls sideways, and the pencil, the trash and the clock - the card's only way to change a level - stay pinned to
+   * its right edge, as `pinLastColumn` keeps a grid's actions.
+   */
+  const stickyActions = {
+    position: 'sticky',
+    right: 0,
+    zIndex: 1,
+    background: 'var(--mantine-color-body)',
+    boxShadow: 'inset 1px 0 0 var(--mantine-color-gray-3)',
+  } as const
 
   /** The row's three actions; the pencil is disabled on an inactive warehouse with the server's sentence. */
   const actions = (row: StockLevelRowDto) => {
@@ -217,22 +246,26 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
     <Card radius="lg" p="lg" withBorder data-item-stock-levels>
       {header}
 
-      <Text fz="sm" mb="sm" data-item-levels-company>
-        <Text span c="dimmed" fz="sm">
-          Company: Minimum Quantity {formatNumber(companyMin ?? 0)} · Maximum Quantity{' '}
-          {companyMax === null ? 'none' : formatNumber(companyMax)}.{' '}
-        </Text>
-        {aboveCompanyMax ? (
-          <Text span c="orange.8" fz="sm" fw={500}>
-            The warehouses&apos; Min add up to {formatNumber(minSum)} pcs, above the company Maximum Quantity (
-            {formatNumber(companyMax)}).
-          </Text>
-        ) : (
+      {!itemLoaded ? (
+        <Skeleton height={18} radius="sm" mb="sm" width="70%" />
+      ) : (
+        <Text fz="sm" mb="sm" data-item-levels-company>
           <Text span c="dimmed" fz="sm">
-            The warehouses&apos; Min add up to {formatNumber(minSum)} pcs.
+            Company: Minimum Quantity {formatNumber(companyMin ?? 0)} · Maximum Quantity{' '}
+            {companyMax === null ? 'none' : formatNumber(companyMax)}.{' '}
           </Text>
-        )}
-      </Text>
+          {aboveCompanyMax ? (
+            <Text span c="orange.8" fz="sm" fw={500}>
+              The warehouses&apos; Min add up to {formatNumber(minSum)} pcs, above the company Maximum Quantity (
+              {formatNumber(companyMax)}).
+            </Text>
+          ) : (
+            <Text span c="dimmed" fz="sm">
+              The warehouses&apos; Min add up to {formatNumber(minSum)} pcs.
+            </Text>
+          )}
+        </Text>
+      )}
 
       {error ? (
         <Alert color="red" mb="sm">
@@ -259,8 +292,9 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
                 {levelPhoneLine(row)}
               </Text>
               {!row.warehouseIsActive ? (
-                <Text fz="xs" c="dimmed">
-                  inactive
+                /* A phone shows no tooltip: an editor reads why the pencil is disabled; a reader, that it is inactive. */
+                <Text fz="xs" c="dimmed" data-item-level-inactive>
+                  {canEdit ? inactiveWarehouseText(row.warehouseCode) : 'inactive'}
                 </Text>
               ) : null}
               <Group justify="space-between" mt={4} gap="xs" wrap="nowrap">
@@ -276,20 +310,23 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
           ))}
         </Stack>
       ) : (
-        <Table.ScrollContainer minWidth={860}>
-          <Table verticalSpacing="sm" highlightOnHover data-item-levels-table>
+        /* THE TABLE FITS THE CARD AT 1440 (about 730 px in the main column): narrow paddings, captions that wrap, the
+           warehouse's name wrapping under its code, and when the level was last set read under its status - Status, Min
+           and Max are what the card is for and must be read without scrolling. A narrower screen scrolls it, the
+           actions pinned to its right edge. */
+        <Table.ScrollContainer minWidth={700}>
+          <Table verticalSpacing="sm" horizontalSpacing={6} highlightOnHover data-item-levels-table>
             <Table.Thead>
               <Table.Tr>
-                <Table.Th miw={190}>Warehouse</Table.Th>
+                <Table.Th w={150}>Warehouse</Table.Th>
                 <Table.Th ta="right">On hand</Table.Th>
                 <Table.Th ta="right">Coming in</Table.Th>
                 <Table.Th ta="right">Going out</Table.Th>
                 <Table.Th ta="right">Projected</Table.Th>
                 <Table.Th ta="right">Min</Table.Th>
                 <Table.Th ta="right">Max</Table.Th>
-                <Table.Th miw={150}>Status</Table.Th>
-                <Table.Th miw={130}>Updated</Table.Th>
-                <Table.Th ta="right" miw={110} aria-label="Actions" />
+                <Table.Th>Status · Updated</Table.Th>
+                <Table.Th ta="right" aria-label="Actions" style={stickyActions} />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -327,13 +364,17 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
                   </Table.Td>
                   <Table.Td>
                     <StockLevelBadge status={row.status} />
-                  </Table.Td>
-                  <Table.Td>
-                    <Text fz="xs" c="dimmed">
-                      {updatedText(row)}
+                    {/* Updated under the badge: "24/10/2026", then "by Manager One". */}
+                    <Text fz="xs" c="dimmed" mt={4} style={{ whiteSpace: 'nowrap' }}>
+                      {localDay(row.updatedAtUtc)}
                     </Text>
+                    {row.updatedByName ? (
+                      <Text fz="xs" c="dimmed">
+                        by {row.updatedByName}
+                      </Text>
+                    ) : null}
                   </Table.Td>
-                  <Table.Td>{actions(row)}</Table.Td>
+                  <Table.Td style={stickyActions}>{actions(row)}</Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
@@ -344,7 +385,7 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
       {dialog?.kind === 'set' || dialog?.kind === 'edit' ? (
         <StockLevelFormModal
           opened
-          item={{ id: itemId, itemCode }}
+          item={{ id: itemId, itemCode: code }}
           warehouse={
             dialog.kind === 'edit'
               ? { id: dialog.row.warehouseId, code: dialog.row.warehouseCode, name: dialog.row.warehouseName }
@@ -363,7 +404,7 @@ export function ItemStockLevelsCard({ itemId, itemCode, companyMin, companyMax, 
         <StockLevelHistoryModal
           opened
           itemId={itemId}
-          itemCode={itemCode}
+          itemCode={code}
           warehouseId={dialog.row.warehouseId}
           warehouseCode={dialog.row.warehouseCode}
           onClose={() => setDialog(null)}

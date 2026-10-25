@@ -9,6 +9,7 @@ import type { WarehouseLookupDto } from '../../api/types'
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, todayDateOnly } from '../format'
 import { FormModal } from '../ui/FormModal'
+import { useCalendarEscape } from '../ui/useCalendarEscape'
 import { notify } from '../ui/notify'
 import { levelWarehouseChoices } from './levelWarehouses'
 
@@ -40,6 +41,8 @@ export function CreateTransferFromLevelsModal(props: CreateTransferFromLevelsMod
 
 function CreateTransferForm({ opened, to, rows, onClose, onCreated }: CreateTransferFromLevelsModalProps) {
   const today = todayDateOnly()
+  // Escape closes an open calendar, not the dialog and the From chosen in it (frontend-conventions).
+  const { calendarOpen, calendar } = useCalendarEscape()
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
   const [fromId, setFromId] = useState<string | null>(null)
   const [documentDate, setDocumentDate] = useState<string | null>(today)
@@ -86,6 +89,9 @@ function CreateTransferForm({ opened, to, rows, onClose, onCreated }: CreateTran
         expectedArrival,
       })
       notify.success(result.message)
+      // As after Fill to Max: each warning orange, as it comes (From below its own Min; other drafts to To that hold
+      // these items - a second click makes a second draft for the same shortage, and is told so).
+      for (const warning of result.warnings) notify.warning(warning)
       onCreated(result)
     } catch (error) {
       // Nothing to transfer (62009), a warehouse refused (62000): nothing was created; the sentence says why.
@@ -103,6 +109,7 @@ function CreateTransferForm({ opened, to, rows, onClose, onCreated }: CreateTran
       onClose={onClose}
       saving={saving}
       saveLabel="Create draft"
+      closeOnEscape={!calendarOpen}
     >
       <Stack gap="sm">
         <Text fz="sm" data-create-transfer-summary>
@@ -145,6 +152,7 @@ function CreateTransferForm({ opened, to, rows, onClose, onCreated }: CreateTran
             setErrors((e) => ({ ...e, date: undefined }))
           }}
           maxDate={fromIsoDate(today) ?? undefined}
+          popoverProps={calendar('date')}
           error={errors.date}
           disabled={saving}
         />
@@ -158,6 +166,7 @@ function CreateTransferForm({ opened, to, rows, onClose, onCreated }: CreateTran
             setErrors((e) => ({ ...e, arrival: undefined }))
           }}
           minDate={fromIsoDate(documentDate) ?? undefined}
+          popoverProps={calendar('arrival')}
           clearable
           error={errors.arrival}
           disabled={saving}

@@ -1415,6 +1415,7 @@ function ItemDetails() {
                       itemCode={item?.itemCode ?? ''}
                       companyMin={item?.minQuantity ?? null}
                       companyMax={item?.maxQuantity ?? null}
+                      itemLoaded={item !== null}
                       canEdit={canEditLevels}
                     />
                   ) : null}

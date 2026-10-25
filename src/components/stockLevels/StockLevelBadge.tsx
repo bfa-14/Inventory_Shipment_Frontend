@@ -8,7 +8,15 @@ import { stockLevelStatusInfo } from './stockLevelStatus'
 export function StockLevelBadge({ status }: { status: string }) {
   const info = stockLevelStatusInfo(status)
   const badge = (
-    <Badge variant="light" color={info.colour} style={{ whiteSpace: 'nowrap' }} data-stock-level-status={status}>
+    /* The whole label, always: a badge in a narrow column was cut to "Be…" (its label hides its overflow), and a
+       status read as "Be…" says nothing. The badge keeps its width; the column grows or the table scrolls. */
+    <Badge
+      variant="light"
+      color={info.colour}
+      style={{ whiteSpace: 'nowrap', maxWidth: 'none', flexShrink: 0 }}
+      styles={{ label: { overflow: 'visible' } }}
+      data-stock-level-status={status}
+    >
       {info.label}
     </Badge>
   )

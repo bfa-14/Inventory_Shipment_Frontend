@@ -86,10 +86,19 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
   const [brandId, setBrandId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [debouncedSearch] = useDebouncedValue(search, 350)
+  /** The search Enter applied at once (the conventions' Filtering): it wins while the box still holds it. */
+  const [entered, setEntered] = useState<string | null>(null)
+  const appliedSearch = entered !== null && entered === search ? entered : debouncedSearch
   const [onlyBelowMin, setOnlyBelowMin] = useState(true)
 
-  const [result, setResult] = useState<TransferBelowMinResult>({ items: [], units: [] })
-  const [loading, setLoading] = useState(true)
+  /**
+   * THE ANSWER REMEMBERS WHICH FILTERS IT IS FOR, and "loading" is derived from it: the table is dimmed while the filters
+   * on screen are not the ones answered (a search still being typed included), and never stays dimmed when a search is
+   * typed and erased before it was sent (it was a state set on every keystroke, cleared only by an answer).
+   */
+  const wanted = JSON.stringify([appliedSearch.trim(), familyId, brandId, onlyBelowMin])
+  const [result, setResult] = useState<TransferBelowMinResult & { key: string | null }>({ key: null, items: [], units: [] })
+  const loading = result.key !== wanted || search.trim() !== appliedSearch.trim()
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -112,15 +121,17 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
 
   useEffect(() => {
     const controller = new AbortController()
+    const key = wanted
+    const query = JSON.parse(key) as [string, string | null, string | null, boolean]
     // The last request wins: the previous one is aborted by this effect's cleanup.
     transferLevelsApi
       .belowMin(
         order.id,
         {
-          search: debouncedSearch,
-          itemFamilyId: familyId === null ? undefined : Number(familyId),
-          brandId: brandId === null ? undefined : Number(brandId),
-          onlyBelowMin,
+          search: query[0],
+          itemFamilyId: query[1] === null ? undefined : Number(query[1]),
+          brandId: query[2] === null ? undefined : Number(query[2]),
+          onlyBelowMin: query[3],
         },
         controller.signal,
       )
@@ -143,24 +154,16 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
             return next
           })
         }
-        setResult(answer)
+        setResult({ key, items: answer.items, units: answer.units })
         setError(null)
-        setLoading(false)
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
-        setResult({ items: [], units: [] })
+        setResult({ key, items: [], units: [] })
         setError(err instanceof ApiError ? err.message : 'The items below Min could not be read.')
-        setLoading(false)
       })
     return () => controller.abort()
-  }, [order.id, debouncedSearch, familyId, brandId, onlyBelowMin])
-
-  /** A filter changed: the table shows its spinner until the new rows arrive. */
-  function refilter(apply: () => void) {
-    setLoading(true)
-    apply()
-  }
+  }, [order.id, wanted])
 
   const unitsByItem = useMemo(() => {
     const map = new Map<number, TransferBelowMinUnitDto[]>()
@@ -256,7 +259,8 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
         allowDeselect={false}
         disabled={busy || units.length <= 1}
         comboboxProps={{ withinPortal: true }}
-        w={phone ? '100%' : 90}
+        // "Box (x12)" whole: at 90 px it read "Box (x1…".
+        w={phone ? '100%' : 108}
       />
     )
   }
@@ -303,7 +307,7 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
             placeholder="All families"
             data={familyOptions(families)}
             value={familyId}
-            onChange={(next) => refilter(() => setFamilyId(next))}
+            onChange={setFamilyId}
             clearable
             searchable
             comboboxProps={{ withinPortal: true }}
@@ -315,7 +319,7 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
             placeholder="All brands"
             data={brands.map((b) => ({ value: String(b.id), label: brandLabel(b) }))}
             value={brandId}
-            onChange={(next) => refilter(() => setBrandId(next))}
+            onChange={setBrandId}
             clearable
             searchable
             comboboxProps={{ withinPortal: true }}
@@ -327,7 +331,10 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
             placeholder="Item code or name"
             leftSection={<IconSearch size={16} />}
             value={search}
-            onChange={(event) => refilter(() => setSearch(event.currentTarget.value))}
+            onChange={(event) => setSearch(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') setEntered(event.currentTarget.value)
+            }}
             data-autofocus
           />
         </Grid.Col>
@@ -336,10 +343,7 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
             label="Only items below Min"
             description={`Off: every item with a level at ${to}`}
             checked={onlyBelowMin}
-            onChange={(event) => {
-              const checked = event.currentTarget.checked
-              refilter(() => setOnlyBelowMin(checked))
-            }}
+            onChange={(event) => setOnlyBelowMin(event.currentTarget.checked)}
           />
         </Grid.Col>
       </Grid>
@@ -416,8 +420,8 @@ function AddBelowMin({ order, onClose, onApplied, onStale, phone }: AddBelowMinD
             <Table.Thead>
               <Table.Tr>
                 <Table.Th w={36} />
-                <Table.Th w={170}>Item</Table.Th>
-                <Table.Th w={100}>Unit</Table.Th>
+                <Table.Th w={152}>Item</Table.Th>
+                <Table.Th w={118}>Unit</Table.Th>
                 <Table.Th w={70} ta="right">
                   On hand at {to}
                 </Table.Th>

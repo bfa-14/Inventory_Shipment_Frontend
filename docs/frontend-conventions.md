@@ -869,7 +869,8 @@ Receive dialogs).
   Inventory Parameters card says so under the Min / Max row, in both modes ("Minimum and Maximum Quantity are for the whole
   company: …"), and the levels card keeps the company figures in view ("Company: Minimum Quantity 50 · Maximum Quantity
   80. The warehouses' Min add up to 95 pcs, above the company Maximum Quantity (80)." in orange when they do).
-- **One formula, the server's** (`inventory.fn_StockPosition`): **Projected = On hand + On the way in + To come in − To go
+- **One formula, the server's** (`inventory.fn_StockLevelState`, read for one pair through `fn_StockPosition` and for
+  many pairs at once through `fn_TransferPositions`): **Projected = On hand + On the way in + To come in − To go
   out**, released transfer orders only (drafts, orders waiting for approval and purchases are not counted). The five
   statuses, the first that applies, in `stockLevelStatus.ts`: No level (gray), **Below Min** (red, Projected < Min),
   **Below Min, covered** (orange, On hand < Min ≤ Projected; its tooltip says why it is not red), **Above Max** (blue),
@@ -885,7 +886,10 @@ Receive dialogs).
 - **`StockLevelFormModal` is the one dialog for a level**: "Set levels…" on the card, "Add levels…" (item first), "Set
   level…" / "Add level…" on a row (one read-only warehouse; the cursor starts in Min). It sends the RowVersion of every
   level it replaces, says before the click which one it replaces ("LUB-01 already has Min 10 / Max 40: it is replaced."),
-  and after a 404 / 409 shows the server's sentence and reads the levels again. Every change is in the level's history
+  and after a 404 / 409 shows the server's sentence and reads the levels again. A warehouse sent without a RowVersion is a
+  NEW level: when another user set one there meanwhile the server answers 409 "… was added by another user. Reload and
+  try again." instead of overwriting it. Min and Max are at most 1,000,000,000 pcs ("Min and Max can be at most
+  1,000,000,000 pcs.", in the dialog before the click, and the server's rule). Every change is in the level's history
   (`StockLevelHistoryModal`: When / By / What / Min "10 → 20" / Max / From "Item Definition", "Stock Levels", "Import
   ({file})").
 - **Two views, one page.** A `SegmentedControl` "Per warehouse" | "Company (Item Definition)" (the whole row below 48em),
@@ -899,7 +903,9 @@ Receive dialogs).
   order…" is disabled with "Tick rows of one warehouse: a transfer order goes to one warehouse." when the destinations
   differ (the reason under the button on a phone). `CreateTransferFromLevelsModal` asks From, the order date and the
   expected arrival, and the server makes ONE draft, each item filled in its base unit to its Max (else Min), capped at
-  what From has; nothing to transfer: no draft, the sentence in the dialog. The new order opens.
+  what From has; nothing to transfer: no draft, the sentence in the dialog. The new order opens; the server's message is
+  green and each of Fill to Max's warnings orange, as after a Fill ("Other draft or waiting transfer orders to {To} hold
+  some of these items too (…)" - a second click for the same shortage is told about the first draft).
 - **The transfer order page: Min, Max and Projected at {To}** (`TransferLinesGrid`, `components/transfers/transferLevels.ts`).
   While the order still moves something (a draft, an order waiting for approval, a released one not yet Received or
   Closed: `showsLevels`) the grid has three more columns after "Stock at {To}": To's **Min** and **Max** ("—" without a
@@ -908,8 +914,9 @@ Receive dialogs).
   − going out."). A saved order's figures are the server's (`usp_TransferOrder_Get`, the item's on each of its lines); a
   draft being typed reads where To and From stand WITHOUT it (`/availability`) and adds what its form's lines of the item
   order, in pcs (`withLevelsAfter`), so a quantity typed moves Projected at once. Read, the fifteen columns still fit a
-  1440 screen (the widths are hints, headers wrap, an item code never breaks); the draft's form scrolls inside its card,
-  as before. On a phone the card says "Min 20 · Max 60 · Projected 60 at LUB-01" and the reasons as dimmed lines.
+  1440 screen (the widths are hints, headers wrap, an item code never breaks) and **Item Name keeps its 130 px** (script
+  90's rule: never squeezed to a word a line - the figure columns and Notes give up their room first); the draft's form
+  scrolls inside its card, as before. On a phone the card says "Min 20 · Max 60 · Projected 60 at LUB-01" and the reasons as dimmed lines.
 - **Fill to Max… and Add items below Min…** (`TransferLinesToolbar` in the Lines card's title row, a draft and Create
   Transfer Orders; stacked full width on a phone). The server's rule only, shown before it is applied: a preview
   (`fillToMaxPreview`, nothing written), then the apply with the order's RowVersion (`fillToMax`), which works it out
@@ -946,9 +953,35 @@ Receive dialogs).
   parent" when the levels are all it holds (`hasStockLevels`, `isUsedInTransactions` of the lookup), else the old "- used
   in transactions, …"; deleting a warehouse or an item takes its levels ("Its stock levels go with it.", "Its units, image,
   documents and stock levels per warehouse go with it.").
+- **What the page is for stays in view at 1440** (the browser tests found Status, Projected, Min and Max off screen). A
+  header of the grid engine is its caption plus about 90 px of sort, funnel and resize controls and never wraps, so:
+  - **Per warehouse** shows Item Code (the item's name under it), Warehouse (code, then name and branch dimmed), On
+    hand, Projected, Min, Max, To reach Max and Status; **Item, On the way in, To come in, To go out and Updated start
+    hidden** (`defaultToggle: false`; the column chooser - right-click a header - shows them, with their tooltips);
+  - the **company view** shows Item Code (the name under it), On hand, Minimum / Maximum Quantity, Missing, Status and
+    Warehouse levels; Item, Family and Brand start hidden;
+  - the figures, the warehouse and the company status have **no column funnel** (`filterable: false`): the filter bar
+    narrows by warehouse, status, family and brand, and a figure is sorted rather than filtered;
+  - the item card's table **fits the card** (about 730 px in the main column): narrow paddings, the warehouse's name
+    wrapping under its code, and "Updated" read under the status badge in a "Status · Updated" column; on a narrower
+    screen it scrolls with the pencil, trash and clock pinned to its right edge (`position: sticky`).
+  - **A status badge never loses its label** (`StockLevelBadge`, the import's Status and Outcome): its label does not
+    hide its overflow and the badge does not shrink, so a narrow column grows instead of reading "Be…" or "Unch…".
 - **Phones.** The page and the card show one card per row ("TVS-APACHE-160 · LUB-01", "On hand 12 · Projected 18 · Min
-  20 / Max 60", the badge on a line of its own - beside the figures it was squeezed to "Be…" - and the "…" menu or the
-  actions).
+  20 / Max 60", the badge on a line of its own - beside the figures it was squeezed to "Be…" - then "inactive item" /
+  "inactive warehouse" badges when they apply, and the "…" menu or the actions). A phone shows no tooltip, so the card's
+  disabled pencil says why under the figures ("Warehouse {code} is inactive: activate it to change its levels.") to a
+  reader who may edit; a reader sees "inactive".
+- **Details the browser tests settled.** The card shows a skeleton instead of the company line, and no "Set levels…",
+  until the item itself has been read (it said "Minimum Quantity 0" and titled its dialog "Stock levels - "). The
+  company view's "3 warehouses" opens Per warehouse in the company view's scope - its branch, and an inactive item's
+  levels too - so the list holds the warehouses the link counted. Escape on the import's "Discard this import?" answers
+  it once (a guard: Mantine sends the key to the wizard too, which asked again). "New transfer order to {To}" follows
+  `useCalendarEscape()` (Escape closes an open calendar, not the dialog). The disabled "Create transfer order…" is
+  `aria-disabled`, ignores the click and shows its reason on keyboard focus too. The drawer's loading state is derived
+  from the filters its answer is for (a search typed and erased before it was sent left it dimmed for good), and Enter in
+  its search applies it at once. The container charges import (`ImportContainerChargesWizard`) has the same Escape guard
+  on its "Discard this import?".
 
 ## Bulk actions
 

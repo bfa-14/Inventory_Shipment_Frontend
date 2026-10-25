@@ -1048,6 +1048,11 @@ export interface CreateTransferFromLevelsResult {
   documentNumber: string | null
   /** "TRO-BR-003-000015 created. Add items below Min: 2 items added (…), 1 not added (…)." - shown as it comes. */
   message: string
+  /**
+   * Fill to Max's warnings for the new draft, as they come: "{From} goes below its own Min for {item}: …" and "Other
+   * draft or waiting transfer orders to {To} hold some of these items too (…): Fill to Max does not count them."
+   */
+  warnings: string[]
 }
 
 const NO_FILL_COUNTS: TransferFillCountsDto = {
@@ -1103,6 +1108,11 @@ export const transferLevelsApi = {
    * its base unit (Add mode), in one call (201). Nothing to add: 62009 and no draft (the sentence says why).
    * Needs transfers.create AND stocklevels.view.
    */
-  createFromLevels: (payload: CreateTransferFromLevelsRequest) =>
-    request<CreateTransferFromLevelsResult>('/api/inventory/stock-levels/create-transfer', { method: 'POST', body: payload }),
+  createFromLevels: async (payload: CreateTransferFromLevelsRequest): Promise<CreateTransferFromLevelsResult> => {
+    const result = await request<CreateTransferFromLevelsResult>('/api/inventory/stock-levels/create-transfer', {
+      method: 'POST',
+      body: payload,
+    })
+    return { ...result, warnings: result?.warnings ?? [] }
+  },
 }

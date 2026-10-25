@@ -291,9 +291,18 @@ export function StockLevelsPage() {
     }
   }
 
-  /** The company view's "3 warehouses": Per warehouse, with that item's levels only. */
+  /**
+   * The company view's "3 warehouses": Per warehouse, with that item's levels only, in the company view's scope - its
+   * branch, and an inactive item's levels too - so the list holds the warehouses the link counted.
+   */
   function openWarehouses(row: CompanyStockLevelRowDto) {
-    setWarehouseFilters({ ...WAREHOUSE_DEFAULTS, itemId: row.itemId, itemCode: row.itemCode })
+    setWarehouseFilters({
+      ...WAREHOUSE_DEFAULTS,
+      itemId: row.itemId,
+      itemCode: row.itemCode,
+      branchId: companyFilters.branchId,
+      activeItemsOnly: row.itemIsActive,
+    })
     setWarehouseMount((n) => n + 1)
     setView('warehouse')
   }
@@ -451,18 +460,33 @@ const NO_LEVEL_ROWS: LevelRow[] = []
 
 const num = (value: number | null) => (value === null ? '' : formatNumber(value))
 
+/*
+ * THE GRID FITS A 1440 SCREEN (the main area is about 1,170 px), so Projected, Min, Max, To reach Max and Status - what
+ * the page is for, and what the Dashboard's line opens it to see - are read without scrolling sideways. A header of the
+ * grid engine takes its caption plus about 90 px of sort, funnel and resize controls, and never wraps. So:
+ * - the figures and the warehouse have no column funnel (the filter bar narrows by warehouse and status; a figure is
+ *   sorted, not filtered);
+ * - the item's name is read under its code, and Item, On the way in, To come in, To go out and Updated start hidden:
+ *   the column chooser (right-click a header) shows them, and Projected's tooltip says what they add up to.
+ */
 const LEVEL_COLUMNS: GridColumnMeta<LevelRow>[] = [
   { accessor: 'itemCode', summary: 'count' },
   { accessor: 'itemName' },
-  { accessor: 'warehouseCode', text: (r) => levelWarehouseText(r) },
-  { accessor: 'onHandBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.onHandBase) },
-  { accessor: 'inOnTheWayBase', kind: 'number', text: (r) => formatNumber(r.inOnTheWayBase) },
-  { accessor: 'inToDispatchBase', kind: 'number', text: (r) => formatNumber(r.inToDispatchBase) },
-  { accessor: 'outToDispatchBase', kind: 'number', text: (r) => formatNumber(r.outToDispatchBase) },
-  { accessor: 'projectedBase', kind: 'number', text: (r) => formatNumber(r.projectedBase) },
-  { accessor: 'minQuantityBase', kind: 'number', text: (r) => num(r.minQuantityBase) },
-  { accessor: 'maxQuantityBase', kind: 'number', text: (r) => num(r.maxQuantityBase) },
-  { accessor: 'toReachMaxBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.toReachMaxBase) },
+  { accessor: 'warehouseCode', filterable: false, text: (r) => levelWarehouseText(r) },
+  { accessor: 'onHandBase', kind: 'number', filterable: false, summary: 'sum', text: (r) => formatNumber(r.onHandBase) },
+  { accessor: 'inOnTheWayBase', kind: 'number', filterable: false, text: (r) => formatNumber(r.inOnTheWayBase) },
+  { accessor: 'inToDispatchBase', kind: 'number', filterable: false, text: (r) => formatNumber(r.inToDispatchBase) },
+  { accessor: 'outToDispatchBase', kind: 'number', filterable: false, text: (r) => formatNumber(r.outToDispatchBase) },
+  { accessor: 'projectedBase', kind: 'number', filterable: false, text: (r) => formatNumber(r.projectedBase) },
+  { accessor: 'minQuantityBase', kind: 'number', filterable: false, text: (r) => num(r.minQuantityBase) },
+  { accessor: 'maxQuantityBase', kind: 'number', filterable: false, text: (r) => num(r.maxQuantityBase) },
+  {
+    accessor: 'toReachMaxBase',
+    kind: 'number',
+    filterable: false,
+    summary: 'sum',
+    text: (r) => formatNumber(r.toReachMaxBase),
+  },
   { accessor: 'status', kind: 'list', text: (r) => stockLevelStatusInfo(r.status).label },
   { accessor: 'updatedAtUtc', text: (r) => updatedText(r) },
 ]
@@ -611,9 +635,18 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
     )
   }
 
+  /* The code on its own line, the name and the branch dimmed under it: the grid keeps Status, Projected, Min and Max
+     in view at 1440 px (a "code - name" line took 230 px). */
   const warehouseCell = (row: LevelRow) => (
     <Box>
-      <Text fz="sm">{levelWarehouseText(row)}</Text>
+      <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+        {row.warehouseCode}
+      </Text>
+      {row.warehouseName ? (
+        <Text fz="xs" c="dimmed">
+          {row.warehouseName}
+        </Text>
+      ) : null}
       <Group gap={6} wrap="wrap">
         {row.branchName || row.branchCode ? (
           <Text fz="xs" c="dimmed">
@@ -640,12 +673,33 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
       </Text>
     )
 
+  /* THE COLUMNS FIT A 1440 SCREEN: see LEVEL_COLUMNS. The widths are the least each needs; a header's controls decide. */
   const columns: DataTableColumn<LevelRow>[] = [
-    { accessor: 'itemCode', title: 'Item Code', width: 150 },
+    {
+      accessor: 'itemCode',
+      title: 'Item Code',
+      width: 165,
+      render: (row) => (
+        <Box>
+          <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+            {row.itemCode}
+          </Text>
+          <Text fz="xs" c="dimmed" lineClamp={2}>
+            {row.itemName}
+          </Text>
+          {!row.itemIsActive ? (
+            <Badge size="xs" variant="light" color="gray">
+              inactive
+            </Badge>
+          ) : null}
+        </Box>
+      ),
+    },
     {
       accessor: 'itemName',
       title: 'Item',
       width: 200,
+      defaultToggle: false,
       render: (row) => (
         <Box>
           <Text fz="sm" fw={500}>
@@ -659,33 +713,36 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
         </Box>
       ),
     },
-    { accessor: 'warehouseCode', title: 'Warehouse', width: 230, render: warehouseCell },
-    { accessor: 'onHandBase', title: 'On hand', width: 100, textAlign: 'right', render: (r) => quantity(r.onHandBase) },
+    { accessor: 'warehouseCode', title: 'Warehouse', width: 150, render: warehouseCell },
+    { accessor: 'onHandBase', title: 'On hand', width: 82, textAlign: 'right', render: (r) => quantity(r.onHandBase) },
     {
       accessor: 'inOnTheWayBase',
       title: hinted('On the way in', LEVEL_COLUMN_HINTS.inOnTheWay),
-      width: 120,
+      width: 86,
+      defaultToggle: false,
       textAlign: 'right',
       render: (r) => quantity(r.inOnTheWayBase, true),
     },
     {
       accessor: 'inToDispatchBase',
       title: hinted('To come in', LEVEL_COLUMN_HINTS.toComeIn),
-      width: 110,
+      width: 86,
+      defaultToggle: false,
       textAlign: 'right',
       render: (r) => quantity(r.inToDispatchBase, true),
     },
     {
       accessor: 'outToDispatchBase',
       title: hinted('To go out', LEVEL_COLUMN_HINTS.toGoOut),
-      width: 110,
+      width: 82,
+      defaultToggle: false,
       textAlign: 'right',
       render: (r) => quantity(r.outToDispatchBase, true),
     },
     {
       accessor: 'projectedBase',
       title: hinted('Projected', LEVEL_COLUMN_HINTS.projected),
-      width: 110,
+      width: 92,
       textAlign: 'right',
       render: (r) => (
         <Text span fz="sm" fw={r.status === 'BelowMin' ? 700 : 500} c={r.status === 'BelowMin' ? 'red' : undefined}>
@@ -693,20 +750,21 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
         </Text>
       ),
     },
-    { accessor: 'minQuantityBase', title: 'Min', width: 90, textAlign: 'right', render: (r) => quantity(r.minQuantityBase) },
-    { accessor: 'maxQuantityBase', title: 'Max', width: 90, textAlign: 'right', render: (r) => quantity(r.maxQuantityBase) },
+    { accessor: 'minQuantityBase', title: 'Min', width: 66, textAlign: 'right', render: (r) => quantity(r.minQuantityBase) },
+    { accessor: 'maxQuantityBase', title: 'Max', width: 66, textAlign: 'right', render: (r) => quantity(r.maxQuantityBase) },
     {
       accessor: 'toReachMaxBase',
       title: hinted('To reach Max', LEVEL_COLUMN_HINTS.toReachMax),
-      width: 120,
+      width: 86,
       textAlign: 'right',
       render: (r) => quantity(r.toReachMaxBase, true),
     },
-    { accessor: 'status', title: 'Status', width: 160, render: (r) => <StockLevelBadge status={r.status} /> },
+    { accessor: 'status', title: 'Status', width: 150, render: (r) => <StockLevelBadge status={r.status} /> },
     {
       accessor: 'updatedAtUtc',
       title: 'Updated',
-      width: 190,
+      width: 170,
+      defaultToggle: false,
       render: (r) => (
         <Text fz="xs" c="dimmed">
           {updatedText(r)}
@@ -890,14 +948,24 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
                 </Button>
               ) : (
                 <Stack gap={2} align="flex-end">
+                  {/* data-disabled, not disabled: the tooltip needs the hover, and the keyboard reaches it (focus shows
+                      the reason); aria-disabled says it is off, and the click does nothing. */}
                   <Tooltip
                     label="Tick rows of one warehouse: a transfer order goes to one warehouse."
                     withArrow
                     multiline
                     w={280}
                     disabled={phone}
+                    events={{ hover: true, focus: true, touch: false }}
                   >
-                    <Button size="xs" leftSection={<IconArrowsExchange size={14} />} data-disabled data-levels-create-transfer>
+                    <Button
+                      size="xs"
+                      leftSection={<IconArrowsExchange size={14} />}
+                      data-disabled
+                      aria-disabled
+                      onClick={(event) => event.preventDefault()}
+                      data-levels-create-transfer
+                    >
                       Create transfer order…
                     </Button>
                   </Tooltip>
@@ -956,10 +1024,21 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
                       <Text fz="xs" c="dimmed">
                         {row.itemName}
                       </Text>
-                      {/* The badge on a line of its own: beside the figures a phone squeezed it to "Be…". */}
-                      <Box mt={4}>
+                      {/* The badge on a line of its own: beside the figures a phone squeezed it to "Be…". An inactive
+                          item or warehouse says so, as the wide grid does. */}
+                      <Group gap={6} mt={4} wrap="wrap">
                         <StockLevelBadge status={row.status} />
-                      </Box>
+                        {!row.itemIsActive ? (
+                          <Badge size="xs" variant="light" color="gray">
+                            inactive item
+                          </Badge>
+                        ) : null}
+                        {!row.warehouseIsActive ? (
+                          <Badge size="xs" variant="light" color="gray">
+                            inactive warehouse
+                          </Badge>
+                        ) : null}
+                      </Group>
                     </Box>
                   </Group>
                   {rowMenu(row)}
@@ -1052,17 +1131,32 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
 
 const NO_COMPANY_ROWS: CompanyStockLevelRowDto[] = []
 
+/*
+ * The same rule as Per warehouse: the grid fits a 1440 screen, so Missing, Status and the warehouse levels link are read
+ * without scrolling. The figures and the status have no column funnel (the filter bar has Status, Family and Brand); the
+ * item's name is read under its code; Item, Family and Brand start hidden (the column chooser shows them).
+ */
 const COMPANY_COLUMNS: GridColumnMeta<CompanyStockLevelRowDto>[] = [
   { accessor: 'itemCode', summary: 'count' },
   { accessor: 'itemName' },
   { accessor: 'itemFamilyName', kind: 'list', text: (r) => r.itemFamilyName ?? '' },
   { accessor: 'brandName', kind: 'list', text: (r) => r.brandName ?? '' },
-  { accessor: 'onHandBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.onHandBase) },
-  { accessor: 'minQuantity', kind: 'number', text: (r) => formatNumber(r.minQuantity) },
-  { accessor: 'maxQuantity', kind: 'number', text: (r) => num(r.maxQuantity) },
-  { accessor: 'missingBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.missingBase) },
-  { accessor: 'status', kind: 'list', text: (r) => COMPANY_STOCK_LEVEL_STATUS[r.status]?.label ?? r.status },
-  { accessor: 'warehouseLevelCount', kind: 'number', text: (r) => warehousesText(r.warehouseLevelCount) },
+  { accessor: 'onHandBase', kind: 'number', filterable: false, summary: 'sum', text: (r) => formatNumber(r.onHandBase) },
+  { accessor: 'minQuantity', kind: 'number', filterable: false, text: (r) => formatNumber(r.minQuantity) },
+  { accessor: 'maxQuantity', kind: 'number', filterable: false, text: (r) => num(r.maxQuantity) },
+  { accessor: 'missingBase', kind: 'number', filterable: false, summary: 'sum', text: (r) => formatNumber(r.missingBase) },
+  {
+    accessor: 'status',
+    kind: 'list',
+    filterable: false,
+    text: (r) => COMPANY_STOCK_LEVEL_STATUS[r.status]?.label ?? r.status,
+  },
+  {
+    accessor: 'warehouseLevelCount',
+    kind: 'number',
+    filterable: false,
+    text: (r) => warehousesText(r.warehouseLevelCount),
+  },
 ]
 
 /** "3 warehouses", "1 warehouse", "None". */
@@ -1146,38 +1240,61 @@ function CompanyView({ initial, onFilters, lookups, reloadKey, onOpenWarehouses,
 
   const companyBadge = (row: CompanyStockLevelRowDto) => <StockLevelBadge status={row.status} />
 
+  /* The columns fit a 1440 screen: see COMPANY_COLUMNS. */
   const columns: DataTableColumn<CompanyStockLevelRowDto>[] = [
-    { accessor: 'itemCode', title: 'Item Code', width: 150 },
+    {
+      accessor: 'itemCode',
+      title: 'Item Code',
+      width: 165,
+      render: (row) => (
+        <Box>
+          <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+            {row.itemCode}
+          </Text>
+          <Text fz="xs" c="dimmed" lineClamp={2}>
+            {row.itemName}
+          </Text>
+        </Box>
+      ),
+    },
     {
       accessor: 'itemName',
       title: 'Item',
+      width: 200,
+      defaultToggle: false,
       render: (row) => (
         <Text fz="sm" fw={500}>
           {row.itemName}
         </Text>
       ),
     },
-    { accessor: 'itemFamilyName', title: 'Family', width: 160, render: (r) => r.itemFamilyName ?? '—' },
-    { accessor: 'brandName', title: 'Brand', width: 120, render: (r) => r.brandName ?? '—' },
-    { accessor: 'onHandBase', title: 'On hand', width: 100, textAlign: 'right', render: (r) => formatNumber(r.onHandBase) },
+    {
+      accessor: 'itemFamilyName',
+      title: 'Family',
+      width: 140,
+      defaultToggle: false,
+      render: (r) => r.itemFamilyName ?? '—',
+    },
+    { accessor: 'brandName', title: 'Brand', width: 110, defaultToggle: false, render: (r) => r.brandName ?? '—' },
+    { accessor: 'onHandBase', title: 'On hand', width: 82, textAlign: 'right', render: (r) => formatNumber(r.onHandBase) },
     {
       accessor: 'minQuantity',
       title: 'Minimum Quantity',
-      width: 140,
+      width: 100,
       textAlign: 'right',
       render: (r) => formatNumber(r.minQuantity),
     },
     {
       accessor: 'maxQuantity',
       title: 'Maximum Quantity',
-      width: 140,
+      width: 100,
       textAlign: 'right',
       render: (r) => (r.maxQuantity === null ? '—' : formatNumber(r.maxQuantity)),
     },
     {
       accessor: 'missingBase',
       title: 'Missing',
-      width: 100,
+      width: 82,
       textAlign: 'right',
       render: (r) => (
         <Text span fz="sm" fw={r.missingBase > 0 ? 700 : undefined} c={r.missingBase > 0 ? 'red' : 'dimmed'}>
@@ -1185,8 +1302,8 @@ function CompanyView({ initial, onFilters, lookups, reloadKey, onOpenWarehouses,
         </Text>
       ),
     },
-    { accessor: 'status', title: 'Status', width: 120, render: companyBadge },
-    { accessor: 'warehouseLevelCount', title: 'Warehouse levels', width: 150, render: levelsCell },
+    { accessor: 'status', title: 'Status', width: 110, render: companyBadge },
+    { accessor: 'warehouseLevelCount', title: 'Warehouse levels', width: 112, render: levelsCell },
     { accessor: 'actions', title: '', width: 56, textAlign: 'right', render: rowMenu },
   ]
 

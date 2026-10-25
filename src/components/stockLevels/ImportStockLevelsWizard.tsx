@@ -57,6 +57,9 @@ const OUTCOME_COLOURS: Record<StockLevelImportOutcome, string> = {
 
 const ACTION_LABELS: Record<string, string> = { Set: 'Set', Remove: 'Remove', None: 'No change' }
 
+/** A badge keeps its whole word ("Unchanged" was cut to "Unch…" in a narrow column): the column grows instead. */
+const WHOLE_BADGE = { root: { maxWidth: 'none', flexShrink: 0 }, label: { overflow: 'visible' } } as const
+
 /** Long files are drawn this many rows at a time ("Show more"), like every list of any length. */
 const PAGE = 200
 
@@ -210,15 +213,26 @@ function WizardBody({ opened, onClose, onImported }: ImportStockLevelsWizardProp
     }
   }
 
+  /**
+   * The discard question is open. Escape on it reaches this dialog too (Mantine listens on every open modal): without
+   * the guard that Escape answered "no" and asked the same question again, so Escape could never dismiss it.
+   */
+  const asking = useRef(false)
+
   async function requestClose() {
-    if (importing) return
+    if (importing || asking.current) return
     if (validation !== null && result === null && changes.length > 0) {
+      asking.current = true
       const go = await confirm({
         title: 'Discard this import?',
         message: `${formatNumber(changes.length)} change${changes.length === 1 ? ' has' : 's have'} been checked but not imported. Closing now discards them.`,
         confirmLabel: 'Discard',
         danger: true,
       })
+      // Released after the key event that answered has finished, so that same Escape cannot ask again.
+      window.setTimeout(() => {
+        asking.current = false
+      }, 0)
       if (!go) return
     }
     onClose()
@@ -249,7 +263,8 @@ function WizardBody({ opened, onClose, onImported }: ImportStockLevelsWizardProp
           <Alert color="blue" title="Use the template">
             <Stack gap="xs" align="flex-start">
               <Text size="sm">
-                One row is one item in one warehouse: Item Code / Barcode, Warehouse (its code), Min (pcs), Max (pcs) and
+                One row is one item in one warehouse: Item Code / Barcode, Warehouse (its code, or its name when no other
+                warehouse has it), Min (pcs), Max (pcs) and
                 Remove (Yes removes the level). Other columns are ignored, so an export of this page can be edited and
                 imported back.
               </Text>
@@ -462,7 +477,7 @@ function WizardBody({ opened, onClose, onImported }: ImportStockLevelsWizardProp
                     </Table.Td>
                     <Table.Td style={{ whiteSpace: 'nowrap' }}>{ACTION_LABELS[row.action] ?? row.action}</Table.Td>
                     <Table.Td>
-                      <Badge color={STATUS_COLOURS[row.status] ?? 'gray'} variant="light">
+                      <Badge color={STATUS_COLOURS[row.status] ?? 'gray'} variant="light" styles={WHOLE_BADGE}>
                         {row.status}
                       </Badge>
                     </Table.Td>
@@ -581,7 +596,7 @@ function WizardBody({ opened, onClose, onImported }: ImportStockLevelsWizardProp
                       <Table.Td>{row?.itemCode ?? row?.itemInput ?? '—'}</Table.Td>
                       <Table.Td>{row?.warehouseCode ?? row?.warehouseInput ?? '—'}</Table.Td>
                       <Table.Td>
-                        <Badge color={OUTCOME_COLOURS[outcome.outcome] ?? 'gray'} variant="light">
+                        <Badge color={OUTCOME_COLOURS[outcome.outcome] ?? 'gray'} variant="light" styles={WHOLE_BADGE}>
                           {outcome.outcome}
                         </Badge>
                       </Table.Td>
