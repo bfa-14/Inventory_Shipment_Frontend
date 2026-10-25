@@ -656,9 +656,16 @@ described in one place, `pages/configuration/documentTypeEffects.ts` (`EFFECT_TE
 - The **Stock** column says what really happens: for PINV "None (goods receipts)" or "In, through a goods receipt at
   posting" (green); the stored `stockDirection` is never changed (old invoices read it). The transfer types are stored
   with direction 0 (a dispatch and a receipt each write two legs, which one direction cannot say), and read TRO "None (an
-  order)", TRD "Out of the source, onto On the way", TRR "From On the way into the destination" (blue).
+  order)", TRD "Out of the source, onto On the way", TRR "From On the way into the destination" (blue). The form's
+  read-only line says the same in a sentence (`stockSentence`: "No stock effect: an order. Its dispatches (TRD) and
+  receipts (TRR) move the goods.", "Takes the goods out of the source warehouse, onto the On the way warehouse of the
+  destination branch.", "Takes the goods from On the way into the destination warehouse.").
 - Turning the TRO switch never changes an order already waiting or released: orders waiting stay waiting (an approver
   approves them, or the requester withdraws and releases).
+- TRD and TRR are numbered when they are posted: the form does not lock their "Number on post", and unticking it is
+  refused by the server, shown as it comes ("A transfer dispatch or receipt is numbered when it is posted: Number on
+  post stays on."). TRO's "Number on post" ticked numbers an order at Release instead of its first save: the order
+  page then reads "Assigned on release" (`numberOnPost` on the order).
 - Where the switches show elsewhere, a missing field (an older API) means today's behaviour:
   - the invoice: `document.affectsCost === false` -> the "Cost of received goods" card says why it is empty
     (`NO_COST_INVOICE_TEXT`) and the posted invoice's Charges card offers no late charge
@@ -754,6 +761,26 @@ Receive dialogs).
   the base unit); Dispatched, Received, To dispatch, Not sent and Lost are pcs. **On the way is never a column of the
   lines grid**: it belongs to a dispatch, so it is on the totals row (Ordered, Dispatched, Received, On the way, Not
   sent, Lost) and on each dispatch of the "Dispatches and receipts" card.
+- **Where the item stands, beside each line**: "Available at {From code}" (on hand less what other released orders
+  still take from From, never below 0; red when below the line's To dispatch; a draft asks `/availability` again when an
+  item, From or To changes) and "Stock at {To code}" (on hand only: `incomingToBase` is read, not drawn). Information
+  only: nothing is reserved.
+- **The list** (`TransferOrdersPage`): Number, Date, From and To (code - name, the branch dimmed below), Status (the
+  badges above), Items, Ordered (pcs), Dispatched and Received (a progress bar each, "40 of 84 pcs …" on hover), On
+  the way, Expected arrival (red and bold when late to dispatch), Reference, Created by; the FilterBar's Search
+  ("Number, reference, warehouse or item"), Branch, From, To (active leaves only), Status (each shown status, then
+  "Open"), date range, "On the way only", "Late only" and, for approvers only, "Waiting for approval"; the line under
+  the grid "Orders: n · On the way: n pcs · Late orders: n". A phone shows one card per order ("40 / 84 dispatched ·
+  10 on the way"). "No transfer orders yet." is a card with the New button when there is no order at all; an empty grid
+  always reads "No transfer order matches these filters.". The menu's count opens the plain list: the approver ticks
+  "Waiting for approval" there.
+- **The notices above the header** (`TransferApprovalNotice`), each in the colour of what it is: yellow "Waiting for
+  approval since {date} (sent by {name})."; red "Rejected by {name} on {date}: {reason}" on the draft until it is sent
+  again; gray "This order needs approval before release: Send for approval… tells the approvers." on a draft for a
+  reader who may not approve; teal "Nothing more will be sent (on {date} by {name}): {reason}. {n} pcs not sent."; red
+  "Cancelled on {date} by {name}: {reason}". Their dates show the time too (`stamp()`, as the purchase order's
+  rejection notice); the server's sentences carry the date only. A new order reads whether approval is needed from the
+  TRO type (`useDocumentTypes`), a saved one from its own `needsApproval`.
 - **The dialogs post directly.** There are no draft dispatches or receipts: Dispatch…, Receive… and Dispatch and
   receive… post what they show, each in one transaction (Dispatch and receive needs both rights, and posts both or
   neither). They are xl, full screen below 48em, and their disabled button says why (`FormModal`'s `fullScreen` and
@@ -800,7 +827,8 @@ Receive dialogs).
 - **Values only with the permission.** Without `inventory.valuation.view` the server sends the order's
   `onTheWayValueBase`, a posting's `valueBase` / `lostValueBase` and a line's `unitCostBase` / `lossUnitCostBase` as null,
   never 0: the page then leaves the figure out ("—" in a value column), it never shows a 0 that is not one. The
-  dispatch note never shows a cost.
+  order's `onTheWayValueBase` is not drawn at all (the totals row holds pcs only); a posting's value is, with the
+  permission. The dispatch note never shows a cost.
 - **`CancelReasonModal`'s `withDate.label`** names the date field when it is not a cancellation's: Reverse… passes
   `{ minDate: the posting date, label: 'Reversal date' }`; the sales cancel of script 84 keeps "Cancellation date".
 - **The Email log links by category.** `TransferApproval`, `TransferApproved` and `TransferRejected` ("Transfer approval
@@ -811,14 +839,16 @@ Receive dialogs).
 - **The dispatch note** (`TransferDispatchPrintPage`, "Print dispatch note" on a dispatch's row): like the goods
   receipt's count sheet, outside the shell, A4 portrait, the browser's print dialog at once: "Dispatch note {TRD}", the
   transfer order, From → To, the dates, "Waybill / truck", the lines in pcs, the total, and three signature boxes
-  ("Dispatched by", "Driver", "Received by").
+  ("Dispatched by", "Driver", "Received by"). A reversed dispatch's note says "REVERSED" in its top right corner. It
+  opens in the same tab, after the unsaved-changes question, as the count sheet does.
 - **`FormModal`'s options** (`closeOnEscape`, `fullScreen`, `saveDisabledReason`, and the nested form's submit ignored)
   came with these dialogs: see **Modals and the keyboard**.
 - **Around them.** The item statement opens a TRD or TRR row, and its TRO, on the order (`transferOrderId`; the
-  counterparty reads "LKS-01 → LUB-01"). Shortages count what is on the way to a warehouse as **Transfers in** (see
+  counterparty reads "LKS-01 → LUB-01"; a transfer's reversal row reads "Reversed", every other family's still
+  "Cancelled"). Shortages count what is on the way to a warehouse as **Transfers in** (see
   **Shortage plans**). The Dashboard's Inventory value of one branch says, on hover, that it includes goods on the way
   to that branch's warehouses (its "Stock value by warehouse" chart shows an On the way slice). Inventory In / Out show
-  a gray hint under the reason "Transfer in" / "Transfer out" (TRF_IN / TRF_OUT): "Moving stock between your own
+  a gray hint under the reason "Transfer In" / "Transfer Out" (TRF_IN / TRF_OUT): "Moving stock between your own
   warehouses? Inventory › Transfer Orders moves it without changing its cost and follows it on the way." Sales Profit's
   COGS adjustments header says, on hover, that adjustments stay in the branch that received the goods.
 
