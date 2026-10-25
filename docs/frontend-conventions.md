@@ -662,10 +662,11 @@ described in one place, `pages/configuration/documentTypeEffects.ts` (`EFFECT_TE
   destination branch.", "Takes the goods from On the way into the destination warehouse.").
 - Turning the TRO switch never changes an order already waiting or released: orders waiting stay waiting (an approver
   approves them, or the requester withdraws and releases).
-- TRD and TRR are numbered when they are posted: the form does not lock their "Number on post", and unticking it is
-  refused by the server, shown as it comes ("A transfer dispatch or receipt is numbered when it is posted: Number on
-  post stays on."). TRO's "Number on post" ticked numbers an order at Release instead of its first save: the order
-  page then reads "Assigned on release" (`numberOnPost` on the order).
+- TRD and TRR are numbered when they are posted: the form does not lock their "Number assigned on posting" switch
+  (the list's "Number on post"), and turning it off is refused by the server, shown as it comes ("A transfer dispatch
+  or receipt is numbered when it is posted: Number on post stays on."). On TRO the switch on numbers an order at
+  Release (or Approve) instead of its first save: the order page then reads "Assigned on release" (`numberOnPost` on
+  the order).
 - Where the switches show elsewhere, a missing field (an older API) means today's behaviour:
   - the invoice: `document.affectsCost === false` -> the "Cost of received goods" card says why it is empty
     (`NO_COST_INVOICE_TEXT`) and the posted invoice's Charges card offers no late charge
@@ -768,7 +769,7 @@ Receive dialogs).
 - **The list** (`TransferOrdersPage`): Number, Date, From and To (code - name, the branch dimmed below), Status (the
   badges above), Items, Ordered (pcs), Dispatched and Received (a progress bar each, "40 of 84 pcs …" on hover), On
   the way, Expected arrival (red and bold when late to dispatch), Reference, Created by; the FilterBar's Search
-  ("Number, reference, warehouse or item"), Branch, From, To (active leaves only), Status (each shown status, then
+  ("Number, reference, warehouse or item"), Branch, From and To (active leaves only), Status (each shown status, then
   "Open"), date range, "On the way only", "Late only" and, for approvers only, "Waiting for approval"; the line under
   the grid "Orders: n · On the way: n pcs · Late orders: n". A phone shows one card per order ("40 / 84 dispatched ·
   10 on the way"). "No transfer orders yet." is a card with the New button when there is no order at all; an empty grid
