@@ -52,6 +52,16 @@ const NO_FILTERS: Filters = { search: '', status: null, category: null, dateFrom
 
 const STATUS_COLOR: Record<EmailStatus, string> = { Pending: 'gray', Sent: 'green', Failed: 'red' }
 
+/**
+ * What the Document column says: the category tells what the document is - a transfer order's emails (90) name the
+ * transfer order, every other email a purchase order, as before. The cell, its filter and the CSV read the same words:
+ * the bare number was one filter value and one CSV cell for two documents (PO 12 and TRO 12).
+ */
+function documentLabel(r: EmailListDto): string {
+  if (!r.relatedDocumentId) return ''
+  return `${isTransferCategory(r.category) ? 'Transfer order' : 'Order'} #${r.relatedDocumentId}`
+}
+
 const GRID_COLUMNS: GridColumnMeta<EmailListDto>[] = [
   { accessor: 'createdAtUtc', kind: 'date', text: (r) => formatDateTime(r.createdAtUtc), summary: 'count' },
   { accessor: 'toAddresses' },
@@ -59,7 +69,8 @@ const GRID_COLUMNS: GridColumnMeta<EmailListDto>[] = [
   { accessor: 'category', kind: 'list', text: (r) => categoryLabel(r.category) },
   { accessor: 'status', kind: 'list' },
   { accessor: 'attempts', kind: 'number' },
-  { accessor: 'relatedDocumentId', kind: 'number' },
+  // text, not number: "Order #12" and "Transfer order #12" are two documents (sorted "#9" before "#10" all the same)
+  { accessor: 'relatedDocumentId', value: documentLabel, text: documentLabel },
 ]
 
 function StatusBadge({ status }: { status: EmailStatus }) {
@@ -175,10 +186,10 @@ export function EmailLogPage() {
               fz="sm"
               onClick={(event) => event.stopPropagation()}
             >
-              Transfer order #{r.relatedDocumentId}
+              {documentLabel(r)}
             </Anchor>
           ) : (
-            <Text fz="sm">Transfer order #{r.relatedDocumentId}</Text>
+            <Text fz="sm">{documentLabel(r)}</Text>
           )
         ) : (
           <Anchor
@@ -187,7 +198,7 @@ export function EmailLogPage() {
             fz="sm"
             onClick={(event) => event.stopPropagation()}
           >
-            Order #{r.relatedDocumentId}
+            {documentLabel(r)}
           </Anchor>
         ),
     },

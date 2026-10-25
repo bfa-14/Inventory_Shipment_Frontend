@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import {
   ActionIcon,
   Anchor,
@@ -7,7 +7,6 @@ import {
   Group,
   NumberInput,
   Paper,
-  Select,
   SimpleGrid,
   Stack,
   Table,
@@ -21,6 +20,9 @@ import { Link } from 'react-router'
 import type { ItemLookupDto } from '../../api/types'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
+import { LazySelect } from '../ui/LazySelect'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 import {
   availabilityTooltip,
   orderedBaseOf,
@@ -54,6 +56,9 @@ interface TransferLinesGridProps {
   totals: TransferTotals
 }
 
+/* A ROW'S TOOLTIP DRAWS NO PORTAL (frontend-conventions, "Lists of any length"): a 200-line import mounts one per row. */
+const ROW_TOOLTIP = { withinPortal: false, floatingStrategy: 'fixed' } as const
+
 /** "= 24 pcs", dimmed under Ordered when the line's unit is not the base unit. */
 function inPieces(line: TransferLineForm) {
   if ((line.packingFormula || 1) === 1) return null
@@ -77,6 +82,10 @@ function inPieces(line: TransferLineForm) {
  *
  * A PLAIN TABLE, like every document's lines (DocumentLinesGrid): a form, not a reading grid. Below 48em one card per
  * line.
+ *
+ * LISTS OF ANY LENGTH (an import of 200 lines): Item and Unit are LazySelects (an input until reached, then the real
+ * Select), a row's tooltips draw no portal, and the lines are DRAWN in steps of 200 ("Show more") - every line stays in
+ * the order (totals, Save), and a new line or one with a problem always shows.
  */
 export function TransferLinesGrid({
   lines,
@@ -94,6 +103,10 @@ export function TransferLinesGrid({
   totals,
 }: TransferLinesGridProps) {
   const phone = useMediaQuery('(max-width: 48em)')
+  const shown = useShownRows(lines.length)
+  const visible = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line, index }) => index < shown.limit || line.id === null || Boolean(line.error))
 
   /* THE OPTIONS ARE BUILT ONCE PER LIST: the whole catalogue, and a new array on every keystroke would make each row's
      Select parse it again. A line's own item, missing from the list (made inactive since), stays an option on its own
@@ -107,6 +120,16 @@ export function TransferLinesGrid({
     line.itemId !== null && !listed.has(line.itemId)
       ? [{ value: String(line.itemId), label: `${line.itemCode} — ${line.itemName}` }, ...itemOptions]
       : itemOptions
+
+  /** A phone card's control under its own word (dimmed, like the card's figures). */
+  const labelled = (label: string, control: ReactNode) => (
+    <Box>
+      <Text fz="xs" c="dimmed">
+        {label}
+      </Text>
+      {control}
+    </Box>
+  )
 
   const availableTitle = `Available at ${fromCode ?? 'From'}`
   const stockTitle = `Stock at ${toCode ?? 'To'}`
@@ -138,7 +161,7 @@ export function TransferLinesGrid({
     }
     return (
       <Box data-transfer-line-item={index}>
-        <Select
+        <LazySelect
           aria-label={`Item, line ${index + 1}`}
           data={optionsFor(line)}
           value={line.itemId === null ? null : String(line.itemId)}
@@ -158,7 +181,7 @@ export function TransferLinesGrid({
   function unitControl(line: TransferLineForm, index: number) {
     if (!editable) return <Text fz="sm">{unitLabel(line.unitName, line.packingFormula)}</Text>
     return (
-      <Select
+      <LazySelect
         aria-label={`Unit, line ${index + 1}`}
         data={line.units.map((u) => ({ value: String(u.id), label: unitLabel(u.unitTypeName, u.packingFormula) }))}
         value={line.itemUnitId === null ? null : String(line.itemUnitId)}
@@ -229,14 +252,27 @@ export function TransferLinesGrid({
         fz="sm"
         fw={short ? 700 : 400}
         c={short ? 'red' : undefined}
-        ta="right"
+        // A phone card reads it under its label, left; the table's figures stand right.
+        ta={phone ? undefined : 'right'}
         data-transfer-available-short={short || undefined}
       >
         {formatNumber(line.availableFromBase)}
       </Text>
     )
+    // A phone has no hover: "{n} on hand · {c} promised to other orders" is a line under the figure there.
+    if (phone)
+      return (
+        <>
+          {text}
+          {tooltip ? (
+            <Text fz="xs" c="dimmed">
+              {tooltip}
+            </Text>
+          ) : null}
+        </>
+      )
     return tooltip ? (
-      <Tooltip label={tooltip} withArrow>
+      <Tooltip {...ROW_TOOLTIP} label={tooltip} withArrow>
         {text}
       </Tooltip>
     ) : (
@@ -252,7 +288,7 @@ export function TransferLinesGrid({
         </Text>
       )
     return (
-      <Text fz="sm" ta="right">
+      <Text fz="sm" ta={phone ? undefined : 'right'}>
         {formatNumber(line.onHandToBase)}
       </Text>
     )
@@ -291,7 +327,7 @@ export function TransferLinesGrid({
   function errorMark(line: TransferLineForm) {
     if (!line.error) return null
     return (
-      <Tooltip label={line.error} multiline w={280} withArrow>
+      <Tooltip {...ROW_TOOLTIP} label={line.error} multiline w={280} withArrow>
         <IconAlertTriangle size={15} color="var(--mantine-color-red-6)" />
       </Tooltip>
     )
@@ -326,7 +362,7 @@ export function TransferLinesGrid({
   if (phone) {
     return (
       <Stack gap="sm">
-        {lines.map((line, index) => (
+        {visible.map(({ line, index }) => (
           <Paper
             key={line.key}
             withBorder
@@ -379,7 +415,7 @@ export function TransferLinesGrid({
                 <Text fz="xs" c="dimmed">
                   {availableTitle}
                 </Text>
-                <Box style={{ textAlign: 'left' }}>{availableCell(line)}</Box>
+                {availableCell(line)}
               </Box>
               <Box>
                 <Text fz="xs" c="dimmed">
@@ -390,12 +426,14 @@ export function TransferLinesGrid({
             </SimpleGrid>
             {editable && (
               <Stack gap="xs" mt="xs">
-                {itemControl(line, index)}
+                {/* Each control under its own word, as the figures above it: a box that says only "Optional" or
+                    "Unit" told nothing on a phone. */}
+                {labelled('Item', itemControl(line, index))}
                 <SimpleGrid cols={2} spacing="xs">
-                  {unitControl(line, index)}
-                  {orderedControl(line, index)}
+                  {labelled('Unit', unitControl(line, index))}
+                  {labelled('Ordered', orderedControl(line, index))}
                 </SimpleGrid>
-                {notesControl(line, index)}
+                {labelled('Notes', notesControl(line, index))}
               </Stack>
             )}
             {!editable && line.notes ? (
@@ -410,6 +448,7 @@ export function TransferLinesGrid({
             {editable ? 'No lines yet. Scan an item above, or add one below.' : 'No lines.'}
           </Text>
         )}
+        <ShownRowsFooter limit={shown.limit} total={lines.length} noun="lines" more={shown.more} all={shown.all} />
         {editable && (
           <Anchor component="button" type="button" fz="sm" onClick={onAdd} ta="left">
             + Add line
@@ -424,39 +463,41 @@ export function TransferLinesGrid({
 
   return (
     <>
-      <Table.ScrollContainer minWidth={editable ? 1280 : 1100}>
+      {/* THE COLUMNS FIT A 1440 SCREEN WHEN READ (a draft's selects need more and scroll): fixed widths, and Item Name
+          takes what is left without being squeezed to a word a line. */}
+      <Table.ScrollContainer minWidth={editable ? 1330 : 1100}>
         <Table striped highlightOnHover verticalSpacing="xs">
           <Table.Thead>
             <Table.Tr>
               {selectable && <Table.Th w={36} />}
               <Table.Th w={52}>#</Table.Th>
-              <Table.Th w={editable ? 240 : 150}>Item Code</Table.Th>
-              <Table.Th>Item Name</Table.Th>
-              <Table.Th w={editable ? 150 : 110}>Unit</Table.Th>
-              <Table.Th w={130} ta="right">
+              <Table.Th w={editable ? 220 : 130}>Item Code</Table.Th>
+              <Table.Th miw={130}>Item Name</Table.Th>
+              <Table.Th w={editable ? 130 : 100}>Unit</Table.Th>
+              <Table.Th w={115} ta="right">
                 {availableTitle}
               </Table.Th>
-              <Table.Th w={120} ta="right">
+              <Table.Th w={105} ta="right">
                 {stockTitle}
               </Table.Th>
-              <Table.Th w={editable ? 120 : 95} ta="right">
+              <Table.Th w={editable ? 110 : 90} ta="right">
                 Ordered
               </Table.Th>
-              <Table.Th w={95} ta="right">
+              <Table.Th w={90} ta="right">
                 Dispatched
               </Table.Th>
-              <Table.Th w={90} ta="right">
+              <Table.Th w={85} ta="right">
                 Received
               </Table.Th>
-              <Table.Th w={100} ta="right">
+              <Table.Th w={90} ta="right">
                 To dispatch
               </Table.Th>
-              <Table.Th w={editable ? 180 : 160}>Notes</Table.Th>
+              <Table.Th w={editable ? 160 : 130}>Notes</Table.Th>
               {editable && <Table.Th w={44} />}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {lines.map((line, index) => (
+            {visible.map(({ line, index }) => (
               <Table.Tr
                 key={line.key}
                 bg={line.error ? 'var(--mantine-color-red-0)' : undefined}
@@ -489,7 +530,7 @@ export function TransferLinesGrid({
                 <Table.Td>{notesControl(line, index)}</Table.Td>
                 {editable && (
                   <Table.Td>
-                    <Tooltip label="Remove line" withArrow>
+                    <Tooltip {...ROW_TOOLTIP} label="Remove line" withArrow>
                       <ActionIcon
                         variant="subtle"
                         color="red"
@@ -528,6 +569,7 @@ export function TransferLinesGrid({
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+      <ShownRowsFooter limit={shown.limit} total={lines.length} noun="lines" more={shown.more} all={shown.all} />
       {totalsRow}
     </>
   )

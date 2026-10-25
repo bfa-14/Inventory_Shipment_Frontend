@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import {
   Anchor,
   Badge,
@@ -65,6 +65,11 @@ interface TransferHeaderCardProps {
   warehouseData: WarehouseGroup[]
   errors: TransferHeaderErrors
   disabled?: boolean
+  /**
+   * Opens another transfer order (the "Return of …" and "Returns: …" links): through the page's unsaved-changes guard,
+   * a return being a draft somebody types into. The link still works with a middle click (a new tab).
+   */
+  onOpenOrder(id: number): void
 }
 
 function field(label: string, value: ReactNode, below?: ReactNode, dimmed = false) {
@@ -107,8 +112,15 @@ export function TransferHeaderCard({
   warehouseData,
   errors,
   disabled,
+  onOpenOrder,
 }: TransferHeaderCardProps) {
   const lost = order ? lostBadgeLabel(order.totals.lostBase) : null
+  /** A plain click goes through the page's guard; a modified one (a new tab) stays the browser's. */
+  const openOrder = (event: MouseEvent<HTMLAnchorElement>, id: number) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    onOpenOrder(id)
+  }
   const numberText = order?.documentNumber ?? (numberOnPost ? 'Assigned on release' : 'Assigned on the first save')
 
   const numberBlock = (
@@ -139,7 +151,12 @@ export function TransferHeaderCard({
       {order?.returnOf && (
         <Text size="sm">
           Return of{' '}
-          <Anchor component={Link} to={routes.transferOrder(order.returnOf.id)} size="sm">
+          <Anchor
+            component={Link}
+            to={routes.transferOrder(order.returnOf.id)}
+            size="sm"
+            onClick={(event) => openOrder(event, order.returnOf!.id)}
+          >
             {order.returnOf.documentNumber ?? `#${order.returnOf.id}`}
           </Anchor>
         </Text>
@@ -150,7 +167,12 @@ export function TransferHeaderCard({
           {order.returns.map((link, index) => (
             <span key={link.id}>
               {index > 0 ? ', ' : ''}
-              <Anchor component={Link} to={routes.transferOrder(link.id)} size="sm">
+              <Anchor
+                component={Link}
+                to={routes.transferOrder(link.id)}
+                size="sm"
+                onClick={(event) => openOrder(event, link.id)}
+              >
                 {returnLabel(link)}
               </Anchor>
             </span>

@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Group,
+  Loader,
   Pagination,
   Paper,
   Progress,
@@ -515,6 +516,12 @@ export function TransferOrdersPage() {
       ) : phone ? (
         /* A phone: one card per order - its number and badges, the way it goes, how far it went, when it is expected. */
         <Stack gap="sm">
+          {/* the first answer not in yet: say it is coming rather than show nothing */}
+          {loading && rows.length === 0 && (
+            <Group justify="center" py="md">
+              <Loader size="sm" />
+            </Group>
+          )}
           {empty && (
             <Text c="dimmed" ta="center" py="md">
               No transfer order matches these filters.
@@ -566,7 +573,9 @@ export function TransferOrdersPage() {
             exportFileName="transfer-orders"
             columns={columns}
             fetching={loading}
-            noRecordsText={unfiltered ? 'No transfer orders yet.' : 'No transfer order matches these filters.'}
+            /* never "No transfer orders yet." here: with no order at all the card above is shown instead, so an empty grid
+               is one the filters (the header funnels too) emptied */
+            noRecordsText="No transfer order matches these filters."
             onRowClick={({ record }) => open(record)}
           />
         </Paper>

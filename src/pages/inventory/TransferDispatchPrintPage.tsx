@@ -165,7 +165,7 @@ export function TransferDispatchPrintPage() {
         <tbody>
           {posting.lines.map((line, index) => (
             <tr key={line.id}>
-              <td>{index + 1}</td>
+              <td>{formatNumber(index + 1)}</td>
               <td className="left">{line.itemCode}</td>
               <td className="left">{line.itemName}</td>
               <td>{formatNumber(line.quantityBase)}</td>

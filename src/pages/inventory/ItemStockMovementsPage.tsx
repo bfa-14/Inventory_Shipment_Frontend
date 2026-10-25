@@ -227,7 +227,16 @@ export function ItemStockMovementsPage() {
                                 ) : null}
                               </Group>
                             </div>
-                            {m.isReversal && <Badge size="xs" color="orange" variant="light">Cancelled</Badge>}
+                            {/* (90) A transfer's dispatch or receipt is reversed, never cancelled (Cancel order… is another action). */}
+                            {m.isReversal &&
+                              (m.documentTypeCode === 'TRD' || m.documentTypeCode === 'TRR' ? (
+                                // As wide as its word: squeezed by the long numbers beside it, it read "Rever…".
+                                <Badge size="xs" color="orange" variant="light" style={{ minWidth: 'max-content' }}>
+                                  Reversed
+                                </Badge>
+                              ) : (
+                                <Badge size="xs" color="orange" variant="light">Cancelled</Badge>
+                              ))}
                           </Group>
                         </Table.Td>
                         <Table.Td>{m.counterparty ?? m.reasonCode ?? '—'}</Table.Td>

@@ -31,6 +31,7 @@ import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue, todayDateOnly } from '../format'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
+import { useCalendarEscape } from '../ui/useCalendarEscape'
 import { orderLabel } from './transferModel'
 import { LATE_BADGE } from './transferStatus'
 
@@ -96,6 +97,9 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
       ),
     ),
   )
+  /* THE CURSOR STARTS ON THE FIRST "RECEIVED NOW": a date field focused first opened its calendar over the lines. */
+  const [focusLineId] = useState<number | null>(() => groups[0]?.lines[0]?.id ?? null)
+  const { calendarOpen, calendar } = useCalendarEscape()
   const [date, setDate] = useState<string | null>(todayDateOnly())
   const [deliveryNote, setDeliveryNote] = useState('')
   const [notes, setNotes] = useState('')
@@ -222,6 +226,7 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
     return (
       <NumberInput
         aria-label={`Received now, ${line.itemCode}`}
+        data-autofocus={line.id === focusLineId ? true : undefined}
         value={row.received}
         onChange={(next) => patch(line.id, { received: Math.max(0, Math.trunc(numberInputValue(next) ?? 0)) })}
         min={0}
@@ -233,7 +238,7 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
         description={over ? `Max ${formatNumber(line.onTheWayBase)}` : undefined}
         styles={over ? { description: { color: 'var(--mantine-color-red-7)', fontWeight: 600 } } : undefined}
         error={over}
-        w={phone ? '100%' : 120}
+        w={phone ? '100%' : 110}
       />
     )
   }
@@ -246,6 +251,7 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
       <Stack gap={6}>
         <SegmentedControl
           size="xs"
+          aria-label={`The rest of ${line.itemCode}`}
           value={row.rest}
           onChange={(next) => patch(line.id, { rest: next as RestMode })}
           data={[
@@ -313,6 +319,7 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
       fullScreen={phone}
       saveDisabled={blockedBy !== null}
       saveDisabledReason={blockedBy ?? undefined}
+      closeOnEscape={!calendarOpen}
     >
       <Group align="flex-start" wrap="wrap" gap="md">
         <DateInput
@@ -328,6 +335,7 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
           maxDate={fromIsoDate(maxDate) ?? undefined}
           w={{ base: '100%', xs: 170 }}
           disabled={busy}
+          popoverProps={calendar('date')}
         />
         <TextInput
           label="Delivery note no."
@@ -397,14 +405,16 @@ export function ReceiveTransferModal({ opened, order, onClose, onPosted, onStale
           </Text>
         </Stack>
       ) : (
-        <Table.ScrollContainer minWidth={820}>
+        /* 720: inside the xl dialog's 748 px body at 1440, so no row scrolls sideways; the last column takes what is left
+           (Still coming / Nothing more will arrive needs about 330 px) */
+        <Table.ScrollContainer minWidth={720}>
           <Table verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Item</Table.Th>
                 <Table.Th ta="right">On the way</Table.Th>
                 <Table.Th w={140}>Received now</Table.Th>
-                <Table.Th w={420} />
+                <Table.Th miw={330} />
               </Table.Tr>
             </Table.Thead>
             {groups.map((g) => (

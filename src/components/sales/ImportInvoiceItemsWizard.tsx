@@ -31,8 +31,6 @@ import {
   type ImportValidatedRow,
   type ImportValidationResult,
 } from '../../api/sales/invoiceImport'
-import { useAuth } from '../../auth/useAuth'
-import { PERMISSIONS } from '../../navigation'
 import { formatMoney, formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
@@ -205,10 +203,10 @@ function ImportWizardBody({
   const isTransfer = mode === 'transfer'
   // Nothing priced: an inventory document's cost, or a transfer, which has none.
   const unpriced = mode !== 'invoice'
-  /* THE ERROR FILE IS THE SALES IMPORT'S (sales.invoices.import). A transfer is imported with its own right, so the
-     file is offered there only to a reader who also holds that one; the reasons are on screen either way. */
-  const { hasPermission } = useAuth()
-  const errorFileOffered = !isTransfer || hasPermission(PERMISSIONS.invoicesImport)
+  /* NO ERROR FILE FOR A TRANSFER. The file is the sales import's (its columns: Warehouse, Unit Price...), behind its
+     own right (sales.invoices.import): a transfer's rows would come back in a sales-shaped sheet. The reasons of every
+     row are on screen (2.5.5 asks for no file). */
+  const errorFileOffered = !isTransfer
 
   const [step, setStep] = useState(0)
   const [file, setFile] = useState<File | null>(null)

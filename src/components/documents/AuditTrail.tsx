@@ -110,7 +110,15 @@ function actionLabel(code: string): string {
  * FIVE ENTRIES, THEN THE REST ON ASKING. A document that has been edited eleven times would
  * otherwise push its own lines off the screen with its history.
  */
-export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
+export function AuditTrail({ entries, wrapLabels = false }: {
+  entries: AuditEntry[]
+  /**
+   * The user name goes under a label too long to sit beside it, rather than cut the label ("Nothing more will be
+   * sent" read "Nothing more will be…" on a phone): the transfer order's trail. Opt-in: every other trail keeps its
+   * one line.
+   */
+  wrapLabels?: boolean
+}) {
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? entries : entries.slice(0, PREVIEW)
 
@@ -129,8 +137,14 @@ export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
           <Timeline bulletSize={14} lineWidth={2}>
             {shown.map((entry, index) => (
               <Timeline.Item key={`${entry.atUtc}-${index}`}>
-                <Group gap="xs" wrap="nowrap">
-                  <Badge size="sm" variant="light" color={ACTION_COLOURS[entry.action] ?? 'gray'}>
+                {/* wrapLabels: the name goes under a long label rather than cut it. */}
+                <Group gap="xs" wrap={wrapLabels ? 'wrap' : 'nowrap'}>
+                  <Badge
+                    size="sm"
+                    variant="light"
+                    color={ACTION_COLOURS[entry.action] ?? 'gray'}
+                    style={wrapLabels ? { minWidth: 'max-content' } : undefined}
+                  >
                     {actionLabel(entry.action)}
                   </Badge>
                   <Text size="sm">{entry.userName ?? 'System'}</Text>

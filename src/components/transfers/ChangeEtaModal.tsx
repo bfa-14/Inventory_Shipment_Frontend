@@ -11,6 +11,7 @@ import {
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
+import { useCalendarEscape } from '../ui/useCalendarEscape'
 
 interface ChangeEtaModalProps {
   opened: boolean
@@ -30,6 +31,7 @@ export function ChangeEtaModal({ opened, order, posting, onClose, onSaved, onSta
   const [eta, setEta] = useState<string | null>(posting.eta)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { calendarOpen, calendar } = useCalendarEscape()
 
   async function submit() {
     if (!eta) {
@@ -61,6 +63,7 @@ export function ChangeEtaModal({ opened, order, posting, onClose, onSaved, onSta
       saving={busy}
       saveLabel="Save"
       size="sm"
+      closeOnEscape={!calendarOpen}
     >
       <DateInput
         label="ETA"
@@ -73,6 +76,7 @@ export function ChangeEtaModal({ opened, order, posting, onClose, onSaved, onSta
         }}
         minDate={fromIsoDate(posting.postingDate) ?? undefined}
         disabled={busy}
+        popoverProps={calendar('eta')}
       />
       {error && <Alert color="red">{error}</Alert>}
     </FormModal>

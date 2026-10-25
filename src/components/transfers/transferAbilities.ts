@@ -39,7 +39,10 @@ export interface TransferAbility {
   primary: boolean
   /** Below 768 px a button beside the primary: Receive… on a partly dispatched order with goods on the way. */
   pinnedOnPhone: boolean
-  /** Below 768 px never the big button while disabled: Cancel order… goes into the menu with its reason. */
+  /**
+   * Below 768 px never the big button (nor pinned) while disabled: it goes into the menu with its reason, since a phone
+   * shows no tooltip. True for every transfer action (rule G7: a disabled action always says why).
+   */
   menuWhenDisabled: boolean
 }
 
@@ -120,7 +123,7 @@ function ability(
     blockedBy: reasons.find((r) => r !== null && r !== '') ?? null,
     primary: extra.primary ?? false,
     pinnedOnPhone: extra.pinnedOnPhone ?? false,
-    menuWhenDisabled: extra.menuWhenDisabled ?? false,
+    menuWhenDisabled: extra.menuWhenDisabled ?? true,
   }
 }
 

@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { ActionIcon, Badge, Box, Group, Menu, Paper, Stack, Table, Text, Title } from '@mantine/core'
+import { ActionIcon, Badge, Group, Menu, Paper, Stack, Table, Text, Title, UnstyledButton } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import {
   IconArrowBackUp,
@@ -48,10 +48,25 @@ function togetherText(posting: TransferPostingDto, all: TransferPostingDto[]): s
   return partner ? `Posted together with ${partner.documentNumber}` : null
 }
 
+/* A BADGE KEEPS ITS WORD. In a table cell a badge (overflow hidden) has almost no minimum width, so a narrow column
+   cut "Posted" to "Po…" and "Late" to a red dot: it is as wide as its label, the column grows instead. */
+const NO_SQUEEZE = { minWidth: 'max-content' } as const
+
+/* THE ACTIONS STAY IN VIEW (the grids' pinLastColumn): twelve columns of a receipt row ("30 received · 1 lost") grow
+   past the card at 1440, and Reverse…, Change ETA… and Print dispatch note then needed a sideways scroll. Opaque, so
+   the columns scrolling under it do not show through. */
+const PINNED = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 1,
+  background: 'var(--mantine-color-body)',
+  boxShadow: 'inset 1px 0 0 var(--mantine-color-default-border)',
+} as const
+
 function lateBadge(posting: TransferPostingDto) {
   if (!posting.isLate) return null
   return (
-    <Badge size="sm" color={LATE_BADGE.colour} variant={LATE_BADGE.variant}>
+    <Badge size="sm" color={LATE_BADGE.colour} variant={LATE_BADGE.variant} style={NO_SQUEEZE}>
       {LATE_BADGE.label}
     </Badge>
   )
@@ -222,8 +237,19 @@ export function TransferPostingsCard({
             return (
               <Paper key={posting.id} withBorder radius="md" p="sm">
                 <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
-                  <Box style={{ minWidth: 0 }} onClick={() => toggle(posting.id)}>
+                  {/* A button: it opens the lines, says so (the chevron) and is reached with the keyboard. */}
+                  <UnstyledButton
+                    style={{ minWidth: 0, flex: 1 }}
+                    onClick={() => toggle(posting.id)}
+                    aria-expanded={open.has(posting.id)}
+                    aria-label={
+                      open.has(posting.id)
+                        ? `Hide the lines of ${posting.documentNumber}`
+                        : `Show the lines of ${posting.documentNumber}`
+                    }
+                  >
                     <Group gap={6} wrap="wrap">
+                      {open.has(posting.id) ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                       <Text fz="sm" fw={600} style={{ overflowWrap: 'anywhere' }}>
                         {[
                           posting.documentNumber,
@@ -255,7 +281,7 @@ export function TransferPostingsCard({
                         {together}
                       </Text>
                     )}
-                  </Box>
+                  </UnstyledButton>
                   {actions.length > 0 && (
                     <Menu position="bottom-end" withinPortal shadow="md">
                       <Menu.Target>
@@ -315,7 +341,7 @@ export function TransferPostingsCard({
                 <Table.Th>Posted by</Table.Th>
                 <Table.Th>Status</Table.Th>
                 {showValues && <Table.Th ta="right">Value (USD)</Table.Th>}
-                <Table.Th w={120} ta="right">
+                <Table.Th w={120} ta="right" style={PINNED}>
                   Actions
                 </Table.Th>
               </Table.Tr>
@@ -337,6 +363,7 @@ export function TransferPostingsCard({
                         <ActionIcon
                           variant="subtle"
                           size="sm"
+                          aria-expanded={expanded}
                           aria-label={
                             expanded
                               ? `Hide the lines of ${posting.documentNumber}`
@@ -393,7 +420,7 @@ export function TransferPostingsCard({
                       <Table.Td>{posting.referenceNo || '—'}</Table.Td>
                       <Table.Td>{posting.postedByName ?? '—'}</Table.Td>
                       <Table.Td>
-                        <Badge variant="light" color={postingStatusColour(posting.status)}>
+                        <Badge variant="light" color={postingStatusColour(posting.status)} style={NO_SQUEEZE}>
                           {postingStatusLabel(posting.status)}
                         </Badge>
                         {reversedText(posting) && (
@@ -413,7 +440,7 @@ export function TransferPostingsCard({
                           )}
                         </Table.Td>
                       )}
-                      <Table.Td onClick={(event) => event.stopPropagation()}>
+                      <Table.Td onClick={(event) => event.stopPropagation()} style={PINNED}>
                         <Group justify="flex-end" wrap="nowrap">
                           <RowActions
                             label={posting.documentNumber}

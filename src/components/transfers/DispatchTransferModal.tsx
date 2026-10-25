@@ -26,6 +26,7 @@ import { fromIsoDate, isoDate, unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue, todayDateOnly } from '../format'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
+import { useCalendarEscape } from '../ui/useCalendarEscape'
 import { numberList, orderLabel } from './transferModel'
 
 export type DispatchMode = 'dispatch' | 'dispatchAndReceive'
@@ -101,6 +102,10 @@ export function DispatchTransferModal({
 
   const lines = useMemo(() => order.lines.filter((l) => l.toDispatchBase > 0), [order.lines])
   const [rows, setRows] = useState<Record<number, RowState>>(() => propose(lines, preselected))
+  /* THE CURSOR STARTS ON THE FIRST QUANTITY (the first ticked line's, else the first line's): the dialog is about the
+     pieces that leave, and a date field focused first opened its calendar over the lines (and the keyboard on a phone). */
+  const [focusLineId] = useState<number | null>(() => (lines.find((l) => rows[l.id]?.ticked) ?? lines[0])?.id ?? null)
+  const { calendarOpen, calendar } = useCalendarEscape()
 
   const today = todayDateOnly()
   const [date, setDate] = useState<string | null>(today)
@@ -214,6 +219,7 @@ export function DispatchTransferModal({
     return (
       <NumberInput
         aria-label={`Dispatch now, line ${line.lineNumber}`}
+        data-autofocus={line.id === focusLineId ? true : undefined}
         value={row.quantity}
         onChange={(next) => {
           const quantity = Math.max(0, Math.trunc(numberInputValue(next) ?? 0))
@@ -228,7 +234,7 @@ export function DispatchTransferModal({
         description={over ? `Max ${formatNumber(line.toDispatchBase)}` : undefined}
         styles={over ? { description: { color: 'var(--mantine-color-red-7)', fontWeight: 600 } } : undefined}
         error={over}
-        w={phone ? '100%' : 120}
+        w={phone ? '100%' : 110}
       />
     )
   }
@@ -274,6 +280,7 @@ export function DispatchTransferModal({
       fullScreen={phone}
       saveDisabled={blockedBy !== null}
       saveDisabledReason={blockedBy ?? undefined}
+      closeOnEscape={!calendarOpen}
     >
       {both && (
         <Text size="sm" data-dispatch-and-receive>
@@ -306,6 +313,7 @@ export function DispatchTransferModal({
           maxDate={new Date()}
           w={{ base: '100%', xs: 170 }}
           disabled={busy}
+          popoverProps={calendar('date')}
         />
         {!both && (
           <DateInput
@@ -321,6 +329,7 @@ export function DispatchTransferModal({
             minDate={fromIsoDate(date) ?? undefined}
             w={{ base: '100%', xs: 170 }}
             disabled={busy}
+            popoverProps={calendar('eta')}
           />
         )}
         <TextInput
@@ -365,7 +374,7 @@ export function DispatchTransferModal({
                   />
                   <Box style={{ minWidth: 0 }}>
                     <Text fz="xs" c="dimmed">
-                      Line {line.lineNumber} · {unitLabel(line.unitName, line.packingFormula)}
+                      Line {formatNumber(line.lineNumber)} · {unitLabel(line.unitName, line.packingFormula)}
                     </Text>
                     {itemCell(line)}
                   </Box>
@@ -400,7 +409,8 @@ export function DispatchTransferModal({
           </Text>
         </Stack>
       ) : (
-        <Table.ScrollContainer minWidth={760}>
+        /* 720: inside the xl dialog's 748 px body at 1440, so no row scrolls sideways */
+        <Table.ScrollContainer minWidth={720}>
           <Table verticalSpacing="xs" striped>
             <Table.Thead>
               <Table.Tr>

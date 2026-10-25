@@ -71,7 +71,7 @@ import {
   type TransferUnitOption,
 } from '../../components/transfers/transferModel'
 import { TransferPostingsCard } from '../../components/transfers/TransferPostingsCard'
-import { confirm } from '../../components/ui/confirm'
+import { confirm, confirmAction } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useDocumentTypes } from '../../hooks/useDocumentTypes'
@@ -670,10 +670,12 @@ export function TransferOrderPage() {
    * a notification too (the row may be scrolled away). An order changed by someone else is read again.
    */
   function showApiError(error: unknown, fallback: string) {
-    if (!(error instanceof ApiError)) {
-      notify.error(fallback)
-      return
-    }
+    notify.error(markApiError(error, fallback))
+  }
+
+  /** The marks of a refusal on the page (its line, its field; the order read again when stale): its sentence back. */
+  function markApiError(error: unknown, fallback: string): string {
+    if (!(error instanceof ApiError)) return fallback
     const message = error.message
     const match = /^Line (\d+)/.exec(message)
     setLines((current) =>
@@ -681,7 +683,8 @@ export function TransferOrderPage() {
     )
 
     const fields: TransferHeaderErrors = {}
-    if (/order date/i.test(message) && !match) fields.documentDate = message
+    // "Expected arrival cannot be before the order date." is Expected arrival's alone.
+    if (/order date/i.test(message) && !match && !/^Expected arrival/.test(message)) fields.documentDate = message
     if (/^Expected arrival/.test(message)) fields.expectedArrival = message
     if (/leave from\.$/.test(message)) fields.fromWarehouseId = message
     if (/go to\.$/.test(message) || /destination must differ/.test(message)) fields.toWarehouseId = message
@@ -694,8 +697,8 @@ export function TransferOrderPage() {
     }
     if (Object.keys(fields).length > 0) setErrors((current) => ({ ...current, ...fields }))
 
-    notify.error(message)
     if (isStale(error)) void reload()
+    return message
   }
 
   async function save(): Promise<TransferOrderDto | null> {
@@ -753,23 +756,31 @@ export function TransferOrderPage() {
     if (result.emailWarning) notify.warning(result.emailWarning)
   }
 
-  /** One confirmed action: the question, the call, its answer - a refusal as a notification, as it comes. */
+  /**
+   * One confirmed action: the question, the call, its answer. Enter confirms; a refusal stays in the dialog as it
+   * comes (2.6.4), and is marked on the page too (its line, its field; the order read again when stale).
+   */
   async function confirmed(
     question: { title: string; message: string; confirmLabel: string; danger?: boolean },
     call: () => Promise<TransferActionResult>,
     fallback: string,
     afterwards?: () => void,
   ) {
-    const go = await confirm(question)
-    if (!go) return
-    setSaving(true)
-    try {
-      applyResult(await call())
-      afterwards?.()
-    } catch (error) {
-      showApiError(error, fallback)
-    } finally {
-      setSaving(false)
+    const result = await confirmAction({ ...question, run: busyWhile(call), describeError: (error) => markApiError(error, fallback) })
+    if (!result) return
+    applyResult(result)
+    afterwards?.()
+  }
+
+  /** The call with the page marked busy while it runs (not while its question waits for an answer). */
+  function busyWhile<T>(call: () => Promise<T>): () => Promise<T> {
+    return async () => {
+      setSaving(true)
+      try {
+        return await call()
+      } finally {
+        setSaving(false)
+      }
     }
   }
 
@@ -821,44 +832,35 @@ export function TransferOrderPage() {
 
   async function createReturn() {
     if (!order) return
-    const go = await confirm({
+    const created = await confirmAction({
       title: `Create a return of ${label}?`,
       message: createReturnText(order),
       confirmLabel: 'Create return',
+      run: busyWhile(() => transfersApi.createReturn(order.id)),
+      describeError: (error) => markApiError(error, 'The return could not be created.'),
     })
-    if (!go) return
-    setSaving(true)
-    try {
-      const created = await transfersApi.createReturn(order.id)
-      notify.success('Draft created.')
-      void navigate(routes.transferOrder(created.id))
-    } catch (error) {
-      showApiError(error, 'The return could not be created.')
-    } finally {
-      setSaving(false)
-    }
+    if (!created) return
+    notify.success('Draft created.')
+    void navigate(routes.transferOrder(created.id))
   }
 
   async function remove() {
     if (!order) return
-    const go = await confirm({
+    const deleted = await confirmAction({
       title: `Delete draft ${order.documentNumber ?? `#${order.id}`}?`,
       message: 'Its number is not reused.',
       confirmLabel: 'Delete',
       danger: true,
+      run: busyWhile(async () => {
+        await transfersApi.remove(order.id, order.rowVersion)
+        return true
+      }),
+      describeError: (error) => markApiError(error, 'The draft could not be deleted.'),
     })
-    if (!go) return
-    setSaving(true)
-    try {
-      await transfersApi.remove(order.id, order.rowVersion)
-      markClean()
-      notify.success('Draft deleted.')
-      void navigate(routes.transferOrders)
-    } catch (error) {
-      showApiError(error, 'The draft could not be deleted.')
-    } finally {
-      setSaving(false)
-    }
+    if (!deleted) return
+    markClean()
+    notify.success('Draft deleted.')
+    void navigate(routes.transferOrders)
   }
 
   async function exportToExcel() {
@@ -1169,7 +1171,7 @@ export function TransferOrderPage() {
     <Stack>
       <PageHeader title={title} />
 
-      <DocumentActionBar actions={actions} />
+      <DocumentActionBar actions={actions} menuTowardsRoom />
 
       <TransferApprovalNotice order={order} needsApproval={typeNeedsApproval} canApprove={canApprove} />
 
@@ -1188,6 +1190,7 @@ export function TransferOrderPage() {
         warehouseData={warehouseData}
         errors={errors}
         disabled={saving}
+        onOpenOrder={(id) => void leaveTo(routes.transferOrder(id))}
       />
 
       <Paper radius="lg" p="md" withBorder>
@@ -1246,7 +1249,7 @@ export function TransferOrderPage() {
         openUpload={addDocument}
       />
 
-      <AuditTrail entries={order?.audit ?? []} />
+      <AuditTrail entries={order?.audit ?? []} wrapLabels />
 
       {/* ── the dialogs ── */}
 
