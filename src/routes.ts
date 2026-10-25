@@ -17,6 +17,18 @@ const GOODS_RECEIPTS = '/purchase/goods-receipts'
 
 const TRANSFER_ORDERS = '/inventory/transfers'
 
+const STOCK_LEVELS = '/inventory/stock-levels'
+
+/** What a link to Inventory › Stock Levels may preset; the page reads them once, when it opens. */
+export interface StockLevelsLink {
+  /** 'company': the "Company (Item Definition)" view; left out: Per warehouse. */
+  view?: 'company'
+  status?: string
+  branchId?: number | string | null
+  warehouseId?: number | null
+  itemId?: number | null
+}
+
 export const routes = {
   purchaseOrders: PURCHASE_LISTS.PO,
   purchaseOrder: (id: number) => `${PURCHASE_LISTS.PO}/${id}`,
@@ -44,6 +56,23 @@ export const routes = {
   newTransferOrder: `${TRANSFER_ORDERS}/new`,
   transferOrder: (id: number) => `${TRANSFER_ORDERS}/${id}`,
   transferDispatchPrint: (id: number, postingId: number) => `${TRANSFER_ORDERS}/${id}/dispatches/${postingId}/print`,
+
+  /*
+   * STOCK LEVELS PER WAREHOUSE (script 91): one page, two views. A link may preset the view and the filters (the
+   * Dashboard's two stock-alert lines, a transfer order's "levels" links): `stockLevels` is the page, `stockLevelsLink`
+   * builds its address with them.
+   */
+  stockLevels: STOCK_LEVELS,
+  stockLevelsLink: (link: StockLevelsLink = {}) => {
+    const params = new URLSearchParams()
+    if (link.view) params.set('view', link.view)
+    if (link.status) params.set('status', link.status)
+    if (link.branchId !== undefined && link.branchId !== null && link.branchId !== '') params.set('branchId', String(link.branchId))
+    if (link.warehouseId) params.set('warehouseId', String(link.warehouseId))
+    if (link.itemId) params.set('itemId', String(link.itemId))
+    const qs = params.toString()
+    return qs ? `${STOCK_LEVELS}?${qs}` : STOCK_LEVELS
+  },
 
   container: (id: number) => `/logistics/containers/${id}`,
   movement: (id: number) => `/logistics/movements/${id}`,

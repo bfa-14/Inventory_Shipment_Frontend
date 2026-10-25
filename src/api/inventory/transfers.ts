@@ -242,6 +242,9 @@ export type TransferAbilityKey =
   | 'createReturn'
   | 'updateDetails'
   | 'editExpectedArrival'
+  /* (91) Fill to Max and Add items below Min on a saved draft (fn_TransferOrder_Blocks: FillToMax, AddBelowMin). */
+  | 'fillToMax'
+  | 'addBelowMin'
 
 export type TransferOrderAbilitiesDto = Record<TransferAbilityKey, TransferServerAbility>
 
@@ -262,6 +265,9 @@ const ABILITY_KEYS: readonly TransferAbilityKey[] = [
   'createReturn',
   'updateDetails',
   'editExpectedArrival',
+  // (91) normaliseAbilities keeps only the keys listed here.
+  'fillToMax',
+  'addBelowMin',
 ]
 
 export interface TransferOrderLineDto {
@@ -294,6 +300,30 @@ export interface TransferOrderLineDto {
   /** At To: on hand, and what released orders (this one left out) bring to it. */
   onHandToBase: number
   incomingToBase: number
+  /*
+   * (91) TO'S STOCK LEVEL AND WHERE TO AND FROM STAND WITH THIS ORDER (pcs, usp_TransferOrder_Get from
+   * fn_StockPosition): the item's figures, the same on each of its lines. "Before" leaves this order out; "after" counts
+   * what it still brings to To (a draft or waiting order: Ordered; released: To dispatch + On the way) and takes from
+   * From (Ordered; released: To dispatch).
+   */
+  toHasLevel: boolean
+  toMinBase: number | null
+  toMaxBase: number | null
+  /** Still to dispatch FROM To on released orders: To's "To go out". */
+  toOutToDispatchBase: number
+  /** To's Projected without this order. */
+  toProjectedBeforeBase: number
+  /** "Projected at {To}": what To will have once this order and the other released ones have arrived. */
+  toProjectedAfterBase: number
+  /** To stays below its Min AFTER this order: the line is red (rule L19). */
+  isBelowMin: boolean
+  fromHasLevel: boolean
+  fromMinBase: number | null
+  fromProjectedBeforeBase: number
+  /** From's Projected after this order. */
+  fromAfterBase: number
+  /** From goes below its own Min with this order (orange; red wins). */
+  fromBelowMinAfter: boolean
 }
 
 export interface TransferPostingLineDto {
@@ -417,6 +447,8 @@ export interface TransferOrderDto {
   /** The returns of this order. */
   returns: TransferOrderLinkDto[]
   abilities: TransferOrderAbilitiesDto
+  /** (91) To's stock levels: whether Fill to Max and Add items below Min have anything to work with. */
+  levels: TransferOrderLevelsDto
   lines: TransferOrderLineDto[]
   /** Dispatches and receipts, in the order they were posted (the card shows them newest first). */
   postings: TransferPostingDto[]
@@ -428,6 +460,14 @@ export interface TransferOrderDto {
   updatedByName: string | null
   /** Base64 ROWVERSION of the ORDER: every action, the postings' included, sends it back. */
   rowVersion: string
+}
+
+/** (91) To's stock levels on the order's page (usp_TransferOrder_Get, script 91). */
+export interface TransferOrderLevelsDto {
+  /** Levels at To for active items: none disables Fill to Max and Add items below Min with the reason. */
+  toLevelCount: number
+  /** Items still below To's Min after this order (the lines with `isBelowMin`; an item on two lines counts once). */
+  itemsBelowMin: number
 }
 
 /* ── requests ───────────────────────────────────────────────────────────────────────────────── */
@@ -550,6 +590,20 @@ export interface TransferAvailabilityDto {
   onHandToBase: number
   /** On the way to To, and still to dispatch to it, on released orders: "Stock at {To}" says it beside on hand. */
   incomingToBase: number
+  /*
+   * (91) An unsaved draft's Min, Max and Projected (the line's names): where To and From stand WITHOUT the order being
+   * edited; the page adds what the form's lines order (components/transfers/transferLevels.ts).
+   */
+  toInOnTheWayBase: number
+  toInToDispatchBase: number
+  toOutToDispatchBase: number
+  toProjectedBeforeBase: number
+  toHasLevel: boolean
+  toMinBase: number | null
+  toMaxBase: number | null
+  fromProjectedBeforeBase: number
+  fromHasLevel: boolean
+  fromMinBase: number | null
 }
 
 export interface TransferAvailabilityQuery {
@@ -620,6 +674,25 @@ function normalisePosting(posting: TransferPostingDto): TransferPostingDto {
   }
 }
 
+/** (91) A line's level figures always present: no level reads as none, never as undefined. */
+function normaliseLine(line: TransferOrderLineDto): TransferOrderLineDto {
+  return {
+    ...line,
+    toHasLevel: line.toHasLevel === true,
+    toMinBase: line.toMinBase ?? null,
+    toMaxBase: line.toMaxBase ?? null,
+    toOutToDispatchBase: line.toOutToDispatchBase ?? 0,
+    toProjectedBeforeBase: line.toProjectedBeforeBase ?? 0,
+    toProjectedAfterBase: line.toProjectedAfterBase ?? 0,
+    isBelowMin: line.isBelowMin === true,
+    fromHasLevel: line.fromHasLevel === true,
+    fromMinBase: line.fromMinBase ?? null,
+    fromProjectedBeforeBase: line.fromProjectedBeforeBase ?? 0,
+    fromAfterBase: line.fromAfterBase ?? 0,
+    fromBelowMinAfter: line.fromBelowMinAfter === true,
+  }
+}
+
 /** An order released without approval: nobody asked, nobody decided. */
 const NO_APPROVAL: TransferApprovalDto = {
   requestedAtUtc: null,
@@ -646,7 +719,8 @@ function normaliseOrder(order: TransferOrderDto): TransferOrderDto {
     returnOf: order.returnOf ?? null,
     returns: order.returns ?? [],
     abilities: normaliseAbilities(order.abilities),
-    lines: order.lines ?? [],
+    levels: { toLevelCount: order.levels?.toLevelCount ?? 0, itemsBelowMin: order.levels?.itemsBelowMin ?? 0 },
+    lines: (order.lines ?? []).map(normaliseLine),
     postings: (order.postings ?? []).map(normalisePosting),
     audit: order.audit ?? [],
   }
@@ -786,4 +860,249 @@ export const transfersApi = {
 
   /** The order's files with their type, date and note (kind TRO): any status, with the create permission. */
   files: documentFilesApi(BASE),
+}
+
+/* ══ (91) STOCK LEVELS ON A TRANSFER ORDER: Fill to Max, Add items below Min, Create from Stock Levels ═════════════════
+ *
+ * Script 91 (prompt 48). The order's own answer gained `levels`, the `fillToMax` / `addBelowMin` abilities, and the level
+ * figures of each line and of the availability (merged into the types above); the calls of the order page's "Fill to
+ * Max…" (FillToMaxModal), "Add items below Min…" (AddBelowMinDrawer) and of Stock Levels' "Create transfer order…" are
+ * below.
+ *
+ * ONE RULE, ON THE SERVER (inventory.fn_TransferFill_Plan): per ITEM, in pcs, Need = (To's Max, else its Min) − To's
+ * Projected before this order − what the item's other lines already order; rounded UP to whole units of the line's unit;
+ * capped at the whole units available at From (on hand − other released orders' To dispatch − the item's other lines).
+ * Fill SETS the item's first line, never adds; Add makes one new line per item; a second run changes nothing. A preview
+ * writes nothing; the apply sends the order's RowVersion and computes everything again.
+ */
+
+/** Fill (the order's own lines) or Add (items not on the order, from the drawer or Stock Levels). */
+export type TransferFillMode = 'Fill' | 'Add'
+
+/** What the plan says of one line or item. OnOrder: Add mode, the item is already on the order. */
+export type TransferFillOutcome = 'Filled' | 'AtOrAboveMin' | 'NoLevel' | 'Covered' | 'Inactive' | 'NothingAvailable' | 'OnOrder'
+
+/** One item ticked in the drawer, in the unit chosen (null = the item's base unit). Each item once. */
+export interface TransferFillItemRequest {
+  itemId: number
+  itemUnitId: number | null
+}
+
+export interface TransferFillCountsDto {
+  filled: number
+  /** Filled, but less than needed: From has no more available. */
+  capped: number
+  /** Filled rows whose quantity differs from the line's (Fill), or new lines (Add). */
+  changed: number
+  atOrAboveMin: number
+  noLevel: number
+  covered: number
+  inactive: number
+  onOrder: number
+  /** Nothing available at From. */
+  notFilled: number
+}
+
+/** One line (Fill) or one item (Add) of the plan, in pcs unless named in the line's unit. */
+export interface TransferFillLineDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  itemIsActive?: boolean
+  /** The order line Fill sets (the item's first); null in Add mode before the apply. */
+  lineId: number | null
+  /** The line's number; after an Add apply, the new line's. */
+  lineNumber: number | null
+  itemUnitId: number
+  unitName: string
+  /** The unit's CURRENT packing formula: what the rounding and the apply use. */
+  packingFormula: number
+  /** Ordered now, in the line's unit and in pcs; null in Add mode. */
+  currentQuantity: number | null
+  currentQuantityBase: number | null
+  /** What the plan sets, in the unit and in pcs; null unless Filled. */
+  newQuantity: number | null
+  newQuantityBase: number | null
+  /** Ordered on the item's other lines of this order. */
+  otherLinesBase: number
+  onOrder?: boolean
+  toOnHandBase: number
+  toInOnTheWayBase: number
+  toInToDispatchBase: number
+  toOutToDispatchBase: number
+  toProjectedBeforeBase: number
+  /** To's Projected with this order as the plan leaves it ("18 → 60"). */
+  toProjectedAfterBase: number
+  toHasLevel?: boolean
+  toMinBase: number | null
+  toMaxBase: number | null
+  /** (Max, else Min) − Projected before − the other lines; null without a level at To. */
+  needBase: number | null
+  unitsNeeded?: number | null
+  unitsAvailable?: number | null
+  fromOnHandBase?: number
+  fromCommittedBase?: number
+  /** "Available at {From}": on hand − what other released orders take, never below 0. */
+  availableFromBase: number
+  /** Available for THIS line: − the item's other lines, never below 0. */
+  availableForLineBase: number
+  outcome: TransferFillOutcome
+  isCapped: boolean
+  /** The apply changes (Fill) or adds (Add) this line. */
+  isChanged: boolean
+  fromHasLevel: boolean
+  fromMinBase: number | null
+  fromProjectedBeforeBase?: number
+  /** From's Projected after this order as the plan leaves it. */
+  fromAfterBase: number
+  /** From goes below its own Min with this order (orange; never a refusal). */
+  fromBelowMinAfter: boolean
+  /** Preview only: pieces also on purchase orders or in containers for To (not counted, shown dimmed). */
+  purchasesToComeBase: number | null
+}
+
+/** The preview (nothing written) or the apply (the order re-read) of Fill to Max / Add items below Min. */
+export interface TransferFillResult {
+  applied: boolean
+  mode: TransferFillMode
+  /** The server's sentence ("Fill to Max: 4 lines filled (2 capped by what LKS-01 has available), …"): shown as it comes. */
+  message: string
+  counts: TransferFillCountsDto
+  /** In item code order. */
+  lines: TransferFillLineDto[]
+  /** From below its own Min; other drafts / waiting orders to the same To with the same items (orange). */
+  warnings: string[]
+  /** The order as it now stands, after an apply; null on a preview. */
+  order: TransferOrderDto | null
+}
+
+/** GET {id}/below-min: the drawer's filters. */
+export interface TransferBelowMinQuery {
+  search?: string
+  itemFamilyId?: number
+  brandId?: number
+  /** Default true: only items below To's Min; false: every item with a level at To. */
+  onlyBelowMin?: boolean
+}
+
+/** One item with a level at the order's To (a row of the drawer). */
+export interface TransferBelowMinItemDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  familyName: string | null
+  brandName: string | null
+  baseUnitId: number
+  baseUnitName: string
+  toOnHandBase: number
+  toInOnTheWayBase: number
+  toInToDispatchBase: number
+  toOutToDispatchBase: number
+  toProjectedBeforeBase: number
+  toMinBase: number | null
+  toMaxBase: number | null
+  needBase: number | null
+  availableFromBase: number
+  /** Below To's Min (an item the order already covers is not). */
+  isBelowMin: boolean
+  onOrder: boolean
+  fromHasLevel: boolean
+  fromMinBase: number | null
+  fromProjectedBeforeBase: number
+}
+
+/** What the server proposes for one item in one of its units ("2 BOX = 24 pcs"). */
+export interface TransferBelowMinUnitDto {
+  itemId: number
+  itemUnitId: number
+  unitName: string
+  packingFormula: number
+  isBaseUnit: boolean
+  /** Null unless Filled. */
+  proposedQuantity: number | null
+  proposedBase: number | null
+  isCapped: boolean
+  outcome: TransferFillOutcome
+  fromBelowMinAfter: boolean
+}
+
+export interface TransferBelowMinResult {
+  /** By Need, largest first, then item code. */
+  items: TransferBelowMinItemDto[]
+  units: TransferBelowMinUnitDto[]
+}
+
+/** POST api/inventory/stock-levels/create-transfer: ticked rows of ONE destination; each item in its base unit. */
+export interface CreateTransferFromLevelsRequest {
+  fromWarehouseId: number
+  toWarehouseId: number
+  itemIds: number[]
+  /** yyyy-MM-dd; null = today (UTC). */
+  documentDate: string | null
+  expectedArrival: string | null
+}
+
+export interface CreateTransferFromLevelsResult {
+  orderId: number
+  /** Null when the TRO type numbers at release ("Draft transfer order #15 created. …"). */
+  documentNumber: string | null
+  /** "TRO-BR-003-000015 created. Add items below Min: 2 items added (…), 1 not added (…)." - shown as it comes. */
+  message: string
+}
+
+const NO_FILL_COUNTS: TransferFillCountsDto = {
+  filled: 0,
+  capped: 0,
+  changed: 0,
+  atOrAboveMin: 0,
+  noLevel: 0,
+  covered: 0,
+  inactive: 0,
+  onOrder: 0,
+  notFilled: 0,
+}
+
+function normaliseFill(result: TransferFillResult): TransferFillResult {
+  return {
+    ...result,
+    counts: { ...NO_FILL_COUNTS, ...(result.counts ?? {}) },
+    lines: (result.lines ?? []).map((line) => ({ ...line, purchasesToComeBase: line.purchasesToComeBase ?? null })),
+    warnings: result.warnings ?? [],
+    order: result.order ? normaliseOrder(result.order) : null,
+  }
+}
+
+export const transferLevelsApi = {
+  /**
+   * Fill to Max (no `addItems`) or Add items below Min (`addItems`, each item once), as a PREVIEW: nothing is written and
+   * no row version is needed. Only on a saved draft (62005 / 62010 otherwise, the server's sentence).
+   */
+  fillToMaxPreview: async (id: number, addItems: TransferFillItemRequest[] = []) =>
+    normaliseFill(
+      await request<TransferFillResult>(`${BASE}/${id}/fill-to-max/preview`, { method: 'POST', body: { addItems } }),
+    ),
+
+  /** The same, APPLIED with the order's row version (62004 when it changed): `order` is the order re-read. */
+  fillToMax: async (id: number, rowVersion: string | null, addItems: TransferFillItemRequest[] = []) =>
+    normaliseFill(
+      await request<TransferFillResult>(`${BASE}/${id}/fill-to-max`, { method: 'POST', body: { rowVersion, addItems } }),
+    ),
+
+  /** The drawer: every level at the order's To (only those below Min by default), and what each unit would add. */
+  belowMin: async (id: number, query: TransferBelowMinQuery = {}, signal?: AbortSignal): Promise<TransferBelowMinResult> => {
+    // toQueryString drops a false; "every item with a level at To" is exactly onlyBelowMin=false, so it is said here.
+    const { onlyBelowMin, ...rest } = query
+    const qs = toQueryString(rest)
+    const flag = onlyBelowMin === false ? `${qs ? '&' : '?'}onlyBelowMin=false` : ''
+    const result = await request<TransferBelowMinResult>(`${BASE}/${id}/below-min${qs}${flag}`, { signal })
+    return { items: result?.items ?? [], units: result?.units ?? [] }
+  },
+
+  /**
+   * Inventory › Stock Levels' "Create transfer order…": ONE draft from From to To with the ticked items, each filled in
+   * its base unit (Add mode), in one call (201). Nothing to add: 62009 and no draft (the sentence says why).
+   * Needs transfers.create AND stocklevels.view.
+   */
+  createFromLevels: (payload: CreateTransferFromLevelsRequest) =>
+    request<CreateTransferFromLevelsResult>('/api/inventory/stock-levels/create-transfer', { method: 'POST', body: payload }),
 }

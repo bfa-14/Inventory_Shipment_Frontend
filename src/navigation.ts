@@ -84,6 +84,10 @@ export const PERMISSIONS = {
   transfersClose: 'inventory.transfers.close',
   transfersCancel: 'inventory.transfers.cancel',
   transfersReverse: 'inventory.transfers.reverse',
+  // Stock levels per warehouse (script 91): each warehouse's own Min / Max, Inventory › Stock Levels and Item
+  // Definition's card. Edit sets, changes, removes and imports them; Fill to Max on a transfer order is transfers.create.
+  stockLevelsView: 'inventory.stocklevels.view',
+  stockLevelsEdit: 'inventory.stocklevels.edit',
   invoicesImport: 'sales.invoices.import',
   invoicesPriceOverride: 'sales.invoices.priceoverride',
   invoicesView: 'sales.invoices.view',
@@ -336,6 +340,8 @@ export const NAVIGATION: NavSection[] = [
         icon: 'movement',
         countOf: 'transfersWaiting',
       },
+      // Each warehouse's own Min / Max and where it stands (script 91): what Fill to Max on a transfer order tops up to.
+      { label: 'Stock Levels', to: '/inventory/stock-levels', permission: PERMISSIONS.stockLevelsView, icon: 'levels' },
       { label: 'Stock Balance', icon: 'balance', comingSoon: true },
       { label: 'Stock Movement', icon: 'movement', comingSoon: true },
     ],

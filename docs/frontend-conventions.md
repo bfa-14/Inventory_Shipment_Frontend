@@ -853,6 +853,103 @@ Receive dialogs).
   warehouses? Inventory › Transfer Orders moves it without changing its cost and follows it on the way." Sales Profit's
   COGS adjustments header says, on hover, that adjustments stay in the branch that received the goods.
 
+## Stock levels per warehouse and Fill to Max (script 91)
+
+**Inventory › Stock Levels** (`/inventory/stock-levels`, `pages/inventory/StockLevelsPage.tsx`; permissions
+`inventory.stocklevels.view` to read, `inventory.stocklevels.edit` to set, remove and import) and Item Definition's
+**"Stock levels per warehouse"** card (`pages/inventory/ItemStockLevelsCard.tsx`). The client is
+`src/api/inventory/stockLevels.ts`; the Fill, drawer and create-from-levels calls are `transferLevelsApi` at the end of
+`src/api/inventory/transfers.ts`; the shared pieces are in `src/components/stockLevels/` (`stockLevelStatus.ts`,
+`StockLevelBadge`, `StockLevelFormModal`, `StockLevelHistoryModal`, `ImportStockLevelsWizard`,
+`CreateTransferFromLevelsModal`, `levelWarehouses.ts`).
+
+- **Two Min / Max, never read as one.** Item Definition's Minimum / Maximum Quantity are the COMPANY's: the Dashboard's
+  "Items below their minimum", the page's view "Company (Item Definition)". A **stock level** is one item's Min (required,
+  pcs, 0 or more) and Max (optional, not below Min) in ONE warehouse at the bottom of the tree, never On the way. The
+  Inventory Parameters card says so under the Min / Max row, in both modes ("Minimum and Maximum Quantity are for the whole
+  company: …"), and the levels card keeps the company figures in view ("Company: Minimum Quantity 50 · Maximum Quantity
+  80. The warehouses' Min add up to 95 pcs, above the company Maximum Quantity (80)." in orange when they do).
+- **One formula, the server's** (`inventory.fn_StockPosition`): **Projected = On hand + On the way in + To come in − To go
+  out**, released transfer orders only (drafts, orders waiting for approval and purchases are not counted). The five
+  statuses, the first that applies, in `stockLevelStatus.ts`: No level (gray), **Below Min** (red, Projected < Min),
+  **Below Min, covered** (orange, On hand < Min ≤ Projected; its tooltip says why it is not red), **Above Max** (blue),
+  **OK** (green). The page never works a status out itself; the column tooltips (`LEVEL_COLUMN_HINTS`) say what each
+  figure is, and Projected is bold red when Below Min.
+- **A card that saves on its own, in view mode too.** The levels card sits in the item's `<form>` but is not part of it:
+  plain buttons, dialogs in portals (`FormModal`), and the page's submit guard ignores a submit that is not its own - so
+  saving a level never saves the item, and the card works without Edit Item. A new item reads "Save the item first to set
+  its stock levels per warehouse." Its rows are the item's every level, inactive warehouses included
+  (`stockLevelsApi.forItem`), read again after every change; the pencil is disabled on an inactive warehouse with the
+  server's sentence ("Warehouse {code} is inactive: activate it to change its levels."), the trash is not (a level may be
+  removed there).
+- **`StockLevelFormModal` is the one dialog for a level**: "Set levels…" on the card, "Add levels…" (item first), "Set
+  level…" / "Add level…" on a row (one read-only warehouse; the cursor starts in Min). It sends the RowVersion of every
+  level it replaces, says before the click which one it replaces ("LUB-01 already has Min 10 / Max 40: it is replaced."),
+  and after a 404 / 409 shows the server's sentence and reads the levels again. Every change is in the level's history
+  (`StockLevelHistoryModal`: When / By / What / Min "10 → 20" / Max / From "Item Definition", "Stock Levels", "Import
+  ({file})").
+- **Two views, one page.** A `SegmentedControl` "Per warehouse" | "Company (Item Definition)" (the whole row below 48em),
+  each view its own grid on the grid engine of Stock Valuation, its filters kept when the reader switches. The address
+  (`view, status, branchId, warehouseId, itemId`) is read ONCE when the page opens: links preset it through
+  `routes.stockLevelsLink(...)`. The Dashboard's "Items below their minimum" opens the company view on the Dashboard's
+  branch with status Below Min (Item Definition without View Stock Levels); its new line "Warehouse levels below Min"
+  (`stockAlerts.belowWarehouseMin`, null without the permission) opens Per warehouse, Below Min, same branch. The company
+  view's "3 warehouses" opens Per warehouse with an "Item: {code}" chip.
+- **Ticks lead to one transfer order.** With Create Transfer Orders, rows with a level can be ticked; "Create transfer
+  order…" is disabled with "Tick rows of one warehouse: a transfer order goes to one warehouse." when the destinations
+  differ (the reason under the button on a phone). `CreateTransferFromLevelsModal` asks From, the order date and the
+  expected arrival, and the server makes ONE draft, each item filled in its base unit to its Max (else Min), capped at
+  what From has; nothing to transfer: no draft, the sentence in the dialog. The new order opens.
+- **The transfer order page: Min, Max and Projected at {To}** (`TransferLinesGrid`, `components/transfers/transferLevels.ts`).
+  While the order still moves something (a draft, an order waiting for approval, a released one not yet Received or
+  Closed: `showsLevels`) the grid has three more columns after "Stock at {To}": To's **Min** and **Max** ("—" without a
+  level; tooltip "{To}'s Min / Max for the item (Stock levels per warehouse).") and **Projected at {To}** AFTER this order
+  (tooltip "What {To} will have once this order and the other released transfer orders have arrived: on hand + coming in
+  − going out."). A saved order's figures are the server's (`usp_TransferOrder_Get`, the item's on each of its lines); a
+  draft being typed reads where To and From stand WITHOUT it (`/availability`) and adds what its form's lines of the item
+  order, in pcs (`withLevelsAfter`), so a quantity typed moves Projected at once. Read, the fifteen columns still fit a
+  1440 screen (the widths are hints, headers wrap, an item code never breaks); the draft's form scrolls inside its card,
+  as before. On a phone the card says "Min 20 · Max 60 · Projected 60 at LUB-01" and the reasons as dimmed lines.
+- **Fill to Max… and Add items below Min…** (`TransferLinesToolbar` in the Lines card's title row, a draft and Create
+  Transfer Orders; stacked full width on a phone). The server's rule only, shown before it is applied: a preview
+  (`fillToMaxPreview`, nothing written), then the apply with the order's RowVersion (`fillToMax`), which works it out
+  again. Per ITEM: the item's FIRST line is SET (never added to), its other lines count but never change, nothing is
+  deleted, a second run changes nothing; Add items below Min makes a new line per item at the end, in the unit chosen
+  (base by default). Both only on a saved draft: "Save your changes first." while the page is dirty, else the server's
+  `abilities.fillToMax` / `abilities.addBelowMin` reason (tooltip; a dimmed line under the buttons on a phone).
+  `FillToMaxModal` ("Fill to Max - {No} ({From} → {To})", xl, full screen below 48em, one card per line there) lays out
+  the server's plan - Now, Fill to (bold when it changes), Projected "18 → 60", Min, Max, Available at {From}, the
+  result in the server's outcome words ("capped: {From} has {n} pcs available"), purchases still to come dimmed under a
+  row - then "If you apply it: {message}" and the warnings (orange); its table fits the xl dialog at 1440, and the cursor
+  is on "Fill {n} lines" (nothing to type: Enter applies; disabled "Every quantity is already at its fill."). The drawer
+  `AddBelowMinDrawer` (`belowMin`; right side, `min(1100px, 100%)`, full screen below 48em, one card per item there;
+  remounted on open) lists To's levels with the server's proposal per unit ("2 BOX = 24 pcs") and pre-ticks the items
+  below Min that are not on the order and whose base unit fills; an item on the order, or a unit that does not fill,
+  cannot be ticked. After either apply the answer's order replaces the page's, its message is green and each warning
+  orange; a 409 CONCURRENCY says "Someone else changed this transfer order. Reload the page." and the page reads the
+  order again. The Activity trail reads "Fill to Max" and "Items below Min added".
+- **Red means "after this order".** On the transfer grid a line is red while the destination's Projected AFTER this
+  order is still below its Min (`isBelowMin`): the row tinted (`var(--mantine-color-red-light)`), Projected bold red,
+  "Still below {To}'s Min of {min} with this order." on hover - so a filled line stops being red and a capped one stays
+  red. The source going below its own Min with this order is orange under "Available at {From}" ("{From} keeps {after}
+  pcs after this order; its own Min is {min}."); **red wins**: a cell red for another reason (below what the line still
+  has to dispatch) stays red and both reasons are joined in the tooltip and the phone line.
+- **The import** (`ImportStockLevelsWizard`, the steps of the charges' import): .xlsx up to 5 MB, 20,000 rows. Step 2
+  shows every row with its Status - **Valid**, **Warning** (imported: an inactive item, Remove with a Min typed),
+  **Error** (skipped, the file's text in red), **Unchanged** (skipped) - and its Action ("Set", "Remove", "No change"),
+  the level it has now ("Min 10 / Max 40"), long files 200 rows at a time. "Continue with {n} changes" is disabled with
+  "Nothing to import: every row is unchanged or has an error." Step 3 saves every change in ONE transaction, judged again
+  by the server, which answers the sentence shown. **The export round trip**: "Export to Excel" (Per warehouse only)
+  writes the five import columns first and greys the others; the import ignores the others, so an export imported back
+  unchanged is "Nothing was imported: every row is unchanged or has an error."
+- **Warehouses.** A warehouse with levels cannot become a parent: the Parent picker says "- has stock levels, cannot be a
+  parent" when the levels are all it holds (`hasStockLevels`, `isUsedInTransactions` of the lookup), else the old "- used
+  in transactions, …"; deleting a warehouse or an item takes its levels ("Its stock levels go with it.", "Its units, image,
+  documents and stock levels per warehouse go with it.").
+- **Phones.** The page and the card show one card per row ("TVS-APACHE-160 · LUB-01", "On hand 12 · Projected 18 · Min
+  20 / Max 60", the badge on a line of its own - beside the figures it was squeezed to "Be…" - and the "…" menu or the
+  actions).
+
 ## Bulk actions
 
 Every document list carries a checkbox column (`DataTable` props `selectedRecords`,

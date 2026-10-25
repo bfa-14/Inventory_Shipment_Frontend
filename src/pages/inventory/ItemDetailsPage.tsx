@@ -53,6 +53,7 @@ import { COUNTRIES, countryLabel, findCountry } from '../../data/countries'
 import { PERMISSIONS } from '../../navigation'
 import { CONTENT_BG } from '../../theme'
 import { ItemImageCard } from './ItemImageCard'
+import { ItemStockLevelsCard } from './ItemStockLevelsCard'
 import { ItemAuditCard, ItemQuickLinksCard, ItemStockCard } from './ItemSideCards'
 import { ItemUnitFormModal } from './ItemUnitFormModal'
 import { ItemUnitsCard } from './ItemUnitsCard'
@@ -203,6 +204,9 @@ function ItemDetails() {
   const canCreate = hasPermission(PERMISSIONS.itemsCreate)
   const canEdit = hasPermission(PERMISSIONS.itemsEdit)
   const canDelete = hasPermission(PERMISSIONS.itemsDelete)
+  // (91) Stock levels per warehouse: their own permissions - the card saves on its own, in view mode too.
+  const canViewLevels = hasPermission(PERMISSIONS.stockLevelsView)
+  const canEditLevels = hasPermission(PERMISSIONS.stockLevelsEdit)
 
   const copySource = (location.state as { copyFrom?: CopySource } | null)?.copyFrom ?? null
 
@@ -815,7 +819,7 @@ function ItemDetails() {
     if (!item) return
     const confirmed = await confirm({
       title: 'Delete item',
-      message: `Delete ${item.itemCode} - ${item.itemName}? Its units, image and documents go with it. This cannot be undone.`,
+      message: `Delete ${item.itemCode} - ${item.itemName}? Its units, image, documents and stock levels per warehouse go with it. This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
@@ -1349,6 +1353,16 @@ function ItemDetails() {
                           </Field>
                         </Grid.Col>
 
+                        {/* (91) TWO MIN / MAX, NEVER READ AS ONE: these two are the company's (the Dashboard's figure);
+                            each warehouse's own are on the card below. In both modes, directly under the row. */}
+                        <Grid.Col span={12} pt={0}>
+                          <Text fz="xs" c="dimmed" data-item-company-levels-hint>
+                            Minimum and Maximum Quantity are for the whole company: the Dashboard&apos;s Items below their
+                            minimum.
+                            {canViewLevels ? " Each warehouse's own Min / Max are in Stock levels per warehouse below." : ''}
+                          </Text>
+                        </Grid.Col>
+
                         <Grid.Col span={12}>
                           {editable ? (
                             <Group gap="xl" wrap="wrap" mt="xs">
@@ -1393,6 +1407,17 @@ function ItemDetails() {
                       </Grid>
                     )}
                   </Card>
+
+                  {canViewLevels ? (
+                    <ItemStockLevelsCard
+                      // The route's id, so an item still loading is not taken for a new one.
+                      itemId={itemId}
+                      itemCode={item?.itemCode ?? ''}
+                      companyMin={item?.minQuantity ?? null}
+                      companyMax={item?.maxQuantity ?? null}
+                      canEdit={canEditLevels}
+                    />
+                  ) : null}
 
                   <Card radius="lg" p="lg" withBorder>
                     <Text fw={600} fz="md" mb="md">

@@ -180,10 +180,24 @@ export function WarehousesPage() {
     }
   }
 
+  /**
+   * (91) Whether the warehouse holds stock levels per warehouse, which its delete takes with it: only the lookup says it
+   * (the list's rows do not). Asked when Delete is pressed; a lookup that fails says nothing more.
+   */
+  async function holdsStockLevels(id: number): Promise<boolean> {
+    try {
+      const all = await warehousesApi.lookup(false, undefined, id)
+      return all.find((w) => w.id === id)?.hasStockLevels === true
+    } catch {
+      return false
+    }
+  }
+
   async function handleDelete(warehouse: WarehouseDto) {
+    const levels = await holdsStockLevels(warehouse.id)
     const confirmed = await confirm({
       title: 'Delete warehouse',
-      message: `Delete warehouse ${warehouse.warehouseCode} - ${warehouse.warehouseName}? This cannot be undone.`,
+      message: `Delete warehouse ${warehouse.warehouseCode} - ${warehouse.warehouseName}?${levels ? ' Its stock levels go with it.' : ''} This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })

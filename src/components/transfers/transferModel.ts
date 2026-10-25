@@ -6,6 +6,7 @@ import type {
 } from '../../api/inventory/transfers'
 import type { ItemUnitDto, WarehouseLookupDto } from '../../api/types'
 import { formatNumber } from '../format'
+import { levelsOfLine, NO_LEVELS, type TransferLineLevels } from './transferLevels'
 import { transferStatusLabel } from './transferStatus'
 
 /**
@@ -137,8 +138,11 @@ export type TransferUnitOption = Pick<ItemUnitDto, 'id' | 'unitTypeName' | 'pack
 /**
  * One line of the order on the page. On a draft it is a form - an item, a unit, Ordered in that unit, notes - and
  * every reference is nullable while it is half typed; once released its counters are the server's (in pcs).
+ *
+ * (91) It also carries To's stock level and where To and From stand (`TransferLineLevels`, transferLevels.ts): the
+ * server's on a saved line, the page's own sum on a draft being typed.
  */
-export interface TransferLineForm {
+export interface TransferLineForm extends TransferLineLevels {
   /** Stable across re-renders; not the id (a new line has none). */
   key: string
   /** The order line's id once saved: what the dispatch dialog's preselection points at. */
@@ -198,6 +202,7 @@ export function emptyTransferLine(): TransferLineForm {
     availableFromBase: null,
     onHandToBase: null,
     incomingToBase: null,
+    ...NO_LEVELS,
   }
 }
 
@@ -232,6 +237,7 @@ export function toTransferLineForm(line: TransferOrderLineDto): TransferLineForm
     availableFromBase: line.availableFromBase,
     onHandToBase: line.onHandToBase,
     incomingToBase: line.incomingToBase,
+    ...levelsOfLine(line),
   }
 }
 

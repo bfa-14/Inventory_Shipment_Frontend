@@ -22,7 +22,8 @@ import { PERMISSIONS } from '../../navigation'
  * would throw away what is being typed, so every action that changes the order is disabled with "Save your changes
  * first." while the page holds unsaved changes (and on a draft never saved, which has nothing to act on yet).
  *
- * WHICH ACTIONS, BY STORED STATUS (2.6.3): a draft - Save, Delete, Import lines from Excel…, Release (or, when the TRO
+ * WHICH ACTIONS, BY STORED STATUS (2.6.3): a draft - Save, Delete, Import lines from Excel…, (91) Fill to Max… and Add
+ * items below Min… (the lines toolbar), Release (or, when the TRO
  * type needs approval, Send for approval… and Approve & release); waiting for approval - Approve, Reject…, Withdraw; a
  * released order - Dispatch…, Receive…, Dispatch and receive…, Nothing more will be sent…, Back to draft…, Cancel
  * order…, Create return…; always - Export to Excel. Outside its status an action is hidden, like a missing permission:
@@ -54,6 +55,13 @@ export interface TransferAbilities {
   editLines: TransferAbility
   remove: TransferAbility
   importLines: TransferAbility
+  /**
+   * (91) The lines toolbar's "Fill to Max…" and "Add items below Min…": a draft and the create permission; disabled with
+   * "Save your changes first." while the page holds changes (the server works on the SAVED lines), else with the
+   * server's reason (no line, no level at To, …).
+   */
+  fillToMax: TransferAbility
+  addBelowMin: TransferAbility
   /** Hidden when the TRO type needs approval: Send for approval… and, for approvers, Approve & release take its place. */
   release: TransferAbility
   sendForApproval: TransferAbility
@@ -184,6 +192,8 @@ export function transferAbilities(
     editLines: ability(draft && canCreate, [server('edit')]),
     remove: ability(draft && saved && can(PERMISSIONS.transfersDelete), [server('delete')]),
     importLines: ability(draft && canCreate, [server('edit'), fromId === null ? CHOOSE_FROM_FIRST : null]),
+    fillToMax: ability(draft && canCreate, [unsaved, server('fillToMax')]),
+    addBelowMin: ability(draft && canCreate, [unsaved, server('addBelowMin')]),
     release: ability(releaseShown, [unsaved, server('release')], { primary: !saveIsNext }),
     sendForApproval: ability(sendShown, [unsaved, server('sendForApproval')], {
       primary: !saveIsNext && !approveAndReleaseShown,

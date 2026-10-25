@@ -22,6 +22,7 @@ import {
   type SaveTransferOrderRequest,
   type TransferActionResult,
   type TransferAvailabilityDto,
+  type TransferFillResult,
   type TransferOrderDto,
   type TransferPostedResult,
   type TransferPostingDto,
@@ -38,8 +39,10 @@ import { isoDate } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
+import { AddBelowMinDrawer } from '../../components/transfers/AddBelowMinDrawer'
 import { ChangeEtaModal } from '../../components/transfers/ChangeEtaModal'
 import { DispatchTransferModal, type DispatchMode } from '../../components/transfers/DispatchTransferModal'
+import { FillToMaxModal } from '../../components/transfers/FillToMaxModal'
 import { ReceiveTransferModal } from '../../components/transfers/ReceiveTransferModal'
 import { transferAbilities, type TransferAbility } from '../../components/transfers/transferAbilities'
 import { TransferApprovalNotice } from '../../components/transfers/TransferApprovalNotice'
@@ -49,6 +52,8 @@ import {
   type TransferHeaderValue,
 } from '../../components/transfers/TransferHeaderCard'
 import { TransferLinesGrid } from '../../components/transfers/TransferLinesGrid'
+import { TransferLinesToolbar } from '../../components/transfers/TransferLinesToolbar'
+import { levelsBefore, NO_LEVELS, showsLevels, withLevelsAfter } from '../../components/transfers/transferLevels'
 import {
   APPROVE_TEXT,
   backToDraftText,
@@ -100,6 +105,9 @@ type Dialog =
   | { kind: 'receive' }
   | { kind: 'eta'; posting: TransferPostingDto }
   | { kind: 'import' }
+  /* (91) The lines toolbar: the Fill to Max preview, and the drawer of To's items below Min. */
+  | { kind: 'fillToMax' }
+  | { kind: 'addBelowMin' }
 
 /** The five figures of where an item stands, empty while not known. */
 const NO_AVAILABILITY = {
@@ -429,25 +437,32 @@ export function TransferOrderPage() {
     return () => controller.abort()
   }, [editable, fromId, toId, itemKey, savedOrderId])
 
-  /** The lines as shown: a draft's figures follow the From / To on screen; a released order's are the server's. */
+  /**
+   * The lines as shown: a draft's figures follow the From / To on screen; a released order's are the server's.
+   * (91) A draft's Projected at To and From's figure after the order are worked out from what its form orders now
+   * (transferLevels.ts `withLevelsAfter`): where To and From stand without it, plus the item's lines as typed.
+   */
   const sameEnds = order !== null && fromId === order.from.id && toId === order.to.id
   const fresh = editable && availability && availability.key === endsKey ? availability.byItem : null
   const shownLines = !editable
     ? lines
-    : lines.map((line) => {
-        const answer = fresh && line.itemId !== null ? fresh.get(line.itemId) : undefined
-        if (answer) {
-          return {
-            ...line,
-            onHandFromBase: answer.onHandFromBase,
-            committedFromBase: answer.committedFromBase,
-            availableFromBase: answer.availableFromBase,
-            onHandToBase: answer.onHandToBase,
-            incomingToBase: answer.incomingToBase,
+    : withLevelsAfter(
+        lines.map((line) => {
+          const answer = fresh && line.itemId !== null ? fresh.get(line.itemId) : undefined
+          if (answer) {
+            return {
+              ...line,
+              onHandFromBase: answer.onHandFromBase,
+              committedFromBase: answer.committedFromBase,
+              availableFromBase: answer.availableFromBase,
+              onHandToBase: answer.onHandToBase,
+              incomingToBase: answer.incomingToBase,
+              ...levelsBefore(answer),
+            }
           }
-        }
-        return sameEnds ? line : { ...line, ...NO_AVAILABILITY }
-      })
+          return sameEnds ? line : { ...line, ...NO_AVAILABILITY, ...NO_LEVELS }
+        }),
+      )
 
   /* ── the warehouses offered ───────────────────────────────────────────────────────────────── */
 
@@ -496,6 +511,7 @@ export function TransferOrderPage() {
                 unitName: base?.unitTypeName ?? '',
                 packingFormula: base?.packingFormula ?? 1,
                 ...NO_AVAILABILITY,
+                ...NO_LEVELS,
                 error: undefined,
               }
             : line,
@@ -919,6 +935,15 @@ export function TransferOrderPage() {
     setDialog(null)
   }
 
+  /** (91) Fill to Max or Add items below Min applied: the order as it now stands, then what the server says. */
+  function filled(result: TransferFillResult) {
+    if (result.order) applyOrder(result.order)
+    else void reload()
+    setDialog(null)
+    notify.success(result.message)
+    for (const warning of result.warnings) notify.warning(warning)
+  }
+
   /** Leaving the page (Back, the dispatch note): asks first when something typed is not saved. */
   async function leaveTo(to: string) {
     if (dirty.current) {
@@ -1194,9 +1219,19 @@ export function TransferOrderPage() {
       />
 
       <Paper radius="lg" p="md" withBorder>
-        <Title order={5} mb="sm">
-          Lines
-        </Title>
+        <Group justify="space-between" align="flex-start" mb="sm" gap="sm" wrap="wrap">
+          <Title order={5}>Lines</Title>
+          {/* (91) "Add items below Min…" and "Fill to Max…": a draft and the create permission (3.6.5). */}
+          {isDraft && (
+            <TransferLinesToolbar
+              addBelowMin={abilities.addBelowMin}
+              fillToMax={abilities.fillToMax}
+              onAddBelowMin={() => setDialog({ kind: 'addBelowMin' })}
+              onFillToMax={() => setDialog({ kind: 'fillToMax' })}
+              busy={saving}
+            />
+          )}
+        </Group>
         {editable && (
           <Group mb="md" align="flex-end">
             <QuickItemSearch onPick={(item, term) => void addScanned(item, term)} disabled={saving} />
@@ -1223,6 +1258,7 @@ export function TransferOrderPage() {
             })
           }
           totals={totals}
+          showLevels={showsLevels(order)}
         />
       </Paper>
 
@@ -1285,6 +1321,26 @@ export function TransferOrderPage() {
             applyOrder(result.order)
             setDialog(null)
           }}
+          onStale={() => void reload()}
+        />
+      )}
+
+      {dialog?.kind === 'fillToMax' && order && (
+        <FillToMaxModal
+          opened
+          order={order}
+          onClose={() => setDialog(null)}
+          onApplied={filled}
+          onStale={() => void reload()}
+        />
+      )}
+
+      {order && (
+        <AddBelowMinDrawer
+          opened={dialog?.kind === 'addBelowMin'}
+          order={order}
+          onClose={() => setDialog(null)}
+          onApplied={filled}
           onStale={() => void reload()}
         />
       )}

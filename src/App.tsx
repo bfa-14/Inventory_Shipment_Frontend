@@ -23,6 +23,7 @@ import { ItemsPage } from './pages/inventory/ItemsPage'
 import { ShortageDocumentPage } from './pages/inventory/ShortageDocumentPage'
 import { ShortagePrintPage } from './pages/inventory/ShortagePrintPage'
 import { ShortagesPage } from './pages/inventory/ShortagesPage'
+import { StockLevelsPage } from './pages/inventory/StockLevelsPage'
 import { StockValuationPage } from './pages/inventory/StockValuationPage'
 import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
 import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
@@ -240,6 +241,12 @@ export default function App() {
                 <Route path="/inventory/transfers" element={<TransferOrdersPage />} />
                 <Route path="/inventory/transfers/new" element={<TransferOrderPage />} />
                 <Route path="/inventory/transfers/:id" element={<TransferOrderPage />} />
+              </Route>
+              {/* Stock levels per warehouse (script 91): the page reads with the view permission; setting, removing and
+                  importing are checked on the page and by the API (stocklevels.edit), creating a transfer order from
+                  ticked rows too (transfers.create). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.stockLevelsView} />}>
+                <Route path="/inventory/stock-levels" element={<StockLevelsPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>

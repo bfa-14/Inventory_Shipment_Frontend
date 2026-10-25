@@ -63,6 +63,16 @@ function eligibleParents(warehouses: WarehouseLookupDto[], selfId: number | unde
   return warehouses.filter((warehouse) => !banned.has(warehouse.id))
 }
 
+/**
+ * Why a warehouse cannot be a parent, after its name: used in transactions (script 71), or - when stock levels per
+ * warehouse are all it holds (script 91) - its levels, which like stock are kept only at the bottom of the tree.
+ */
+function usedLabel(w: WarehouseLookupDto): string {
+  if (!w.isUsed) return ''
+  if (w.isUsedInTransactions === false && w.hasStockLevels === true) return ' - has stock levels, cannot be a parent'
+  return ' - used in transactions, cannot be a parent'
+}
+
 export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: WarehouseFormModalProps) {
   /* (90) AN ON THE WAY WAREHOUSE: only its name and address change. Everything else is shown as text and sent back as
      it is stored - the server refuses any other change to it (52009) - so the form cannot offer one. */
@@ -334,7 +344,7 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
               warehouse?.id,
             ).map((w) => ({
               value: String(w.id),
-              label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}${w.isUsed ? ' - used in transactions, cannot be a parent' : ''}`,
+              label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}${usedLabel(w)}`,
               disabled: w.isUsed && w.id !== warehouse?.parentId,
             }))}
             {...form.getInputProps('parentId')}

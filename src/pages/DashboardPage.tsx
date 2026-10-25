@@ -18,6 +18,7 @@ import { formatDateOnly, formatNumber, todayDateOnly } from '../components/forma
 import { PageHeader } from '../components/ui/PageHeader'
 import { useAuth } from '../auth/useAuth'
 import { PERMISSIONS } from '../navigation'
+import { routes } from '../routes'
 import { useApprovalsMe } from '../hooks/useApprovalsMe'
 import css from './DashboardPage.module.css'
 
@@ -218,7 +219,12 @@ export function DashboardPage() {
       </div>
 
       {data && (
-        <NeedsAttention data={data} ccy={ccy} approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null} />
+        <NeedsAttention
+          data={data}
+          ccy={ccy}
+          approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null}
+          branchId={branchId}
+        />
       )}
     </>
   )
@@ -474,7 +480,18 @@ function Line({ to, label, sub, value, colour }: { to: string; label: string; su
   )
 }
 
-function NeedsAttention({ data, ccy, approvalsPending }: { data: DashboardSummaryDto; ccy: string; approvalsPending: number | null }) {
+function NeedsAttention({
+  data,
+  ccy,
+  approvalsPending,
+  branchId,
+}: {
+  data: DashboardSummaryDto
+  ccy: string
+  approvalsPending: number | null
+  /** The branch chosen at the top (null: the company): the stock-level links open Stock Levels on it (script 91). */
+  branchId: string | null
+}) {
   const { hasPermission } = useAuth()
   const money = (value: number | null | undefined) => `${formatNumber(value ?? 0, 2)} ${ccy}`
   const cards: ReactNode[] = []
@@ -502,16 +519,41 @@ function NeedsAttention({ data, ccy, approvalsPending }: { data: DashboardSummar
 
   if (data.stockAlerts) {
     const a = data.stockAlerts
-    const count = a.belowMinimum + a.negativeStock + (a.outOfStockSales ?? 0)
+    const belowWarehouseMin = a.belowWarehouseMin ?? 0
+    const count = a.belowMinimum + a.negativeStock + (a.outOfStockSales ?? 0) + belowWarehouseMin
+    /* (91) "Items below their minimum" is the COMPANY's Minimum Quantity: it opens Stock Levels' company view, which
+       computes the same figure, on the branch chosen here (Item Definition without View Stock Levels). Each warehouse's
+       own Min has its own line, "Warehouse levels below Min", opening Per warehouse on that branch. */
+    const canLevels = hasPermission(PERMISSIONS.stockLevelsView)
+    const belowMinimumTo = canLevels
+      ? routes.stockLevelsLink({ view: 'company', status: 'BelowMin', branchId })
+      : '/inventory/items'
     cards.push(
       <AttentionCard key="stock" title="Stock alerts" count={count} clear="No item below its minimum, no stock below zero.">
-        {a.belowMinimum > 0 && <Line to="/inventory/shortages" label="Items below their minimum" value={formatNumber(a.belowMinimum)} colour="#ffb547" />}
+        {a.belowMinimum > 0 && (
+          <Line
+            to={belowMinimumTo}
+            label="Items below their minimum"
+            sub="Company Minimum Quantity (Item Definition)"
+            value={formatNumber(a.belowMinimum)}
+            colour="#ffb547"
+          />
+        )}
         {(data.belowMinimum ?? []).map((i) => (
           <Line key={i.itemId} to={`/inventory/items/${i.itemId}`} label={i.itemCode} sub={i.itemName}
             value={`${formatNumber(i.onHand)} / ${formatNumber(i.minQuantity)}`} colour="#ffb547" />
         ))}
         {a.negativeStock > 0 && <Line to={hasPermission(PERMISSIONS.valuationView) ? '/inventory/valuation' : '/inventory/items'} label="Item and warehouse below zero" value={formatNumber(a.negativeStock)} colour="#ff6b8a" />}
         {(a.outOfStockSales ?? 0) > 0 && <Line to="/sales/out-of-stock-audit" label="Out-of-stock sales in the period" value={formatNumber(a.outOfStockSales)} colour="#ffb547" />}
+        {belowWarehouseMin > 0 && (
+          <Line
+            to={routes.stockLevelsLink({ status: 'BelowMin', branchId })}
+            label="Warehouse levels below Min"
+            sub="Projected stock below a warehouse's own Min"
+            value={formatNumber(belowWarehouseMin)}
+            colour="#ffb547"
+          />
+        )}
       </AttentionCard>,
     )
   }

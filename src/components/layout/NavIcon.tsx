@@ -7,6 +7,7 @@ import {
   IconDatabase,
   IconFileInvoice,
   IconFiles,
+  IconGauge,
   IconHistory,
   IconHome,
   IconLayoutDashboard,
@@ -56,6 +57,8 @@ const ICONS = {
   inbox: IconPackageImport,
   // The Shipments board: containers in columns by stage.
   board: IconLayoutKanban,
+  // Stock levels per warehouse: Min / Max, a gauge between them.
+  levels: IconGauge,
 } as const
 
 /** Maps a navigation model icon key to its Tabler icon. */

@@ -300,6 +300,12 @@ export interface WarehouseLookupDto {
   /** Already used in transactions: it cannot be chosen as a parent (script 71). */
   isUsed: boolean
   /**
+   * (91) What `isUsed` is made of: used by stock or a document, and holding stock levels per warehouse (a warehouse with
+   * levels cannot become a parent either). Missing from an older API: then `isUsed` alone says it.
+   */
+  isUsedInTransactions?: boolean
+  hasStockLevels?: boolean
+  /**
    * (90) An On the way warehouse. The lookup lists them only when asked (`includeTransit`: Stock Valuation), or the one
    * named by `includeId`; missing from an older API, which means false.
    */

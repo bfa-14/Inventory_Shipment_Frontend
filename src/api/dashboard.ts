@@ -33,7 +33,17 @@ export interface DashboardSummaryDto {
     containersInTransit: number | null
   } | null
   drafts: { kind: string; typeCode: string; draftCount: number }[]
-  stockAlerts: { belowMinimum: number; negativeStock: number; outOfStockSales: number | null } | null
+  stockAlerts: {
+    /** Items whose company stock is below Item Definition's Minimum Quantity (the company's, script 72). */
+    belowMinimum: number
+    negativeStock: number
+    outOfStockSales: number | null
+    /**
+     * (91) "Warehouse levels below Min": stock levels per warehouse (active item, active warehouse) whose Projected is below
+     * their Min - Stock Levels' "Below Min" tile for the same branch. Null without View Stock Levels, or from an older API.
+     */
+    belowWarehouseMin?: number | null
+  } | null
   belowMinimum: { itemId: number; itemCode: string; itemName: string; onHand: number; minQuantity: number; missing: number }[] | null
   containers: { arrivingSoon: number; atPort: number; nearLastFreeDay: number } | null
   containerList: {

@@ -24,6 +24,14 @@ import { LazySelect } from '../ui/LazySelect'
 import { ShownRowsFooter } from '../ui/ShownRows'
 import { useShownRows } from '../ui/useShownRows'
 import {
+  belowMinText,
+  fromBelowMinText,
+  levelsPhoneLine,
+  minMaxHint,
+  projectedHint,
+  shortText,
+} from './transferLevels'
+import {
   availabilityTooltip,
   orderedBaseOf,
   toDispatchOf,
@@ -54,6 +62,11 @@ interface TransferLinesGridProps {
   onToggle(lineId: number, checked: boolean): void
   /** The totals row (rule T11): Ordered, Dispatched, Received, On the way, Not sent, Lost - all in pcs. */
   totals: TransferTotals
+  /**
+   * (91) Min, Max and Projected at {To} (transferLevels.ts `showsLevels`): a draft, an order waiting for approval, a
+   * released one not yet Received or Closed. The lines carry the figures (the server's, or a draft's own sum).
+   */
+  showLevels: boolean
 }
 
 /* A ROW'S TOOLTIP DRAWS NO PORTAL (frontend-conventions, "Lists of any length"): a 200-line import mounts one per row. */
@@ -86,6 +99,11 @@ function inPieces(line: TransferLineForm) {
  * LISTS OF ANY LENGTH (an import of 200 lines): Item and Unit are LazySelects (an input until reached, then the real
  * Select), a row's tooltips draw no portal, and the lines are DRAWN in steps of 200 ("Show more") - every line stays in
  * the order (totals, Save), and a new line or one with a problem always shows.
+ *
+ * (91) TO'S STOCK LEVEL, while the order still moves something (`showLevels`): Min and Max of To ("—" without a level)
+ * and "Projected at {To}" AFTER this order. A line To stays below its Min with is red (the row tinted, Projected bold
+ * red, rule L19); "Available at {From}" is orange when From goes below its own Min with this order - unless it is red
+ * already (below what the line still has to dispatch): red wins, and both reasons are joined (tooltip, phone line).
  */
 export function TransferLinesGrid({
   lines,
@@ -101,6 +119,7 @@ export function TransferLinesGrid({
   selected,
   onToggle,
   totals,
+  showLevels,
 }: TransferLinesGridProps) {
   const phone = useMediaQuery('(max-width: 48em)')
   const shown = useShownRows(lines.length)
@@ -133,6 +152,13 @@ export function TransferLinesGrid({
 
   const availableTitle = `Available at ${fromCode ?? 'From'}`
   const stockTitle = `Stock at ${toCode ?? 'To'}`
+  const fromName = fromCode ?? 'From'
+  const toName = toCode ?? 'To'
+  const projectedTitle = `Projected at ${toName}`
+  /** (91) Red: To stays below its Min with this order (only while the columns show). */
+  const belowMin = (line: TransferLineForm) => showLevels && line.isBelowMin
+  /** (91) Orange: From goes below its own Min with this order (only while the columns show). */
+  const fromLow = (line: TransferLineForm) => showLevels && line.fromBelowMinAfter
 
   /** Enter in Ordered goes to the next line's item: item, quantity, next item. */
   function jumpToNextRow(index: number) {
@@ -154,6 +180,8 @@ export function TransferLinesGrid({
           fz="sm"
           fw={500}
           tabIndex={-1}
+          // A code is one word: never broken at its hyphens when the columns are narrowed (91).
+          style={{ whiteSpace: 'nowrap' }}
         >
           {line.itemCode}
         </Anchor>
@@ -237,7 +265,23 @@ export function TransferLinesGrid({
     )
   }
 
-  /** Available at From: red when below what the line still has to dispatch; who else takes some, on hover. */
+  /**
+   * (91) Why "Available at {From}" is orange - From goes below its own Min with this order - and, when it is red as well
+   * (red wins), the red reason first: both said together. Null when it is not orange.
+   */
+  function fromLowReason(line: TransferLineForm): string | null {
+    if (!fromLow(line)) return null
+    const orange = fromBelowMinText(fromName, line.fromAfterBase, line.fromMinBase)
+    const toDispatch = toDispatchOf(line)
+    return line.availableFromBase !== null && line.availableFromBase < toDispatch
+      ? `${shortText(fromName, line.availableFromBase, toDispatch)} ${orange}`
+      : orange
+  }
+
+  /**
+   * Available at From: red when below what the line still has to dispatch; (91) else orange when From goes below its
+   * own Min with this order; who else takes some, on hover.
+   */
   function availableCell(line: TransferLineForm) {
     if (line.availableFromBase === null)
       return (
@@ -246,15 +290,20 @@ export function TransferLinesGrid({
         </Text>
       )
     const short = line.availableFromBase < toDispatchOf(line)
-    const tooltip = availabilityTooltip(line)
+    const low = !short && fromLow(line)
+    // The reasons first (red, orange), then who else takes some: one tooltip.
+    const reasons = phone ? null : fromLowReason(line)
+    const committed = availabilityTooltip(line)
+    const tooltip = [reasons, committed].filter((part): part is string => Boolean(part)).join(' · ') || null
     const text = (
       <Text
         fz="sm"
-        fw={short ? 700 : 400}
-        c={short ? 'red' : undefined}
+        fw={short || low ? 700 : 400}
+        c={short ? 'red' : low ? 'orange.7' : undefined}
         // A phone card reads it under its label, left; the table's figures stand right.
         ta={phone ? undefined : 'right'}
         data-transfer-available-short={short || undefined}
+        data-transfer-available-low={fromLow(line) || undefined}
       >
         {formatNumber(line.availableFromBase)}
       </Text>
@@ -272,12 +321,86 @@ export function TransferLinesGrid({
         </>
       )
     return tooltip ? (
-      <Tooltip {...ROW_TOOLTIP} label={tooltip} withArrow>
+      <Tooltip {...ROW_TOOLTIP} label={tooltip} withArrow multiline={Boolean(reasons)} w={reasons ? 300 : undefined}>
         {text}
       </Tooltip>
     ) : (
       text
     )
+  }
+
+  /** (91) To's Min or Max: "—" without a level (a level without a Max: "—" too). */
+  function levelCell(line: TransferLineForm, value: number | null) {
+    if (!line.toHasLevel || value === null)
+      return (
+        <Text fz="sm" c="dimmed" ta="right">
+          —
+        </Text>
+      )
+    return (
+      <Text fz="sm" ta="right">
+        {formatNumber(value)}
+      </Text>
+    )
+  }
+
+  /** (91) Projected at To AFTER this order: bold red, with the reason on hover, while To stays below its Min. */
+  function projectedCell(line: TransferLineForm) {
+    if (line.toProjectedAfterBase === null)
+      return (
+        <Text fz="sm" c="dimmed" ta="right">
+          —
+        </Text>
+      )
+    const red = belowMin(line)
+    const text = (
+      <Text
+        fz="sm"
+        ta="right"
+        fw={red ? 700 : 400}
+        c={red ? 'red' : undefined}
+        data-transfer-projected-below={red || undefined}
+      >
+        {formatNumber(line.toProjectedAfterBase)}
+      </Text>
+    )
+    return red ? (
+      <Tooltip {...ROW_TOOLTIP} label={belowMinText(toName, line.toMinBase)} withArrow>
+        {text}
+      </Tooltip>
+    ) : (
+      text
+    )
+  }
+
+  /** (91) The phone card's levels: "Min 20 · Max 60 · Projected 60 at LUB-01", red when below, the reasons dimmed. */
+  function phoneLevels(line: TransferLineForm) {
+    if (!showLevels || line.itemId === null) return null
+    const red = belowMin(line)
+    const fromReason = fromLowReason(line)
+    return (
+      <Box mt="xs" data-transfer-line-levels>
+        <Text fz="sm" c={red ? 'red' : undefined} fw={red ? 600 : undefined}>
+          {levelsPhoneLine(line, toName)}
+        </Text>
+        {red ? (
+          <Text fz="xs" c="dimmed">
+            {belowMinText(toName, line.toMinBase)}
+          </Text>
+        ) : null}
+        {fromReason ? (
+          <Text fz="xs" c="dimmed">
+            {fromReason}
+          </Text>
+        ) : null}
+      </Box>
+    )
+  }
+
+  /** The row's tint: a refusal's red first, else (91) red while To stays below its Min with this order. */
+  function rowTint(line: TransferLineForm): string | undefined {
+    if (line.error) return 'var(--mantine-color-red-0)'
+    return belowMin(line) ? 'var(--mantine-color-red-light)' : undefined
   }
 
   function stockCell(line: TransferLineForm) {
@@ -363,13 +486,7 @@ export function TransferLinesGrid({
     return (
       <Stack gap="sm">
         {visible.map(({ line, index }) => (
-          <Paper
-            key={line.key}
-            withBorder
-            radius="md"
-            p="sm"
-            bg={line.error ? 'var(--mantine-color-red-0)' : undefined}
-          >
+          <Paper key={line.key} withBorder radius="md" p="sm" bg={rowTint(line)}>
             <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
               <Group gap={6} wrap="nowrap" align="flex-start" style={{ minWidth: 0 }}>
                 {tickControl(line)}
@@ -424,6 +541,7 @@ export function TransferLinesGrid({
                 {stockCell(line)}
               </Box>
             </SimpleGrid>
+            {phoneLevels(line)}
             {editable && (
               <Stack gap="xs" mt="xs">
                 {/* Each control under its own word, as the figures above it: a box that says only "Optional" or
@@ -459,20 +577,31 @@ export function TransferLinesGrid({
     )
   }
 
-  const columnCount = 11 + (selectable ? 1 : 0) + (editable ? 1 : 0)
+  const columnCount = 11 + (showLevels ? 3 : 0) + (selectable ? 1 : 0) + (editable ? 1 : 0)
+  /* (91) THREE MORE COLUMNS while the levels show. A draft's form already scrolls inside its card: it gets their room.
+     Read, the columns still fit a 1440 screen: the widths below are hints the table narrows (headers wrap), and it
+     scrolls only below that. */
+  const minWidth = editable ? 1330 + (showLevels ? 230 : 0) : showLevels ? 1120 : 1100
+  const levelHeader = (title: string, hint: string, width: number) => (
+    <Table.Th w={width} ta="right">
+      <Tooltip label={hint} multiline w={260} withArrow>
+        <span>{title}</span>
+      </Tooltip>
+    </Table.Th>
+  )
 
   return (
     <>
       {/* THE COLUMNS FIT A 1440 SCREEN WHEN READ (a draft's selects need more and scroll): fixed widths, and Item Name
           takes what is left without being squeezed to a word a line. */}
-      <Table.ScrollContainer minWidth={editable ? 1330 : 1100}>
+      <Table.ScrollContainer minWidth={minWidth}>
         <Table striped highlightOnHover verticalSpacing="xs">
           <Table.Thead>
             <Table.Tr>
               {selectable && <Table.Th w={36} />}
               <Table.Th w={52}>#</Table.Th>
               <Table.Th w={editable ? 220 : 130}>Item Code</Table.Th>
-              <Table.Th miw={130}>Item Name</Table.Th>
+              <Table.Th miw={showLevels && !editable ? 90 : 130}>Item Name</Table.Th>
               <Table.Th w={editable ? 130 : 100}>Unit</Table.Th>
               <Table.Th w={115} ta="right">
                 {availableTitle}
@@ -480,6 +609,9 @@ export function TransferLinesGrid({
               <Table.Th w={105} ta="right">
                 {stockTitle}
               </Table.Th>
+              {showLevels && levelHeader('Min', minMaxHint(toName), 66)}
+              {showLevels && levelHeader('Max', minMaxHint(toName), 66)}
+              {showLevels && levelHeader(projectedTitle, projectedHint(toName), 98)}
               <Table.Th w={editable ? 110 : 90} ta="right">
                 Ordered
               </Table.Th>
@@ -500,8 +632,9 @@ export function TransferLinesGrid({
             {visible.map(({ line, index }) => (
               <Table.Tr
                 key={line.key}
-                bg={line.error ? 'var(--mantine-color-red-0)' : undefined}
+                bg={rowTint(line)}
                 data-transfer-line={index + 1}
+                data-transfer-line-below-min={belowMin(line) || undefined}
               >
                 {selectable && <Table.Td>{tickControl(line)}</Table.Td>}
                 <Table.Td>
@@ -519,6 +652,9 @@ export function TransferLinesGrid({
                 <Table.Td>{unitControl(line, index)}</Table.Td>
                 <Table.Td ta="right">{availableCell(line)}</Table.Td>
                 <Table.Td ta="right">{stockCell(line)}</Table.Td>
+                {showLevels && <Table.Td ta="right">{levelCell(line, line.toMinBase)}</Table.Td>}
+                {showLevels && <Table.Td ta="right">{levelCell(line, line.toMaxBase)}</Table.Td>}
+                {showLevels && <Table.Td ta="right">{projectedCell(line)}</Table.Td>}
                 <Table.Td>{orderedControl(line, index)}</Table.Td>
                 <Table.Td ta="right">{formatNumber(line.dispatchedBase)}</Table.Td>
                 <Table.Td ta="right">{formatNumber(line.receivedBase)}</Table.Td>

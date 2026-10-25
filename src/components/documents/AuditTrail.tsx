@@ -57,6 +57,9 @@ const ACTION_COLOURS: Record<string, string> = {
   DispatchedAndReceived: 'green',
   ReturnCreated: 'teal',
   ReturnOf: 'teal',
+  // (91) Transfer orders: the draft's lines set or added from the destination's stock levels.
+  FillToMax: 'violet',
+  ItemsAddedBelowMin: 'violet',
 }
 
 /**
@@ -85,6 +88,9 @@ const ACTION_LABELS: Record<string, string> = {
   ReturnCreated: 'Return created',
   ReturnOf: 'Return',
   DetailsUpdated: 'Details updated',
+  // (91) "Fill to Max" keeps its capitals (split it would read "Fill to max"); the drawer's lines added.
+  FillToMax: 'Fill to Max',
+  ItemsAddedBelowMin: 'Items below Min added',
 }
 
 /** "CostAdjusted" -> "Cost adjusted", "POCreated" -> "PO created": the map first, else the code split into words. */
