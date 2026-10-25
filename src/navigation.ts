@@ -213,8 +213,9 @@ export interface NavFacts {
   /** Draft goods receipts waiting to be posted (GET api/purchase/goods-receipts/waiting, useGoodsReceiptsWaiting). */
   draftGoodsReceipts: number
   /**
-   * Transfer orders waiting for approval (GET api/inventory/transfers/waiting, useTransfersWaiting): asked only for a
-   * reader holding Approve Transfer Orders, 0 for everybody else.
+   * Transfer orders waiting for approval (GET api/inventory/transfers/waiting, useTransfersWaiting) plus (92) those on
+   * the way to the reader's own warehouses: asked only for a reader holding Approve or Receive Transfer Orders, 0 for
+   * everybody else.
    */
   transfersWaiting: number
 }
@@ -332,7 +333,7 @@ export const NAVIGATION: NavSection[] = [
       // An Inventory Out of BIVAC items only (script 66): its own list, numbers (BIV-) and permissions.
       { label: 'BIVAC Out', to: '/inventory/bivac-out', permission: PERMISSIONS.bivacOutView, icon: 'box' },
       // Stock moved between warehouses (script 90) without changing its cost; the count is the orders waiting for the
-      // reader's approval.
+      // reader's approval and (92) those on the way to the reader's own warehouses.
       {
         label: 'Transfer Orders',
         to: '/inventory/transfers',

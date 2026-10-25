@@ -7,6 +7,7 @@ import type {
 } from '../../../api/purchase/goodsReceipts'
 import type { ItemUnitDto, WarehouseLookupDto } from '../../../api/types'
 import { formatNumber } from '../../format'
+import { NOT_ONE_OF_YOURS } from '../../documents/lineWarehouses'
 
 /**
  * The goods receipt page's working shapes and the sentences more than one place says.
@@ -331,23 +332,33 @@ export function warehouseLabel(w: Pick<WarehouseLookupDto, 'warehouseCode' | 'wa
  * group, not a place that holds stock (scripts 70, 72): the same rule as every document line (see lineWarehouses).
  * `firstBranchId` (the receipt's or the document's branch) puts its group first. The line's current warehouse stays an
  * option even when it is no longer allowed - inactive, or a parent, marked so - so the cell never goes blank.
+ *
+ * `usableOnly` (92): only the leaves the READER may use (`canUse` of the lookup, missing = true); a kept one the reader
+ * may not use stays, marked "- not one of your warehouses" (the parent's mark wins). Left out, exactly what it was.
  */
 export function warehouseChoices(
   warehouses: WarehouseLookupDto[],
   branchId: number | null,
   keep: { id: number | null; code: string | null; name: string | null }[] = [],
   firstBranchId: number | null = null,
+  usableOnly = false,
 ): WarehouseGroup[] {
   const kept = (w: WarehouseLookupDto) => keep.some((k) => k.id === w.id)
   const isLeaf = (w: WarehouseLookupDto) => w.childCount === 0
+  const usable = (w: WarehouseLookupDto) => !usableOnly || w.canUse !== false
   const shown = warehouses
-    .filter((w) => ((w.isActive && isLeaf(w)) || kept(w)) && (branchId === null || w.branchId === branchId))
+    .filter((w) => ((w.isActive && isLeaf(w) && usable(w)) || kept(w)) && (branchId === null || w.branchId === branchId))
     .sort((a, b) => Number(b.branchId === firstBranchId) - Number(a.branchId === firstBranchId))
   const groups = new Map<string, WarehouseOption[]>()
   for (const w of shown) {
     const group = `${w.branchCode} - ${w.branchName}`
     const list = groups.get(group) ?? []
-    list.push({ value: String(w.id), label: isLeaf(w) ? warehouseLabel(w) : `${warehouseLabel(w)} - has warehouses under it, choose one of those` })
+    const label = !isLeaf(w)
+      ? `${warehouseLabel(w)} - has warehouses under it, choose one of those`
+      : usable(w)
+        ? warehouseLabel(w)
+        : `${warehouseLabel(w)} - ${NOT_ONE_OF_YOURS}`
+    list.push({ value: String(w.id), label })
     groups.set(group, list)
   }
   const missing = keep.filter((k) => k.id !== null && !shown.some((w) => w.id === k.id))

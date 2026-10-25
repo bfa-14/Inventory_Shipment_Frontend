@@ -471,6 +471,15 @@ export function TransferOrderPage() {
     () => transferWarehouseChoices(warehouses, [order?.from, order?.to], firstBranchId),
     [warehouses, order?.from, order?.to, firstBranchId],
   )
+  /* (92) THE FROM IS THE READER'S (A9): the order is the source's document, so its From offers only the warehouses the
+     reader may use (a held one kept, marked "- not one of your warehouses"); the To stays every leaf of every branch.
+     Every button keeps reading the server's abilities, which carry the access rule (Blocks). */
+  const fromWarehouseData = useMemo(
+    // Only the order's own From is kept: its To, kept in the To list, would be offered here marked "- not one of your
+    // warehouses", a choice that can only be refused.
+    () => transferWarehouseChoices(warehouses, [order?.from], firstBranchId, true),
+    [warehouses, order?.from, firstBranchId],
+  )
   const fromCode = warehouseCodeOf(header.fromWarehouseId, warehouses, order?.from)
   const toCode = warehouseCodeOf(header.toWarehouseId, warehouses, order?.to)
 
@@ -914,7 +923,9 @@ export function TransferOrderPage() {
     setReasonError(null)
     try {
       applyResult(await call())
-      if (current.kind === 'reject') waitingChanged()
+      // The menu count: a rejection leaves the approvers' list; (92) a reversal, "Nothing more will be sent" or a
+      // cancel changes what is on the way to the reader's warehouses.
+      waitingChanged()
       setReasonDialog(null)
     } catch (error) {
       setReasonError(error instanceof ApiError ? error.message : 'The transfer order could not be changed.')
@@ -933,6 +944,8 @@ export function TransferOrderPage() {
     applyOrder(result.order)
     setSelected(new Set())
     setDialog(null)
+    // (92) A dispatch or a receipt changes what is on the way to the reader's warehouses: the menu count at once.
+    waitingChanged()
   }
 
   /** (91) Fill to Max or Add items below Min applied: the order as it now stands, then what the server says. */
@@ -1213,6 +1226,7 @@ export function TransferOrderPage() {
         onSaveDetails={() => void saveDetails()}
         savingDetails={saving}
         warehouseData={warehouseData}
+        fromWarehouseData={fromWarehouseData}
         errors={errors}
         disabled={saving}
         onOpenOrder={(id) => void leaveTo(routes.transferOrder(id))}

@@ -58,8 +58,9 @@ function CreateTransferForm({ opened, to, rows, onClose, onCreated }: CreateTran
       .catch(() => setServerError('The warehouses could not be loaded.'))
   }, [])
 
-  // From: a warehouse at the bottom of the tree, active, never On the way, never the destination itself.
-  const choices = useMemo(() => levelWarehouseChoices(warehouses, to.id), [warehouses, to.id])
+  // From: a warehouse at the bottom of the tree, active, never On the way, never the destination itself - and (92) one
+  // the reader may use: the order is the source's document (A9); the To (the ticked rows') may be any warehouse.
+  const choices = useMemo(() => levelWarehouseChoices(warehouses, to.id, true), [warehouses, to.id])
 
   const itemIds = useMemo(() => [...new Set(rows.map((r) => r.itemId))], [rows])
   const belowMin = new Set(rows.filter((r) => r.status === 'BelowMin').map((r) => r.itemId)).size

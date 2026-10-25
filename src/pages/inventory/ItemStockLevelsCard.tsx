@@ -4,6 +4,8 @@ import { useMediaQuery } from '@mantine/hooks'
 import { IconClock, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { stockLevelsApi, type StockLevelRowDto } from '../../api/inventory/stockLevels'
+import { warehousesApi } from '../../api/masterdata/warehouses'
+import { noAccessSentence } from '../../auth/warehouseAccess'
 import { formatNumber } from '../../components/format'
 import { StockLevelBadge } from '../../components/stockLevels/StockLevelBadge'
 import { StockLevelFormModal } from '../../components/stockLevels/StockLevelFormModal'
@@ -70,6 +72,25 @@ export function ItemStockLevelsCard({
   const [busyKey, setBusyKey] = useState<number | null>(null)
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), [])
+
+  /* (92) The warehouses whose Min / Max the reader may not set (W17): their rows stay, the pencil and the trash disabled
+     with the database's sentence. Read only for a reader who may edit; the server repeats the refusal anyway. */
+  const [notYours, setNotYours] = useState<Set<number>>(() => new Set())
+  useEffect(() => {
+    if (!canEdit || itemId === null) return
+    let cancelled = false
+    warehousesApi
+      .lookup(false)
+      .then((rows) => {
+        if (!cancelled) setNotYours(new Set(rows.filter((w) => w.canUse === false).map((w) => w.id)))
+      })
+      .catch(() => {
+        /* nothing disabled then: the server refuses a warehouse that is not the reader's with its own sentence */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canEdit, itemId])
 
   /* The item's rows: every warehouse with a level, inactive ones and an inactive item included (the card's query). Read
      again after every change; Previous / Next remount the page, so a new item reads its own. */
@@ -155,6 +176,9 @@ export function ItemStockLevelsCard({
     )
   }
 
+  /** (92) Why the reader may not set or remove this row's level, or null: the warehouse is not theirs. */
+  const accessOf = (row: StockLevelRowDto) => (notYours.has(row.warehouseId) ? noAccessSentence(row.warehouseCode) : null)
+
   /**
    * THE ACTIONS COLUMN STAYS IN VIEW. The table fits the card at 1440; where the card is narrower than the table's 700 px
    * it scrolls sideways, and the pencil, the trash and the clock - the card's only way to change a level - stay pinned to
@@ -172,10 +196,16 @@ export function ItemStockLevelsCard({
   const actions = (row: StockLevelRowDto) => {
     const busy = busyKey === row.warehouseId
     const inactive = !row.warehouseIsActive
+    const access = accessOf(row)
     return (
       <Group gap={4} justify="flex-end" wrap="nowrap">
         {canEdit ? (
-          <Tooltip label={inactive ? inactiveWarehouseText(row.warehouseCode) : 'Edit level'} withArrow multiline maw={280}>
+          <Tooltip
+            label={access ?? (inactive ? inactiveWarehouseText(row.warehouseCode) : 'Edit level')}
+            withArrow
+            multiline
+            maw={280}
+          >
             {/* A disabled ActionIcon swallows the hover, so the span keeps the tooltip alive. */}
             <span>
               <ActionIcon
@@ -183,7 +213,7 @@ export function ItemStockLevelsCard({
                 variant="subtle"
                 color="blue"
                 aria-label={`Edit level at ${row.warehouseCode}`}
-                disabled={inactive || busy}
+                disabled={access !== null || inactive || busy}
                 onClick={() => setDialog({ kind: 'edit', row })}
               >
                 <IconPencil size={17} />
@@ -192,17 +222,21 @@ export function ItemStockLevelsCard({
           </Tooltip>
         ) : null}
         {canEdit ? (
-          <Tooltip label="Remove level" withArrow>
-            <ActionIcon
-              type="button"
-              variant="subtle"
-              color="red"
-              aria-label={`Remove level at ${row.warehouseCode}`}
-              disabled={busy}
-              onClick={() => void removeLevel(row)}
-            >
-              <IconTrash size={17} />
-            </ActionIcon>
+          <Tooltip label={access ?? 'Remove level'} withArrow multiline maw={280}>
+            {/* (92) The span keeps the tooltip of a disabled trash; inline-flex so it adds no line box and the trash
+                stays exactly where it was before (a plain span moved it up a pixel on a phone). */}
+            <span style={{ display: 'inline-flex' }}>
+              <ActionIcon
+                type="button"
+                variant="subtle"
+                color="red"
+                aria-label={`Remove level at ${row.warehouseCode}`}
+                disabled={access !== null || busy}
+                onClick={() => void removeLevel(row)}
+              >
+                <IconTrash size={17} />
+              </ActionIcon>
+            </span>
           </Tooltip>
         ) : null}
         <Tooltip label="History" withArrow>
@@ -295,6 +329,12 @@ export function ItemStockLevelsCard({
                 /* A phone shows no tooltip: an editor reads why the pencil is disabled; a reader, that it is inactive. */
                 <Text fz="xs" c="dimmed" data-item-level-inactive>
                   {canEdit ? inactiveWarehouseText(row.warehouseCode) : 'inactive'}
+                </Text>
+              ) : null}
+              {/* (92) A phone shows no tooltip: why the pencil and the trash are disabled, under the figures. */}
+              {canEdit && accessOf(row) !== null ? (
+                <Text fz="xs" c="dimmed" data-item-level-no-access>
+                  {accessOf(row)}
                 </Text>
               ) : null}
               <Group justify="space-between" mt={4} gap="xs" wrap="nowrap">

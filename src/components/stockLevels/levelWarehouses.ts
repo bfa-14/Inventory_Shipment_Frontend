@@ -24,10 +24,17 @@ export function isLevelWarehouse(warehouse: WarehouseLookupDto): boolean {
 /**
  * The pickers' data: the warehouses a level may take, grouped by branch (branch name, then code). `except` leaves one
  * out (a transfer order's To, which cannot be its From).
+ *
+ * `usableOnly` (92): only the warehouses the reader may use (`canUse` of the lookup, missing = true) - setting a level
+ * needs the warehouse (W17), and a transfer order's From is the reader's (A9). Left out, exactly what it was.
  */
-export function levelWarehouseChoices(warehouses: WarehouseLookupDto[], except?: number | null): LevelWarehouseGroup[] {
+export function levelWarehouseChoices(
+  warehouses: WarehouseLookupDto[],
+  except?: number | null,
+  usableOnly = false,
+): LevelWarehouseGroup[] {
   const shown = warehouses
-    .filter((w) => isLevelWarehouse(w) && w.id !== except)
+    .filter((w) => isLevelWarehouse(w) && w.id !== except && (!usableOnly || w.canUse !== false))
     .sort((a, b) => a.branchName.localeCompare(b.branchName) || a.warehouseCode.localeCompare(b.warehouseCode))
   const groups = new Map<string, LevelWarehouseOption[]>()
   for (const w of shown) {

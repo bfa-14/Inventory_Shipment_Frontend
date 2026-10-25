@@ -35,6 +35,13 @@ import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
+import {
+  defaultBranchIdFor,
+  hasNoUsableWarehouse,
+  isWarehouseRestricted,
+  NO_USABLE_WAREHOUSE,
+  postAccessBlockedReason,
+} from '../../auth/warehouseAccess'
 
 let keySeed = 0
 const nextKey = () => `line-${++keySeed}`
@@ -367,11 +374,36 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const headerBranchId = header.branchId === null ? null : Number(header.branchId)
   const defaultWarehouseId = useMemo(() => {
     if (chosenDefaultWarehouseId !== null) return chosenDefaultWarehouseId
-    return defaultLineWarehouseId(warehouses, headerBranchId)
+    return defaultLineWarehouseId(warehouses, headerBranchId, true)
   }, [chosenDefaultWarehouseId, headerBranchId, warehouses])
 
-  /* Leaves of every branch, the header branch's first (see lineWarehouses). */
-  const warehouseOptions = lineWarehouseOptions(warehouses, headerBranchId, lines.map((l) => l.warehouseId))
+  /* Leaves of every branch, the header branch's first (see lineWarehouses); (92) only those the reader may use, a
+     warehouse a line already holds kept and marked "- not one of your warehouses". */
+  const warehouseOptions = lineWarehouseOptions(warehouses, headerBranchId, lines.map((l) => l.warehouseId), true)
+
+  /* (92) A NEW DOCUMENT OF A RESTRICTED READER STARTS WHERE THEY MAY MOVE STOCK (A17): the main branch when it holds one
+     of their warehouses, else the branch of their first one. Once, when both lists are in, and only while the reader has
+     not chosen a branch; an unrestricted reader keeps the main branch, as before. */
+  const branchSettled = useRef(false)
+  useEffect(() => {
+    if (!isNew || branchSettled.current || branches.length === 0 || warehouses.length === 0) return
+    branchSettled.current = true
+    if (dirty.current || !isWarehouseRestricted(warehouses)) return
+    const branchId = defaultBranchIdFor(branches, warehouses, header.branchId === null ? null : Number(header.branchId))
+    if (branchId !== null && String(branchId) !== header.branchId) {
+      setHeader((current) => ({ ...current, branchId: String(branchId) }))
+    }
+  }, [isNew, branches, warehouses, header.branchId])
+
+  /* (92) Save & Post waits while a CURRENT line is in a warehouse the reader may not use (the server's sentence while
+     those are the stored draft's); Cancel takes the server's refusal of the stored document. */
+  const postAccessBlocked = postAccessBlockedReason(
+    warehouses,
+    lines.map((l) => l.warehouseId),
+    document ? [document.warehouseId, ...document.lines.map((l) => l.warehouseId)] : [],
+    document?.warehouseAccessRefusal,
+  )
+  const accessRefusal = document?.warehouseAccessRefusal ?? null
 
   /* ── line editing ─────────────────────────────────────────────────────────────────────────── */
 
@@ -798,6 +830,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           icon: DocumentIcons.cancel,
           colour: 'red',
           visible: canCancelDoc && document?.canCancel === true,
+          disabled: accessRefusal !== null,
+          disabledReason: accessRefusal ?? undefined,
+          menuWhenDisabled: true,
           onClick: () => setCancelOpen(true),
         },
         {
@@ -820,6 +855,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           key: 'save',
           label: 'Save Draft',
           icon: DocumentIcons.save,
+          // (92) Save & Post refused for a warehouse that is not the reader's: what they can still do is the primary (on
+          // a phone the big button, Save & Post going into the menu with its sentence).
+          variant: postAccessBlocked !== null ? 'filled' : undefined,
+          colour: postAccessBlocked !== null ? kind.colour : undefined,
           visible: editable,
           disabled: typeMissing,
           disabledReason: typeMissing ? typeMissingMessage : undefined,
@@ -839,8 +878,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           variant: 'filled',
           colour: kind.colour,
           visible: editable && canPost,
-          disabled: typeMissing,
-          disabledReason: typeMissing ? typeMissingMessage : undefined,
+          disabled: typeMissing || postAccessBlocked !== null,
+          disabledReason: typeMissing ? typeMissingMessage : (postAccessBlocked ?? undefined),
+          menuWhenDisabled: postAccessBlocked !== null,
           loading: saving,
           onClick: () => void saveAndPost(),
         },
@@ -857,6 +897,12 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       />
 
       <DocumentActionBar actions={actions} />
+
+      {editable && hasNoUsableWarehouse(warehouses) && (
+        <Alert color="orange" data-no-usable-warehouse>
+          {NO_USABLE_WAREHOUSE}
+        </Alert>
+      )}
 
       {/* THE BANNER IS THE FIRST THING A READ-ONLY DOCUMENT SAYS. Without it a posted document looks
           like a form that has stopped working. */}

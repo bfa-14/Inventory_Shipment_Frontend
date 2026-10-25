@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
 import { formatNumber, numberInputValue } from '../format'
 import { money, unitLabel } from './documentKind'
+import { notYoursNote } from './lineWarehouses'
 
 /**
  * One row of the grid while it is being edited.
@@ -286,7 +287,8 @@ export function DocumentLinesGrid({
                         if (!next) return
                         onChange(line.key, { warehouseId: Number(next), onHandBase: null })
                       }}
-                      error={Boolean(line.error) && line.warehouseId === null}
+                      // (92) a warehouse the reader may not use says so under the cell, which cuts the label's mark
+                      error={notYoursNote(warehouses, line.warehouseId) ?? (Boolean(line.error) && line.warehouseId === null)}
                       comboboxProps={{ withinPortal: true }}
                     />
                   )}

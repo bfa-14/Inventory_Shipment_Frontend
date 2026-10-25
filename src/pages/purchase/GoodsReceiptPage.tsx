@@ -21,6 +21,13 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { defaultLineWarehouseId } from '../../components/documents/lineWarehouses'
+import {
+  defaultBranchIdFor,
+  hasNoUsableWarehouse,
+  NO_USABLE_WAREHOUSE,
+  noAccessSentenceFor,
+  postAccessBlockedReason,
+} from '../../auth/warehouseAccess'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber, reasonSentence } from '../../components/format'
 import { GoodsReceiptCostAdjustmentsCard } from '../../components/purchase/goodsReceipts/GoodsReceiptCostAdjustmentsCard'
@@ -256,11 +263,12 @@ export function GoodsReceiptPage() {
       setWarehouses(warehouseRows)
       if (!branchRows) return
       setBranches(branchRows)
-      const main = branchRows.find((b) => b.isMainBranch) ?? branchRows[0]
+      // (92) The main branch, or for a restricted reader the branch of one of their warehouses (A17): unchanged otherwise.
+      const main = defaultBranchIdFor(branchRows, warehouseRows)
       setHeader((current) => {
-        const branchId = current.branchId ?? (main ? String(main.id) : null)
+        const branchId = current.branchId ?? (main !== null ? String(main) : null)
         if (branchId === null || current.warehouseId !== null) return { ...current, branchId }
-        const warehouseId = defaultLineWarehouseId(warehouseRows, Number(branchId))
+        const warehouseId = defaultLineWarehouseId(warehouseRows, Number(branchId), true)
         return { ...current, branchId, warehouseId: warehouseId === null ? null : String(warehouseId) }
       })
     })
@@ -314,10 +322,31 @@ export function GoodsReceiptPage() {
       numbers the receipt, it does not limit its lines), the receipt's branch first. Leaves only, in both cases. */
   const branchFilter = isContainer ? (receipt?.branchId ?? null) : null
   const firstBranchId = header.branchId !== null ? Number(header.branchId) : (receipt?.branchId ?? null)
+  /* (92) Only the warehouses the reader may use; one the receipt already holds stays, marked "- not one of your
+     warehouses" (see lineWarehouses). */
   const warehouseData = useMemo(
-    () => warehouseChoices(warehouses, branchFilter, keep, firstBranchId),
+    () => warehouseChoices(warehouses, branchFilter, keep, firstBranchId, true),
     [warehouses, branchFilter, keep, firstBranchId],
   )
+
+  /* (92) Post waits while "Receive into" or a CURRENT line is in a warehouse the reader may not use (the server's
+     sentence while those are the stored draft's); Cancel… and Delete take the server's refusal of the stored receipt. */
+  const postAccessBlocked = postAccessBlockedReason(
+    warehouses,
+    [header.warehouseId === null ? null : Number(header.warehouseId), ...lines.map((l) => l.warehouseId)],
+    receipt ? [receipt.warehouseId, ...receipt.lines.map((l) => l.warehouseId)] : [],
+    receipt?.warehouseAccessRefusal,
+  )
+  const accessRefusal = receipt?.warehouseAccessRefusal ?? null
+  /* (92) A container's receipt is received in the container's branch: when that branch has warehouses but none the reader
+     may use, the page says so in the database's words (W8) - "Receive into" offers nothing they could choose - and Post
+     waits with the same sentence while no warehouse is chosen. */
+  const containerNoAccess = useMemo(() => {
+    if (!isContainer || branchFilter === null) return null
+    const leaves = warehouses.filter((w) => w.isActive && !w.isTransit && w.childCount === 0 && w.branchId === branchFilter)
+    return leaves.length > 0 && leaves.every((w) => w.canUse === false) ? noAccessSentenceFor(leaves.map((w) => w.warehouseCode)) : null
+  }, [isContainer, branchFilter, warehouses])
+  const postAccessReason = postAccessBlocked ?? (header.warehouseId === null ? containerNoAccess : null)
 
   /* ── editing ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -333,7 +362,7 @@ export function GoodsReceiptPage() {
     // A new branch leaves the lines alone: their warehouses may be of any branch (script 72, as Ali's 69 / 70 for the
     // documents). Only "Receive into", where NEW lines start, goes to the new branch's main warehouse (or first leaf).
     if ('branchId' in patch && patch.branchId !== header.branchId) {
-      const main = patch.branchId ? defaultLineWarehouseId(warehouses, Number(patch.branchId)) : null
+      const main = patch.branchId ? defaultLineWarehouseId(warehouses, Number(patch.branchId), true) : null
       setHeader((current) => ({ ...current, warehouseId: main === null ? null : String(main) }))
     }
     // "Receive into" sets every line's warehouse on an order, an invoice or a typed receipt (a line may then change it).
@@ -719,12 +748,14 @@ export function GoodsReceiptPage() {
           icon: <IconTrash size={16} />,
           colour: 'red',
           visible: canDelete && receipt !== null,
-          disabled: receipt !== null && !receipt.canDelete,
-          disabledReason: receipt?.deleteBlockedReason ?? 'This draft cannot be deleted.',
+          disabled: (receipt !== null && !receipt.canDelete) || accessRefusal !== null,
+          disabledReason: accessRefusal ?? receipt?.deleteBlockedReason ?? 'This draft cannot be deleted.',
+          menuWhenDisabled: accessRefusal !== null,
           loading: saving,
           onClick: () => void remove(),
         },
-        { key: 'save', label: 'Save', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
+        // (92) Post refused for a warehouse that is not the reader's: Save is then the primary (a phone's big button).
+        { key: 'save', label: 'Save', icon: DocumentIcons.save, variant: postAccessReason !== null ? 'filled' : undefined, colour: postAccessReason !== null ? 'teal' : undefined, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void leave() },
         {
           key: 'post',
@@ -733,8 +764,9 @@ export function GoodsReceiptPage() {
           variant: 'filled',
           colour: 'teal',
           visible: canPost && (isNew ? canCreate : true),
-          disabled: postBlocked,
-          disabledReason: receipt?.postBlockedReason ?? 'This goods receipt cannot be posted.',
+          disabled: postBlocked || postAccessReason !== null,
+          disabledReason: postAccessReason ?? receipt?.postBlockedReason ?? 'This goods receipt cannot be posted.',
+          menuWhenDisabled: postAccessReason !== null,
           loading: saving,
           onClick: () => void post(),
         },
@@ -747,8 +779,9 @@ export function GoodsReceiptPage() {
           icon: <IconArrowBackUp size={16} />,
           colour: 'red',
           visible: canCancel && isPosted,
-          disabled: receipt !== null && !receipt.canCancel,
-          disabledReason: receipt?.cancelBlockedReason ?? 'This goods receipt cannot be cancelled.',
+          disabled: (receipt !== null && !receipt.canCancel) || accessRefusal !== null,
+          disabledReason: accessRefusal ?? receipt?.cancelBlockedReason ?? 'This goods receipt cannot be cancelled.',
+          menuWhenDisabled: accessRefusal !== null,
           onClick: () => setCancelOpen(true),
         },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(routes.goodsReceipts) },
@@ -771,6 +804,11 @@ export function GoodsReceiptPage() {
       />
 
       <DocumentActionBar actions={actions} />
+      {editable && !containerNoAccess && hasNoUsableWarehouse(warehouses) && (
+        <Alert color="orange" data-no-usable-warehouse>
+          {NO_USABLE_WAREHOUSE}
+        </Alert>
+      )}
 
       {receipt && isPosted && (
         <Alert color="green" title={`Posted — ${receipt.documentNumber ?? ''}`}>
@@ -801,6 +839,11 @@ export function GoodsReceiptPage() {
         <Alert color="orange" data-no-warehouse>
           Choose the warehouse the goods are received into: the container's warehouse is not set, does not belong to branch{' '}
           {branchText} or has warehouses under it (stock is kept only in the warehouses at the bottom of the tree).
+        </Alert>
+      )}
+      {receipt && isDraft && editable && containerNoAccess && (
+        <Alert color="orange" data-receipt-no-access>
+          {containerNoAccess}
         </Alert>
       )}
       {receipt && isDraft && isContainer && receipt.containerStatus === 2 && receipt.containerRef && (

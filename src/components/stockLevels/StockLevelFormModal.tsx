@@ -113,7 +113,8 @@ function StockLevelForm({ opened, item, warehouse, existing, source, onClose, on
     return () => controller.abort()
   }, [wantedKey, loadedKey, itemId])
 
-  const choices = useMemo(() => levelWarehouseChoices(warehouses), [warehouses])
+  // (92) Only the warehouses the reader may use: setting a level needs the warehouse (W17).
+  const choices = useMemo(() => levelWarehouseChoices(warehouses, null, true), [warehouses])
   const itemData = useMemo(
     () => items.map((i) => ({ value: String(i.id), label: `${i.itemCode} - ${i.itemName}` })),
     [items],

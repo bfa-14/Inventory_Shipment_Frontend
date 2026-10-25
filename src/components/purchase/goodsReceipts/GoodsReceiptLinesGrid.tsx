@@ -37,6 +37,7 @@ import {
   type GoodsReceiptLineForm,
   type WarehouseGroup,
 } from './goodsReceiptModel'
+import { notYoursNote } from '../../documents/lineWarehouses'
 
 interface GoodsReceiptLinesGridProps {
   lines: GoodsReceiptLineForm[]
@@ -175,7 +176,8 @@ export function GoodsReceiptLinesGrid({
         nothingFoundMessage="No warehouse matches"
         size="xs"
         w={phone ? '100%' : 140}
-        error={line.error && line.warehouseId === null ? true : undefined}
+        // (92) a warehouse the reader may not use says so under the cell, which cuts the label's mark
+        error={notYoursNote(warehouseData, line.warehouseId) ?? (line.error && line.warehouseId === null ? true : undefined)}
       />
     )
   }

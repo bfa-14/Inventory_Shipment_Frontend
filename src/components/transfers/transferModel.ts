@@ -6,6 +6,7 @@ import type {
 } from '../../api/inventory/transfers'
 import type { ItemUnitDto, WarehouseLookupDto } from '../../api/types'
 import { formatNumber } from '../format'
+import { NOT_ONE_OF_YOURS } from '../documents/lineWarehouses'
 import { levelsOfLine, NO_LEVELS, type TransferLineLevels } from './transferLevels'
 import { transferStatusLabel } from './transferStatus'
 
@@ -74,15 +75,21 @@ const isLeaf = (w: WarehouseLookupDto) => w.childCount === 0
  * A WAREHOUSE THE ORDER HOLDS STAYS SHOWN when it is no longer allowed (made inactive, given warehouses under it since
  * the draft was saved), marked the way a document line's is (lineWarehouses.ts), so the field never goes blank and the
  * server's refusal points at something the reader can see. Only the order's own warehouses are kept.
+ *
+ * `usableOnly` (92, the FROM picker): only the leaves the reader may use (`canUse` of the lookup, missing = true), a
+ * kept one they may not use marked "- not one of your warehouses" (the parent's and the inactive mark win). The order
+ * is the source's document (A9): the To may be any warehouse, so its picker leaves this out.
  */
 export function transferWarehouseChoices(
   warehouses: WarehouseLookupDto[],
   keep: (TransferWarehouseRefDto | null | undefined)[],
   firstBranchId: number | null,
+  usableOnly = false,
 ): WarehouseGroup[] {
   const keptIds = new Set(keep.filter((k): k is TransferWarehouseRefDto => !!k).map((k) => k.id))
+  const usable = (w: WarehouseLookupDto) => !usableOnly || w.canUse !== false
   const shown = warehouses
-    .filter((w) => !isTransit(w) && ((w.isActive && isLeaf(w)) || keptIds.has(w.id)))
+    .filter((w) => !isTransit(w) && ((w.isActive && isLeaf(w) && usable(w)) || keptIds.has(w.id)))
     .sort(
       (a, b) =>
         Number(b.branchId === firstBranchId) - Number(a.branchId === firstBranchId) ||
@@ -98,7 +105,9 @@ export function transferWarehouseChoices(
       ? `${base} - has warehouses under it, choose one of those`
       : !w.isActive
         ? `${base} (inactive)`
-        : base
+        : usable(w)
+          ? base
+          : `${base} - ${NOT_ONE_OF_YOURS}`
     const list = groups.get(group) ?? []
     list.push({ value: String(w.id), label })
     groups.set(group, list)

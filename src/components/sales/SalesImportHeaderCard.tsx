@@ -110,7 +110,8 @@ export function SalesImportHeaderCard({
             label="Default Warehouse"
             withAsterisk
             placeholder={value.branchId ? 'Choose a warehouse' : 'Choose a branch first'}
-            data={lineWarehouseOptions(warehouses, value.branchId ? Number(value.branchId) : null, [value.warehouseId ? Number(value.warehouseId) : null])}
+            // (92) Only the reader's own warehouses: the import posts the invoice, which moves stock (W9).
+            data={lineWarehouseOptions(warehouses, value.branchId ? Number(value.branchId) : null, [value.warehouseId ? Number(value.warehouseId) : null], true)}
             value={value.warehouseId}
             onChange={(next) => onChange({ warehouseId: next })}
             disabled={disabled || !value.branchId}

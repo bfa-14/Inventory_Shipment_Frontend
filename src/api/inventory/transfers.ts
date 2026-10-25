@@ -150,6 +150,9 @@ export type TransferOrderSortColumn =
   | 'ExpectedArrival'
   | 'CreatedAtUtc'
 
+/** (92) The Transfer Orders list's "Warehouses" filter of a restricted reader. */
+export type TransferMineFilter = 'any' | 'from' | 'to'
+
 export interface TransferOrderQuery {
   /** Number, reference, From / To code or name, an item code on a line, the number of one of its dispatches or receipts. */
   search?: string
@@ -162,6 +165,11 @@ export interface TransferOrderQuery {
   lateOnly?: boolean
   /** The approvers' list (the menu count). */
   waitingForApproval?: boolean
+  /**
+   * (92) A restricted reader's "Warehouses" filter: orders from or to (`any`), from (`from`) or to (`to`) one of the
+   * warehouses they may use. Left out: every order (the default of an unrestricted reader, and "All warehouses").
+   */
+  mine?: TransferMineFilter
   dateFrom?: string
   dateTo?: string
   itemId?: number
@@ -616,6 +624,11 @@ export interface TransferAvailabilityQuery {
 
 export interface TransferWaitingDto {
   waitingForApproval: number
+  /**
+   * (92) Released orders with goods on the way to one of the reader's warehouses: 0 for a reader who may use every
+   * warehouse, or who may not receive transfers. Missing from an older API, which means 0.
+   */
+  toReceive?: number
 }
 
 /* ── the calls ──────────────────────────────────────────────────────────────────────────────── */
@@ -745,11 +758,14 @@ export const transfersApi = {
     }
   },
 
-  /** How many orders wait for approval: the menu count (0 for a reader who may not approve). */
+  /**
+   * The menu count: the orders waiting for the reader's approval (0 for a reader who may not approve) plus (92) the
+   * orders on their way to the reader's own warehouses (0 unless the reader is restricted and may receive).
+   */
   waiting: async (signal?: AbortSignal): Promise<number> => {
     const answer = await request<TransferWaitingDto>(`${BASE}/waiting`, { signal })
-    const count = answer?.waitingForApproval
-    return typeof count === 'number' && Number.isFinite(count) ? count : 0
+    const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+    return count(answer?.waitingForApproval) + count(answer?.toReceive)
   },
 
   /** Available at From and stock at To for the items of a draft (re-asked when an item, From or To changes). */

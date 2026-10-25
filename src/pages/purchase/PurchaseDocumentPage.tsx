@@ -104,6 +104,14 @@ import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
+import {
+  canUseWarehouse,
+  defaultBranchIdFor,
+  hasNoUsableWarehouse,
+  isWarehouseRestricted,
+  NO_USABLE_WAREHOUSE,
+  postAccessBlockedReason,
+} from '../../auth/warehouseAccess'
 
 let keySeed = 0
 const nextKey = () => `pur-${++keySeed}`
@@ -535,10 +543,27 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }, [])
 
+  /* (92) WAREHOUSE ACCESS LIMITS A PURCHASE RETURN ONLY: orders and invoices move no stock (A6), so their pickers keep
+     every leaf. A return's lines offer the reader's own warehouses, a held one kept and marked. */
+  const accessLimited = kind.code === 'PRET'
+
   useEffect(() => {
     if (header.branchId === null) return
-    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId)))
-  }, [header.branchId, warehouses])
+    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId), accessLimited))
+  }, [header.branchId, warehouses, accessLimited])
+
+  /* (92) A NEW RETURN OF A RESTRICTED READER STARTS WHERE THEY MAY MOVE STOCK (A17), once, while nothing is changed. */
+  const branchSettled = useRef(false)
+  useEffect(() => {
+    if (!accessLimited || !isNew || branchSettled.current || branches.length === 0 || warehouses.length === 0) return
+    branchSettled.current = true
+    if (dirty.current || !isWarehouseRestricted(warehouses)) return
+    const branchId = defaultBranchIdFor(branches, warehouses, header.branchId === null ? null : Number(header.branchId))
+    if (branchId !== null && String(branchId) !== header.branchId) {
+      setDefaultWarehouseId(null)
+      setHeader((current) => ({ ...current, branchId: String(branchId) }))
+    }
+  }, [accessLimited, isNew, branches, warehouses, header.branchId])
 
   /* The rate follows the currency, the type and the date — but overwrites a loaded document's own
      rate only once the reader changed one of the three. */
@@ -987,7 +1012,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     if (kind.code === 'PINV') {
       // A supplier invoice moves no stock: the question says so, estimates what it does to the goods already received,
       // and may receive the goods at once (rule 15a).
-      const answer = await askInvoicePost(saved, canReceiveGoods && canPostReceipts)
+      const answer = await askInvoicePost(saved, canReceiveGoods && canPostReceipts, (warehouseId) =>
+        canUseWarehouse(warehouses.find((w) => w.id === warehouseId)),
+      )
       if (!answer.post) return
       receiveNow = answer.receiveNow
     } else {
@@ -1309,6 +1336,19 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   }
 
   const documentLabel = document?.documentNumber ?? `draft #${document?.id}`
+  /* (92) A purchase return's Save & Post waits while a CURRENT line is in a warehouse the reader may not use (the
+     server's sentence while those are the stored draft's); its Cancel takes the server's refusal. Never on PO / PINV,
+     except the Cancel of a supplier invoice posted before goods receipts: it takes the invoice's own stock back out, so
+     the server sends its refusal for that invoice too (null on every other invoice). */
+  const postAccessBlocked = accessLimited
+    ? postAccessBlockedReason(
+        warehouses,
+        lines.map((l) => l.warehouseId),
+        document ? [document.warehouseId, ...document.lines.map((l) => l.warehouseId)] : [],
+        document?.warehouseAccessRefusal,
+      )
+    : null
+  const accessRefusal = accessLimited || kind.code === 'PINV' ? (document?.warehouseAccessRefusal ?? null) : null
   const canImportHere = editable && canImport && !fromSource && header.branchId !== null && defaultWarehouseId !== null
   const source = document && document.sourceDocumentId !== null
     ? { id: document.sourceDocumentId, documentNumber: document.sourceDocumentNumber, documentTypeCode: document.sourceDocumentTypeCode ?? (kind.code === 'PRET' ? 'PINV' : 'PO') }
@@ -1379,7 +1419,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.createInvoice), loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
-        { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, onClick: () => setCancelOpen(true) },
+        { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, disabled: accessRefusal !== null, disabledReason: accessRefusal ?? undefined, menuWhenDisabled: accessRefusal !== null, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
       ]
     : [
@@ -1391,7 +1431,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         // its goods are received once it is posted.
         receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, colour: 'green', ...orderAction(abilities?.createInvoice), onClick: () => void createFromThis() },
-        { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
+        // (92) A return's Save & Post refused for a warehouse that is not the reader's: Save Draft is then the primary.
+        { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, variant: postAccessBlocked !== null ? 'filled' : undefined, colour: postAccessBlocked !== null ? kind.colour : undefined, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
         ...(creating
           ? ([
@@ -1407,7 +1448,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
                 { key: 'send-approval', label: 'Send for approval', icon: <IconSend size={16} />, variant: abilities?.approveDirect.visible ? 'default' : 'filled', colour: kind.colour, ...orderAction(abilities?.sendForApproval), loading: saving || approvalBusy, onClick: () => void sendForApproval() },
                 { key: 'approve-now', label: 'Approve & post', icon: <IconCheck size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.approveDirect), loading: saving || approvalBusy, onClick: () => void approveNow() },
               ] satisfies DocumentAction[])
-            : [{ key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: editable && canPost, loading: saving, onClick: () => void saveAndPost() } satisfies DocumentAction]),
+            : [{ key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: editable && canPost, disabled: postAccessBlocked !== null, disabledReason: postAccessBlocked ?? undefined, menuWhenDisabled: postAccessBlocked !== null, loading: saving, onClick: () => void saveAndPost() } satisfies DocumentAction]),
       ]
 
   return (
@@ -1425,6 +1466,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       />
 
       <DocumentActionBar actions={actions} />
+      {editable && accessLimited && hasNoUsableWarehouse(warehouses) && (
+        <Alert color="orange" data-no-usable-warehouse>
+          {NO_USABLE_WAREHOUSE}
+        </Alert>
+      )}
 
       {/* A rejected order is a draft again: why, first, so the author knows what to change before sending it again. */}
       {approvalState?.status === 'Draft' && approvalState.lastRejectReason && (
@@ -1604,7 +1650,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId))}
+          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId), accessLimited)}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => void unitChosen(key, unit)}
           onUnitsNeeded={(key) => void loadUnits(key)}

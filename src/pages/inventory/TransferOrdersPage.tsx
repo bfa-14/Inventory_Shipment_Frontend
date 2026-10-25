@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import {
   Alert,
@@ -24,6 +24,7 @@ import { IconFilterOff, IconSearch } from '@tabler/icons-react'
 import {
   transfersApi,
   type TransferOrderListItemDto,
+  type TransferMineFilter,
   type TransferOrderTotalsDto,
   type TransferStatusFilter,
 } from '../../api/inventory/transfers'
@@ -31,6 +32,7 @@ import { branchesApi } from '../../api/masterdata/branches'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { isWarehouseRestricted } from '../../auth/warehouseAccess'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { transferWarehouseChoices, utcToday, warehouseText } from '../../components/transfers/transferModel'
@@ -62,6 +64,8 @@ interface Filters {
   waitingForApproval: boolean
   dateFrom: string | null
   dateTo: string | null
+  /** (92) A restricted reader's "Warehouses" filter: any, from, to, or all (nothing sent). Ignored for the others. */
+  mine: string
 }
 
 const NO_FILTERS: Filters = {
@@ -75,7 +79,23 @@ const NO_FILTERS: Filters = {
   waitingForApproval: false,
   dateFrom: null,
   dateTo: null,
+  mine: 'any',
 }
+
+/**
+ * (92) THE "WAREHOUSES" FILTER OF A RESTRICTED READER (W15, A18): from or to the warehouses they may use by default, a
+ * convenience they can undo ("All warehouses"). Viewing is never limited: every order stays one choice away.
+ */
+const MINE_DATA = [
+  { value: 'any', label: 'From or to my warehouses' },
+  { value: 'from', label: 'From my warehouses' },
+  { value: 'to', label: 'To my warehouses' },
+  { value: 'all', label: 'All warehouses' },
+]
+const mineParam = (value: string): TransferMineFilter | undefined =>
+  value === 'any' || value === 'from' || value === 'to' ? value : undefined
+/** (92) The words of an empty list per Warehouses choice: "No transfer order from or to your warehouses. …". */
+const MINE_EMPTY: Record<TransferMineFilter, string> = { any: 'from or to', from: 'from', to: 'to' }
 
 const STATUS_DATA = TRANSFER_STATUS_FILTER_OPTIONS.map((s) => ({ value: s.value, label: s.label }))
 
@@ -193,6 +213,15 @@ export function TransferOrdersPage() {
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
+  /* (92) ONE READ OF THE WAREHOUSES for the pickers and for "restricted" (their `canUse`). The list does not wait for
+     it: `mine` is always sent and the server ignores it for a reader with every warehouse (usp_TransferOrder_Search),
+     so a restricted reader's first page is already their own warehouses' and nobody's first page waits. */
+  const warehousesLoad = useRef<Promise<WarehouseLookupDto[]> | null>(null)
+  const loadWarehouses = useCallback(() => {
+    warehousesLoad.current ??= warehousesApi.lookup(false).catch(() => [] as WarehouseLookupDto[])
+    return warehousesLoad.current
+  }, [])
+  const restricted = isWarehouseRestricted(warehouses)
   /** The totals of the last search, over every order it matched (not only the rows loaded). */
   const [totals, setTotals] = useState<TransferOrderTotalsDto | null>(null)
 
@@ -207,6 +236,7 @@ export function TransferOrdersPage() {
     paging: 'client',
     errorMessage: 'The transfer orders could not be loaded.',
     fetcher: useCallback(async ({ filters, signal }) => {
+      const mine = mineParam(filters.mine)
       const query = {
         search: filters.search.trim() || undefined,
         status: (filters.status as TransferStatusFilter | null) ?? undefined,
@@ -218,6 +248,7 @@ export function TransferOrdersPage() {
         waitingForApproval: filters.waitingForApproval || undefined,
         dateFrom: filters.dateFrom ?? undefined,
         dateTo: filters.dateTo ?? undefined,
+        mine,
         sortColumn: 'DocumentDate' as const,
         sortDirection: 'DESC' as const,
       }
@@ -238,7 +269,10 @@ export function TransferOrdersPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const rows = useMemo(() => data?.items ?? [], [data])
-  const unfiltered = grid.isDefault
+  /* (92) "From or to my warehouses" is the restricted reader's default, but it IS a filter: with it on, an empty list
+     says so and how to see every order, never "No transfer orders yet." (A18: a convenience the reader can undo). */
+  const mineFiltering = restricted && mineParam(filters.mine) !== undefined
+  const unfiltered = grid.isDefault && !mineFiltering
 
   const engine = useDataGrid({
     rows,
@@ -252,11 +286,8 @@ export function TransferOrdersPage() {
       .lookup(false)
       .then(setBranches)
       .catch(() => {})
-    warehousesApi
-      .lookup(false)
-      .then(setWarehouses)
-      .catch(() => {})
-  }, [])
+    void loadWarehouses().then(setWarehouses)
+  }, [loadWarehouses])
 
   /* From and To offer the leaves of every branch (never an On the way warehouse), grouped by branch. */
   const warehouseData = useMemo(
@@ -372,6 +403,14 @@ export function TransferOrdersPage() {
   ) : null
 
   const empty = !loading && !error && rows.length === 0
+  /* (92) Emptied by the restricted reader's own Warehouses filter alone: say which, and the way to every order. */
+  const othersDefault = (Object.keys(NO_FILTERS) as (keyof Filters)[]).every(
+    (k) => k === 'mine' || JSON.stringify(filters[k]) === JSON.stringify(NO_FILTERS[k]),
+  )
+  const emptyText =
+    mineFiltering && othersDefault
+      ? `No transfer order ${MINE_EMPTY[mineParam(filters.mine) ?? 'any']} your warehouses. Choose All warehouses under Warehouses to see every order.`
+      : 'No transfer order matches these filters.'
 
   return (
     <div>
@@ -471,6 +510,19 @@ export function TransferOrdersPage() {
             pb={8}
           />
         </FilterBar.Col>
+        {restricted && (
+          // three columns: in two, "From or to my warehouses" was cut to "From or to my ware…"
+          <FilterBar.Col span={3}>
+            <Select
+              label="Warehouses"
+              data={MINE_DATA}
+              value={filters.mine}
+              onChange={(next) => setFilter('mine', next ?? 'any')}
+              allowDeselect={false}
+              data-transfer-mine
+            />
+          </FilterBar.Col>
+        )}
         {canApprove && (
           <FilterBar.Col span={2}>
             <Switch
@@ -486,7 +538,7 @@ export function TransferOrdersPage() {
             variant="default"
             leftSection={<IconFilterOff size={16} />}
             onClick={grid.clearFilters}
-            disabled={unfiltered}
+            disabled={grid.isDefault}
           >
             Clear Filters
           </Button>
@@ -523,8 +575,8 @@ export function TransferOrdersPage() {
             </Group>
           )}
           {empty && (
-            <Text c="dimmed" ta="center" py="md">
-              No transfer order matches these filters.
+            <Text c="dimmed" ta="center" py="md" data-transfer-empty>
+              {emptyText}
             </Text>
           )}
           {engine.pageRows.map((row) => (
@@ -575,7 +627,7 @@ export function TransferOrdersPage() {
             fetching={loading}
             /* never "No transfer orders yet." here: with no order at all the card above is shown instead, so an empty grid
                is one the filters (the header funnels too) emptied */
-            noRecordsText="No transfer order matches these filters."
+            noRecordsText={emptyText}
             onRowClick={({ record }) => open(record)}
           />
         </Paper>

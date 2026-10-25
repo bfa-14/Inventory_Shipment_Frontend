@@ -15,9 +15,11 @@ import { PERMISSIONS } from '../navigation'
  * rejects or withdraws an order calls refreshTransfersWaiting(), so the count moves at once rather than at the next
  * minute.
  *
- * ONLY FOR AN APPROVER: a reader holding Approve Transfer Orders (and View, which the route asks for). Nobody else is
- * asked and the count is 0 - the server answers 0 to them anyway. The answer belongs to one user and is dropped when
- * another one signs in. (Script 92 widens it to the receipts waiting at the reader's own warehouses.)
+ * ONLY FOR AN APPROVER OR A RECEIVER: a reader holding Approve Transfer Orders or (92) Receive Transfers (and View,
+ * which the route asks for). Nobody else is asked and the count is 0 - the server answers 0 to them anyway. The count is
+ * the orders waiting for the reader's approval plus (92) the orders on their way to the reader's own warehouses (the
+ * server counts those only for a reader limited to some warehouses: FB section 6's "to receive"). The answer belongs to
+ * one user and is dropped when another one signs in.
  */
 const REFRESH_MS = 60_000
 
@@ -74,24 +76,29 @@ export function refreshTransfersWaiting(): Promise<void> {
   return load()
 }
 
-/** The orders waiting for approval; 0 while unknown and for a reader who does not approve transfer orders. */
+/**
+ * The orders waiting for the reader's approval plus those on the way to their own warehouses; 0 while unknown and for a
+ * reader who neither approves nor receives transfer orders.
+ */
 export function useTransfersWaiting(): number {
   const { status, user, hasPermission } = useAuth()
   const userId = status === 'authenticated' ? (user?.id ?? null) : null
-  const canApprove =
-    userId !== null && hasPermission(PERMISSIONS.transfersView) && hasPermission(PERMISSIONS.transfersApprove)
+  const canAsk =
+    userId !== null &&
+    hasPermission(PERMISSIONS.transfersView) &&
+    (hasPermission(PERMISSIONS.transfersApprove) || hasPermission(PERMISSIONS.transfersReceive))
   const count = useSyncExternalStore(subscribe, snapshot)
 
   useEffect(() => {
     if (userId === null) return
-    allowed = canApprove
+    allowed = canAsk
     if (userId !== currentUserId) {
       currentUserId = userId
       publish(null)
     }
-    if (canApprove) void load()
-  }, [userId, canApprove])
+    if (canAsk) void load()
+  }, [userId, canAsk])
 
   // Until the effect above has adopted this user, what the store holds is somebody else's.
-  return canApprove && userId === currentUserId ? (count ?? 0) : 0
+  return canAsk && userId === currentUserId ? (count ?? 0) : 0
 }

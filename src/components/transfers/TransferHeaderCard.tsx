@@ -29,6 +29,7 @@ import {
   transferStatusColour,
   transferStatusLabel,
 } from './transferStatus'
+import { notYoursNote } from '../documents/lineWarehouses'
 
 /** The header as it is edited: ids as Select strings, dates as yyyy-MM-dd, text as typed. */
 export interface TransferHeaderValue {
@@ -63,6 +64,11 @@ interface TransferHeaderCardProps {
   savingDetails?: boolean
   /** From and To: leaves of every branch, grouped, the order's branch first (transferWarehouseChoices). */
   warehouseData: WarehouseGroup[]
+  /**
+   * (92) The From picker's own list when it differs: the reader's usable leaves only (the order is the source's
+   * document, A9), the To keeping every leaf. Left out, From offers `warehouseData` as before.
+   */
+  fromWarehouseData?: WarehouseGroup[]
   errors: TransferHeaderErrors
   disabled?: boolean
   /**
@@ -110,6 +116,7 @@ export function TransferHeaderCard({
   onSaveDetails,
   savingDetails,
   warehouseData,
+  fromWarehouseData,
   errors,
   disabled,
   onOpenOrder,
@@ -192,12 +199,13 @@ export function TransferHeaderCard({
         label={label}
         withAsterisk
         placeholder="Choose the warehouse"
-        data={warehouseData}
+        data={which === 'fromWarehouseId' ? (fromWarehouseData ?? warehouseData) : warehouseData}
         value={value[which]}
         onChange={(next) => onChange({ [which]: next } as Partial<TransferHeaderValue>)}
         searchable
         nothingFoundMessage="No warehouse matches"
-        error={errors[which]}
+        // (92) a From the reader may not use says so under the field (a narrow field cuts the label's mark)
+        error={errors[which] ?? (which === 'fromWarehouseId' ? notYoursNote(fromWarehouseData ?? warehouseData, value[which]) : undefined)}
         disabled={disabled}
         comboboxProps={{ withinPortal: true }}
       />

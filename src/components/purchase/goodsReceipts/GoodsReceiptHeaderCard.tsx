@@ -12,6 +12,7 @@ import { dateLabel, fromIsoDate, isoDate } from '../../documents/documentKind'
 import { branchLabel } from '../../format'
 import { partyLabel } from '../../sales/salesLines'
 import { SEVERAL_SUPPLIERS, supplierText, type WarehouseGroup } from './goodsReceiptModel'
+import { notYoursNote } from '../../documents/lineWarehouses'
 
 /** The header as it is edited: ids as Select strings, text as typed. */
 export interface GoodsReceiptHeaderValue {
@@ -209,7 +210,7 @@ export function GoodsReceiptHeaderCard({
               searchable
               clearable={!isContainer}
               nothingFoundMessage="No warehouse matches"
-              error={errors.warehouseId}
+              error={errors.warehouseId ?? notYoursNote(warehouseData, value.warehouseId)}
               disabled={disabled}
             />
           ) : (

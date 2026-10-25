@@ -14,6 +14,62 @@ export interface UserDto {
   isActive: boolean
   lastLoginAtUtc: string | null
   createdAtUtc: string
+  /**
+   * (92) Where the user may move stock. Filled on the Users list only (`GET api/users`); missing from an older API or
+   * another answer, which means All warehouses. A system administrator uses every warehouse whatever is stored.
+   */
+  allWarehouses?: boolean
+  isSystemAdministrator?: boolean
+  /** (92) The warehouses ticked while `allWarehouses` is false (a ticked parent gives its whole tree); empty otherwise. */
+  warehouses?: UserWarehouseRefDto[]
+}
+
+/** (92) One warehouse ticked for a user, as the Users list shows it. */
+export interface UserWarehouseRefDto {
+  id: number
+  code: string
+  name: string
+  branchCode: string
+  isActive: boolean
+  /** A parent: the tick gives every warehouse under it, also those added later. */
+  hasChildren: boolean
+}
+
+/** (92) One ticked warehouse in the "Warehouses of {user}" dialog. */
+export interface UserWarehouseDto extends UserWarehouseRefDto {
+  branchId: number
+  branchName: string
+  grantedAtUtc: string
+  grantedByName: string
+}
+
+/** (92) One change of a user's warehouses: "All warehouses" → "Only: LKS-01, LUB" (a deleted warehouse included). */
+export interface UserWarehouseChangeDto {
+  id: number
+  before: string
+  after: string
+  changedAtUtc: string
+  changedByName: string
+}
+
+/** (92) `GET api/users/{id}/warehouses`: what the "Warehouses of {user}" dialog shows. */
+export interface UserWarehousesDto {
+  userId: number
+  username: string
+  fullName: string
+  allWarehouses: boolean
+  isSystemAdministrator: boolean
+  /** The leaves the ticks give (On the way warehouses never count). */
+  usableCount: number
+  warehouses: UserWarehouseDto[]
+  /** The newest first, at most 100. */
+  history: UserWarehouseChangeDto[]
+}
+
+/** (92) `PUT api/users/{id}/warehouses`. `warehouseIds` is read only when `allWarehouses` is false. */
+export interface SetUserWarehousesRequest {
+  allWarehouses: boolean
+  warehouseIds: number[]
 }
 
 /**
@@ -310,6 +366,12 @@ export interface WarehouseLookupDto {
    * named by `includeId`; missing from an older API, which means false.
    */
   isTransit?: boolean
+  /**
+   * (92) The READER may move stock in this warehouse (post, cancel, receive, dispatch, set its levels), worked out on
+   * the server for each request, so a change of the reader's warehouses shows at the next read. False on an On the way
+   * warehouse (nobody's). Missing from an older API, which means true. Viewing is never limited by it.
+   */
+  canUse?: boolean
 }
 
 // ----- master data: currencies -----

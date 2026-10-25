@@ -55,6 +55,7 @@ import { itemFamiliesApi } from '../../api/masterdata/itemFamilies'
 import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, BrandLookupDto, ItemFamilyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { noAccessSentence } from '../../auth/warehouseAccess'
 import { formatNumber } from '../../components/format'
 import { CreateTransferFromLevelsModal } from '../../components/stockLevels/CreateTransferFromLevelsModal'
 import { ImportStockLevelsWizard } from '../../components/stockLevels/ImportStockLevelsWizard'
@@ -587,9 +588,18 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
   const familyData = useMemo(() => familyOptions(lookups.families), [lookups.families])
   const warehouseData = useMemo(() => warehouseOptions(lookups.warehouses), [lookups.warehouses])
 
+  /* (92) Setting, removing or importing a warehouse's Min / Max needs that warehouse (W17): its rows stay visible, their
+     Set / Add / Remove disabled with the database's sentence (repeated by the server if the click came anyway). */
+  const notYours = useMemo(
+    () => new Set(lookups.warehouses.filter((w) => w.canUse === false).map((w) => w.id)),
+    [lookups.warehouses],
+  )
+
   /** The row's "…" menu: a disabled entry says why under its label (a disabled menu item carries no tooltip). */
   const rowMenu = (row: LevelRow) => {
     const inactive = !row.warehouseIsActive
+    const access = notYours.has(row.warehouseId) ? noAccessSentence(row.warehouseCode) : null
+    const setReason = access ?? (inactive ? inactiveWarehouseText(row.warehouseCode) : null)
     return (
       <Menu position="bottom-end" shadow="md" withinPortal>
         <Menu.Target>
@@ -606,20 +616,30 @@ function PerWarehouseView({ initial, onFilters, lookups, reloadKey, phone }: Per
           {canEdit ? (
             <Menu.Item
               leftSection={row.hasLevel ? <IconPencil size={16} /> : <IconPlus size={16} />}
-              disabled={inactive}
+              disabled={setReason !== null}
               onClick={() => setDialog({ kind: 'level', row })}
             >
               {row.hasLevel ? 'Set level…' : 'Add level…'}
-              {inactive ? (
+              {setReason !== null ? (
                 <Text fz="xs" c="dimmed" maw={260} style={{ whiteSpace: 'normal' }}>
-                  {inactiveWarehouseText(row.warehouseCode)}
+                  {setReason}
                 </Text>
               ) : null}
             </Menu.Item>
           ) : null}
           {canEdit && row.hasLevel ? (
-            <Menu.Item leftSection={<IconTrash size={16} />} color="red" onClick={() => void removeLevel(row)}>
+            <Menu.Item
+              leftSection={<IconTrash size={16} />}
+              color="red"
+              disabled={access !== null}
+              onClick={() => void removeLevel(row)}
+            >
               Remove level
+              {access !== null ? (
+                <Text fz="xs" c="dimmed" maw={260} style={{ whiteSpace: 'normal' }}>
+                  {access}
+                </Text>
+              ) : null}
             </Menu.Item>
           ) : null}
           <Menu.Item leftSection={<IconClock size={16} />} onClick={() => setDialog({ kind: 'history', row })}>

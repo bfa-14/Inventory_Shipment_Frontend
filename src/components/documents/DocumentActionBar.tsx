@@ -64,7 +64,8 @@ interface DocumentActionBarProps {
  * so as the last action shown it was a big greyed button that said nothing (a completed movement's
  * "Cancel…" with a later leg); it goes into the menu with its reason, and the action before it takes
  * the big button. Opt-in: elsewhere the last action shown is chosen on purpose (a container's
- * pinned next step).
+ * pinned next step). It holds for the page's filled primary too (92: a Save & Post refused because a
+ * line is in a warehouse that is not the reader's goes into the menu with that sentence).
  */
 export function DocumentActionBar({ actions, menuTowardsRoom = false }: DocumentActionBarProps) {
   const compact = useMediaQuery('(max-width: 768px)')

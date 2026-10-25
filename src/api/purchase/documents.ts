@@ -637,6 +637,12 @@ export interface PurchaseDocumentDto {
   canMarkShipped: boolean
   canCreateInvoice: boolean
   canCreateReturn: boolean
+  /**
+   * (92) Why the reader may not post, cancel or delete this document: the server's sentence ("You have no access to
+   * warehouse LKS-01: ask an administrator."), null when they may. A purchase return's only: null on an order or an
+   * invoice, which are not limited. Missing from an older API: then nothing is refused.
+   */
+  warehouseAccessRefusal?: string | null
   lines: PurchaseDocumentLineDto[]
   /** The invoice's own charges AND those of its adjustments, each saying which it came from. */
   charges: PurchaseChargeDto[]

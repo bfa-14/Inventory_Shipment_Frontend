@@ -448,6 +448,11 @@ export interface GoodsReceiptDto {
   postBlockedReason: string | null
   cancelBlockedReason: string | null
   deleteBlockedReason: string | null
+  /**
+   * (92) Why the reader may not post, cancel or delete this document: the server's sentence ("You have no access to
+   * warehouse LKS-01: ask an administrator."), null when they may. Missing from an older API: then nothing is refused.
+   */
+  warehouseAccessRefusal?: string | null
   /** When goods receipts started; null before the switch. */
   switchedAtUtc: string | null
   rowVersion: string | null

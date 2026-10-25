@@ -235,6 +235,11 @@ export interface StockDocumentDto {
   canPost: boolean
   canCancel: boolean
   canDelete: boolean
+  /**
+   * (92) Why the reader may not post, cancel or delete this document: the server's sentence ("You have no access to
+   * warehouse LKS-01: ask an administrator."), null when they may. Missing from an older API: then nothing is refused.
+   */
+  warehouseAccessRefusal?: string | null
   lines: StockDocumentLineDto[]
   files: StockDocumentFileDto[]
   audit: StockDocumentAuditDto[]

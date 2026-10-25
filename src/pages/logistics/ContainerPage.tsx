@@ -101,6 +101,7 @@ import { COUNTRIES, countryLabel } from '../../data/countries'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
 import { CONTAINERS_ROUTE } from './ContainersPage'
+import { noAccessSentenceFor } from '../../auth/warehouseAccess'
 
 type ReasonDialog = 'cancel' | 'cancelOffload' | null
 
@@ -288,6 +289,11 @@ export function ContainerPage() {
   }, [])
 
   const receipt = containerReceiptOf(container)
+  /** The warehouses its goods may be received into: active leaves of its branch (whoever the reader is). */
+  const receiveLeaves = useMemo(
+    () => (container ? warehouses.filter((w) => w.isActive && w.branchId === container.branchId && w.childCount === 0) : []),
+    [warehouses, container],
+  )
   /** "Receive goods…" is offered: no open receipt and not received, offloaded, closed or cancelled. */
   const receivable = container !== null && receipt === null && container.status <= 5
   const canReceiveNow = container !== null && receivable && container.status !== 1 && container.canReceive !== false
@@ -1120,8 +1126,16 @@ export function ContainerPage() {
           opened
           onClose={() => setReceiveOpen(false)}
           container={container}
-          /* The container's branch, and a leaf: stock is kept only at the bottom of the tree (scripts 70, 72). */
-          warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId && w.childCount === 0)}
+          /* The container's branch, and a leaf: stock is kept only at the bottom of the tree (scripts 70, 72). (92) And
+             one the reader may use (W9): a warehouse named here is checked at once, so one that is not theirs is not
+             offered; the container's own then starts empty ("Choose the warehouse"). None of the branch's is the
+             reader's: the dialog says so, in the database's words, rather than an empty list (W8). */
+          warehouses={receiveLeaves.filter((w) => w.canUse !== false)}
+          accessRefusal={
+            receiveLeaves.length > 0 && receiveLeaves.every((w) => w.canUse === false)
+              ? noAccessSentenceFor(receiveLeaves.map((w) => w.warehouseCode))
+              : null
+          }
           canPost={perm.postReceipt}
           onCreated={(created) => receiptCreated(created.id)}
         />

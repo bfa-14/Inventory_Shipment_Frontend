@@ -709,17 +709,20 @@ too, script 72). The header's branch numbers the document, it does not limit its
 warehouses under it is a group, not a place that holds stock, and the database refuses it on save and at
 posting. One helper for every document line, `components/documents/lineWarehouses.ts`:
 
-- `lineWarehouseOptions(warehouses, headerBranchId, keepIds)`: the leaves of every branch, the header
-  branch's first, the others with their branch named. A warehouse a line already holds stays listed even
+- `lineWarehouseOptions(warehouses, headerBranchId, keepIds, usableOnly = false)`: the leaves of every branch, the
+  header branch's first, the others with their branch named. A warehouse a line already holds stays listed even
   when it is no longer allowed, marked "- has warehouses under it, choose one of those", so an older line
-  still shows where it is.
-- `defaultLineWarehouseId(warehouses, branchId)`: the branch's main warehouse when it is a leaf, else its
-  first leaf - the seed of new rows.
+  still shows where it is. `usableOnly` (script 92) offers only the leaves the reader may use (`canUse` of the
+  lookup) and marks a kept one they may not use "- not one of your warehouses" (the parent's mark wins); see
+  **Warehouse access per user**.
+- `defaultLineWarehouseId(warehouses, branchId, usableOnly = false)`: the branch's main warehouse when it is a leaf,
+  else its first leaf - the seed of new rows. With `usableOnly`, among the reader's own; none in the branch, the
+  reader's first usable leaf of any branch.
 - Changing the branch leaves the lines alone; only the seed of NEW rows goes back to the new branch's.
 
 Goods receipts keep their own grouped pickers (`warehouseChoices` in `goodsReceiptModel.ts`, one group per
-branch, the receipt's or document's branch first) with the same rule: leaves only, a kept parent marked the
-same way. A container's receipt offers the leaves of the container's branch only; an order's, an invoice's or
+branch, the receipt's or document's branch first; its last parameter `usableOnly` as above) with the same rule:
+leaves only, a kept parent marked the same way. A container's receipt offers the leaves of the container's branch only; an order's, an invoice's or
 a receipt without an order, the leaves of every branch. On a receipt without an order a branch change sets
 "Receive into" (where new lines start) to the new branch's default and leaves the lines alone. The container
 form's "Warehouse (offloading destination)" offers the branch's leaves; a draft goods receipt takes it as
@@ -985,6 +988,119 @@ Receive dialogs).
   from the filters its answer is for (a search typed and erased before it was sent left it dimmed for good), and Enter in
   its search applies it at once. The container charges import (`ImportContainerChargesWizard`) has the same Escape guard
   on its "Discard this import?".
+
+## Warehouse access per user (script 92)
+
+A user has **All warehouses** (every user before script 92, and every new user) or **Only these warehouses**, ticked
+on Users & Permissions › Users › Warehouses (`pages/security/UserWarehousesModal.tsx`). A ticked parent gives every
+warehouse under it, also those added later; a system administrator uses every warehouse whatever is stored; an On the
+way warehouse is nobody's and is never ticked. It changes nothing for anybody until an administrator restricts
+someone. The rules, in short (W1-W17 of the specification):
+
+- **It limits moving stock, never viewing.** Posting, cancelling, reversing, receiving, dispatching, setting a stock
+  level, naming a warehouse on a draft, deleting a draft that holds another's warehouse. Every list, page, print,
+  export, the item card, Stock Valuation, Shortages, Stock Levels and the Dashboard stay the same for everyone:
+  **never hide a list, never filter a report** - viewing is not limited. Purchase orders and supplier invoices are not
+  limited either (an invoice moves no stock); an invoice whose posting receives its goods is posted and its goods
+  receipt refused, in the existing warning.
+- **One sentence, the database's**: "You have no access to warehouse LKS-01: ask an administrator." ("warehouses
+  LKS-01 and LUB-01", more than three "… and 2 more"), 403 with code `WAREHOUSE_ACCESS`, shown as it comes.
+  `joinWarehouseCodes`, `noAccessSentence` and `noAccessSentenceFor` (`auth/warehouseAccess.ts`) repeat its wording
+  where a page disables a button before the click; the server repeats it if the click comes anyway. A change takes
+  effect at once (no sign-out); each change is in the user's history.
+- **"Restricted" is read from the lookup, never from the session.** `GET api/masterdata/warehouses/lookup` answers
+  `canUse` for the reader on every row, worked out per request (missing = true, false on an On the way warehouse):
+  `isWarehouseRestricted(warehouses)` and `canUseWarehouse(w)` read it. The token and `me` carry nothing about
+  warehouses, so a page that loaded the lookup is right at once after an administrator's change.
+- **`usableOnly` on the pickers** (`lineWarehouseOptions`, `defaultLineWarehouseId`, `warehouseChoices`,
+  `transferWarehouseChoices`, `levelWarehouseChoices`; default `false`, so a caller that passes nothing is unchanged).
+  Passed by Inventory In / Out / BIVAC Out, sales invoices and returns, purchase RETURNS only (PO and PINV keep every
+  leaf), Import Sales' default warehouse, the goods receipt ("Receive into" and its lines), Receive goods…, a
+  container's Receive goods… (the container page filters its list), the transfer order's **From**, the stock level
+  dialog's Warehouses and Create transfer order…'s From. **A kept warehouse the reader may not use is marked "- not
+  one of your warehouses"**, so a draft an administrator prepared still shows where its lines are; a line's cell
+  (190 px) cuts that label, so the select also says "Not one of your warehouses" under it (`notYoursNote(options,
+  id)`, the document line grids, the goods receipt's lines and "Receive into", Receive goods…, the transfer's From).
+  In Receive goods… a line whose own warehouse is not the reader's starts in their only usable warehouse when there is
+  exactly one, else empty; choosing it again is refused in the dialog with the sentence, before any call. A container
+  whose branch has warehouses but none the reader may use says so at the top of its Receive goods… dialog, in the
+  database's words ("You have no access to warehouses LUB-01 and LUB-02: ask an administrator.",
+  `noAccessSentenceFor`), and as the empty "Receive into" list's message; never an empty list that says nothing.
+  "Create draft" still works then, with no warehouse named (the server gives the draft the container's own, A7): the
+  dialog says so, and "Create and post" waits with the sentence. Its draft goods receipt says the same at the top of
+  the page, and Post waits with it while no warehouse is chosen. A restricted reader with no warehouse to move stock
+  in at all ("Only these warehouses" with none ticked, or only inactive ones) gets an orange Alert on a document they
+  may edit (Inventory In / Out / BIVAC Out, sales, purchase returns, goods receipts): "You have no warehouse to move
+  stock in: ask an administrator." (`NO_USABLE_WAREHOUSE`, `hasNoUsableWarehouse`), rather than an empty picker alone.
+- **A new document starts where the reader may move stock** (`defaultBranchIdFor`): the page's default branch (the
+  main one) when it holds one of the reader's warehouses, else the branch of their first one (their main warehouse
+  first), new lines in their usable leaf of that branch (main first). Once, when the branches and the warehouses are
+  in, and only while the reader has changed nothing. Unrestricted readers: the main branch, as before.
+- **Save & Post is disabled by the CURRENT lines** (`postAccessBlockedReason`): while a line (or the goods receipt's
+  "Receive into") is in a warehouse the reader may not use. The reason is the document's `warehouseAccessRefusal` (the
+  server's sentence) while the warehouses that block are exactly the stored draft's, else "Some lines are in a
+  warehouse that is not one of yours (marked - not one of your warehouses): change them, or ask an administrator."
+  Moving the line to one of the reader's warehouses enables it at once. Save Draft stays, and the server judges it
+  LINE BY LINE (A8): in a warehouse the reader may not use, a stored line may stay exactly as it is or move to one of
+  theirs (a line of the same item there; once moved it is theirs to change); a line added there, one whose item, unit,
+  quantity or expiry changed there (on a goods receipt also its counted pieces, its source line and "Nothing more will
+  come"), or one dropped without being moved is refused with the sentence naming that warehouse. Prices and notes are
+  not compared: they move no stock. While Save & Post is refused that way, Save Draft (Save on a goods receipt) is the
+  filled action: on a phone it is the big button, Save & Post going into the "⋮" menu with its sentence, never Cancel
+  or Back.
+- **Cancel (posted) and Delete (draft) take `warehouseAccessRefusal`** of the stored document (Inventory In / Out /
+  BIVAC Out, sales, purchase returns, goods receipts; and the Cancel of a supplier invoice posted before goods
+  receipts, which takes its own stock back out - the server sends the refusal on that invoice only): disabled with it,
+  `menuWhenDisabled: true`. On a phone a disabled action marked `menuWhenDisabled` goes into the "⋮" menu with its
+  reason, the filled Save & Post included (`DocumentActionBar`). The lists' bulk actions and row actions (Post, Cancel
+  document, Delete) are not pre-judged: the server answers per document with the sentence (a row's refusal in the
+  error notification). Only the goods receipt has a Delete on its page; the other documents are deleted from their
+  list.
+- **The supplier invoice's post confirmation** (`askInvoicePost(invoice, canReceiveNow, usable)`): "Receive the goods
+  now" can be ticked only when every line it would receive is in one of the reader's warehouses; otherwise it stays,
+  disabled and unticked, with the database's sentence under it (a rule that blocks disables, it does not hide); when
+  the type receives on posting and one is not, an orange Alert (orange text alone is too faint on white): "You may not
+  use {codes}: the invoice will be posted, but its goods receipt will be refused. Someone who may use {codes} receives
+  them with Receive goods…"
+- **Transfers: the From / To asymmetry** (A9). The order is the source's document: its From offers the reader's
+  warehouses only (a held one kept, marked), its To every leaf of every branch. Every button keeps reading the
+  server's `abilities` (the access rule is in the procedures' Blocks: the From for what the source does, Fill to Max
+  and Add items below Min included; the To for receiving; both for Dispatch and receive; either for the expected
+  arrival, reference and notes; neither for approving a request).
+- **The Transfer Orders list and the menu count.** A restricted reader gets a "Warehouses" filter - "From or to my
+  warehouses" (default) / "From my warehouses" / "To my warehouses" / "All warehouses" (`mine=any|from|to`, nothing
+  sent for All). `mine` is always sent, without waiting for the lookup: the server ignores it for a reader with every
+  warehouse, so a restricted reader's first page is already their own and nobody's first page waits. It is a filter
+  like the others: emptied by it alone, the list says "No transfer order from or to your warehouses. Choose All
+  warehouses under Warehouses to see every order." ("from" / "to" per choice), never "No transfer orders yet." The
+  menu's count (`useTransfersWaiting`) is asked for a reader holding Approve Transfer Orders OR Receive Transfers and
+  adds `toReceive` (the orders on the way to the reader's own warehouses; 0 for an unrestricted reader) to
+  `waitingForApproval`; the order page refreshes it after every dispatch, receipt, reversal, "Nothing more will be
+  sent" and cancel. The From picker keeps only the order's own From (a To the reader may not use is never offered as a
+  From).
+- **Stock levels.** Every row stays visible. On a warehouse whose `canUse` is false, Stock Levels' "Set level…" / "Add
+  level…" and "Remove level" (the row's "…" menu, the sentence under the entry's label) and the item card's pencil and
+  trash (the sentence as their tooltip; a phone has none, so a dimmed line under the figures says it) are disabled
+  with "You have no access to warehouse {code}: ask an administrator." The item card reads the lookup only for a
+  reader who may edit levels. The levels dialog offers the reader's warehouses only; the import's Error rows show the
+  server's sentence.
+- **The Users page.** A "Warehouses" column after Roles: "All" / "All (administrator)" dimmed, up to three teal badges
+  of codes then "+{n}" (wrapping in the cell), "None" with an orange warning icon (orange text alone fails the
+  contrast rule); a teal warehouse icon in the row's actions (with `security.users.edit`, as Roles) opens "Warehouses
+  of {username}": the All warehouses switch, a search and the tree of ticks by branch (indented, "(inactive)", a
+  parent "(and the warehouses under it)", the rows under a ticked parent ticked and disabled "through {code}"), "{n}
+  ticked: {name} may use {m} warehouses.", the orange "No warehouse ticked" warning, the blue system administrator
+  alert, and the collapsible History. No row version: the last save wins and the history shows both. The cursor starts
+  on the switch once the dialog's two answers are in (the form mounts on a Loader); Enter in the search saves, as in
+  every dialog (the tree narrows as it is typed). Each branch is a `role="group"` named by its title; a warehouse
+  under a parent of another branch starts its own branch's tree, not indented under a warehouse it is not drawn under.
+  Saved: "Warehouses of {username} saved.", the dialog closes and the list reloads; a refusal stays in the dialog as
+  it comes.
+- **Moving a warehouse** to another parent (Master Data › Warehouses) changes who may use it, a ticked parent giving
+  its whole tree. When it changes restricted users' warehouses, the server refuses an editor who is restricted or
+  lacks `security.users.edit` (403, "Moving LKS-01 to another parent changes the warehouses 2 users may use (Users &
+  Permissions › Users › Warehouses): ask an administrator."); the Warehouses form shows it as it comes, nothing is
+  judged there before the click.
 
 ## Bulk actions
 
