@@ -740,6 +740,20 @@ export interface ItemListDto {
   rowVersion: string
 }
 
+/**
+ * (93) HOW AN ITEM IS TRACKED (Item Definition › Tracking): no numbers, a batch no. per group of pieces, or a serial no.
+ * per piece (a TVS chassis no.). Asked on transfer dispatches only (script 93): the flags are generic, the screens that
+ * ask for them say so.
+ */
+export type TrackingMode = 'None' | 'Batch' | 'Serial'
+
+/**
+ * (93) WHAT A DISPATCH ASKS FOR, derived from the item and never stored on it: Serial (one row per piece), Batch (batch
+ * no., expiry, pcs) or Expiry (an item of no tracking that requires an expiry date: expiry, pcs); null = nothing. A
+ * dispatch line keeps the kind it left with, and its receipt follows it whatever the item says now.
+ */
+export type TrackingKind = 'Serial' | 'Batch' | 'Expiry'
+
 /** An item with its units and the metadata of its files - what the details page reads. */
 export interface ItemDetailsDto {
   id: number
@@ -790,6 +804,14 @@ export interface ItemDetailsDto {
   note?: string | null
   /** An http(s) web address, opened in a new tab (script 87). */
   link?: string | null
+  /* (93) Tracking on transfers. Missing from an older API, which means None / no / any length. */
+  trackingMode?: TrackingMode
+  /** Each dispatch gives the expiry date of its pieces. */
+  requiresExpiry?: boolean
+  /** Serial items: the exact length of a serial no. (17 = a TVS chassis no.); null = any length. */
+  serialLength?: number | null
+  /** What a dispatch asks for: derived from the two above. */
+  trackingKind?: TrackingKind | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -866,6 +888,15 @@ export interface SaveItemRequest {
   note?: string | null
   /** An absolute http:// or https:// address, up to 500 characters; null clears it. */
   link?: string | null
+  /**
+   * (93) None | Batch | Serial. Left out on an update, the tracking stays as it is (with requiresExpiry and
+   * serialLength); on a new item it is None.
+   */
+  trackingMode?: TrackingMode | null
+  /** (93) Null = false when trackingMode is given. */
+  requiresExpiry?: boolean | null
+  /** (93) Serial items only: 1-50 characters; null = any length. */
+  serialLength?: number | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }

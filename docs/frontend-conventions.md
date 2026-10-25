@@ -1102,6 +1102,148 @@ someone. The rules, in short (W1-W17 of the specification):
   Permissions › Users › Warehouses): ask an administrator."); the Warehouses form shows it as it comes, nothing is
   judged there before the click.
 
+## Batch, serial and expiry on transfers (script 93)
+
+A transfer dispatch asks, for the lines of a **tracked item**, which pieces leave: one **serial no.** per piece (a TVS
+chassis no.), **batch** rows (batch no., expiry, pcs) or **expiry** rows (expiry, pcs); its receipt says, row by row,
+what arrived. The word is **tracking** everywhere (JSON `tracking`, `trackingKind`, `trackingMode`; the generic pieces
+in `src/components/tracking/`), never "details": that word is the header's "Save details". The client is
+`transferTrackingApi` at the end of `src/api/inventory/transfers.ts` (plus the optional (93) fields on the order's line,
+the posting line, the list row and the requests); the transfer glue is `components/transfers/transferTracking.ts`.
+
+- **The item says it, Item Definition sets it** (Inventory Parameters, the row after the Min / Max hint, before BIVAC /
+  Active; `inventory.items.edit`): **Tracking** None / Batch numbers / Serial numbers ("Asked when goods are dispatched
+  on a transfer order."), **Serial no. length** (Serial only; empty = any length, 1-50; emptied when Tracking leaves
+  Serial) and **Requires expiry date**; under the row, dimmed, where they are asked: "Batch, serial and expiry details are
+  asked on transfer dispatches (Inventory › Transfer Orders). Goods receipts, sales and Inventory In / Out do not ask for
+  them." View mode: "Tracking: Serial numbers (17 characters) · expiry date required". Serial no. length is never
+  clamped (`clampBehavior="none"`): 60 typed is refused on Save with "Serial no. length must be between 1 and 50, or
+  empty for any length.", never saved as 50 without a word. The page always sends the three
+  fields (the API leaves the tracking alone when an older client sends none); the server's plain refusals ("Serial no.
+  length applies to serial-numbered items only.") come in the form's red Alert, like the Link's.
+- **Three kinds, derived, never stored on the item** (`trackingKindOf`, the database's K(i)): Serial (Serial numbers),
+  Batch (Batch numbers), Expiry (None + Requires expiry). Their words are `KIND_TEXT` (`trackingNumbers.ts`): buttons
+  "Serial nos.…", "Batches…", "Expiry dates…"; counts "1 serial no." / "20 serial nos.", "2 batches", "1 expiry date";
+  `TrackingBadge` "Serial nos." grape, "Batches" cyan, "Expiry dates" yellow, "+ expiry" when the item also requires the
+  date; a badge is never cut (`minWidth: max-content`: it widens its column a little rather than end in "…"). The
+  badge stands in Item Definition's header after BIVAC and under a transfer line's Item Name (xs, light, `compact`: 4
+  px side padding and no letter-spacing, so "Serial nos. + expiry" fits Item Name's 130 px; under the Item Code it was
+  cut, as a released order at 1440 narrows that column to about 85 px (91); tooltip "Dispatch… asks for the serial
+  numbers of these pieces."; the kind comes from the order's Get, and from the item's own answer as soon as an item is
+  chosen on a line, so a line changed to another item never keeps the old one's badge). Item Definition's sticky header
+  keeps one line (the code cut with an ellipsis, 87's rule) except for a tracked item, whose badges may go under the
+  code (`PageHeader`'s `wrapTitleExtra`).
+- **One dialog for dispatch and receipt, `TrackingModal`** (`mode: 'dispatch' | 'receive'`, `kind`, `withExpiry`,
+  `serialLength`, `otherLineSerials`, `known`; FormModal xl, full screen below 48em; Cancel drops every change since it
+  opened, Done keeps them). **Rendered as a SIBLING of the dialog that opens it, never in its children**: the outer
+  dialog passes `closeOnEscape={!calendarOpen && trackingFor === null && !confirmOpen}` (90's calendar rule kept), so
+  Escape closes the inner one alone, and the inner form never submits the outer one (Done and Enter there post
+  nothing). It names no transfer: the caller gives the title ("Serial numbers - line 1: TEST93-S"), the pieces and the
+  Check, so a goods receipt can reuse it. Its own expiry fields follow 90's calendar rule (`useCalendarEscape`, each
+  `DateInput` with `popoverProps={calendar(name)}`, the dialog `closeOnEscape={!calendarOpen}`): Escape on an open
+  calendar closes the calendar, never the dialog and the serials scanned in it.
+- **The scan box consumes its Enter** (`preventDefault`: a scanner ends every code with one) and splits what it got on
+  TAB, CR and LF: one number is added, several are refused ("Scan one number at a time, or use Paste list…"). The local
+  refusals under it say only what the list itself shows: "{x} is already in the list.", "{x} is already on line {m}."
+  (the same item's other lines), "{q} serial numbers are already typed: remove one, or raise Dispatch now.", "A serial
+  no. has no spaces.", "{x} has {len} characters; this item's have {L}." The counter "{c} / {q}" is red until equal.
+  The refusals (and the receipt's "Scanning: …" line) are live regions, said by a screen reader as they appear; a
+  refusal goes with the next change of the list (it said nothing about the list as it is then).
+  "Known at {From} ({n})…" (`GET …/lines/{lineId}/tracking-suggestions`, read once when the line's dialog first opens,
+  with the dispatch permission) lists the serials transfers received into From and did not send since, minus those on
+  the same item's other lines - the server sends at most 2,000, the oldest received first; the list draws 200 and
+  "Find a number" narrows it - each "Received into {From} by {TRR} on {date}", those already in the list ticked and
+  disabled; "Add the ticked" adds up to the pieces leaving.
+  **The cursor goes back to the scan box** after every button of a serial list (Paste list's Add and Close, Known's
+  "Add the ticked" and Close, Apply, a row's trash icon, Tick all, Untick all, "Mark the {n} not ticked as lost") and
+  after a Check that keeps the dialog open - there once the Check's disabled fieldset is enabled again (an effect on
+  the end of the Check: a frame-timed focus raced the re-render and was sometimes lost): a scanner's next code and its
+  closing Enter land there, never on the button that had the focus.
+  The newest serial is listed first (so the one just scanned is on screen); long lists are drawn 200 at a time, a row a
+  Check names always shows.
+- **Paste list…** reads the shapes of `parsePastedSerials` / `parsePastedRows` (unit-tested: `npm test`,
+  `scripts/tests/`): serials one per line or joined by commas, semicolons or spaces, each followed by its date when the
+  item requires one; batch rows `batch | expiry | pcs` (or `batch | pcs`) and expiry rows `expiry | pcs`, cells by tabs
+  (Excel), semicolons or commas - never spaces, which a batch no. may hold. A row without a readable whole number of
+  pcs, or with a date that is not one, is unread and named ("Line {k} could not be read: '{text}'."); a token shaped
+  like a date is never taken for a serial. A batch (or a date) already listed gets the pasted pcs added; the untouched
+  row the dialog opens with is replaced. "Copy list" in the viewer gives the same shapes back.
+- **Check on Done, errors keep it open, warnings need a second click.** Done sends the WHOLE dispatch as it would be
+  posted, this line's rows as typed now, to `POST …/dispatch/check-tracking?forLineId=` (no lock, nothing written): this
+  line's errors (and the dispatch's own, and a serial twice on two lines, which names each line's row) in red at the
+  top with the named rows outlined, the dialog open; warnings in orange and the button becomes "Keep these numbers".
+  The count errors alone (the rows do not add up to the pieces yet, the database's Seq 12 / 24) are said in red but let
+  the second click keep what is typed - the dialog says so under them ("Keep these numbers closes the dialog with what
+  is typed: nothing is posted until the line is complete.") - the line's state stays red and Dispatch stays disabled,
+  so nothing half done is posted and nothing scanned is lost (a decision against the spec's "errors keep it open": 19
+  chassis nos. scanned of 20 must survive closing the dialog). A Check that fails says why and lets the second click
+  keep the rows (the posting checks them again). Done with no row closes without asking. **While the Check runs,
+  nothing in the dialog can be typed** (its rows and buttons sit in a disabled `fieldset`): what Done keeps is what was
+  checked. A cell tidied on blur (capitals, trimmed) changes the row only when the tidying changes it, so leaving a cell
+  never turns "Keep these numbers" back into "Done".
+- **The Dispatch dialog** (and Dispatch and receive): a column "Batch / serial" when a line is tracked (on a phone,
+  under "Dispatch now"): the button and the line's state, "18 / 20 serial nos.", "45 / 60 pcs in 2 batches", "30 / 30
+  pcs in 2 dates" - green with a check when complete, red when not, "—" when nothing leaves; the button is then
+  disabled with its reason, "Type the pieces that leave in Dispatch now first." (a tooltip; on a phone the line under
+  it), and each line's button names its line for a screen reader ("Serial nos.… line 1, TEST93-S"). Dispatch is
+  disabled while a leaving tracked line is incomplete, with the database's own Seq 12 / 24 sentence
+  (`incompleteSentence`, plain numbers as the database writes them). Changing "Dispatch now" keeps the rows. The last Check's warnings stay listed
+  in orange above the footer; a refusal at posting shows in the red Alert as it comes, nothing lost. Closing with rows
+  typed asks "Discard the serial numbers, batches and expiry dates typed in this dialog?" (Discard / Keep editing);
+  Escape on that question answers it (Keep editing) and only it - the same key press reaches the Dispatch dialog's own
+  Escape listener after the question's, and a ref keeps it from asking again until that key press is over.
+  With a tracked line the dialog is 62rem instead of xl and its table 920 px (90's 720 plus the 200 px column), inside
+  the 960 px body at 1440: no row scrolls sideways. The cursor still starts on the first "Dispatch now" (90's rule).
+- **The typed rows survive a reload** in `sessionStorage` under `trf-tracking:{orderId}:{rowVersion}` (wrapped in try /
+  catch; written at every change, the rows being typed in an open dialog included; keys of an older row version of the
+  order dropped; cleared after the post or Discard; `components/transfers/transferTrackingStore.ts`, unit-tested).
+  Opening the dialog again offers "Restore the {n} rows typed earlier?" (Restore / Start again); until it is answered
+  the lines' "Serial nos.…" / "Batches…" / "Expiry dates…" are disabled with "Answer Restore or Start again first.", so
+  typing never throws the offered rows away unasked. A row's `key` is never stored: every row read back gets a fresh
+  one, so a restored row never shares its key with one added after the reload. Per viewer, never server state (there
+  are no draft postings).
+- **Receipts follow their dispatch line** (its `trackingKind`, kept at dispatch), whatever the item says now. The Receive
+  dialog reads the rows still on the way of each dispatch with tracked lines when it opens (`onTheWayOnly`); everything
+  on the way has arrived until the dialog says otherwise. A tracked line's "Received now" is read only (the rows' sum),
+  its state "18 arrived · 1 lost · 1 still coming" (zero parts left out), 90's Still coming / Nothing more will arrive
+  is not shown on it, and "Why?" (and Note for Other) are asked when its rows hold lost pieces. It sends one `tracking`
+  entry per row arrived or lost; a row still coming is left out. The cursor starts on the first untracked line's
+  "Received now" (90's rule); when every line is tracked, on the first line's "Serial nos.…" / "Batches…" / "Expiry
+  dates…" button, which looks disabled while the rows are read (`data-disabled`, so it can still take the focus; a
+  click does nothing until they are). Each of those buttons names its dispatch line for a screen reader ("Serial nos.…
+  TRD-BR-003-000021 line 1, TEST93-S"). The dialog is 62rem with a tracked line; its table keeps 90's 720 px. **A receipt
+  refused because someone else changed the order** reloads it; the dialog then reads the rows on the way again (only
+  then: a new row version, not a new copy of the same order) and Receive waits for them: what the reader said of each
+  row still on the way is kept (`mergeReceiptTracking`: received, the rest, the scan session), the rows no longer on
+  the way drop out, and when they differ an orange Alert says "The order was changed by someone else: the serial
+  numbers, batches and expiry dates on the way were read again."
+- **The scan session on receipt**: the serials on the way, all ticked; the FIRST scan unticks every serial not scanned
+  yet and says "Scanning: only the serial numbers you scan are ticked.", each scan then ticks one ("{x} is not on the way
+  on this line." otherwise). The session is kept when the dialog is opened again. Tick all / Untick all; each unticked
+  serial is Still coming (default) or Lost; "Mark the {n} not ticked as lost". Batches and expiry dates: Received now
+  starts at the row's on the way and may be lowered ("Max {w}" red above it and Done disabled above), the rest "Still
+  coming | Lost".
+- **Rows are read per posting, when shown** (never in the order's Get: 10,000 serials would make every answer heavy).
+  "Dispatches and receipts": a posting's summary adds " · 20 serial nos."; an expanded line with `trackingCount > 0` has
+  the link "20 serial nos." / "2 batches" / "1 expiry date" opening `TrackingView` (a 520 px Popover, the whole screen
+  below 48em, whose close button is named "Close"): # / number / Expiry / Pcs / State - On the way blue, Received green, Written off red, Partly received
+  orange, Reversed gray - with the server's `stateText` dimmed, "Find a number" past 10 rows, "Copy list" ("Copied {n}
+  rows."); the Popover traps the focus (Tab reaches "Find a number" and "Copy list", Escape returns to the link). The
+  dispatch note lists, under each line, its serial nos. in four columns, or "B2410-07 · exp. 31/03/2027 · 40 pcs", read
+  before it prints; when they cannot be read, Print is disabled with the reason ("… Try again.", and a "Try again"
+  button), and the paper itself says under each tracked line "The serial nos. could not be read: print the note
+  again." (a browser's own Print still prints the page).
+- **Found from the list**: the Transfer Orders list's "Batch or serial no." (placeholder "At least 3 characters";
+  trimmed, in capitals and sent as `trackingNo` from 3 characters, debounced; shorter text asks nothing) finds the
+  orders whose postings hold a number CONTAINING it; each row says what happened to it (`matchedTracking`, dimmed under
+  its number; the last line of a phone card). Item › Stock Movement shows a transfer row's expiry dimmed under its
+  number ("Expiry 31/03/2027"), transfer rows only, no new column.
+- **Numbers are shown in capitals** (`normalizeTrackingNo`, the database's rule: tab, CR, LF, no-break space, BOM and
+  spaces cut at both ends only, then capitals); the cells normalise on blur, the server normalises again.
+- **Never a claim that a serial "is" somewhere.** Only transfers record serials (goods receipts, sales and Inventory In /
+  Out do not), so a screen says "last received into {W}", "Received into {From} by {TRR} on {date}" (the "Known at
+  {From} ({n})…" suggestions), never "at {W}" or "in stock".
+
 ## Bulk actions
 
 Every document list carries a checkbox column (`DataTable` props `selectedRecords`,
@@ -2497,6 +2639,11 @@ order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_
   finds its neighbours. Activate / Deactivate / Delete on the item page update the remembered list.
 - **Note**: a textarea (2,000 characters, counter) right under the Description (same column, a 2 px gap in edit mode),
   shown read-only with its line breaks (`Field multiline`).
+- **Tracking (script 93)**: the Inventory Parameters row after the Min / Max hint, before BIVAC / Active - Tracking,
+  Serial no. length (Serial only), Requires expiry date (span sm 4 each, sm 6 each without the length; the hints under
+  the boxes so the row lines up), the dimmed line saying they are asked on transfer dispatches only, and in view mode
+  "Tracking: Serial numbers (17 characters) · expiry date required". The header shows `TrackingBadge` after BIVAC. See
+  **Batch, serial and expiry on transfers**.
 - **Link**: beside the Default Warehouse, with its "Open link" button; `type="url"`, checked when leaving the field and on Save: an absolute `http://` / `https://` address with a
   host and no spaces (`isWebAddress`; the API and `inventory.usp_Item_SetNotes` refuse the rest). "Open link" is
   disabled while the field is empty or invalid and opens a new tab with `noopener,noreferrer`; in view mode the address

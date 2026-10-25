@@ -44,6 +44,7 @@ import {
   transferStatusColour,
   transferStatusLabel,
 } from '../../components/transfers/transferStatus'
+import { normalizeTrackingNo } from '../../components/tracking/trackingNumbers'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
@@ -66,6 +67,11 @@ interface Filters {
   dateTo: string | null
   /** (92) A restricted reader's "Warehouses" filter: any, from, to, or all (nothing sent). Ignored for the others. */
   mine: string
+  /**
+   * (93) "Batch or serial no.", as the server takes it (trimmed, in capitals) and only from 3 characters: shorter text
+   * stays in the box and asks nothing.
+   */
+  trackingNo: string
 }
 
 const NO_FILTERS: Filters = {
@@ -80,6 +86,7 @@ const NO_FILTERS: Filters = {
   dateFrom: null,
   dateTo: null,
   mine: 'any',
+  trackingNo: '',
 }
 
 /**
@@ -98,6 +105,12 @@ const mineParam = (value: string): TransferMineFilter | undefined =>
 const MINE_EMPTY: Record<TransferMineFilter, string> = { any: 'from or to', from: 'from', to: 'to' }
 
 const STATUS_DATA = TRANSFER_STATUS_FILTER_OPTIONS.map((s) => ({ value: s.value, label: s.label }))
+
+/** (93) The box's text as the filter: trimmed and in capitals, from 3 characters; '' otherwise. */
+function trackingFilterOf(text: string): string {
+  const value = normalizeTrackingNo(text)
+  return value && value.length >= 3 ? value : ''
+}
 
 /** "Assigned on release" on a draft of a type that numbers then; the number otherwise. */
 const numberText = (row: TransferOrderListItemDto) => row.documentNumber ?? 'Assigned on release'
@@ -231,7 +244,7 @@ export function TransferOrdersPage() {
     { items: TransferOrderListItemDto[]; truncated: boolean }
   >({
     initialFilters: NO_FILTERS,
-    debounced: ['search'],
+    debounced: ['search', 'trackingNo'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
     paging: 'client',
     errorMessage: 'The transfer orders could not be loaded.',
@@ -249,6 +262,7 @@ export function TransferOrdersPage() {
         dateFrom: filters.dateFrom ?? undefined,
         dateTo: filters.dateTo ?? undefined,
         mine,
+        trackingNo: filters.trackingNo || undefined,
         sortColumn: 'DocumentDate' as const,
         sortDirection: 'DESC' as const,
       }
@@ -268,6 +282,17 @@ export function TransferOrdersPage() {
   })
 
   const { filters, setFilter, data, loading, error } = grid
+  /* (93) What is typed in "Batch or serial no.": the filter follows it from 3 characters (debounced). */
+  const [trackingText, setTrackingText] = useState('')
+  function typeTracking(text: string) {
+    setTrackingText(text)
+    const next = trackingFilterOf(text)
+    if (next !== filters.trackingNo) setFilter('trackingNo', next)
+  }
+  function clearAllFilters() {
+    setTrackingText('')
+    grid.clearFilters()
+  }
   const rows = useMemo(() => data?.items ?? [], [data])
   /* (92) "From or to my warehouses" is the restricted reader's default, but it IS a filter: with it on, an empty list
      says so and how to see every order, never "No transfer orders yet." (A18: a convenience the reader can undo). */
@@ -333,6 +358,12 @@ export function TransferOrdersPage() {
           {row.returnOfNumber ? (
             <Text fz="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
               Return of {row.returnOfNumber}
+            </Text>
+          ) : null}
+          {/* (93) The "Batch or serial no." filter: what happened to the number found. */}
+          {row.matchedTracking ? (
+            <Text fz="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }} data-transfer-matched-tracking>
+              {row.matchedTracking}
             </Text>
           ) : null}
         </>
@@ -427,6 +458,20 @@ export function TransferOrdersPage() {
             onKeyDown={(event) => {
               if (event.key === 'Enter') grid.commitFilters()
             }}
+          />
+        </FilterBar.Col>
+        <FilterBar.Col span={2}>
+          <TextInput
+            label="Batch or serial no."
+            placeholder="At least 3 characters"
+            leftSection={<IconSearch size={16} />}
+            value={trackingText}
+            onChange={(event) => typeTracking(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') grid.commitFilters()
+            }}
+            maxLength={100}
+            data-transfer-tracking-filter
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
@@ -537,8 +582,8 @@ export function TransferOrdersPage() {
           <Button
             variant="default"
             leftSection={<IconFilterOff size={16} />}
-            onClick={grid.clearFilters}
-            disabled={grid.isDefault}
+            onClick={clearAllFilters}
+            disabled={grid.isDefault && trackingText === ''}
           >
             Clear Filters
           </Button>
@@ -603,6 +648,12 @@ export function TransferOrdersPage() {
                 <Text fz="xs" c={lateToDispatch(row) ? 'red' : 'dimmed'} fw={lateToDispatch(row) ? 700 : undefined}>
                   Expected arrival {dateLabel(row.expectedArrival)}
                 </Text>
+                {/* (93) Last line of the card: the number the filter found. */}
+                {row.matchedTracking ? (
+                  <Text fz="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }} data-transfer-matched-tracking>
+                    {row.matchedTracking}
+                  </Text>
+                ) : null}
               </Paper>
             </UnstyledButton>
           ))}

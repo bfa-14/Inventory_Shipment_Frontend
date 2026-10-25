@@ -4,7 +4,7 @@ import type {
   TransferPostingDto,
   TransferWarehouseRefDto,
 } from '../../api/inventory/transfers'
-import type { ItemUnitDto, WarehouseLookupDto } from '../../api/types'
+import type { ItemUnitDto, TrackingKind, WarehouseLookupDto } from '../../api/types'
 import { formatNumber } from '../format'
 import { NOT_ONE_OF_YOURS } from '../documents/lineWarehouses'
 import { levelsOfLine, NO_LEVELS, type TransferLineLevels } from './transferLevels'
@@ -180,6 +180,12 @@ export interface TransferLineForm extends TransferLineLevels {
   availableFromBase: number | null
   onHandToBase: number | null
   incomingToBase: number | null
+  /**
+   * (93) What Dispatch… asks for the line: the item's tracking, from the order's Get, and from the item's own answer as
+   * soon as an item is chosen on a line (a new line, or a saved one changed to another item).
+   */
+  trackingKind: TrackingKind | null
+  requiresExpiry: boolean
   /** A "Line N: …" refusal about this line. */
   error?: string
 }
@@ -212,6 +218,8 @@ export function emptyTransferLine(): TransferLineForm {
     onHandToBase: null,
     incomingToBase: null,
     ...NO_LEVELS,
+    trackingKind: null,
+    requiresExpiry: false,
   }
 }
 
@@ -247,6 +255,8 @@ export function toTransferLineForm(line: TransferOrderLineDto): TransferLineForm
     onHandToBase: line.onHandToBase,
     incomingToBase: line.incomingToBase,
     ...levelsOfLine(line),
+    trackingKind: line.trackingKind ?? null,
+    requiresExpiry: line.requiresExpiry === true,
   }
 }
 

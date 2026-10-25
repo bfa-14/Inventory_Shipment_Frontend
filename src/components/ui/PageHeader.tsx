@@ -22,11 +22,24 @@ interface PageHeaderProps {
    * out of reach on a phone.
    */
   truncateTitle?: boolean
+  /**
+   * With `truncateTitle`: the badges of `titleExtra` may go under the title when both do not fit on one line (script
+   * 93: a tracked item's code and its four badges). Off by default, so every other header keeps one line.
+   */
+  wrapTitleExtra?: boolean
 }
 
 const ONE_LINE: CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }
 
-export function PageHeader({ title, subtitle, breadcrumbs, actions, titleExtra, truncateTitle = false }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  subtitle,
+  breadcrumbs,
+  actions,
+  titleExtra,
+  truncateTitle = false,
+  wrapTitleExtra = false,
+}: PageHeaderProps) {
   const titleNode = (
     <Title order={2} style={truncateTitle ? ONE_LINE : undefined} title={truncateTitle ? title : undefined}>
       {title}
@@ -53,7 +66,14 @@ export function PageHeader({ title, subtitle, breadcrumbs, actions, titleExtra, 
         ) : null}
 
         {titleExtra ? (
-          <Group gap="sm" wrap={truncateTitle ? 'nowrap' : 'wrap'} miw={0}>
+          /* With truncateTitle the badges stay beside the title, which cuts with an ellipsis; wrapTitleExtra (script 93,
+             a tracked item: its code, status, BIVAC and tracking badges) lets them go under it instead. */
+          <Group
+            gap="sm"
+            wrap={truncateTitle && !wrapTitleExtra ? 'nowrap' : 'wrap'}
+            miw={0}
+            style={wrapTitleExtra ? { rowGap: 4 } : undefined}
+          >
             {titleNode}
             {titleExtra}
           </Group>

@@ -20,6 +20,8 @@ import { Link } from 'react-router'
 import type { ItemLookupDto } from '../../api/types'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
+import { TrackingBadge } from '../tracking/TrackingBadge'
+import { KIND_TEXT } from '../tracking/trackingNumbers'
 import { LazySelect } from '../ui/LazySelect'
 import { ShownRowsFooter } from '../ui/ShownRows'
 import { useShownRows } from '../ui/useShownRows'
@@ -451,6 +453,20 @@ export function TransferLinesGrid({
     )
   }
 
+  /** (93) How Dispatch… will ask for the line's pieces: a light badge, once the line is saved. */
+  function trackingBadge(line: TransferLineForm) {
+    if (!line.trackingKind) return null
+    return (
+      <TrackingBadge
+        kind={line.trackingKind}
+        withExpiry={line.requiresExpiry}
+        size="xs"
+        compact
+        tooltip={`Dispatch… asks for the ${KIND_TEXT[line.trackingKind].ask} of these pieces.`}
+      />
+    )
+  }
+
   function errorMark(line: TransferLineForm) {
     if (!line.error) return null
     return (
@@ -490,7 +506,7 @@ export function TransferLinesGrid({
     return (
       <Stack gap="sm">
         {visible.map(({ line, index }) => (
-          <Paper key={line.key} withBorder radius="md" p="sm" bg={rowTint(line)}>
+          <Paper key={line.key} withBorder radius="md" p="sm" bg={rowTint(line)} data-transfer-line-card={index + 1}>
             <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
               <Group gap={6} wrap="nowrap" align="flex-start" style={{ minWidth: 0 }}>
                 {tickControl(line)}
@@ -505,6 +521,7 @@ export function TransferLinesGrid({
                       `${formatNumber(toDispatchOf(line))} to dispatch`,
                     ].join(' · ')}
                   </Text>
+                  {trackingBadge(line)}
                   {line.itemName ? (
                     <Text fz="xs" c="dimmed">
                       {line.itemName}
@@ -656,6 +673,9 @@ export function TransferLinesGrid({
                   <Text fz="sm" c="dimmed">
                     {line.itemName || '—'}
                   </Text>
+                  {/* (93) UNDER THE NAME: Item Name keeps its 130 px (91), while a released order at 1440 narrows Item
+                      Code to about 85 px, where even "Serial nos." was cut. Compact, "Serial nos. + expiry" fits 130 px. */}
+                  {line.trackingKind ? <Box mt={4}>{trackingBadge(line)}</Box> : null}
                 </Table.Td>
                 <Table.Td>{unitControl(line, index)}</Table.Td>
                 <Table.Td ta="right">{availableCell(line)}</Table.Td>

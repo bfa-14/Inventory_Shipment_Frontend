@@ -6,7 +6,7 @@ import { IconArrowLeft } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import type { ItemStockMovementDto, ItemStockStatementDto } from '../../api/types'
-import { fromIsoDate, isoDate } from '../../components/documents/documentKind'
+import { dateLabel, fromIsoDate, isoDate } from '../../components/documents/documentKind'
 import { formatDateTime, formatNumber } from '../../components/format'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useAuth } from '../../auth/useAuth'
@@ -226,6 +226,11 @@ export function ItemStockMovementsPage() {
                                   </>
                                 ) : null}
                               </Group>
+                              {/* (93) A transfer row's expiry, under its number (no new column): the other families'
+                                  expiry comes from fields no screen shows. */}
+                              {m.documentFamily === 'Transfer' && m.expiryDate ? (
+                                <Text fz="xs" c="dimmed" data-movement-expiry>Expiry {dateLabel(m.expiryDate)}</Text>
+                              ) : null}
                             </div>
                             {/* (90) A transfer's dispatch or receipt is reversed, never cancelled (Cancel order… is another action). */}
                             {m.isReversal &&

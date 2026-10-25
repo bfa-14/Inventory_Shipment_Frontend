@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { ActionIcon, Badge, Group, Menu, Paper, Stack, Table, Text, Title, UnstyledButton } from '@mantine/core'
+import { ActionIcon, Badge, Box, Group, Menu, Paper, Stack, Table, Text, Title, UnstyledButton } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import {
   IconArrowBackUp,
@@ -9,14 +9,24 @@ import {
   IconDotsVertical,
   IconPrinter,
 } from '@tabler/icons-react'
-import { transferLossReasonLabel, type TransferPostingDto } from '../../api/inventory/transfers'
+import {
+  transferLossReasonLabel,
+  transferTrackingApi,
+  type TransferPostingDto,
+  type TransferPostingLineDto,
+} from '../../api/inventory/transfers'
 import { dateLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
+import { TrackingView } from '../tracking/TrackingView'
+import { kindCount } from '../tracking/trackingNumbers'
 import { RowActions } from '../ui/RowActions'
 import { transferPostingAbilities, type TransferAbility } from './transferAbilities'
+import { postingLineTracking, postingTrackingSummary, trackingViewRowsOf, trackingViewTitle } from './transferTracking'
 import { LATE_BADGE, postingKindLabel, postingStatusColour, postingStatusLabel } from './transferStatus'
 
 interface TransferPostingsCardProps {
+  /** (93) The order: a posting line's serial nos., batches or expiry dates are read from it when shown. */
+  orderId: number
   postings: TransferPostingDto[]
   hasPermission(permission: string): boolean
   /** The page holds unsaved changes: a reversal or a new ETA answers with the order as the server holds it. */
@@ -28,10 +38,14 @@ interface TransferPostingsCardProps {
   onPrint(posting: TransferPostingDto): void
 }
 
-/** "40 pcs", a receipt "30 received · 1 lost". */
-function piecesText(posting: TransferPostingDto): string {
-  if (posting.kind === 'Dispatch') return `${formatNumber(posting.totalQuantityBase)} pcs`
-  return `${formatNumber(posting.totalQuantityBase)} received${posting.totalLostBase > 0 ? ` · ${formatNumber(posting.totalLostBase)} lost` : ''}`
+/**
+ * "40 pcs", a receipt "30 received · 1 lost"; (93) + " · 20 serial nos." when its lines carry tracking rows (a phone
+ * card; the table says it on a dimmed line of its own, so the Pcs column stays narrow).
+ */
+function piecesText(posting: TransferPostingDto, withTracking = true): string {
+  const tracking = withTracking ? postingTrackingSummary(posting) : ''
+  if (posting.kind === 'Dispatch') return `${formatNumber(posting.totalQuantityBase)} pcs${tracking}`
+  return `${formatNumber(posting.totalQuantityBase)} received${posting.totalLostBase > 0 ? ` · ${formatNumber(posting.totalLostBase)} lost` : ''}${tracking}`
 }
 
 /** "Reversed on 21/10/2026 by Manager One: wrong truck". */
@@ -82,6 +96,7 @@ function lateBadge(posting: TransferPostingDto) {
  * under its label (DocumentActionBar's phone rule).
  */
 export function TransferPostingsCard({
+  orderId,
   postings,
   hasPermission,
   dirty,
@@ -143,6 +158,25 @@ export function TransferPostingsCard({
     return list.filter((a) => a.ability.visible)
   }
 
+  /**
+   * (93) "20 serial nos." / "2 batches" / "1 expiry date" under a line that carries tracking rows: its rows and their
+   * state, read when opened (GET …/postings/{postingId}/tracking).
+   */
+  function trackingLink(posting: TransferPostingDto, line: TransferPostingLineDto) {
+    const tracking = postingLineTracking(line)
+    if (!tracking) return null
+    return (
+      <TrackingView
+        label={kindCount(tracking.kind, tracking.count)}
+        title={trackingViewTitle(posting, line)}
+        kind={tracking.kind}
+        load={async (signal) =>
+          trackingViewRowsOf(await transferTrackingApi.postingRows(orderId, posting.id, false, signal), line.id)
+        }
+      />
+    )
+  }
+
   function linesTable(posting: TransferPostingDto) {
     const receipt = posting.kind === 'Receipt'
     return (
@@ -168,6 +202,7 @@ export function TransferPostingsCard({
                 <Text fz="xs" c="dimmed">
                   {line.itemName}
                 </Text>
+                {trackingLink(posting, line)}
               </Table.Td>
               <Table.Td ta="right">{formatNumber(line.quantityBase)}</Table.Td>
               {receipt && (
@@ -207,13 +242,16 @@ export function TransferPostingsCard({
     return (
       <Stack gap={4} mt="xs">
         {posting.lines.map((line) => (
-          <Text key={line.id} fz="xs">
-            {line.itemCode} · {formatNumber(line.quantityBase)} pcs
-            {line.lostBase > 0
-              ? ` · ${formatNumber(line.lostBase)} lost (${[transferLossReasonLabel(line.lossReasonCode), line.lossNote].filter(Boolean).join(' - ')})`
-              : ''}
-            {line.dispatchNumber ? ` · from ${line.dispatchNumber}` : ''}
-          </Text>
+          <Box key={line.id}>
+            <Text fz="xs">
+              {line.itemCode} · {formatNumber(line.quantityBase)} pcs
+              {line.lostBase > 0
+                ? ` · ${formatNumber(line.lostBase)} lost (${[transferLossReasonLabel(line.lossReasonCode), line.lossNote].filter(Boolean).join(' - ')})`
+                : ''}
+              {line.dispatchNumber ? ` · from ${line.dispatchNumber}` : ''}
+            </Text>
+            {trackingLink(posting, line)}
+          </Box>
         ))}
       </Stack>
     )
@@ -403,8 +441,15 @@ export function TransferPostingsCard({
                           </Text>
                         )}
                       </Table.Td>
-                      <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
-                        {piecesText(posting)}
+                      <Table.Td ta="right">
+                        <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>
+                          {piecesText(posting, false)}
+                        </Text>
+                        {postingTrackingSummary(posting) ? (
+                          <Text fz="xs" c="dimmed" data-posting-tracking>
+                            {postingTrackingSummary(posting).replace(/^ · /, '')}
+                          </Text>
+                        ) : null}
                       </Table.Td>
                       <Table.Td ta="right">
                         {posting.kind === 'Dispatch' ? (

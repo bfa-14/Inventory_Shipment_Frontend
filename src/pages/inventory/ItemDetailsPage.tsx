@@ -41,10 +41,12 @@ import { itemsApi } from '../../api/inventory/items'
 import { partiesApi } from '../../api/masterdata/parties'
 import type { PartyLookupDto } from '../../api/types'
 import { formatNumber, numberInputValue } from '../../components/format'
-import type { ItemDetailsDto, ItemUnitDto, SaveItemRequest, SaveItemUnitRequest } from '../../api/types'
+import type { ItemDetailsDto, ItemUnitDto, SaveItemRequest, SaveItemUnitRequest, TrackingMode } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { AttachmentsPanel, type AttachmentsSource } from '../../components/attachments/AttachmentsPanel'
 import { confirm } from '../../components/ui/confirm'
+import { TrackingBadge } from '../../components/tracking/TrackingBadge'
+import { trackingKindOf, trackingSummary } from '../../components/tracking/trackingNumbers'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
@@ -116,7 +118,18 @@ interface FormValues {
   volumeCbm: number | ''
   note: string
   link: string
+  /** (93) Tracking on transfer dispatches; the length for serial items only. */
+  trackingMode: TrackingMode
+  requiresExpiry: boolean
+  serialLength: number | ''
 }
+
+/** (93) Item Definition › Tracking: what a transfer dispatch asks for the item's pieces. */
+const TRACKING_OPTIONS: { value: TrackingMode; label: string }[] = [
+  { value: 'None', label: 'None' },
+  { value: 'Batch', label: 'Batch numbers' },
+  { value: 'Serial', label: 'Serial numbers' },
+]
 
 const BLANK: FormValues = {
   itemCode: '',
@@ -139,6 +152,9 @@ const BLANK: FormValues = {
   volumeCbm: '',
   note: '',
   link: '',
+  trackingMode: 'None',
+  requiresExpiry: false,
+  serialLength: '',
 }
 
 /** What Copy Item hands the new page: the source's values, its units, and the code it came from. */
@@ -170,6 +186,9 @@ function toFormValues(item: ItemDetailsDto): FormValues {
     volumeCbm: item.volumeCbm ?? '',
     note: item.note ?? '',
     link: item.link ?? '',
+    trackingMode: item.trackingMode ?? 'None',
+    requiresExpiry: item.requiresExpiry === true,
+    serialLength: item.trackingMode === 'Serial' && item.serialLength ? item.serialLength : '',
   }
 }
 
@@ -274,6 +293,12 @@ function ItemDetails() {
         return isWebAddress(link)
           ? null
           : 'Enter a web address starting with http:// or https://, for example https://www.tvsmotor.com.'
+      },
+      serialLength: (value, values) => {
+        if (value === '' || values.trackingMode !== 'Serial') return null
+        if (!Number.isInteger(value) || value < 1 || value > 50)
+          return 'Serial no. length must be between 1 and 50, or empty for any length.'
+        return null
       },
       warrantyMonths: (value) => {
         if (value === '') return null
@@ -470,6 +495,10 @@ function ItemDetails() {
       volumeCbm: values.volumeCbm === '' ? null : values.volumeCbm,
       note: values.note.trim() ? values.note.trim() : null,
       link: values.link.trim() ? values.link.trim() : null,
+      // (93) Always sent by this page (it knows the fields); the length only for a serial item.
+      trackingMode: values.trackingMode,
+      requiresExpiry: values.requiresExpiry,
+      serialLength: values.trackingMode === 'Serial' && values.serialLength !== '' ? values.serialLength : null,
       ...(isNew ? {} : { rowVersion: item?.rowVersion ?? null }),
     }
   }
@@ -628,6 +657,8 @@ function ItemDetails() {
       else if (key.includes('description')) mapped.description = message
       else if (key.includes('note')) mapped.note = message
       else if (key.includes('link')) mapped.link = message
+      else if (key.includes('seriallength')) mapped.serialLength = message
+      else if (key.includes('trackingmode')) mapped.trackingMode = message
       else if (key.includes('warrantymonths')) mapped.warrantyMonths = message
       else if (key.includes('minquantity')) mapped.minQuantity = message
       else if (key.includes('maxquantity')) mapped.maxQuantity = message
@@ -928,6 +959,7 @@ function ItemDetails() {
           subtitle={subtitle}
           breadcrumbs={BREADCRUMBS}
           truncateTitle
+          wrapTitleExtra={item ? trackingKindOf(item.trackingMode, item.requiresExpiry) !== null : false}
           titleExtra={
             item ? (
               <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -937,6 +969,11 @@ function ItemDetails() {
                     BIVAC
                   </Badge>
                 ) : null}
+                {/* (93) How a transfer dispatch asks for its pieces: "Serial nos.", "Batches + expiry", … */}
+                <TrackingBadge
+                  kind={trackingKindOf(item.trackingMode, item.requiresExpiry)}
+                  withExpiry={item.requiresExpiry === true}
+                />
               </Group>
             ) : undefined
           }
@@ -1360,6 +1397,80 @@ function ItemDetails() {
                             Minimum and Maximum Quantity are for the whole company: the Dashboard&apos;s Items below their
                             minimum.
                             {canViewLevels ? " Each warehouse's own Min / Max are in Stock levels per warehouse below." : ''}
+                          </Text>
+                        </Grid.Col>
+
+                        {/* (93) TRACKING: after the Min / Max hint, before BIVAC / Active. Asked on transfers only. */}
+                        {editable ? (
+                          <>
+                            <Grid.Col span={{ base: 12, sm: form.values.trackingMode === 'Serial' ? 4 : 6 }}>
+                              <Select
+                                label="Tracking"
+                                description="Asked when goods are dispatched on a transfer order."
+                                // The hints under the boxes, so the three controls of the row line up at the top.
+                                inputWrapperOrder={['label', 'input', 'description', 'error']}
+                                data={TRACKING_OPTIONS}
+                                allowDeselect={false}
+                                {...form.getInputProps('trackingMode')}
+                                onChange={(next) => {
+                                  const mode = (next as TrackingMode | null) ?? 'None'
+                                  form.setFieldValue('trackingMode', mode)
+                                  // The length is a serial item's only: emptied when Tracking leaves Serial.
+                                  if (mode !== 'Serial') form.setFieldValue('serialLength', '')
+                                }}
+                                data-item-tracking
+                              />
+                            </Grid.Col>
+                            {form.values.trackingMode === 'Serial' ? (
+                              <Grid.Col span={{ base: 12, sm: 4 }}>
+                                <NumberInput
+                                  label="Serial no. length"
+                                  description="Every serial no. of this item has exactly this many characters (a TVS chassis no. has 17)."
+                                  placeholder="Any length"
+                                  inputWrapperOrder={['label', 'input', 'description', 'error']}
+                                  min={1}
+                                  max={50}
+                                  // Never clamped: 60 typed is refused with its sentence on Save, not saved as 50.
+                                  clampBehavior="none"
+                                  step={1}
+                                  allowDecimal={false}
+                                  allowNegative={false}
+                                  {...form.getInputProps('serialLength')}
+                                  data-item-serial-length
+                                />
+                              </Grid.Col>
+                            ) : null}
+                            <Grid.Col span={{ base: 12, sm: form.values.trackingMode === 'Serial' ? 4 : 6 }}>
+                              <Group gap={6} pt={{ base: 0, sm: 32 }}>
+                                <Checkbox
+                                  label="Requires expiry date"
+                                  {...form.getInputProps('requiresExpiry', { type: 'checkbox' })}
+                                  data-item-requires-expiry
+                                />
+                                <Tooltip
+                                  label="Each dispatch gives the expiry date of its pieces: per batch, per serial no., or per group of pieces."
+                                  withArrow
+                                  multiline
+                                  w={280}
+                                >
+                                  <ThemeIcon variant="subtle" color="gray" size="sm" aria-label="About the expiry date">
+                                    <IconInfoCircle size={16} />
+                                  </ThemeIcon>
+                                </Tooltip>
+                              </Group>
+                            </Grid.Col>
+                          </>
+                        ) : item ? (
+                          <Grid.Col span={12}>
+                            <Text fz="sm" data-item-tracking-summary>
+                              {trackingSummary(item.trackingMode, item.requiresExpiry, item.serialLength)}
+                            </Text>
+                          </Grid.Col>
+                        ) : null}
+                        <Grid.Col span={12} pt={0}>
+                          <Text fz="xs" c="dimmed" data-item-tracking-hint>
+                            Batch, serial and expiry details are asked on transfer dispatches (Inventory › Transfer Orders).
+                            Goods receipts, sales and Inventory In / Out do not ask for them.
                           </Text>
                         </Grid.Col>
 

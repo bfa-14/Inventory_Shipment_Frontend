@@ -1,6 +1,7 @@
 import { documentFilesApi, saveBlob } from '../documentFiles'
 import { fetchBlob, postForm, request } from '../http'
 import type { ImportValidationResult } from '../sales/invoiceImport'
+import type { TrackingKind, TrackingMode } from '../types'
 
 /**
  * Transfer orders (script 90): stock moved from one warehouse (From) to another (To), of any branch, without changing
@@ -120,6 +121,11 @@ export interface TransferOrderListItemDto {
   returnOfNumber: string | null
   createdAtUtc: string
   createdByName: string | null
+  /**
+   * (93) With the "Batch or serial no." filter only: what happened to the order's latest matching number,
+   * "MD626AE1XR1T00005: received into LUB-01 (TRR-BR-002-000007)" (+ " and {n} more"); null or missing otherwise.
+   */
+  matchedTracking?: string | null
 }
 
 /** The summary row: over every order matching the filters, not only the page. */
@@ -173,6 +179,11 @@ export interface TransferOrderQuery {
   dateFrom?: string
   dateTo?: string
   itemId?: number
+  /**
+   * (93) "Batch or serial no.": the orders whose dispatches or receipts hold a number CONTAINING this text, 3 characters
+   * or more (the database trims it, puts it in capitals, and refuses fewer with 62000). The page sends it from 3.
+   */
+  trackingNo?: string
   sortColumn?: TransferOrderSortColumn
   sortDirection?: 'ASC' | 'DESC'
   page?: number
@@ -332,6 +343,15 @@ export interface TransferOrderLineDto {
   fromAfterBase: number
   /** From goes below its own Min with this order (orange; red wins). */
   fromBelowMinAfter: boolean
+  /*
+   * (93) The item's tracking NOW (Item Definition), and what Dispatch… asks for the line (Serial | Batch | Expiry |
+   * null). A dispatch line keeps the kind it left with (TransferPostingLineDto.trackingKind). Missing = none.
+   */
+  trackingMode?: TrackingMode
+  requiresExpiry?: boolean
+  /** Serial items: the exact length of a serial no. (17 = a TVS chassis no.); null = any length. */
+  serialLength?: number | null
+  trackingKind?: TrackingKind | null
 }
 
 export interface TransferPostingLineDto {
@@ -361,6 +381,14 @@ export interface TransferPostingLineDto {
   unitCostBase: number | null
   /** The average a loss was written off at. Null without the value permission, or without a loss. */
   lossUnitCostBase: number | null
+  /**
+   * (93) Serial | Batch | Expiry when the line carries tracking rows (a dispatch line: what it left with; a receipt
+   * line: its dispatch line's); null or missing otherwise. Its rows are read by transferTrackingApi.postingRows (never in
+   * the order's answer: 10,000 serials would make every answer heavy).
+   */
+  trackingKind?: TrackingKind | null
+  /** (93) How many tracking rows the line holds: "20 serial nos.", "2 batches", "1 expiry date". */
+  trackingCount?: number
 }
 
 /** A reversal: "Reversed on {date} by {name}: {reason}". */
@@ -514,6 +542,11 @@ export interface DispatchTransferLineRequest {
   transferOrderLineId: number
   /** Pieces leaving From; lines at 0 may be left out. */
   quantityBase: number
+  /**
+   * (93) The line's serial nos., batches or expiry dates when its item is tracked (required then); left out for an
+   * untracked line. In the order of the dialog: a row's place is its row number in the server's sentences.
+   */
+  tracking?: TransferDispatchTrackingRow[]
 }
 
 /** A dispatch, or "Dispatch and receive" (its `eta` is then ignored: the goods arrive the same date). */
@@ -534,6 +567,12 @@ export interface ReceiveTransferLineRequest {
   nothingMoreWillArrive: boolean
   lossReasonCode: TransferLossReasonCode | null
   lossNote: string | null
+  /**
+   * (93) A dispatch line that left with tracking rows: one entry per row that arrived or was lost (a row left out is still
+   * coming). Its receivedBase is then the rows' sum (the API sets it), nothingMoreWillArrive is not read, and the reason
+   * covers its lost pieces.
+   */
+  tracking?: TransferReceiptTrackingRow[]
 }
 
 export interface ReceiveTransferRequest {
@@ -1130,5 +1169,191 @@ export const transferLevelsApi = {
       body: payload,
     })
     return { ...result, warnings: result?.warnings ?? [] }
+  },
+}
+
+/* ══ (93) BATCH, SERIAL AND EXPIRY ON TRANSFERS ═══════════════════════════════════════════════════════════════════════
+ *
+ * Script 93 (prompt 50). APPENDED, plus the optional (93) fields above (a line's trackingKind, a posting line's
+ * trackingKind / trackingCount, a list row's matchedTracking, the requests' `tracking`). The word is TRACKING, never
+ * "details": that word is the header's "Save details".
+ *
+ * A dispatch line of a tracked item carries its rows: one serial no. per piece, batch rows (batch no., expiry, pcs) or
+ * expiry rows (expiry, pcs); its receipt says, row by row, what arrived and what was lost (a row left out is still
+ * coming). EVERY RULE IS THE DATABASE'S (inventory.fn_TransferDispatch_TrackingProblems): the format, the length, the
+ * duplicates, the sums and "already on the way". The dialog's Done asks checkDispatch, the posting checks the errors
+ * again with the same sentences; numbers go as typed (the database trims them and puts them in capitals).
+ */
+
+/** One row a dispatch line carries (inventory.tvp_TransferDispatchTracking): a serial (1 pc), a batch or an expiry date. */
+export interface TransferDispatchTrackingRow {
+  serialNo: string | null
+  batchNo: string | null
+  /** yyyy-MM-dd; required on an expiry row and on any row of an item that requires an expiry date. */
+  expiryDate: string | null
+  /** 1 for a serial; the batch's or the date's pcs otherwise. */
+  quantityBase: number
+}
+
+/** One dispatch row a receipt line settles (inventory.tvp_TransferReceiptTracking). A serial: received 1 or lost 1. */
+export interface TransferReceiptTrackingRow {
+  /** The dispatch's tracking row (TransferTrackingRowDto.id, read with onTheWayOnly). */
+  dispatchTrackingId: number
+  receivedBase: number
+  lostBase: number
+}
+
+export type TransferTrackingSeverity = 'Error' | 'Warning'
+
+/** One problem of a dispatch's rows: an Error refuses the posting, a Warning only says. The message is the database's. */
+export interface TransferTrackingProblemDto {
+  /** The rule's place in the order of the checks (5 … 24 the rows, 90 already on the way, 100-103 warnings). */
+  seq?: number
+  severity: TransferTrackingSeverity
+  /** The order line it is about; null for the dispatch as a whole. */
+  transferOrderLineId: number | null
+  lineNumber: number | null
+  /** The row's place in the line's list as sent (1-based); null when the problem is the line's. */
+  rowNumber: number | null
+  message: string
+}
+
+/** POST {id}/dispatch/check-tracking: every error of the dispatch, and the warnings (of forLineId only, when given). */
+export interface CheckDispatchTrackingResult {
+  problems: TransferTrackingProblemDto[]
+  errorCount: number
+  warningCount: number
+}
+
+/** What became of a tracking row (inventory.usp_TransferPosting_Tracking). */
+export type TransferTrackingState =
+  | 'Reversed'
+  | 'OnTheWay'
+  | 'PartlyReceived'
+  | 'Received'
+  | 'Lost'
+  | 'Settled'
+  | 'PartlyLost'
+
+/** One tracking row of a dispatch or receipt, with what became of it. A reversed posting's rows read "Reversed". */
+export interface TransferTrackingRowDto {
+  id: number
+  postingId?: number
+  postingLineId: number
+  postingLineNumber: number
+  itemId: number
+  itemCode: string
+  /** 1..n within the posting line: the order typed (dispatch), the dispatch rows' order (receipt). */
+  rowNumber: number
+  kind: TrackingKind
+  /** In capitals, as stored. */
+  serialNo: string | null
+  batchNo: string | null
+  expiryDate: string | null
+  /** Dispatch: pcs sent; receipt: pcs received. */
+  quantityBase: number
+  /** Receipt rows: pcs written off as lost. */
+  lostBase: number
+  /** Dispatch rows: received + written off by posted receipts. */
+  settledBase: number
+  /** Dispatch rows of a posted dispatch: quantity − settled; 0 otherwise. */
+  onTheWayBase: number
+  /** Receipt rows: the dispatch row received, and its dispatch's number. */
+  dispatchTrackingId: number | null
+  dispatchNumber: string | null
+  state: TransferTrackingState
+  /** "Received by TRR-BR-002-000007", "Written off by TRR-… (Missing / stolen)", "2 received, 1 written off, 3 on the way". */
+  stateText: string
+}
+
+/** A serial no. received into the order's From by a transfer and not sent since: "Known at {From}…". */
+export interface TransferSerialSuggestionDto {
+  serialNo: string
+  expiryDate: string | null
+  receivedByNumber: string | null
+  receivedOn: string | null
+}
+
+export interface TransferTrackingSuggestionsDto {
+  /** What Dispatch… asks for the line now. */
+  trackingKind: TrackingKind | null
+  /** At most 2,000; empty for any kind but Serial. */
+  serials: TransferSerialSuggestionDto[]
+}
+
+function normaliseTrackingRow(row: TransferTrackingRowDto): TransferTrackingRowDto {
+  return {
+    ...row,
+    serialNo: row.serialNo ?? null,
+    batchNo: row.batchNo ?? null,
+    expiryDate: dateOnly(row.expiryDate ?? null),
+    lostBase: row.lostBase ?? 0,
+    settledBase: row.settledBase ?? 0,
+    onTheWayBase: row.onTheWayBase ?? 0,
+    dispatchTrackingId: row.dispatchTrackingId ?? null,
+    dispatchNumber: row.dispatchNumber ?? null,
+    stateText: row.stateText ?? '',
+  }
+}
+
+export const transferTrackingApi = {
+  /**
+   * The dialog's Done: the whole dispatch as it would be posted (date and ETA ignored), checked without a lock and
+   * without writing anything. `forLineId` limits the WARNINGS to that line; the errors are the whole dispatch's.
+   */
+  checkDispatch: async (
+    id: number,
+    payload: DispatchTransferRequest,
+    forLineId?: number | null,
+    signal?: AbortSignal,
+  ): Promise<CheckDispatchTrackingResult> => {
+    const qs = forLineId ? `?forLineId=${forLineId}` : ''
+    const result = await request<CheckDispatchTrackingResult>(`${BASE}/${id}/dispatch/check-tracking${qs}`, {
+      method: 'POST',
+      body: payload,
+      signal,
+    })
+    const problems = (result?.problems ?? []).map((p) => ({
+      ...p,
+      transferOrderLineId: p.transferOrderLineId ?? null,
+      lineNumber: p.lineNumber ?? null,
+      rowNumber: p.rowNumber ?? null,
+    }))
+    return {
+      problems,
+      errorCount: result?.errorCount ?? problems.filter((p) => p.severity === 'Error').length,
+      warningCount: result?.warningCount ?? problems.filter((p) => p.severity === 'Warning').length,
+    }
+  },
+
+  /**
+   * The tracking rows of one dispatch or receipt of the order, with their state (404 when the posting is not the
+   * order's). `onTheWayOnly`: the dispatch rows still on the way (what a receipt may take).
+   */
+  postingRows: async (
+    id: number,
+    postingId: number,
+    onTheWayOnly = false,
+    signal?: AbortSignal,
+  ): Promise<TransferTrackingRowDto[]> => {
+    const qs = onTheWayOnly ? '?onTheWayOnly=true' : ''
+    const rows = await request<TransferTrackingRowDto[]>(`${BASE}/${id}/postings/${postingId}/tracking${qs}`, { signal })
+    return (rows ?? []).map(normaliseTrackingRow)
+  },
+
+  /** "Known at {From}…": the serials received into the order's From by transfers and not sent since (serial items). */
+  suggestions: async (id: number, lineId: number, signal?: AbortSignal): Promise<TransferTrackingSuggestionsDto> => {
+    const result = await request<TransferTrackingSuggestionsDto>(`${BASE}/${id}/lines/${lineId}/tracking-suggestions`, {
+      signal,
+    })
+    return {
+      trackingKind: result?.trackingKind ?? null,
+      serials: (result?.serials ?? []).map((s) => ({
+        ...s,
+        expiryDate: dateOnly(s.expiryDate ?? null),
+        receivedByNumber: s.receivedByNumber ?? null,
+        receivedOn: dateOnly(s.receivedOn ?? null),
+      })),
+    }
   },
 }

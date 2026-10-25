@@ -39,6 +39,7 @@ import { isoDate } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
+import { trackingKindOf } from '../../components/tracking/trackingNumbers'
 import { AddBelowMinDrawer } from '../../components/transfers/AddBelowMinDrawer'
 import { ChangeEtaModal } from '../../components/transfers/ChangeEtaModal'
 import { DispatchTransferModal, type DispatchMode } from '../../components/transfers/DispatchTransferModal'
@@ -521,6 +522,10 @@ export function TransferOrderPage() {
                 packingFormula: base?.packingFormula ?? 1,
                 ...NO_AVAILABILITY,
                 ...NO_LEVELS,
+                // (93) The new item's tracking at once (the item's answer carries it): a line changed to another item
+                // never keeps the old one's badge until the draft is saved.
+                trackingKind: trackingKindOf(details.trackingMode, details.requiresExpiry),
+                requiresExpiry: details.requiresExpiry === true,
                 error: undefined,
               }
             : line,
@@ -1278,6 +1283,7 @@ export function TransferOrderPage() {
 
       {order && (order.status === 'Released' || order.status === 'Cancelled' || order.postings.length > 0) && (
         <TransferPostingsCard
+          orderId={order.id}
           postings={order.postings}
           hasPermission={hasPermission}
           dirty={isDirty}

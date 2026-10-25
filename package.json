@@ -10,7 +10,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "node --test \"scripts/tests/*.test.ts\""
   },
   "dependencies": {
     "@mantine/charts": "^9.5.2",
