@@ -383,10 +383,8 @@ export interface PurchaseDocumentLineDto {
   notes: string | null
   sourceLineId: number | null
   onHandBase: number
-  itemLastCost: number | null
-  itemAverageCost: number | null
-  /** The item's FOB cost as it stands now — what the next invoice would start from. */
-  itemFobCost: number | null
+  /* (94) itemLastCost, itemAverageCost and itemFobCost are no longer sent: the item's current costs are not a purchase
+     document's figure, and no page drew them (the item's own read carries them, for a reader who may see them). */
 }
 
 export interface PurchaseDocumentFileDto {

@@ -62,6 +62,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { ForbiddenPage } from '../ForbiddenPage'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
@@ -83,6 +84,9 @@ function focusItem(index: number, attempt = 0) {
   }
   if (attempt < 10) window.setTimeout(() => focusItem(index, attempt + 1), 40)
 }
+
+/** (94) Under the lines of a receipt without an order, for a reader without View item costs. */
+const NO_COSTS_MANUAL_NOTE = "You may not see item costs: each line is saved at the item's last cost (its average when it has none)."
 
 /**
  * One goods receipt (GRN): a draft counted and corrected, then posted - the goods enter the stock and the item costs are
@@ -109,6 +113,10 @@ export function GoodsReceiptPage() {
   const canPost = hasPermission(PERMISSIONS.goodsReceiptsPost)
   const canCancel = hasPermission(PERMISSIONS.goodsReceiptsCancel)
   const canDelete = hasPermission(PERMISSIONS.goodsReceiptsDelete)
+  /* (94) WITHOUT VIEW ITEM COSTS a receipt shows no cost or value (the server sends them null) and a line without an order
+     is priced by the server: it starts without a typed cost, and the save sends none - a saved line keeps its cost by its
+     id, a new one takes the item's last cost, else its average. */
+  const seesCosts = useSeesItemCosts()
 
   const [loading, setLoading] = useState(!isNew)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -152,6 +160,10 @@ export function GoodsReceiptPage() {
   const isPosted = status === 2
   const editable = canCreate && (isNew || (isDraft && receipt?.canEdit !== false))
   const currencyCode = receipt?.baseCurrencyCode ?? 'USD'
+  /* (94) THE COSTS ARE DRAWN WHEN THE READER MAY SEE THEM AND THE PAGE HOLDS THEM: a receipt the server sent without its
+     costs (its current value is null only then) is not drawn with empty cost boxes while the reader's permission
+     changes - it is read again below - and the save says the page drew none, so its typed costs are kept. */
+  const drawCosts = seesCosts && !(receipt !== null && receipt.currentValueBase === null)
 
   /* ── loading ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -230,6 +242,16 @@ export function GoodsReceiptPage() {
       cancelled = true
     }
   }, [receiptId, applyReceipt])
+
+  /* (94) THE READER'S PERMISSION CHANGED WHILE THE PAGE WAS OPEN (a token refreshed after "View item costs" was ticked or
+     unticked): a saved receipt with no edits is read again, so it shows what the reader may now see. With edits it stays
+     as it is, and its save says it drew no cost while it holds a receipt read without them. */
+  const seesCostsBefore = useRef(seesCosts)
+  useEffect(() => {
+    if (seesCostsBefore.current === seesCosts) return
+    seesCostsBefore.current = seesCosts
+    if (receiptId !== null && !dirty.current) void reload()
+  }, [seesCosts, receiptId, reload])
 
   /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail; the lines being counted stay. */
   const filesChanged = useCallback(async () => {
@@ -395,7 +417,8 @@ export function GoodsReceiptPage() {
                 itemUnitId: base?.id ?? null,
                 unitTypeName: base?.unitTypeName ?? '',
                 packingFormula: base?.packingFormula ?? 1,
-                manualUnitCostBase: details.lastCost ?? null,
+                // (94) proposed as an Inventory In line is: the last cost when it is not 0, else the average (C13)
+                manualUnitCostBase: seesCosts ? (details.lastCost ? details.lastCost : details.averageCost ? details.averageCost : null) : null,
                 error: undefined,
               }
             : line,
@@ -404,7 +427,7 @@ export function GoodsReceiptPage() {
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
     }
-  }, [])
+  }, [seesCosts])
 
   function addLine() {
     markDirty()
@@ -508,8 +531,13 @@ export function GoodsReceiptPage() {
       notes: header.notes.trim() || null,
       rowVersion: receipt?.rowVersion ?? null,
       ...(isNew ? { sourceKind: 'Manual' as const } : {}),
+      // (94) No cost drawn: the server keeps each saved line's typed cost by its id (a reader whose token still holds the
+      // permission included), and prices a new one at the item's last cost, else its average.
+      costsHidden: !drawCosts,
       lines: lines.map((line, index) => ({
         lineNumber: index + 1,
+        // (94) The line's id as it was read (null on a new row): how the server finds the cost a saved line keeps.
+        id: line.id,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
         quantity: line.quantity,
@@ -522,7 +550,7 @@ export function GoodsReceiptPage() {
         varianceReasonCode: line.varianceReasonCode,
         varianceReason: line.varianceReason.trim() || null,
         closeShort: line.kind !== 'container' && line.poLineId !== null ? line.closeShort : false,
-        manualUnitCostBase: line.kind === 'manual' ? line.manualUnitCostBase : null,
+        manualUnitCostBase: line.kind === 'manual' && drawCosts ? line.manualUnitCostBase : null,
         expiryDate: line.expiryDate,
         notes: line.notes.trim() || null,
       })),
@@ -579,7 +607,7 @@ export function GoodsReceiptPage() {
 
     const go = await confirm({
       title: 'Post goods receipt',
-      message: postConfirmFor(saved, warehouses),
+      message: postConfirmFor(saved, warehouses, seesCosts),
       confirmLabel: 'Post',
     })
     if (!go) return
@@ -892,7 +920,13 @@ export function GoodsReceiptPage() {
           items={items}
           warehouseData={warehouseData}
           currencyCode={currencyCode}
+          showCosts={drawCosts}
         />
+        {isManual && editable && !seesCosts && (
+          <Text size="sm" c="dimmed" mt="xs">
+            {NO_COSTS_MANUAL_NOTE}
+          </Text>
+        )}
       </Paper>
 
       {receipt && !isDraft && receipt.costChanges.length > 0 && (

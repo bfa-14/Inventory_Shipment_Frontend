@@ -21,6 +21,7 @@ import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { saveItemSequence } from './itemSequence'
 import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
@@ -69,6 +70,9 @@ export function ItemsPage() {
   const narrow = useMediaQuery(NARROW)
   /* The cost column is for the desk, not the phone: below 1024 px the row has no room for it. */
   const wide = useMediaQuery('(min-width: 1024px)')
+  /* (94) And for a reader who may see item costs: without View item costs the two columns are not drawn (the server
+     sends them null). GRID_COLUMNS keeps their meta: a meta without its column is inert. */
+  const seesCosts = useSeesItemCosts()
   const [busyId, setBusyId] = useState<number | null>(null)
 
   const canCreate = hasPermission(PERMISSIONS.itemsCreate)
@@ -307,7 +311,7 @@ export function ItemsPage() {
         </Text>
       ),
     },
-    ...(wide
+    ...(wide && seesCosts
       ? [
           {
             accessor: 'averageCost',

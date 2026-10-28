@@ -19,8 +19,8 @@ import type { TrackingKind, TrackingMode } from '../types'
  * the colours).
  *
  * QUANTITIES ARE PIECES wherever a name ends in `Base`; Ordered is also kept in the line's own unit (`quantity`).
- * VALUES (`…ValueBase`, `unitCostBase`, `lossUnitCostBase`) are null, never 0, for a reader who may not see stock
- * values: the server strips them, and a page shows nothing (or "—") for a null.
+ * VALUES (`…ValueBase`, `unitCostBase`, `lossUnitCostBase`) are null, never 0, for a reader who may not see item
+ * costs (inventory.costs.view, script 94): the server strips them, and a page shows nothing (or "—") for a null.
  *
  * EVERY RULE IS THE SERVER'S. Each action of the order comes with `abilities.{action}`: allowed, or the sentence the
  * action would be refused with (inventory.fn_TransferOrder_Blocks); each posting with canReverse / canChangeEta and

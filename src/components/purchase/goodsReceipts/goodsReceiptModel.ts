@@ -86,10 +86,12 @@ export function receiptLabel(row: { id: number; documentNumber: string | null })
 /**
  * Post confirm: "{n} pcs enter {warehouse} at {value} {USD}, ...". The sentence about the order price only when a line
  * has one (an order's or a container's line): a receipt without an order has its cost typed, and an invoice's lines
- * are invoiced already.
+ * are invoiced already. (94) A null value - a reader without View item costs - names no figure: "{n} pcs enter
+ * {warehouse}, ...".
  */
-export function postConfirmMessage(pieces: number, warehouse: string, value: number, currencyCode: string, atOrderPrice = true): string {
-  const first = `Post this goods receipt? ${formatNumber(pieces)} pcs enter ${warehouse} at ${formatNumber(value, 2)} ${currencyCode}, the item costs are updated and the number is assigned.`
+export function postConfirmMessage(pieces: number, warehouse: string, value: number | null, currencyCode: string, atOrderPrice = true): string {
+  const worth = value === null ? '' : ` at ${formatNumber(value, 2)} ${currencyCode}`
+  const first = `Post this goods receipt? ${formatNumber(pieces)} pcs enter ${warehouse}${worth}, the item costs are updated and the number is assigned.`
   return atOrderPrice
     ? `${first} Pieces not invoiced yet are valued at the order price; their cost is adjusted when the invoice is posted.`
     : first
@@ -97,13 +99,14 @@ export function postConfirmMessage(pieces: number, warehouse: string, value: num
 
 /**
  * The post confirm of a SAVED receipt, from its lines: what the page asks, and the list's row Post (which reads the
- * receipt first). The value is the server's when it has one, else the estimate of the lines.
+ * receipt first). The value is the server's when it has one, else the estimate of the lines. (94) `seesCosts` false (no
+ * View item costs): the sentence names no value - the server sent none.
  */
-export function postConfirmFor(receipt: GoodsReceiptDto, warehouses: WarehouseLookupDto[]): string {
+export function postConfirmFor(receipt: GoodsReceiptDto, warehouses: WarehouseLookupDto[], seesCosts = true): string {
   const lines = receipt.lines.map((line) => toLineForm(line))
   const pieces = lines.reduce((sum, line) => sum + receivedBaseOf(line), 0)
   const estimate = lines.reduce((sum, line) => sum + (lineValueOf(line, false) ?? 0), 0)
-  const value = receipt.currentValueBase > 0 ? receipt.currentValueBase : estimate
+  const value = !seesCosts ? null : receipt.currentValueBase !== null && receipt.currentValueBase > 0 ? receipt.currentValueBase : estimate
   const atOrderPrice = lines.some((line) => line.kind === 'order' || line.kind === 'container')
   return postConfirmMessage(pieces, warehousesOf(lines, receipt.warehouseCode, warehouses), value, receipt.baseCurrencyCode ?? 'USD', atOrderPrice)
 }

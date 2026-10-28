@@ -20,6 +20,7 @@ import { useAuth } from '../auth/useAuth'
 import { PERMISSIONS } from '../navigation'
 import { routes } from '../routes'
 import { useApprovalsMe } from '../hooks/useApprovalsMe'
+import { useSeesItemCosts } from '../hooks/useSeesItemCosts'
 import css from './DashboardPage.module.css'
 
 /** The periods every widget answers for, and what each one is compared with. */
@@ -237,6 +238,9 @@ function Board({ data, ccy, branchChosen }: { data: DashboardSummaryDto; ccy: st
   // Script 75: the statement and the valuation have their own permissions; fall back to the lists.
   const receivablesTo = hasPermission(PERMISSIONS.statementView) ? '/sales/receipts/statement' : '/sales/invoices'
   const valuationTo = hasPermission(PERMISSIONS.valuationView) ? '/inventory/valuation' : '/inventory/items'
+  /* (94) The inventory value and the value by warehouse are stock at the average cost: without View item costs the pill
+     counts the items in stock instead, and there is no donut (the server sends both null). */
+  const seesCosts = useSeesItemCosts()
   const { sales, receivables, payables, inventory, onTheWay } = data
   const money = (value: number | null | undefined) => `${formatNumber(value ?? 0, 2)} ${ccy}`
 
@@ -293,7 +297,12 @@ function Board({ data, ccy, branchChosen }: { data: DashboardSummaryDto; ccy: st
         label="We owe" value={money(total)} chip={{ text: `${count} open`, className: css.chipDim }} />,
     )
   }
-  if (inventory) {
+  if (inventory && !seesCosts) {
+    pills.push(
+      <Pill key="inventory" to={valuationTo} icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
+        label="Items in stock" value={formatNumber(inventory.itemsInStock)} />,
+    )
+  } else if (inventory) {
     pills.push(
       <Pill key="inventory" to={valuationTo} icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
         label="Inventory value" value={money(inventory.valueBase)} chip={{ text: `${inventory.itemsInStock} items`, className: css.chipDim }}
@@ -354,7 +363,7 @@ function Board({ data, ccy, branchChosen }: { data: DashboardSummaryDto; ccy: st
   if (data.salesByFamily) {
     donuts.push(<Donut key="family" title="Sales by item family" slices={data.salesByFamily} ccy={ccy} empty="No sales in the period." />)
   }
-  if (data.stockByWarehouse) {
+  if (data.stockByWarehouse && seesCosts) {
     donuts.push(<Donut key="warehouse" title="Stock value by warehouse" slices={data.stockByWarehouse} ccy={ccy} empty="No stock on hand." />)
   }
   if (donuts.length > 0) left.push(<div key="donuts" className={css.row}>{donuts}</div>)
@@ -400,7 +409,8 @@ function Pill({ to, icon, colour, label, value, chip, tooltip }: {
   colour: string
   label: string
   value: string
-  chip: { text: string; className: string }
+  /** The chip at the right; left out (94: "Items in stock", whose count is the figure itself), the pill has none. */
+  chip?: { text: string; className: string }
   /** What the figure includes, on hover; left out, the pill has no tooltip. */
   tooltip?: string
 }) {
@@ -411,7 +421,7 @@ function Pill({ to, icon, colour, label, value, chip, tooltip }: {
         <div className={css.pillLabel}>{label}</div>
         <div className={css.pillValue}>{value}</div>
       </span>
-      <span className={`${css.chip} ${chip.className}`}>{chip.text}</span>
+      {chip && <span className={`${css.chip} ${chip.className}`}>{chip.text}</span>}
     </Link>
   )
   return tooltip ? <Tooltip label={tooltip} withArrow multiline w={280}>{pill}</Tooltip> : pill

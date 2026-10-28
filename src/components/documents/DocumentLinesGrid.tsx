@@ -41,6 +41,14 @@ export interface EditableLine {
   units: Pick<ItemUnitDto, 'id' | 'unitTypeName' | 'packingFormula'>[]
   /** A "Line N: …" message the API sent back about this row. */
   error?: string
+  /**
+   * (94) THE PAGE HOLDS NO REAL COST FOR THIS LINE: the server sent it without one (read by a reader who could not see
+   * item costs), the item it was proposed from came without costs, or an imported row had none and the item's cost has
+   * not been proposed yet. Its cost goes to the server as null - a saved line then keeps its own cost (by its id), any
+   * other is priced at the item's last cost, else its average - until a cost is typed or proposed. A hidden figure is
+   * never saved back as a real one.
+   */
+  costUnknown?: boolean
 }
 
 interface DocumentLinesGridProps {
@@ -74,6 +82,16 @@ interface DocumentLinesGridProps {
   currencyCode: string
   /** False on an Inventory Out: the cost is the average, applied by the database. */
   costIsEditable: boolean
+  /**
+   * (94) False for a reader without View item costs (inventory.costs.view): the Unit Cost and Total Cost columns are not
+   * drawn at all - the page decides by the permission, never by the data. Absent: true.
+   */
+  showCosts?: boolean
+  /**
+   * (94) The tooltip of a cost that cannot be typed. Absent: "Average cost is applied automatically" (an Out); an In
+   * passes its own words, since its server-side default is the item's last cost.
+   */
+  costHint?: string
   /** True on an Out — the grid then warns when a line asks for more than there is. */
   warnOnOverdraw: boolean
   readOnly: boolean
@@ -102,6 +120,8 @@ export function DocumentLinesGrid({
   onItemChosen,
   currencyCode,
   costIsEditable,
+  showCosts = true,
+  costHint = 'Average cost is applied automatically',
   warnOnOverdraw,
   readOnly,
 }: DocumentLinesGridProps) {
@@ -146,9 +166,11 @@ export function DocumentLinesGrid({
   }
 
   const total = (line: EditableLine) => line.quantity * line.unitCost
+  /* (94) Without the two cost columns the row is 260 px narrower; the empty and "add" rows span what is drawn. */
+  const columnCount = showCosts ? 11 : 9
 
   return (
-    <Table.ScrollContainer minWidth={1240}>
+    <Table.ScrollContainer minWidth={showCosts ? 1240 : 980}>
       <Table striped highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
@@ -159,8 +181,8 @@ export function DocumentLinesGrid({
             <Table.Th w={190}>Warehouse</Table.Th>
             <Table.Th w={90} ta="right">On Hand</Table.Th>
             <Table.Th w={100} ta="right">Qty</Table.Th>
-            <Table.Th w={130} ta="right">Unit Cost</Table.Th>
-            <Table.Th w={130} ta="right">Total Cost</Table.Th>
+            {showCosts && <Table.Th w={130} ta="right">Unit Cost</Table.Th>}
+            {showCosts && <Table.Th w={130} ta="right">Total Cost</Table.Th>}
             <Table.Th w={160}>Notes</Table.Th>
             <Table.Th w={84} />
           </Table.Tr>
@@ -261,6 +283,9 @@ export function DocumentLinesGrid({
                           itemUnitId: unit.id,
                           unitTypeName: unit.unitTypeName,
                           packingFormula: unit.packingFormula,
+                          // (94) THE COST IS PER UNIT: a Box of 12 costs twelve pieces.
+                          unitCost:
+                            Math.round((line.unitCost / (line.packingFormula || 1)) * unit.packingFormula * 10000) / 10000,
                         })
                       }}
                       comboboxProps={{ withinPortal: true }}
@@ -329,34 +354,42 @@ export function DocumentLinesGrid({
                   )}
                 </Table.Td>
 
-                <Table.Td data-line-cost={line.key}>
-                  {readOnly || !costIsEditable ? (
-                    <Tooltip
-                      label="Average cost is applied automatically"
-                      // Said in every mode on an Out: a posted Out's cost is still the average, not a typed figure.
-                      disabled={costIsEditable}
-                      withArrow
-                    >
-                      <Text fz="sm" ta="right" c={costIsEditable ? undefined : 'dimmed'}>
-                        {formatNumber(line.unitCost, 2)}
-                      </Text>
-                    </Tooltip>
-                  ) : (
-                    <NumberInput
-                      value={line.unitCost}
-                      min={0}
-                      decimalScale={2}
-                      fixedDecimalScale
-                      thousandSeparator=","
-                      // Parsed, not type-checked: with fixedDecimalScale the value arrives as "2,150.00".
-                      onChange={(next) => onChange(line.key, { unitCost: numberInputValue(next) ?? 0 })}
-                    />
-                  )}
-                </Table.Td>
+                {showCosts && (
+                  <Table.Td data-line-cost={line.key}>
+                    {readOnly || !costIsEditable ? (
+                      <Tooltip
+                        label={costHint}
+                        // Said in every mode on an Out: a posted Out's cost is still the average, not a typed figure.
+                        disabled={costIsEditable}
+                        withArrow
+                      >
+                        <Text fz="sm" ta="right" c={costIsEditable ? undefined : 'dimmed'}>
+                          {formatNumber(line.unitCost, 2)}
+                        </Text>
+                      </Tooltip>
+                    ) : (
+                      <NumberInput
+                        value={line.unitCost}
+                        min={0}
+                        decimalScale={2}
+                        fixedDecimalScale
+                        thousandSeparator=","
+                        // Parsed, not type-checked: with fixedDecimalScale the value arrives as "2,150.00". (94) A cost
+                        // typed (a different figure) is a real one: the line is no longer priced by the server.
+                        onChange={(next) => {
+                          const unitCost = numberInputValue(next) ?? 0
+                          onChange(line.key, unitCost === line.unitCost ? { unitCost } : { unitCost, costUnknown: false })
+                        }}
+                      />
+                    )}
+                  </Table.Td>
+                )}
 
-                <Table.Td ta="right">
-                  <Text fz="sm" fw={500}>{money(total(line), currencyCode)}</Text>
-                </Table.Td>
+                {showCosts && (
+                  <Table.Td ta="right">
+                    <Text fz="sm" fw={500}>{money(total(line), currencyCode)}</Text>
+                  </Table.Td>
+                )}
 
                 <Table.Td>
                   {readOnly ? (
@@ -413,7 +446,7 @@ export function DocumentLinesGrid({
 
           {lines.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={columnCount}>
                 <Text ta="center" c="dimmed" py="lg">
                   No lines yet. Scan an item above, or add one below.
                 </Text>
@@ -425,7 +458,7 @@ export function DocumentLinesGrid({
               it makes people hunt upwards after every line they finish. */}
           {!readOnly && (
             <Table.Tr style={{ cursor: 'pointer' }} onClick={onAdd}>
-              <Table.Td colSpan={11}>
+              <Table.Td colSpan={columnCount}>
                 <Text c="dimmed" fz="sm">
                   + Click to add an item…
                 </Text>

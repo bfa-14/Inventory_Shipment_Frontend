@@ -49,6 +49,7 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
@@ -164,6 +165,9 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
   const canPost = hasPermission(PERMISSIONS.goodsReceiptsPost)
   const canCancel = hasPermission(PERMISSIONS.goodsReceiptsCancel)
   const canDelete = hasPermission(PERMISSIONS.goodsReceiptsDelete)
+  /* (94) A receipt's value is its goods at their cost: without View item costs the Value column is not drawn (so it is
+     neither sorted, filtered nor exported) and the month-end line gives the pieces only. The server sends both null. */
+  const seesCosts = useSeesItemCosts()
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
@@ -303,7 +307,7 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
     }
     const go = await confirm({
       title: 'Post goods receipt',
-      message: postConfirmFor(receipt, warehouses),
+      message: postConfirmFor(receipt, warehouses, seesCosts),
       confirmLabel: 'Post',
     })
     if (!go) return
@@ -502,7 +506,17 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
         </Text>
       ),
     },
-    { accessor: 'valueBase', title: 'Value (USD)', width: 135, textAlign: 'right', render: (row) => formatNumber(row.valueBase, 2) },
+    ...(seesCosts
+      ? [
+          {
+            accessor: 'valueBase',
+            title: 'Value (USD)',
+            width: 135,
+            textAlign: 'right',
+            render: (row: GoodsReceiptListItemDto) => formatNumber(row.valueBase, 2),
+          } satisfies DataTableColumn<GoodsReceiptListItemDto>,
+        ]
+      : []),
     {
       accessor: 'actions',
       title: 'Actions',
@@ -679,7 +693,9 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
 
       {totals && (
         <Text size="sm" mt="xs" c="dimmed" data-received-not-invoiced>
-          Received not invoiced: {formatNumber(totals.receivedNotInvoicedBase)} pcs, {formatNumber(totals.receivedNotInvoicedValueBase, 2)} USD at the order price.
+          {seesCosts
+            ? `Received not invoiced: ${formatNumber(totals.receivedNotInvoicedBase)} pcs, ${formatNumber(totals.receivedNotInvoicedValueBase, 2)} USD at the order price.`
+            : `Received not invoiced: ${formatNumber(totals.receivedNotInvoicedBase)} pcs.`}
         </Text>
       )}
 

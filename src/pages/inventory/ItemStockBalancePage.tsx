@@ -7,6 +7,7 @@ import { itemsApi } from '../../api/inventory/items'
 import type { ItemStockBalanceDto } from '../../api/types'
 import { formatDateTime, formatNumber } from '../../components/format'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 
 /**
  * One item's stock, warehouse by warehouse - where the item card's "Stock Balance" quick link goes.
@@ -14,6 +15,9 @@ import { PageHeader } from '../../components/ui/PageHeader'
  * EVERY WAREHOUSE THAT HAS HELD THE ITEM, zero included: a warehouse that has just been emptied is
  * an answer ("none left there"), not something to hide. A negative figure is out-of-stock selling
  * the warehouse has not caught up with yet, and is shown in red rather than rounded away.
+ *
+ * (94) THE VALUE IS AN ITEM COST: without View item costs the value tile, column and footer cell are not drawn (the server
+ * sends them null), and the two remaining tiles share the row.
  */
 export function ItemStockBalancePage() {
   const { id } = useParams<{ id: string }>()
@@ -21,6 +25,7 @@ export function ItemStockBalancePage() {
   const itemId = Number(id)
   const [data, setData] = useState<ItemStockBalanceDto | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const seesCosts = useSeesItemCosts()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -68,7 +73,7 @@ export function ItemStockBalancePage() {
 
       {data && (
         <>
-          <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">
+          <SimpleGrid cols={{ base: 1, sm: seesCosts ? 3 : 2 }} mb="md">
             <Paper withBorder radius="lg" p="md">
               <Text c="dimmed" fz="sm">Total on hand</Text>
               <Text fw={700} fz="xl">{formatNumber(data.totalOnHandBase)}</Text>
@@ -77,10 +82,12 @@ export function ItemStockBalancePage() {
               <Text c="dimmed" fz="sm">Warehouses holding it</Text>
               <Text fw={700} fz="xl">{formatNumber(holding)}</Text>
             </Paper>
-            <Paper withBorder radius="lg" p="md">
-              <Text c="dimmed" fz="sm">Inventory value</Text>
-              <Text fw={700} fz="xl">{formatNumber(data.totalInventoryValue, 2)} USD</Text>
-            </Paper>
+            {seesCosts && (
+              <Paper withBorder radius="lg" p="md">
+                <Text c="dimmed" fz="sm">Inventory value</Text>
+                <Text fw={700} fz="xl">{formatNumber(data.totalInventoryValue, 2)} USD</Text>
+              </Paper>
+            )}
           </SimpleGrid>
 
           <Paper withBorder radius="lg" p="md">
@@ -94,7 +101,7 @@ export function ItemStockBalancePage() {
                       <Table.Th>Warehouse</Table.Th>
                       <Table.Th>Branch</Table.Th>
                       <Table.Th ta="right">On Hand</Table.Th>
-                      <Table.Th ta="right">Value (USD)</Table.Th>
+                      {seesCosts && <Table.Th ta="right">Value (USD)</Table.Th>}
                       <Table.Th>Last Movement</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
@@ -113,7 +120,7 @@ export function ItemStockBalancePage() {
                             {formatNumber(w.onHandBase)}
                           </Text>
                         </Table.Td>
-                        <Table.Td ta="right">{formatNumber(w.inventoryValue, 2)}</Table.Td>
+                        {seesCosts && <Table.Td ta="right">{formatNumber(w.inventoryValue, 2)}</Table.Td>}
                         <Table.Td>{w.lastMovementAtUtc ? formatDateTime(w.lastMovementAtUtc) : '—'}</Table.Td>
                       </Table.Tr>
                     ))}
@@ -122,7 +129,7 @@ export function ItemStockBalancePage() {
                     <Table.Tr>
                       <Table.Th colSpan={2}>Total</Table.Th>
                       <Table.Th ta="right">{formatNumber(data.totalOnHandBase)}</Table.Th>
-                      <Table.Th ta="right">{formatNumber(data.totalInventoryValue, 2)}</Table.Th>
+                      {seesCosts && <Table.Th ta="right">{formatNumber(data.totalInventoryValue, 2)}</Table.Th>}
                       <Table.Th />
                     </Table.Tr>
                   </Table.Tfoot>

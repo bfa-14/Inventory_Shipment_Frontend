@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../ui/DataTable'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { derive, STOCK_PLUS_TRANSIT_HINT, TRANSFERS_IN_HINT, type ShortageDerived, type ShortageLine } from './shortageMath'
 
 /** A line with its place on the document and every derived cell — what the grid sorts and draws. */
@@ -59,6 +60,9 @@ function compare(a: Row, b: Row, status: DataTableSortStatus<Row>): number {
 export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, readOnly }: ShortageLinesGridProps) {
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Row>>(LINE_ORDER)
   const [order, setOrder] = useState<string[]>([])
+  /* (94) Last cost is an item cost: without View item costs the column is not drawn (the server sends it null), so it
+     cannot be sorted either. */
+  const seesCosts = useSeesItemCosts()
 
   const rows: Row[] = lines.map((line, index) => ({ ...line, ...derive(line, leadTimeMonths), lineNo: index + 1 }))
   const byKey = new Map(rows.map((row) => [row.key, row]))
@@ -272,7 +276,18 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
     { accessor: 'containerRequirement', title: 'Container Requirement', sortable: true, width: 200, textAlign: 'right', render: (row) => <Text fz="sm" data-line-containers={row.key}>{formatNumber(row.containerRequirement, 2)}</Text> },
     { accessor: 'minQuantity', title: 'Min', sortable: true, width: 80, textAlign: 'right', render: (row) => number(row.minQuantity) },
     { accessor: 'maxQuantity', title: 'Max', sortable: true, width: 80, textAlign: 'right', render: (row) => number(row.maxQuantity) },
-    { accessor: 'lastCost', title: 'Last cost', sortable: true, width: 120, textAlign: 'right', render: (row) => number(row.lastCost, 2) },
+    ...(seesCosts
+      ? [
+          {
+            accessor: 'lastCost',
+            title: 'Last cost',
+            sortable: true,
+            width: 120,
+            textAlign: 'right',
+            render: (row: Row) => number(row.lastCost, 2),
+          } satisfies DataTableColumn<Row>,
+        ]
+      : []),
     {
       accessor: 'notes',
       title: 'Notes',

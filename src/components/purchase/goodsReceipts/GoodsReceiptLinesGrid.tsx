@@ -26,6 +26,7 @@ import {
   type VarianceReasonCode,
 } from '../../../api/purchase/goodsReceipts'
 import type { ItemLookupDto } from '../../../api/types'
+import { useSeesItemCosts } from '../../../hooks/useSeesItemCosts'
 import { unitLabel } from '../../documents/documentKind'
 import { formatNumber, numberInputValue } from '../../format'
 import {
@@ -55,6 +56,11 @@ interface GoodsReceiptLinesGridProps {
   items: ItemLookupDto[]
   warehouseData: WarehouseGroup[]
   currencyCode: string
+  /**
+   * (94) Whether the cost and value columns are drawn: the page's decision - false without View item costs, or while it
+   * holds a receipt the server sent without them. Absent: the reader's permission.
+   */
+  showCosts?: boolean
 }
 
 const REASON_DATA = VARIANCE_REASONS.map((r) => ({ value: r.value, label: r.label }))
@@ -69,6 +75,10 @@ const REASON_DATA = VARIANCE_REASONS.map((r) => ({ value: r.value, label: r.labe
  *
  * A TABLE ON A SCREEN, CARDS ON A PHONE. At 390 px each line shows Item, Expected, Received and Reason first; the cost
  * figures drop below them, because the warehouse counts pieces and only then looks at money.
+ *
+ * (94) THE MONEY IS AN ITEM COST: without View item costs the Unit cost and Value columns (the phone's cost row) and the
+ * typed cost of a line without an order are not drawn - the server sends them null and prices such a line itself. What
+ * is not a figure stays, in a "Cost source" column of its own: the source's name and the invoiced pieces.
  */
 export function GoodsReceiptLinesGrid({
   lines,
@@ -82,8 +92,11 @@ export function GoodsReceiptLinesGrid({
   items,
   warehouseData,
   currencyCode,
+  showCosts,
 }: GoodsReceiptLinesGridProps) {
   const phone = useMediaQuery('(max-width: 48em)')
+  const seesCostsPermission = useSeesItemCosts()
+  const seesCosts = showCosts ?? seesCostsPermission
   const manualReceipt = sourceKind === 'Manual'
   const showWarehouse = sourceKind !== 'Container'
   const showExpected = !manualReceipt || lines.some((l) => l.expectedQuantityBase !== null)
@@ -299,13 +312,47 @@ export function GoodsReceiptLinesGrid({
     )
   }
 
-  function costCell(line: GoodsReceiptLineForm, index: number): ReactNode {
+  /** Where the line's cost comes from (Order, Invoice, Manual...): a name, not a figure. */
+  function costSourceBadge(line: GoodsReceiptLineForm): ReactNode {
     const source = costSourceOf(line)
-    const badge = source ? (
+    return source ? (
       <Badge size="xs" variant="light" color={source === 'Order' ? 'yellow' : source === 'Manual' ? 'gray' : source === 'Mixed' ? 'orange' : 'green'}>
         {COST_SOURCE_LABELS[source]}
       </Badge>
     ) : null
+  }
+
+  /** A posted line of an order or a container: how many of its received pieces are invoiced. */
+  function invoicedNote(line: GoodsReceiptLineForm): ReactNode {
+    const received = receivedBaseOf(line)
+    return posted && line.kind !== 'manual' && received > 0 ? (
+      <Text fz={11} c="dimmed" ta="right">
+        {formatNumber(line.invoicedBase)} of {formatNumber(received)} pcs invoiced
+      </Text>
+    ) : null
+  }
+
+  /**
+   * (94) WITHOUT VIEW ITEM COSTS the line keeps what is not a cost: the cost's source and the invoiced pieces, in a column
+   * of their own ("Cost source"), without the figure.
+   */
+  function sourceCell(line: GoodsReceiptLineForm): ReactNode {
+    const badge = costSourceBadge(line)
+    const note = invoicedNote(line)
+    return badge || note ? (
+      <Stack gap={2} align="flex-end" miw={96}>
+        {badge}
+        {note}
+      </Stack>
+    ) : (
+      <Text fz="sm" c="dimmed" ta="right">
+        —
+      </Text>
+    )
+  }
+
+  function costCell(line: GoodsReceiptLineForm, index: number): ReactNode {
+    const badge = costSourceBadge(line)
 
     if (editable && line.kind === 'manual') {
       return (
@@ -327,16 +374,11 @@ export function GoodsReceiptLinesGrid({
     }
 
     const cost = unitCostOf(line)
-    const received = receivedBaseOf(line)
     return (
       <Stack gap={2} align="flex-end" miw={96}>
         <Text fz="sm">{cost === null ? '—' : formatNumber(cost, 2)}</Text>
         {badge}
-        {posted && line.kind !== 'manual' && received > 0 && (
-          <Text fz={11} c="dimmed" ta="right">
-            {formatNumber(line.invoicedBase)} of {formatNumber(received)} pcs invoiced
-          </Text>
-        )}
+        {invoicedNote(line)}
       </Stack>
     )
   }
@@ -455,20 +497,29 @@ export function GoodsReceiptLinesGrid({
                 )}
               </SimpleGrid>
             )}
-            <Group justify="space-between" align="flex-start" mt="xs" pt="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-2)' }}>
-              <Box>
+            {seesCosts ? (
+              <Group justify="space-between" align="flex-start" mt="xs" pt="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-2)' }}>
+                <Box>
+                  <Text fz="xs" c="dimmed">
+                    Unit cost
+                  </Text>
+                  {costCell(line, index)}
+                </Box>
+                <Box ta="right">
+                  <Text fz="xs" c="dimmed">
+                    Value ({currencyCode})
+                  </Text>
+                  {valueCell(line)}
+                </Box>
+              </Group>
+            ) : (
+              <Group justify="space-between" align="flex-start" mt="xs" pt="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-2)' }}>
                 <Text fz="xs" c="dimmed">
-                  Unit cost
+                  Cost source
                 </Text>
-                {costCell(line, index)}
-              </Box>
-              <Box ta="right">
-                <Text fz="xs" c="dimmed">
-                  Value ({currencyCode})
-                </Text>
-                {valueCell(line)}
-              </Box>
-            </Group>
+                {sourceCell(line)}
+              </Group>
+            )}
           </Paper>
         ))}
         {addLine}
@@ -480,7 +531,7 @@ export function GoodsReceiptLinesGrid({
 
   return (
     <>
-      <Table.ScrollContainer minWidth={showWarehouse ? 1040 : 880}>
+      <Table.ScrollContainer minWidth={(showWarehouse ? 1040 : 880) - (seesCosts ? 0 : 110)}>
         <Table verticalSpacing="xs" horizontalSpacing={8} striped>
           <Table.Thead>
             <Table.Tr>
@@ -492,8 +543,9 @@ export function GoodsReceiptLinesGrid({
               {showExpected && <Table.Th ta="right">Difference</Table.Th>}
               {showExpected && <Table.Th>Reason</Table.Th>}
               {showCloseShort && <Table.Th ta="center">Nothing more will come</Table.Th>}
-              <Table.Th ta="right">Unit cost ({currencyCode})</Table.Th>
-              <Table.Th ta="right">Value ({currencyCode})</Table.Th>
+              {seesCosts && <Table.Th ta="right">Unit cost ({currencyCode})</Table.Th>}
+              {seesCosts && <Table.Th ta="right">Value ({currencyCode})</Table.Th>}
+              {!seesCosts && <Table.Th ta="right">Cost source</Table.Th>}
               {removable && <Table.Th w={40} />}
             </Table.Tr>
           </Table.Thead>
@@ -523,8 +575,9 @@ export function GoodsReceiptLinesGrid({
                     <Group justify="center">{closeShortCell(line)}</Group>
                   </Table.Td>
                 )}
-                <Table.Td>{costCell(line, index)}</Table.Td>
-                <Table.Td ta="right">{valueCell(line)}</Table.Td>
+                {seesCosts && <Table.Td>{costCell(line, index)}</Table.Td>}
+                {seesCosts && <Table.Td ta="right">{valueCell(line)}</Table.Td>}
+                {!seesCosts && <Table.Td>{sourceCell(line)}</Table.Td>}
                 {removable && <Table.Td>{removeCell(line, index)}</Table.Td>}
               </Table.Tr>
             ))}

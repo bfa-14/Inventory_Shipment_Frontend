@@ -25,6 +25,7 @@ import { goodsReceiptsApi, type ReceivableContainerDto, type ReceivableDocumentD
 import type { PartyLookupDto } from '../../../api/types'
 import { useAuth } from '../../../auth/useAuth'
 import { refreshGoodsReceiptsWaiting } from '../../../hooks/useGoodsReceiptsWaiting'
+import { useSeesItemCosts } from '../../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../../navigation'
 import { routes } from '../../../routes'
 import { dateLabel } from '../../documents/documentKind'
@@ -64,6 +65,8 @@ export function NewGoodsReceiptModal({ opened, onClose, onPickOrder }: NewGoodsR
 
 function ChooserBody({ onClose, onPickOrder }: Omit<NewGoodsReceiptModalProps, 'opened'>) {
   const [step, setStep] = useState<Step>('choose')
+  // (94) A reader without View item costs types no cost on a receipt without an order: the server prices its lines.
+  const seesCosts = useSeesItemCosts()
   const [suppliers, setSuppliers] = useState<PartyLookupDto[] | null>(null)
 
   useEffect(() => {
@@ -106,7 +109,11 @@ function ChooserBody({ onClose, onPickOrder }: Omit<NewGoodsReceiptModalProps, '
       <Choice
         icon={<IconBox size={22} />}
         title="Without an order"
-        text="Goods of a supplier with no purchase order, at a typed cost."
+        text={
+          seesCosts
+            ? 'Goods of a supplier with no purchase order, at a typed cost.'
+            : "Goods of a supplier with no purchase order, at the item's last cost (its average when it has none)."
+        }
         onClick={() => setStep('manual')}
       />
       <Group justify="flex-end">

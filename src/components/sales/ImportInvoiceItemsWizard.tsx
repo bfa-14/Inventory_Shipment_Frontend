@@ -89,6 +89,13 @@ export interface ImportInvoiceItemsWizardProps {
   validate?: (file: File) => Promise<ImportValidationResult>
   /** The family's own template, in place of the sales import's (a transfer's Transfer_Order_Lines_Template.xlsx). */
   downloadTemplate?: () => Promise<void>
+  /**
+   * (94) Stock mode only: the reader may not see item costs (inventory.costs.view), so the preview has no Unit Cost
+   * column - the file's costs are not used, the server prices the lines. Absent: false.
+   */
+  hideCosts?: boolean
+  /** (94) Stock mode only: a dimmed line under the preview saying what becomes of the file's costs. Absent: none. */
+  costNote?: string
   /** The host's draft id, recorded on the audit row so it can be attached to the document later. */
   draftReference?: string | null
   /**
@@ -197,12 +204,18 @@ function ImportWizardBody({
   onSwitchWarehouse,
   validate: validateFile,
   downloadTemplate: downloadOwnTemplate,
+  hideCosts = false,
+  costNote,
 }: ImportInvoiceItemsWizardProps) {
   const fullScreen = useMediaQuery('(max-width: 768px)')
   const isStock = mode === 'stock'
   const isTransfer = mode === 'transfer'
   // Nothing priced: an inventory document's cost, or a transfer, which has none.
   const unpriced = mode !== 'invoice'
+  /* The price / cost column: never on a transfer (no money), and (94) not in stock mode for a reader who may not see item
+     costs. The note under the preview is stock mode's too. */
+  const showsPrice = !isTransfer && !(isStock && hideCosts)
+  const previewNote = isStock ? costNote : undefined
   /* NO ERROR FILE FOR A TRANSFER. The file is the sales import's (its columns: Warehouse, Unit Price...), behind its
      own right (sales.invoices.import): a transfer's rows would come back in a sales-shaped sheet. The reasons of every
      row are on screen (2.5.5 asks for no file). */
@@ -540,7 +553,7 @@ function ImportWizardBody({
         ? `Import ${importable.length} Row(s), Skip ${skipped}`
         : `Import Valid Rows (${importable.length})`
 
-  const columnCount = isTransfer ? 9 : isStock ? 11 : 12
+  const columnCount = isTransfer ? 9 : isStock ? (showsPrice ? 11 : 10) : 12
 
   return (
     <Modal
@@ -704,8 +717,8 @@ function ImportWizardBody({
                   {/* What the shelf holds, beside what the row asks of it. Base units, like the check. */}
                   <Table.Th ta="right">On Hand</Table.Th>
                   <Table.Th ta="right">Qty</Table.Th>
-                  {/* A transfer moves no money. */}
-                  {!isTransfer && <Table.Th ta="right">{isStock ? 'Unit Cost' : 'Price'}</Table.Th>}
+                  {/* A transfer moves no money; (94) a reader who may not see item costs gets no Unit Cost. */}
+                  {showsPrice && <Table.Th ta="right">{isStock ? 'Unit Cost' : 'Price'}</Table.Th>}
                   {/* An inventory document has no discounts, so the column is not there to explain. */}
                   {!unpriced && <Table.Th ta="right">Discount %</Table.Th>}
                   <Table.Th>Status</Table.Th>
@@ -737,7 +750,7 @@ function ImportWizardBody({
                         )}
                       </Table.Td>
                       <Table.Td ta="right">{row.quantity == null ? '—' : formatNumber(row.quantity)}</Table.Td>
-                      {!isTransfer && <Table.Td ta="right">{money(row.unitPrice)}</Table.Td>}
+                      {showsPrice && <Table.Td ta="right">{money(row.unitPrice)}</Table.Td>}
                       {!unpriced && <Table.Td ta="right">{row.discountPercent}</Table.Td>}
                       <Table.Td>
                         <Badge color={STATUS_COLOURS[row.status]} variant="light">
@@ -764,6 +777,12 @@ function ImportWizardBody({
               </Table.Tbody>
             </Table>
           </ScrollArea.Autosize>
+
+          {previewNote && (
+            <Text size="sm" c="dimmed">
+              {previewNote}
+            </Text>
+          )}
 
           <Group justify="flex-end">
             <Button variant="default" onClick={() => void requestClose()}>

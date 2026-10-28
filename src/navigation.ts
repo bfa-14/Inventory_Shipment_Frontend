@@ -4,6 +4,10 @@ export const PERMISSIONS = {
   dashboardView: 'dashboard.view',
   // Screens with their own permission since script 75 (they borrowed another screen's before).
   valuationView: 'inventory.valuation.view',
+  // (94) What an item costs - average, last and FOB cost, stock values - on the inventory screens, goods receipts, the
+  // Dashboard and transfer orders. Without it the API sends those figures null and the pages draw none of them
+  // (useSeesItemCosts). Stock Valuation, purchase documents and sales margins keep their own permissions.
+  costsView: 'inventory.costs.view',
   statementView: 'sales.statement.view',
   movementsView: 'containers.movements.view',
   trackingView: 'containers.tracking.view',

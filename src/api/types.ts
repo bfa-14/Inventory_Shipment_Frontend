@@ -728,8 +728,8 @@ export interface ItemListDto {
   lastCost: number | null
   /** What the supplier charged on the last posted invoice, before the charges around it. */
   fobCost: number | null
-  /** On hand × average cost, in the base currency. */
-  inventoryValue: number
+  /** On hand × average cost, in the base currency. (94) Null, with the three costs, without View item costs. */
+  inventoryValue: number | null
   defaultSupplierId: number | null
   defaultSupplierName: string | null
   isBivac: boolean
@@ -782,8 +782,11 @@ export interface ItemDetailsDto {
   averageCost: number | null
   /** What the supplier charged per base unit on the last posted invoice, before freight, customs and the rest. */
   fobCost: number | null
-  /** On hand × average cost, in the base currency. */
-  inventoryValue: number
+  /**
+   * On hand × average cost, in the base currency. (94) Null, with lastCost, averageCost, fobCost and lastPurchaseCost,
+   * without View item costs (inventory.costs.view).
+   */
+  inventoryValue: number | null
   lastPurchaseCost: number | null
   /** The supplier a purchase order is raised on by default. */
   defaultSupplierId: number | null
@@ -1076,8 +1079,9 @@ export interface ItemStockBalanceRowDto {
   /** Base units; negative when out-of-stock selling took it below zero. */
   onHandBase: number
   lastMovementAtUtc: string | null
+  /** (94) Null, with inventoryValue, without View item costs. */
   averageCost: number | null
-  inventoryValue: number
+  inventoryValue: number | null
 }
 
 /** The item card's Stock Balance: the item, its stock per warehouse and the totals. */
@@ -1087,7 +1091,8 @@ export interface ItemStockBalanceDto {
   itemName: string
   warehouses: ItemStockBalanceRowDto[]
   totalOnHandBase: number
-  totalInventoryValue: number
+  /** (94) Null without View item costs. */
+  totalInventoryValue: number | null
 }
 
 /** One movement on an item's stock statement, with the balance after it. */
@@ -1111,6 +1116,7 @@ export interface ItemStockMovementDto {
   quantityIn: number
   quantityOut: number
   balance: number
+  /** (94) Null without View item costs. */
   unitCostBase: number | null
   /** The client of a sale or the supplier of a purchase. */
   counterparty: string | null

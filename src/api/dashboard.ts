@@ -22,7 +22,8 @@ export interface DashboardSummaryDto {
     chargesBase: number | null
     chargeCount: number | null
   } | null
-  inventory: { valueBase: number; itemsInStock: number } | null
+  /** (94) valueBase is null without View item costs (inventory.costs.view); the count stays. */
+  inventory: { valueBase: number | null; itemsInStock: number } | null
   onTheWay: {
     /** The orders' still to receive, less the pieces in containers (inTransitPieces); with them when that one is null. */
     onOrderPieces: number | null
@@ -75,6 +76,7 @@ export interface DashboardSummaryDto {
   /** The twelve months ending with the period's month; a figure is null when the reader may not see it. */
   trend: { monthStart: string; salesBase: number | null; grossProfitBase: number | null; purchasesBase: number | null }[] | null
   salesByFamily: { label: string; valueBase: number }[] | null
+  /** (94) Null without View item costs (stock at the average cost), as without View items. */
   stockByWarehouse: { label: string; valueBase: number }[] | null
   /** dayNo 1 = Monday. */
   salesByWeekday: { dayNo: number; invoiceCount: number; salesBase: number }[] | null

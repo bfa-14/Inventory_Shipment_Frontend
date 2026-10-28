@@ -16,6 +16,7 @@ import { warehousesApi } from '../../api/masterdata/warehouses'
 import type { BranchLookupDto, ItemListDto, ItemLookupDto, WarehouseLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
@@ -52,6 +53,34 @@ const BIVAC_ITEMS_HINT = 'Only BIVAC items. Tick "BIVAC Item" in Inventory › I
 const BIVAC_ITEMS_NONE = 'No BIVAC item matches. Tick "BIVAC Item" in Inventory › Item Definition to add one.'
 /** What the Item dropdown offers while no list fits the type. One array, so the grid's options keep their identity. */
 const NO_ITEMS: ItemLookupDto[] = []
+
+/** (94) The tooltip of an Inventory In cost that cannot be typed: the server's default is the item's last cost. */
+const IN_COST_HINT = "The item's last cost (its average when it has none) is applied automatically"
+/** (94) An Out's cost, typed or not, is the average the database applies. */
+const OUT_COST_HINT = 'Average cost is applied automatically'
+/** (94) Under the lines of an editable Inventory In, for a reader without View item costs. */
+const NO_COSTS_IN_NOTE = "You may not see item costs: each line is saved at the item's last cost (its average when it has none)."
+/** (94) Its second sentence, only when the type's cost may be typed: otherwise nobody changes it, the server prices it. */
+const NO_COSTS_IN_NOTE_EDITABLE = ' A user who may see item costs can change it before the document is posted.'
+/** (94) Under the import wizard's preview on an Inventory In: what a row without a cost becomes, or why costs are not read. */
+const IMPORT_COST_NOTE = "A row without a unit cost is saved at the item's last cost (its average when it has none)."
+const IMPORT_NO_COSTS_NOTE =
+  "Unit costs in the file are not used: you may not see item costs, so each line is saved at the item's last cost (its average when it has none)."
+/** (94) The same on an In whose type's cost cannot be typed ("Price / cost editable" off): the server prices every line. */
+const IMPORT_TYPE_COST_NOTE =
+  "Unit costs in the file are not used: this document type's cost cannot be typed, so each line is saved at the item's last cost (its average when it has none)."
+
+/**
+ * (94) THE COST A NEW LINE IS PROPOSED, per base unit: what the server would store for it. An In takes the item's last
+ * cost when it is not 0, else its average (usp_StockDocument_Save, script 94; an Inventory In never sets the last cost,
+ * so proposing only the last cost proposed 0); an Out the average, which the database applies anyway.
+ */
+function proposedUnitCost(direction: number, details: { lastCost: number | null; averageCost: number | null }): number {
+  return direction === 1 ? (details.lastCost ? details.lastCost : (details.averageCost ?? 0)) : (details.averageCost ?? 0)
+}
+
+/** Four decimals, the precision a line's cost is stored with. */
+const round4 = (value: number) => Math.round(value * 10000) / 10000
 
 /**
  * Puts the cursor in a line's quantity box once React has drawn it.
@@ -140,6 +169,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const canCreate = hasPermission(kind.permissions.create)
   const canPost = hasPermission(kind.permissions.post)
   const canCancelDoc = hasPermission(kind.permissions.cancel)
+  /* (94) THE PERMISSION DECIDES THE LAYOUT: without View item costs the lines have no cost columns, the summary no Total
+     Cost and an In's lines are priced by the server (toRequest sends no cost). Never decided by the figures. */
+  const seesCosts = useSeesItemCosts()
 
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
@@ -205,6 +237,11 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   const status = document?.status ?? 'Draft'
   const readOnly = !isNew && status !== 'Draft'
   const editable = !readOnly && (isNew ? canCreate : canCreate && document?.canEdit === true)
+  /* (94) THE COSTS ARE DRAWN WHEN THE READER MAY SEE THEM AND THE PAGE HOLDS THEM. A document the server sent without its
+     costs (its total is null only then) is not drawn with zeros while the reader's permission changes - it is read
+     again below - and its lines' costs are never sent back. */
+  const costsWithheld = document !== null && document.totalCost === null
+  const drawCosts = seesCosts && !costsWithheld
 
   /* ── loading ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -277,7 +314,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         warehouseId: line.warehouseId,
         expiryDate: line.expiryDate ? line.expiryDate.slice(0, 10) : null,
         quantity: line.quantity,
-        unitCost: line.unitCost,
+        // (94) Null for a reader without View item costs: the column is not drawn and the server keeps the line's cost.
+        // The line is then marked: its 0 here is not a cost, and is never sent back as one.
+        unitCost: line.unitCost ?? 0,
+        costUnknown: line.unitCost === null,
         notes: line.notes ?? '',
         onHandBase: line.onHandBase,
         /* SEEDED WITH THE LINE'S OWN UNIT, not left empty. The Unit cell is a Select whose options
@@ -340,6 +380,16 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  /* (94) THE READER'S PERMISSION CHANGED WHILE THE PAGE WAS OPEN (a token refreshed after "View item costs" was ticked or
+     unticked): a saved document with no edits is read again, so it shows what the reader may now see. With edits it
+     stays as it is; its lines read without costs keep their mark, so the server keeps their saved costs. */
+  const seesCostsBefore = useRef(seesCosts)
+  useEffect(() => {
+    if (seesCostsBefore.current === seesCosts) return
+    seesCostsBefore.current = seesCosts
+    if (documentId !== null && !dirty.current) void reload()
+  }, [seesCosts, documentId, reload])
 
   /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail: those two come from a fresh read,
      and the header and lines being typed stay as they are (a file does not touch the document's row). */
@@ -448,7 +498,10 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
                   itemUnitId: base?.id ?? null,
                   unitTypeName: base?.unitTypeName ?? '',
                   packingFormula: base?.packingFormula ?? 1,
-                  unitCost: costIsEditable ? (details.lastCost ?? 0) : (details.averageCost ?? 0),
+                  unitCost: proposedUnitCost(kind.direction, details),
+                  // (94) An item read without its costs (a token older than the reader's permission) proposed 0: the
+                  // server prices the line instead.
+                  costUnknown: details.averageCost === null,
                   onHandBase: null,
                 }
               : line,
@@ -463,7 +516,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
       }
     },
-    [costIsEditable, lines, defaultWarehouseId, refreshOnHand],
+    [kind.direction, lines, defaultWarehouseId, refreshOnHand],
   )
 
   /**
@@ -515,14 +568,15 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           itemUnitId: base.id,
           unitTypeName: base.unitTypeName,
           packingFormula: base.packingFormula,
-          unitCost: costIsEditable ? (details.lastCost ?? 0) : (details.averageCost ?? 0),
+          unitCost: proposedUnitCost(kind.direction, details),
+          costUnknown: details.averageCost === null,
         },
       ])
 
       if (warehouseId !== null) void refreshOnHand(key, details.id, warehouseId)
       focusQuantity(key)
     },
-    [defaultWarehouseId, lines, patchLine, costIsEditable, refreshOnHand],
+    [defaultWarehouseId, lines, patchLine, kind.direction, refreshOnHand],
   )
 
   function addEmptyLine() {
@@ -551,26 +605,74 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
 
   function appendImported(imported: ImportedLine[]) {
     markDirty()
-    setLines((current) => [
-      ...current,
-      ...imported.map((line) => ({
-        ...emptyLine(line.warehouseId),
-        key: nextKey(),
-        itemId: line.itemId,
-        itemCode: line.itemCode,
-        itemName: line.itemName,
-        itemUnitId: line.itemUnitId,
-        unitTypeName: line.unitTypeName,
-        packingFormula: line.packingFormula,
-        warehouseId: line.warehouseId,
-        quantity: line.quantity,
-        // In stock mode the wizard's price column IS the unit cost.
-        unitCost: line.unitPrice ?? 0,
-        expiryDate: line.expiryDate ? line.expiryDate.slice(0, 10) : null,
-        notes: line.notes ?? '',
-      })),
-    ])
+    /* (94) THE FILE'S COST IS A LINE'S COST ONLY WHERE THE READER MAY SEE AND TYPE IT: on an In whose type's cost cannot be
+       typed the server prices every line, so the page shows the item's cost (proposed below), never the file's. A line
+       of an In left without a usable cost is marked and goes to the server without one until a cost is typed or
+       proposed - also when its item cannot be read, or the page is saved before the proposal arrives. */
+    const fileCostUsed = seesCosts && (kind.direction !== 1 || costIsEditable)
+    const appended: EditableLine[] = imported.map((line) => ({
+      ...emptyLine(line.warehouseId),
+      key: nextKey(),
+      itemId: line.itemId,
+      itemCode: line.itemCode,
+      itemName: line.itemName,
+      itemUnitId: line.itemUnitId,
+      unitTypeName: line.unitTypeName,
+      packingFormula: line.packingFormula,
+      warehouseId: line.warehouseId,
+      quantity: line.quantity,
+      // In stock mode the wizard's price column IS the unit cost. (94) Not read for a reader without View item costs.
+      unitCost: fileCostUsed ? (line.unitPrice ?? 0) : 0,
+      costUnknown: kind.direction === 1 && (!fileCostUsed || line.unitPrice === null),
+      expiryDate: line.expiryDate ? line.expiryDate.slice(0, 10) : null,
+      notes: line.notes ?? '',
+      // Seeded with the line's own unit, as a saved line is; the item's full list follows below.
+      units: [{ id: line.itemUnitId, unitTypeName: line.unitTypeName, packingFormula: line.packingFormula }],
+    }))
+    setLines((current) => [...current, ...appended])
     notify.success(`${imported.length} line(s) imported.`)
+    void completeImported(appended)
+  }
+
+  /**
+   * (94) WHAT AN IMPORTED LINE STILL NEEDS ONCE IT IS ON THE PAGE: the item's unit list, so its unit can be changed, and -
+   * on an In, for a reader who sees item costs - the page's proposed cost on a line without a usable file cost (marked
+   * costUnknown: the row had none, or the type's cost cannot be typed), instead of 0.00. One request per distinct item,
+   * failures swallowed as in loadLineUnits (the line keeps its unit, and its mark: the server prices it). Only the
+   * appended lines are touched, and a cost is set only while the line is still marked and at the placeholder 0: a cost
+   * typed meanwhile is never overwritten.
+   */
+  async function completeImported(appended: EditableLine[]) {
+    const itemIds = [...new Set(appended.map((line) => line.itemId).filter((itemId): itemId is number => itemId !== null))]
+    const lists = await Promise.all(
+      itemIds.map(async (itemId) => {
+        try {
+          return [itemId, await itemsApi.get(itemId)] as const
+        } catch {
+          return [itemId, null] as const
+        }
+      }),
+    )
+    const byItem = new Map(lists.filter((entry) => entry[1] !== null))
+    const keys = new Set(appended.map((line) => line.key))
+    const priceIn = kind.direction === 1 && seesCosts
+
+    setLines((current) =>
+      current.map((line) => {
+        if (!keys.has(line.key) || line.itemId === null) return line
+        const details = byItem.get(line.itemId)
+        if (!details) return line
+        // The item read without its costs (a token older than the permission) proposes nothing: the line stays marked.
+        const proposeCost = priceIn && line.costUnknown === true && line.unitCost === 0 && details.averageCost !== null
+        return {
+          ...line,
+          units: details.units,
+          ...(proposeCost
+            ? { unitCost: round4(proposedUnitCost(kind.direction, details) * line.packingFormula), costUnknown: false }
+            : {}),
+        }
+      }),
+    )
   }
 
   /* ── totals ───────────────────────────────────────────────────────────────────────────────── */
@@ -635,13 +737,18 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
       rowVersion: document?.rowVersion ?? null,
       lines: lines.map((line, index) => ({
         lineNo: index + 1,
+        // (94) The line's id as it was read (null on a new row): how the server finds the cost a saved line keeps.
+        id: line.id,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
         // The row's OWN warehouse. Validated non-null above, so the assertion is safe.
         warehouseId: line.warehouseId!,
         expiryDate: line.expiryDate,
         quantity: line.quantity,
-        unitCost: costIsEditable ? line.unitCost : null,
+        /* (94) A cost only when the reader may type it and see it, and the page holds a real one. Null otherwise: on an In
+           the server keeps a saved line's cost (by its id) and prices any other line at the item's last cost, else its
+           average; an Out takes the average whatever is sent. */
+        unitCost: costIsEditable && drawCosts && !line.costUnknown ? line.unitCost : null,
         notes: line.notes.trim() || null,
       })),
     }
@@ -1016,9 +1123,18 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           currencyCode={document?.currencyCode ?? 'USD'}
           costIsEditable={costIsEditable}
+          showCosts={drawCosts}
+          costHint={kind.direction === 1 ? IN_COST_HINT : OUT_COST_HINT}
           warnOnOverdraw={kind.direction === -1}
           readOnly={!editable}
         />
+
+        {editable && kind.direction === 1 && !seesCosts && (
+          <Text size="sm" c="dimmed" mt="xs">
+            {NO_COSTS_IN_NOTE}
+            {costIsEditable ? NO_COSTS_IN_NOTE_EDITABLE : ''}
+          </Text>
+        )}
       </Paper>
 
       <DocumentAttachmentsCard
@@ -1042,6 +1158,7 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
             totalQuantity={totals.quantity}
             totalCost={totals.cost}
             currencyCode={document?.currencyCode ?? 'USD'}
+            showCost={drawCosts}
           />
         </Grid.Col>
       </Grid>
@@ -1069,6 +1186,17 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
           }}
           documentTypeCode={kind.code}
           mode="stock"
+          // (94) Without View item costs the preview has no Unit Cost column and the file's costs are not used.
+          hideCosts={!seesCosts}
+          costNote={
+            kind.direction === 1
+              ? !seesCosts
+                ? IMPORT_NO_COSTS_NOTE
+                : costIsEditable
+                  ? IMPORT_COST_NOTE
+                  : IMPORT_TYPE_COST_NOTE
+              : undefined
+          }
           draftReference={document ? `${kind.code}-${document.id}` : null}
           onImported={appendImported}
           // A file naming several warehouses becomes ONE document, each line keeping its own — or, on
@@ -1090,7 +1218,9 @@ export function StockDocumentPage({ kind }: { kind: DocumentKind }) {
                 itemId: line.itemId,
                 itemUnitId: line.itemUnitId,
                 quantity: line.quantity,
-                unitPrice: line.unitPrice,
+                // (94) The file's cost as it is (null when empty: the server prices it); none for a reader without View
+                // item costs, whose import the server prices whatever is sent.
+                unitPrice: seesCosts ? line.unitPrice : null,
                 expiryDate: line.expiryDate,
                 notes: line.notes,
                 importRowNumber: line.importRowNumber,

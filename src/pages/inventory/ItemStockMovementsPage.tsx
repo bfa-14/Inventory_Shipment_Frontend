@@ -10,6 +10,7 @@ import { dateLabel, fromIsoDate, isoDate } from '../../components/documents/docu
 import { formatDateTime, formatNumber } from '../../components/format'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useAuth } from '../../auth/useAuth'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
@@ -58,6 +59,8 @@ export function ItemStockMovementsPage() {
   const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
   const canViewTransfers = hasPermission(PERMISSIONS.transfersView)
+  /* (94) The Unit Cost column is an item cost: without View item costs it is not drawn (the server sends it null). */
+  const seesCosts = useSeesItemCosts()
   /**
    * Where a goods receipt row's source opens: its container, else its order, else its invoice (with the view right).
    * (90) A transfer's row names its order (TRO-…), which opens the order.
@@ -186,7 +189,7 @@ export function ItemStockMovementsPage() {
                     <Table.Th ta="right">In</Table.Th>
                     <Table.Th ta="right">Out</Table.Th>
                     <Table.Th ta="right">Balance</Table.Th>
-                    <Table.Th ta="right">Unit Cost (USD)</Table.Th>
+                    {seesCosts && <Table.Th ta="right">Unit Cost (USD)</Table.Th>}
                     <Table.Th>By</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -196,7 +199,7 @@ export function ItemStockMovementsPage() {
                       <Text fz="sm" fw={600}>{from ? 'Balance brought forward' : 'Opening balance'}</Text>
                     </Table.Td>
                     <Table.Td ta="right"><Text fz="sm" fw={600}>{formatNumber(data.openingBase)}</Text></Table.Td>
-                    <Table.Td colSpan={2} />
+                    <Table.Td colSpan={seesCosts ? 2 : 1} />
                   </Table.Tr>
                   {data.movements.map((m) => {
                     const route = documentRoute(m, hasPermission)
@@ -248,14 +251,14 @@ export function ItemStockMovementsPage() {
                         <Table.Td ta="right">{m.quantityIn ? <Text fz="sm" c="teal">{formatNumber(m.quantityIn)}</Text> : ''}</Table.Td>
                         <Table.Td ta="right">{m.quantityOut ? <Text fz="sm" c="red">{formatNumber(m.quantityOut)}</Text> : ''}</Table.Td>
                         <Table.Td ta="right"><Text fz="sm" fw={600} c={m.balance < 0 ? 'red' : undefined}>{formatNumber(m.balance)}</Text></Table.Td>
-                        <Table.Td ta="right">{m.unitCostBase === null ? '—' : formatNumber(m.unitCostBase, 2)}</Table.Td>
+                        {seesCosts && <Table.Td ta="right">{m.unitCostBase === null ? '—' : formatNumber(m.unitCostBase, 2)}</Table.Td>}
                         <Table.Td>{m.createdByName ?? '—'}</Table.Td>
                       </Table.Tr>
                     )
                   })}
                   {data.movements.length === 0 && (
                     <Table.Tr>
-                      <Table.Td colSpan={8}>
+                      <Table.Td colSpan={seesCosts ? 8 : 7}>
                         <Text c="dimmed" ta="center" py="md">No movement in this period.</Text>
                       </Table.Td>
                     </Table.Tr>
@@ -267,7 +270,7 @@ export function ItemStockMovementsPage() {
                     <Table.Th ta="right">{formatNumber(data.totalIn)}</Table.Th>
                     <Table.Th ta="right">{formatNumber(data.totalOut)}</Table.Th>
                     <Table.Th ta="right">{formatNumber(data.closingBase)}</Table.Th>
-                    <Table.Th colSpan={2} />
+                    <Table.Th colSpan={seesCosts ? 2 : 1} />
                   </Table.Tr>
                 </Table.Tfoot>
               </Table>

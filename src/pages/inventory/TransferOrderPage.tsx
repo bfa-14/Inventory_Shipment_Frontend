@@ -180,8 +180,9 @@ export function TransferOrderPage() {
 
   const canCreate = hasPermission(PERMISSIONS.transfersCreate)
   const canApprove = hasPermission(PERMISSIONS.transfersApprove)
-  // Value figures arrive null without it (the server strips them); the column is then not shown at all.
-  const canSeeValues = hasPermission(PERMISSIONS.valuationView)
+  // Value figures arrive null without it (the server strips them); the column is then not shown at all. (94) View item
+  // costs decides, as on every inventory screen (View Stock Valuation before script 94).
+  const canSeeValues = hasPermission(PERMISSIONS.costsView)
 
   /* THE TRO TYPE answers for a NEW order: whether it needs approval, and when it is numbered. A loaded order carries
      its own. An API older than script 90 sends no `needsApproval`, which reads as "no approval". */

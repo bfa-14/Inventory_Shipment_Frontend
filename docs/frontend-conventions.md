@@ -828,11 +828,12 @@ Receive dialogs).
 - **The barcode's unit, on this page only.** `QuickItemSearch` passes `onPick(item, term)` the text scanned; the
   transfer page takes the unit whose barcode it is, else the base unit, and a second scan of the same item and unit adds
   1. Every other page ignores `term`.
-- **Values only with the permission.** Without `inventory.valuation.view` the server sends the order's
-  `onTheWayValueBase`, a posting's `valueBase` / `lostValueBase` and a line's `unitCostBase` / `lossUnitCostBase` as null,
-  never 0: the page then leaves the figure out ("—" in a value column), it never shows a 0 that is not one. The
-  order's `onTheWayValueBase` is not drawn at all (the totals row holds pcs only); a posting's value is, with the
-  permission. The dispatch note never shows a cost.
+- **Values only with the permission.** The value figures arrive null without View item costs (`inventory.costs.view`,
+  script 94; View Stock Valuation before it): the order's `onTheWayValueBase`, a posting's `valueBase` / `lostValueBase`
+  and a line's `unitCostBase` / `lossUnitCostBase` come as null, never 0. The page decides by the permission
+  (`PERMISSIONS.costsView`): without it the Value column is left out; with it a figure the server has not got shows
+  "—", never a 0 that is not one. The order's `onTheWayValueBase` is not drawn at all (the totals row holds pcs only);
+  a posting's value is, with the permission. The dispatch note never shows a cost. See **Item costs**.
 - **`CancelReasonModal`'s `withDate.label`** names the date field when it is not a cancellation's: Reverse… passes
   `{ minDate: the posting date, label: 'Reversal date' }`; the sales cancel of script 84 keeps "Cancellation date".
 - **The Email log links by category.** `TransferApproval`, `TransferApproved` and `TransferRejected` ("Transfer approval
@@ -1149,11 +1150,6 @@ the posting line, the list row and the requests); the transfer glue is `componen
   no. has no spaces.", "{x} has {len} characters; this item's have {L}." The counter "{c} / {q}" is red until equal.
   The refusals (and the receipt's "Scanning: …" line) are live regions, said by a screen reader as they appear; a
   refusal goes with the next change of the list (it said nothing about the list as it is then).
-  "Known at {From} ({n})…" (`GET …/lines/{lineId}/tracking-suggestions`, read once when the line's dialog first opens,
-  with the dispatch permission) lists the serials transfers received into From and did not send since, minus those on
-  the same item's other lines - the server sends at most 2,000, the oldest received first; the list draws 200 and
-  "Find a number" narrows it - each "Received into {From} by {TRR} on {date}", those already in the list ticked and
-  disabled; "Add the ticked" adds up to the pieces leaving.
   **The cursor goes back to the scan box** after every button of a serial list (Paste list's Add and Close, Known's
   "Add the ticked" and Close, Apply, a row's trash icon, Tick all, Untick all, "Mark the {n} not ticked as lost") and
   after a Check that keeps the dialog open - there once the Check's disabled fieldset is enabled again (an effect on
@@ -1428,7 +1424,9 @@ in **cost mode**:
   supplier and branch are fixed, and Add Item / Import are hidden because the lines are the source's.
 - **Lines** (`PurchaseLinesGrid`, helpers in `purchaseLines.ts`): Quick Item Search and "+ Add Item" give a
   line its **purchase unit** (else the base unit), quantity 1 and a **Unit Cost = last cost × packing formula
-  × exchange rate** (blank when the item was never bought — the server then writes 0). The cost column
+  × exchange rate** (blank when the item was never bought, or for a reader without View item costs, whose item read has
+  no last cost: the page sends null and the server prices the line the same way, last cost × packing × rate - 0 when the
+  item has no last cost). The cost column
   follows the type configuration (`pricingOf`, Cost mode: editable unless the owner turned it off). On a
   line with a source, the Qty box is capped at what remains on the source line and says **"Remaining: n"**
   under it; a larger quantity turns the row red before the server's SOURCE_INVALID does, and that message
@@ -1995,13 +1993,91 @@ rather than a row of dashes, which would leak the permission as a shrug.
   Branch / Month / All, with summary cards, a totals row and Export to Excel. The **COGS adjustments**
   column appears only for the groupings a landed cost adjustment can be attributed to
   (`showsCogsAdjustments()`): an adjustment knows its item and its date, never its invoice.
-- `/inventory/valuation` (`StockValuationPage`, `inventory.items.view`) is on hand × the item's
+- `/inventory/valuation` (`StockValuationPage`, `inventory.valuation.view` since script 75) is on hand × the item's
   moving average cost, per warehouse or company-wide. The totals come from the API, not from summing
   the page.
 - **Item Definition** shows FOB Purchase Cost, Last Cost (landed), Average Cost and Inventory Value
-  with a tooltip each (they differ by one word), and the Purchasing section carries **Weight (kg)**
-  and **Volume (CBM)** per base unit — a charge allocated by weight or volume is refused for an item
-  that has none.
+  with a tooltip each (they differ by one word) - with View item costs, see **Item costs** - and the Purchasing
+  section carries **Weight (kg)** and **Volume (CBM)** per base unit — a charge allocated by weight or volume is
+  refused for an item that has none.
+
+## Item costs (script 94: inventory.costs.view)
+
+`inventory.costs.view`, "View item costs" (`PERMISSIONS.costsView`), decides who sees **what an item costs**: its
+average, last and FOB cost and its stock value. It was given once, when script 94 first ran, to every role that saw
+such a cost then; an administrator unticks it on Role Permissions for the storekeepers and sales staff who must not.
+
+**What it covers.** Item Definition (the list's Avg. Cost and Inventory Value, the card's four cost rows), the item's
+Stock Balance (the value tile, column and total) and Stock Movement (Unit Cost), Inventory In / Out / BIVAC Out (the
+lines' Unit Cost and Total Cost, the summary's Total Cost, the list's Total Cost, the import preview's Unit Cost),
+goods receipts (the lines' Unit cost and Value, the typed cost of a line without an order, the summary's "Value at
+cost", the Cost adjustments card's before / after and amounts, the list's Value (USD) and the value in "Received not
+invoiced"), the shortage plan's Last cost, the Dashboard's "Inventory value" pill and "Stock value by warehouse" donut,
+and a transfer order's values.
+
+**The server strips, the page hides.** Without it the API sends every such figure `null` (never 0), its exports leave
+the cost columns out and a list cannot be sorted by one. The page decides **by the permission, never by the data**:
+`useSeesItemCosts()` (`src/hooks/`) is the one test, and without it the column, row, tile or pill is **not drawn** -
+no header, no empty cell, no "—", which would name the hidden figure. A viewer still sees "—" for an item that has no
+cost: the data decides the cell, the permission decides the layout. With it, every screen is exactly what it was.
+
+- **Lists**: the cost column is left out of the column array (`...(seesCosts ? [column] : [])`), so the grid's sort,
+  funnel, footer and CSV never offer it. A `GridColumnMeta` entry without its column is inert: leave it.
+- **Shared pieces take a prop, default on**: `DocumentLinesGrid` `showCosts` (and `costHint`, the tooltip of a cost that
+  cannot be typed), `DocumentSummary` `showCost`, `ImportInvoiceItemsWizard` `hideCosts` and `costNote` (stock mode
+  only), `GoodsReceiptLinesGrid` `showCosts` (absent: the hook). The goods receipt cards read the hook themselves.
+  Colspans and minimum widths follow what is drawn.
+- **What is not a figure stays**: a goods receipt line without the cost columns keeps its cost source ("Order",
+  "Invoice", "Manual") and its "n of m pcs invoiced" in a "Cost source" column of their own (the phone: a row).
+- **A shortage plan's purchase orders** show their Amount to a reader who may see purchase orders or item costs (the
+  server sends it null to anybody else: a plan's order is priced at the item's last cost).
+- **The Dashboard** shows "Items in stock" with the count instead of "Inventory value", by the permission.
+- **Post confirmations name no value** the reader may not see ("84 pcs enter LUB-WH, the item costs are updated…").
+
+**It hides, it never blocks.** Nobody is refused anything for want of it:
+
+- **Inventory In**: no cost column; under the lines "You may not see item costs: each line is saved at the item's last
+  cost (its average when it has none)." and, only when the type's cost may be typed, " A user who may see item costs can
+  change it before the document is posted." The page sends `unitCost: null` and each line's `id`: the server keeps the
+  cost of a saved line (same id, item and unit) - a colleague priced it - and gives any other line the item's last cost
+  when it is not 0, else its average (else 0), per unit of the line. Costs in an import file are not used ("Unit costs
+  in the file are not used: you may not see item costs, so each line is saved at the item's last cost (its average
+  when it has none).").
+- **A goods receipt without an order**: no typed cost; a new line starts without one, the save sends each line's `id`
+  and `costsHidden: true`, and the server keeps a saved line's cost or takes the item's last cost, else its average
+  ("You may not see item costs: each line is saved at the item's last cost (its average when it has none)."). "+ New ›
+  Without an order" then reads "Goods of a supplier with no purchase order, at the item's last cost (its average when
+  it has none)." instead of "…, at a typed cost.".
+
+**A hidden figure is never saved back as a real one.** The permission can change while a page is open (a token
+refreshed after an administrator ticked or unticked it), and a token issued before it was ticked strips what the
+reader may now see. So:
+
+- A line read **without its cost** (`unitCost: null`), proposed from an item read without costs, or imported without a
+  usable cost and not proposed yet is marked `costUnknown` (`EditableLine`): its 0 on the page is a placeholder, sent
+  as `unitCost: null` until a different cost is typed or the proposal arrives. The server keeps a saved line's cost by
+  its id whenever the cost comes null, for a viewer too, and prices any other line.
+- A document or goods receipt the server sent **without its costs** (its `totalCost` / `currentValueBase` is null only
+  then) draws no cost columns even for a reader who now may see them, and a goods receipt's save then sends
+  `costsHidden: true`. When the permission changes, a saved document or receipt with no edits is **read again**.
+- The server, for its part, reads the document and takes its save with the token confirmed by the database
+  (`ItemCosts.ConfirmedAsync`): a reader the token says may not see costs is asked once more, so a token older than the
+  grant (every token of the first 15 minutes after script 94 is deployed) neither strips the draft nor drops its costs.
+- **A purchase line** starts without a price (the item read has no last cost) and the server prices it at save, as it
+  always did for a line left empty.
+
+**Not this permission's.** Stock Valuation (`inventory.valuation.view`), purchase orders / invoices / returns (supplier
+prices), landed cost adjustments, containers (their invoices, charges, estimates and landed cost per item), and sales
+costs, margins and Sales Profit (`sales.profit.view`, **Sales profit** above) keep their own permissions.
+
+**A line's cost follows its unit** (every reader). On an Inventory In or Out line the cost is per unit of the line:
+changing the unit scales it by the packing (`DocumentLinesGrid`; a Box of 12 costs twelve pieces), and a new line is
+proposed what the server would store - on an In the item's last cost, else its average (it proposed 0 for an item
+that only ever came in by Inventory In), on an Out the average. An imported line without a cost gets the same proposal
+(per unit of its unit) once the item is read, only while its cost is still the placeholder 0, and its unit list. On an
+In whose type's cost cannot be typed every imported line is proposed the item's cost, never the file's (the server
+prices it), and the wizard says "Unit costs in the file are not used: this document type's cost cannot be typed, so
+each line is saved at the item's last cost (its average when it has none).".
 
 ## Numbers
 
