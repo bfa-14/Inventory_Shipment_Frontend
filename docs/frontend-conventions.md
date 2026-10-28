@@ -2060,9 +2060,13 @@ reader may now see. So:
 - A document or goods receipt the server sent **without its costs** (its `totalCost` / `currentValueBase` is null only
   then) draws no cost columns even for a reader who now may see them, and a goods receipt's save then sends
   `costsHidden: true`. When the permission changes, a saved document or receipt with no edits is **read again**.
-- The server, for its part, reads the document and takes its save with the token confirmed by the database
-  (`ItemCosts.ConfirmedAsync`): a reader the token says may not see costs is asked once more, so a token older than the
-  grant (every token of the first 15 minutes after script 94 is deployed) neither strips the draft nor drops its costs.
+- The server, for its part, reads the document and takes its save, its post and its cancel with the token confirmed by
+  the database (`ItemCosts.ConfirmedAsync`): a reader the token says may not see costs is asked once more, so a token
+  older than the grant (every token of the first 15 minutes after script 94 is deployed) neither strips the draft nor
+  drops its costs, and a document posted from a page that showed its costs comes back with them.
+- A list the page draws with its cost column (the page knows the permission) whose rows the server still stripped (the
+  token does not carry it yet) shows "—" in that column, never a measured-looking 0.00 (`StockDocumentsPage`: a null
+  `totalCost` is "—"; `formatNumber(null)` is already "—" elsewhere).
 - **A purchase line** starts without a price (the item read has no last cost) and the server prices it at save, as it
   always did for a line left empty.
 
