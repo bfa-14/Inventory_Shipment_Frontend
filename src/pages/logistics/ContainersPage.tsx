@@ -45,6 +45,7 @@ import {
   INVOICING_STATUSES,
   type ContainerListDto,
   type ContainerNextStepFilter,
+  type ContainerJourneyStatus,
   type ContainerStatusCode,
 } from '../../api/logistics/containers'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -61,6 +62,8 @@ import { refreshSelection } from '../../components/logistics/containerSelection'
 import { useNextStep } from '../../components/logistics/useNextStep'
 import { NEXT_STEP_FILTERS, nextStepColumnText, nextStepOf } from '../../components/logistics/nextStep'
 import { NextStepFilterPopover } from '../../components/logistics/NextStepFilterPopover'
+import { JourneyFilterPopover } from '../../components/logistics/JourneyFilterPopover'
+import { JOURNEY_COLOURS, JOURNEY_FILTERS, journeyLegText, journeySinceText, journeyStatusText } from '../../components/logistics/journey'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
@@ -86,6 +89,8 @@ interface Filters {
   status: string | null
   /** (81) The logistics to-do list: the Next step column's funnel, filtered on the server. */
   nextStep: ContainerNextStepFilter | null
+  /** (95) Where they are on their journey: the Journey column's funnel, filtered on the server. */
+  journey: ContainerJourneyStatus | null
   /** 'YYYY-MM-01' of the picked month. */
   orderMonth: string | null
   // advanced
@@ -105,6 +110,7 @@ const NO_FILTERS: Filters = {
   supplierId: null,
   status: null,
   nextStep: null,
+  journey: null,
   orderMonth: null,
   purchaseOrderId: null,
   purchaseDocumentId: null,
@@ -116,7 +122,7 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-const ADVANCED: (keyof Filters)[] = ['nextStep', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
+const ADVANCED: (keyof Filters)[] = ['nextStep', 'journey', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
 /**
  * The Status filter's own choice beside the statuses: a completed Delivery-stage movement and no posted goods receipt
@@ -157,6 +163,9 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'blNo', text: (r) => r.blNo ?? '' },
   { accessor: 'dispatchDate', kind: 'date' },
   { accessor: 'eta', kind: 'date' },
+  // (95) the latest leg that started, and whether it is on its way or arrived (filtered on the server: its funnel)
+  { accessor: 'journeyLeg', text: journeyLegText },
+  { accessor: 'journeyStatus', text: journeyStatusText, filterable: false },
   { accessor: 'currentLocation', text: (r) => r.currentLocation ?? '' },
   { accessor: 'status', kind: 'list', text: (r) => r.statusName },
   // (81) Filtered on the server (its funnel is the page's own): a browser filter would see the loaded rows only.
@@ -226,6 +235,7 @@ export function ContainersPage() {
                   : (Number(filters.status) as ContainerStatusCode),
               deliveredNotReceived: filters.status === DELIVERED_NOT_RECEIVED || undefined,
               nextStep: filters.nextStep ?? undefined,
+              journey: filters.journey ?? undefined,
               orderMonthKey: monthKey(filters.orderMonth),
               purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
               purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
@@ -346,12 +356,12 @@ export function ContainersPage() {
     downloadCsv(
       'containers.csv',
       ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
-        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
+        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'From → To', 'Journey', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
       engine.rows.map((r) => [
         r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
         r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
         formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
-        r.currentLocation ?? '', r.statusName, nextStepColumnText(r), receiptText(r),
+        journeyLegText(r), journeyStatusText(r), r.currentLocation ?? '', r.statusName, nextStepColumnText(r), receiptText(r),
       ]),
     )
   }
@@ -463,6 +473,51 @@ export function ContainersPage() {
     { accessor: 'dispatchDate', title: 'Dispatch Date', width: 140, render: (row) => dateLabel(row.dispatchDate) },
     { accessor: 'eta', title: 'ETA', width: 105, render: (row) => dateLabel(row.eta) },
     {
+      accessor: 'journeyLeg',
+      title: 'From → To',
+      width: 220,
+      // (95) the latest leg that started (in progress or completed); never moved: its port of loading → port of destination
+      render: (row) =>
+        journeyLegText(row) ? (
+          <Stack gap={0}>
+            <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>
+              {journeyLegText(row)}
+            </Text>
+            {row.journeyMovementNo ? (
+              <Text fz="xs" c="dimmed">
+                {row.journeyMovementNo}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : (
+          dash
+        ),
+    },
+    {
+      accessor: 'journeyStatus',
+      title: 'Journey',
+      width: 190,
+      filter: ({ close }: { close: () => void }) => (
+        <JourneyFilterPopover value={filters.journey} onApply={(next) => setFilter('journey', next)} close={close} />
+      ),
+      filtering: filters.journey !== null,
+      render: (row) =>
+        row.journeyStatus ? (
+          <Stack gap={2} data-journey-cell={row.journeyStatus}>
+            <Badge color={JOURNEY_COLOURS[row.journeyStatus]} variant="light" w="fit-content" style={{ whiteSpace: 'nowrap' }}>
+              {journeyStatusText(row)}
+            </Badge>
+            {journeySinceText(row) ? (
+              <Text fz="xs" c="dimmed">
+                {journeySinceText(row)}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : (
+          dash
+        ),
+    },
+    {
       accessor: 'currentLocation',
       title: 'Current Location',
       width: 190,
@@ -553,7 +608,10 @@ export function ContainersPage() {
           stepEntry,
           {
             key: 'receive',
-            show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.canReceive !== false && !(receiptIsNext && step?.kind === 'Receive'),
+            // (95) shown, disabled with the server's reason, until the container is delivered
+            show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.status !== 1 && !(receiptIsNext && step?.kind === 'Receive'),
+            disabled: row.canReceive === false,
+            reason: row.canReceive === false ? (row.receiveBlockedReason ?? 'This container cannot be received now.') : undefined,
             label: 'Receive goods',
             icon: <IconPackageImport size={16} />,
             onClick: () => void navigate(`${CONTAINERS_ROUTE}/${row.id}?receive=1`),
@@ -705,6 +763,17 @@ export function ContainersPage() {
                 onChange={(next) => setFilter('nextStep', next as ContainerNextStepFilter | null)}
                 clearable
                 data-next-step-filter-select
+              />
+            </FilterBar.Col>
+            <FilterBar.Col span={3}>
+              <Select
+                label="Journey"
+                placeholder="Any"
+                data={JOURNEY_FILTERS}
+                value={filters.journey}
+                onChange={(next) => setFilter('journey', next as ContainerJourneyStatus | null)}
+                clearable
+                data-journey-filter-select
               />
             </FilterBar.Col>
             <FilterBar.Col span={3}>

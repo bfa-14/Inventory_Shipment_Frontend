@@ -700,7 +700,10 @@ export function ContainerPage() {
   const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
   const draftReceipt = receipt?.status === 1 ? receipt : null
   const postedReceipt = receipt?.status === 2 ? receipt : null
-  const receiveBlocked = canReceiveNow ? null : container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.'
+  // (95) the server's reason first: a container that travels with movements is received once its Delivery is completed
+  const receiveBlocked = canReceiveNow
+    ? null
+    : (container?.receiveBlockedReason ?? (container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.'))
   /* DELIVERED, NOT RECEIVED: the next step is "Open goods receipt (draft)" or "Receive goods…", the page's own buttons
      with their own permissions. On a narrow screen the Route card repeats it as it repeats a leg: the action bar is a
      whole page below (7,300 px on a phone), and the card's "New movement for this container" was the first thing seen. */

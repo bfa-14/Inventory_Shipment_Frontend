@@ -26,6 +26,8 @@ export interface NextStepTarget extends NextStepContainer {
   goodsReceiptId?: number | null
   /** False while it cannot be received (Receive goods… disabled). */
   canReceive?: boolean
+  /** (script 95) Why, from the server ("… has not been delivered yet: …"). */
+  receiveBlockedReason?: string | null
 }
 
 /**
@@ -59,7 +61,9 @@ export function useNextStep(
     if (!step) return null
     if (step.kind === 'Receive') {
       if (!canReceive) return null
-      return container.canReceive === false ? { ...step, disabledReason: step.disabledReason ?? 'This container cannot be received now.' } : step
+      return container.canReceive === false
+        ? { ...step, disabledReason: step.disabledReason ?? container.receiveBlockedReason ?? 'This container cannot be received now.' }
+        : step
     }
     if (step.kind === 'OpenReceipt') return canViewReceipts && container.goodsReceiptId ? step : null
     return canManage ? step : null

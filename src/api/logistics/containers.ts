@@ -163,6 +163,13 @@ export type ContainerNextStepKind = 'Done' | 'Complete' | 'OpenReceipt' | 'Start
 /** (script 81) The values of the Containers list's Next step filter (Receive also lists the open draft receipts). */
 export type ContainerNextStepFilter = 'Ship' | 'StartPlanned' | 'Complete' | 'NextLeg' | 'Receive'
 
+/**
+ * (script 95) Where a container is on its journey (logistics.fn_Container_Journey): its latest leg that started.
+ * NotDispatched (no leg yet), OnTheWay (a leg in progress that moves), Arrived (the leg completed, or a stay in
+ * progress), Received (offloaded or closed). Also the Containers list's Journey filter.
+ */
+export type ContainerJourneyStatus = 'NotDispatched' | 'OnTheWay' | 'Arrived' | 'Received'
+
 /** (script 81) Where a proposed leg comes from: the usual next leg from here, the container's own ports, the stage order. */
 export type NextLegProposalSource = 'History' | 'Ports' | 'Stages' | 'None'
 
@@ -174,8 +181,20 @@ export interface ContainerFlags extends ContainerReceiptRef, ContainerShipState 
   canConfirm: boolean
   /** Always false since goods receipts (kept for old clients): the goods are received with "Receive goods…". */
   canOffload: boolean
-  /** Confirmed … Cleared and no open goods receipt (draft or posted): "Receive goods…" can create its draft. */
+  /**
+   * Confirmed … Cleared, no open goods receipt (draft or posted) and (script 95) delivered - a container that travels
+   * with movements is received once a Delivery leg is completed: "Receive goods…" can create its draft.
+   */
   canReceive?: boolean
+  /** (script 95) Why "Receive goods…" cannot be used now ("KTG-2026-0031 has not been delivered yet: …"). */
+  receiveBlockedReason?: string | null
+  /** (script 95) The journey: null for a cancelled container. */
+  journeyStatus?: ContainerJourneyStatus | null
+  journeyFromName?: string | null
+  journeyToName?: string | null
+  /** Since when: the leg's start (on the way, a stay), its end (arrived), the receipt (received). */
+  journeySince?: string | null
+  journeyMovementNo?: string | null
   /** 'GRN' or 'Offload' once received; null before. */
   receivedBy?: ContainerReceivedBy | null
   /** False once a goods receipt (draft or posted) exists: the loaded lines are fixed (rule 21). */
@@ -797,6 +816,8 @@ export interface ContainerQuery {
    * leg"), Complete ("Arrival due"), NextLeg ("Next leg to plan"), Receive ("Receive goods", open drafts included).
    */
   nextStep?: ContainerNextStepFilter
+  /** (script 95) Where the containers are on their journey. */
+  journey?: ContainerJourneyStatus
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number

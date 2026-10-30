@@ -87,6 +87,9 @@ export function notOpenReason(status: PurchaseDocumentStatus, draftReason: strin
 }
 
 /** Why "Receive goods…" cannot be used on this order (rule 14); null when it can. */
+/** (script 95) The server's reason when an order's goods still to come all travel in containers: the button is hidden. */
+export const ORDER_IN_CONTAINERS_TEXT = 'Everything still to receive travels in containers: it is received with its containers.'
+
 export function receiveGoodsReason(order: PurchaseDocumentDto): string | null {
   switch (order.status) {
     case 'Draft':
@@ -118,7 +121,7 @@ export function receiveGoodsReason(order: PurchaseDocumentDto): string | null {
   if (outstanding <= 0) return 'Everything ordered is already received.'
   if (toReceive > 0) return null
   if (inDrafts > 0) return 'The rest of this order is on draft goods receipts: post or delete them first.'
-  if (inContainers > 0) return 'Everything still to receive travels in containers: it is received with its containers.'
+  if (inContainers > 0) return ORDER_IN_CONTAINERS_TEXT
   return null
 }
 
@@ -174,7 +177,12 @@ export function orderAbilities(
       // Since script 43 an order with containers is invoiced directly too: the invoice is "shipped in containers".
       !somethingToInvoice ? 'Everything ordered is already invoiced.' : null,
     ),
-    receiveGoods: ability(hasPermission(PERMISSIONS.goodsReceiptsCreate), receiveGoodsReason(order)),
+    // (95) HIDDEN, not disabled, while everything still to come travels in containers: those goods are received from
+    // their container once it is delivered (the container's Receive goods…), never from the order
+    receiveGoods: ability(
+      hasPermission(PERMISSIONS.goodsReceiptsCreate) && receiveGoodsReason(order) !== ORDER_IN_CONTAINERS_TEXT,
+      receiveGoodsReason(order),
+    ),
 
     sendForApproval: ability(needsApproval && canPost),
     approveDirect: ability(needsApproval && state?.canApproveDirect === true),

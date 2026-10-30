@@ -285,7 +285,8 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
     const term = debounced
     void (async () => {
       try {
-        // The server's list: status 2-5 and no draft or posted receipt (a draft that exists is opened, not created again).
+        // The server's list: status 2-5, no draft or posted receipt (a draft that exists is opened, not created again) and
+        // (script 95) delivered - a container that travels with movements is received once its Delivery is completed.
         const rows = await goodsReceiptsApi.receivableContainers({ search: term.trim() || undefined }, controller.signal)
         if (controller.signal.aborted) return
         setResult({ term, rows: rows.filter((c) => c.canReceive), total: rows[0]?.totalCount ?? rows.length, error: null })

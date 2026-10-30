@@ -2729,7 +2729,25 @@ order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_
   disabled while the field is empty or invalid and opens a new tab with `noopener,noreferrer`; in view mode the address
   is also a plain link with `rel="noopener noreferrer"`.
 
-## Checklist for a new page
+## The container's journey, BIVAC charges and lead times (scripts 95-98)
+
+- **Journey columns on the Containers list**: "From → To" (`journeyLegText`) and "Journey" (a badge in
+  `JOURNEY_COLOURS`, "since {date}" under it), both from the server's journey fields, never worked out from the
+  container's status in the page; the funnel is `JourneyFilterPopover` (`components/logistics/journey.ts`).
+- **Receive goods… reads `receiveBlockedReason`** from the container (list row, page, Next step): disabled with that
+  sentence, never a rule re-written in the page. On an order or an invoice the button is hidden (not disabled) when its
+  reason is the "travels in containers" one (`ORDER_IN_CONTAINERS_TEXT`, `INVOICE_IN_CONTAINERS_TEXT`).
+- **A BIVAC charge in New charge**: when the charge type's code is `BIVAC_CHARGE_CODE`, "Which BIVAC?" replaces the
+  currency, rate, amount and split; the per-container amounts come from the item's port costs, the total is read-only, and
+  the options are re-read when the containers change (answers kept with the key they were read for, never cleared in an
+  effect). The charge drawer shows "BIVAC item" and "BIVAC Out" (a link with View BIVAC Out).
+- **Cards that save on their own** on Item Definition ("BIVAC cost per port", like "Stock levels per warehouse"): plain
+  buttons, a "Save costs" disabled with its reason until something changed and every row is complete.
+- **Lead time per shortage line**: each line's NumberInput holds only a typed value; its placeholder is the worked-out one
+  (`lineLeadTime`), and a dimmed line under it says where it comes from (`leadTimeSourceText`). A line whose lead time is
+  the plan's follows the header as it is typed. Only the typed value is sent (`leadTimeMonths` on the line).
+
+
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.
 - [ ] Menu entry in `src/navigation.ts` with its permission code (breadcrumb comes from the model). That entry

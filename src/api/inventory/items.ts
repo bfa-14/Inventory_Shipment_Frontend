@@ -41,6 +41,17 @@ function toQueryString(query: ItemQuery): string {
  * Item definitions - guarded by the inventory.items.* permissions (except lookup, which any
  * signed-in user may read). Units and files are sub-resources of an item and have their own calls.
  */
+/** (97) A BIVAC item's cost at one port, in the base currency. */
+export interface ItemBivacPortCostDto {
+  portId: number
+  portCode: string
+  portName: string
+  countryCode: string | null
+  costBase: number
+  updatedAtUtc: string
+  updatedByName: string | null
+}
+
 export const itemsApi = {
   /** `signal` lets a grid abandon this request when the reader edits the filters again. */
   search: (query: ItemQuery = {}, signal?: AbortSignal) =>
@@ -51,6 +62,13 @@ export const itemsApi = {
 
   /** The item's on hand in every warehouse that has held it, with the totals. */
   stockBalance: (id: number, signal?: AbortSignal) => request<ItemStockBalanceDto>(`${BASE}/${id}/stock-balance`, { signal }),
+
+  /** (97) A BIVAC item's cost at each port (base currency). */
+  bivacPortCosts: (id: number, signal?: AbortSignal) => request<ItemBivacPortCostDto[]>(`${BASE}/${id}/bivac-port-costs`, { signal }),
+
+  /** (97) Replaces the costs: a port left out has no cost. */
+  setBivacPortCosts: (id: number, costs: { portId: number; costBase: number }[]) =>
+    request<ItemBivacPortCostDto[]>(`${BASE}/${id}/bivac-port-costs`, { method: 'PUT', body: { costs } }),
 
   /** The containers carrying the item, and what is still on the way. Needs containers.view. */
   containers: (id: number, signal?: AbortSignal) => request<ItemContainersDto>(`${BASE}/${id}/containers`, { signal }),

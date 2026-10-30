@@ -40,7 +40,10 @@ export interface ShortageFigures {
   totalExpectedStockBase: number
   /** Sales of the last "months of history" ÷ months. The computed value, never the override. */
   expectedMonthlySalesBase: number
+  /** (98) The line's own lead time: typed on it, else the item's purchase history, the item's, the plan's. */
   leadTimeMonths: number
+  /** (98) Manual | History | Item | Plan (null on a line saved before script 98). */
+  leadTimeSource: LeadTimeSource | null
   expectedRequirementBase: number
   shortageBase: number
   /** Null when nothing sells: a coverage in months has no meaning then. */
@@ -63,16 +66,24 @@ export interface ShortageLiveRowDto extends ShortageFigures {
   suggestedRequiredQty: number
   averageCost: number | null
   leadTimeDays: number | null
+  /** (98) What the item's purchase history says (order approval to goods receipt, last 12 months), and its receipts. */
+  leadTimeHistoryMonths: number | null
+  leadTimeReceipts: number | null
   /** The default supplier, else the last one the item was bought from. */
   supplierId: number | null
   supplierName: string | null
   supplierIsDefault: boolean
 }
 
+/** (98) Where a shortage line's lead time comes from. */
+export type LeadTimeSource = 'Manual' | 'History' | 'Item' | 'Plan'
+
 export interface ShortageDocumentLineDto extends ShortageFigures {
   id: number
   lineNo: number
   expectedMonthlySalesManual: number | null
+  /** (98) The lead time typed on the line; null when it is worked out. */
+  leadTimeManual: number | null
   effectiveMonthlySales: number
   /** Purchase units. */
   requiredQty: number
@@ -194,6 +205,8 @@ export interface SaveShortageDocumentLine {
   /** Null = the item's own PC per container. */
   pcPerContainer: number | null
   notes: string | null
+  /** (98) The lead time typed on the line, in months. Null = worked out (history, the item's, the plan's). */
+  leadTimeMonths?: number | null
 }
 
 export interface SaveShortageDocumentRequest {

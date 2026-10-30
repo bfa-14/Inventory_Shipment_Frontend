@@ -80,6 +80,7 @@ import { PurchaseHeaderCard, type PurchaseHeader, type PurchaseHeaderErrors } fr
 import {
   invoicePostedBanner,
   invoiceReceiveReason,
+  INVOICE_IN_CONTAINERS_TEXT,
   LEGACY_INVOICE_TEXTS,
   NO_COST_INVOICE_TEXT,
   NO_COST_LATE_CHARGES_TEXT,
@@ -1375,7 +1376,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     kind.code === 'PO'
       ? (abilities?.receiveGoods ?? { visible: false, blockedBy: null })
       : kind.code === 'PINV' && document
-        ? { visible: canReceiveGoods, blockedBy: canReceiveGoods ? invoiceReceiveReason(document) : null }
+        ? // (95) hidden while every piece travels in containers: they are received from the delivered container
+          {
+            visible: canReceiveGoods && invoiceReceiveReason(document) !== INVOICE_IN_CONTAINERS_TEXT,
+            blockedBy: canReceiveGoods ? invoiceReceiveReason(document) : null,
+          }
         : { visible: false, blockedBy: null }
   const receiveAction: DocumentAction = {
     key: 'receive-goods',

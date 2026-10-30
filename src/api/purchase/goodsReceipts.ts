@@ -649,6 +649,8 @@ export interface ReceivableContainerDto {
   movementInProgressNo: string | null
   /** Status 2-5 and no draft or posted receipt. */
   canReceive: boolean
+  /** (script 95) Why it cannot be received now ("KTG-2026-0031 has not been delivered yet: …"), null when it can. */
+  receiveBlockedReason?: string | null
   /** Confirmed and never dispatched (status 2): "has not left the supplier". */
   notDispatched: boolean
   /** "From a container…" (script 78): how many containers match, of which at most 200 are listed; 0 for one container. */

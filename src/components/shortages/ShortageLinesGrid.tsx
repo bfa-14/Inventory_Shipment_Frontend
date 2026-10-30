@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { ActionIcon, Anchor, Badge, Group, NumberInput, Text, TextInput, Tooltip } from '@mantine/core'
+import { ActionIcon, Anchor, Badge, Group, NumberInput, Stack, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconRestore, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../ui/DataTable'
 import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
-import { derive, STOCK_PLUS_TRANSIT_HINT, TRANSFERS_IN_HINT, type ShortageDerived, type ShortageLine } from './shortageMath'
+import { derive, leadTimeSourceText, STOCK_PLUS_TRANSIT_HINT, TRANSFERS_IN_HINT, type ShortageDerived, type ShortageLine } from './shortageMath'
 
 /** A line with its place on the document and every derived cell — what the grid sorts and draws. */
 type Row = ShortageLine & ShortageDerived & { lineNo: number }
@@ -186,7 +186,36 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
           </div>
         ),
     },
-    { accessor: 'leadTime', title: 'Lead Time (Month)', width: 175, textAlign: 'right', render: () => number(leadTimeMonths, Number.isInteger(leadTimeMonths) ? 0 : 2) },
+    {
+      // (98) Each line its own lead time: typed, else the item's (purchase history, Item Definition), else the plan's.
+      accessor: 'leadTime',
+      title: 'Lead Time (Month)',
+      width: 175,
+      textAlign: 'right',
+      render: (row) =>
+        readOnly ? (
+          <Stack gap={0} align="flex-end">
+            <Text fz="sm">{number(row.leadTimeMonths, Number.isInteger(row.leadTimeMonths) ? 0 : 2)}</Text>
+            <Text fz={10} c="dimmed">{leadTimeSourceText(row)}</Text>
+          </Stack>
+        ) : (
+          <div>
+            <NumberInput
+              value={row.leadTimeManual ?? ''}
+              placeholder={formatNumber(row.leadTimeAuto ?? leadTimeMonths, 1)}
+              min={0.1}
+              max={60}
+              decimalScale={1}
+              allowNegative={false}
+              onChange={(next) => onChange(row.key, { leadTimeManual: numberInputValue(next) })}
+              aria-label={`Lead time of line ${row.lineNo}`}
+            />
+            <Text fz={10} c="dimmed" ta="right" mt={2}>
+              {leadTimeSourceText(row)}
+            </Text>
+          </div>
+        ),
+    },
     { accessor: 'expectedRequirementBase', title: 'Expected Requirement', sortable: true, width: 195, textAlign: 'right', render: (row) => number(row.expectedRequirementBase, 2) },
     {
       accessor: 'shortageBase',
@@ -206,7 +235,7 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
         row.coverageMonths === null ? (
           <Tooltip label="Nothing sells: months of coverage have no meaning" withArrow><Text fz="sm" c="dimmed">—</Text></Tooltip>
         ) : (
-          <Text fz="sm" fw={row.coverageMonths < leadTimeMonths ? 700 : 400} c={row.coverageMonths < leadTimeMonths ? 'red' : undefined}>{formatNumber(row.coverageMonths, 2)}</Text>
+          <Text fz="sm" fw={row.coverageMonths < row.leadTimeMonths ? 700 : 400} c={row.coverageMonths < row.leadTimeMonths ? 'red' : undefined}>{formatNumber(row.coverageMonths, 2)}</Text>
         ),
     },
     {

@@ -146,7 +146,8 @@ export function ShortagePrintPage() {
                 {formatNumber(line.effectiveMonthlySales, 2)}
                 {line.expectedMonthlySalesManual !== null ? ' (manual)' : ''}
               </td>
-              <td>{leadTime}</td>
+              {/* (98) each line its own lead time */}
+              <td>{formatNumber(line.leadTimeMonths, Number.isInteger(line.leadTimeMonths) ? 0 : 2)}</td>
               <td>{formatNumber(line.expectedRequirementBase, 2)}</td>
               <td>{formatNumber(line.shortageBase)}</td>
               <td>{formatNumber(line.coverageMonths, 2)}</td>

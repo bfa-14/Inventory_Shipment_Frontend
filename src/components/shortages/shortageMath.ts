@@ -1,4 +1,4 @@
-import type { ShortageDocumentLineDto, ShortageLiveRowDto } from '../../api/inventory/shortages'
+import type { LeadTimeSource, ShortageDocumentLineDto, ShortageLiveRowDto } from '../../api/inventory/shortages'
 
 /**
  * One line of a shortage plan while it is on the page.
@@ -37,6 +37,15 @@ export interface ShortageLine {
   maxQuantity: number | null
   lastCost: number | null
   notes: string
+  /**
+   * (98) The item's own lead time from the server - its purchase history, else Item Definition's - or null when the item
+   * has neither: the line then follows the plan's header (and a change of the header shows at once).
+   */
+  leadTimeAuto: number | null
+  /** (98) Where leadTimeAuto comes from: History or Item (null: the plan's). */
+  leadTimeAutoSource: LeadTimeSource | null
+  /** (98) The lead time typed on the line; it wins. */
+  leadTimeManual: number | null
   /** A message about the row: the server's "Line N: …". */
   error?: string
 }
@@ -55,6 +64,21 @@ export interface ShortageDerived {
   requiredBase: number
   /** Null without a PC per container. */
   containerRequirement: number | null
+  /** (98) The lead time this line is computed with: typed, else the item's, else the plan's. */
+  leadTimeMonths: number
+}
+
+/** (98) A line's lead time: typed on it, else its item's (history or Item Definition), else the plan's header. */
+export function lineLeadTime(line: Partial<Pick<ShortageLine, 'leadTimeManual' | 'leadTimeAuto'>>, planLeadTime: number): number {
+  return line.leadTimeManual ?? line.leadTimeAuto ?? planLeadTime
+}
+
+/** (98) The words under a line's lead time. */
+export function leadTimeSourceText(line: Pick<ShortageLine, 'leadTimeManual' | 'leadTimeAutoSource'>): string {
+  if (line.leadTimeManual !== null) return 'typed'
+  if (line.leadTimeAutoSource === 'History') return 'from purchase history'
+  if (line.leadTimeAutoSource === 'Item') return 'from Item Definition'
+  return "the plan's"
 }
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
@@ -64,15 +88,17 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
  *
  *   Stock + Transit       = Current Inventory + Transit + Transfers in (90: goods on the way from another warehouse)
  *   Total Expected Stock  = Current Inventory + Transit + Transfers in + Outstanding Order
- *   Expected Requirement  = Expected Monthly Sales × Lead Time (Month)
+ *   Expected Requirement  = Expected Monthly Sales × the line's Lead Time (Month) (98: typed, the item's, the plan's)
  *   Shortage              = max(0, Requirement − Total Expected Stock), rounded UP to a whole unit
  *   Coverage (months)     = Total Expected Stock ÷ Expected Monthly Sales
  *   Container Requirement = Required Qty × packing ÷ PC per Container
  */
 export function derive(
-  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'transfersInBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'>,
-  leadTimeMonths: number,
+  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'transfersInBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'> &
+    Partial<Pick<ShortageLine, 'leadTimeManual' | 'leadTimeAuto'>>,
+  planLeadTimeMonths: number,
 ): ShortageDerived {
+  const leadTimeMonths = lineLeadTime(line, planLeadTimeMonths)
   // A plan saved before transfers has 0 transfers in: its figures stay what they were.
   const stockPlusTransitBase = line.currentInventoryBase + line.transitBase + line.transfersInBase
   const totalExpectedStockBase = stockPlusTransitBase + line.outstandingOrderBase
@@ -94,6 +120,7 @@ export function derive(
     suggestedRequiredQty: shortageBase > 0 ? Math.ceil(shortageBase / packing) : 0,
     requiredBase,
     containerRequirement: line.pcPerContainer !== null && line.pcPerContainer > 0 ? round2(requiredBase / line.pcPerContainer) : null,
+    leadTimeMonths,
   }
 }
 
@@ -158,6 +185,10 @@ export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
     maxQuantity: dto.maxQuantity,
     lastCost: dto.lastCost,
     notes: dto.notes ?? '',
+    // (98) A typed lead time is kept apart; a worked-out one of the item's own (not the plan's) is the line's default.
+    leadTimeManual: dto.leadTimeManual ?? null,
+    leadTimeAuto: dto.leadTimeSource === 'History' || dto.leadTimeSource === 'Item' ? dto.leadTimeMonths : null,
+    leadTimeAutoSource: dto.leadTimeSource === 'History' || dto.leadTimeSource === 'Item' ? dto.leadTimeSource : null,
   }
   line.requiredManual = dto.requiredQty !== derive(line, dto.leadTimeMonths).suggestedRequiredQty
   return line
@@ -186,6 +217,9 @@ export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
     maxQuantity: row.maxQuantity,
     lastCost: row.lastCost,
     notes: '',
+    leadTimeManual: null,
+    leadTimeAuto: row.leadTimeSource === 'History' || row.leadTimeSource === 'Item' ? row.leadTimeMonths : null,
+    leadTimeAutoSource: row.leadTimeSource === 'History' || row.leadTimeSource === 'Item' ? row.leadTimeSource : null,
   }
 }
 

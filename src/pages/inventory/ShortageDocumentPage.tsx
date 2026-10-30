@@ -248,6 +248,7 @@ export function ShortageDocumentPage() {
         expectedMonthlySalesManual: line.expectedMonthlySalesManual,
         pcPerContainer: line.pcPerContainer,
         notes: line.notes.trim() || null,
+        leadTimeMonths: line.leadTimeManual,   // (98) only a typed one
       })),
     }
   }

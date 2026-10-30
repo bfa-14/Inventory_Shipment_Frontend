@@ -55,6 +55,7 @@ import { COUNTRIES, countryLabel, findCountry } from '../../data/countries'
 import { PERMISSIONS } from '../../navigation'
 import { CONTENT_BG } from '../../theme'
 import { ItemImageCard } from './ItemImageCard'
+import { ItemBivacPortCostsCard } from './ItemBivacPortCostsCard'
 import { ItemStockLevelsCard } from './ItemStockLevelsCard'
 import { ItemAuditCard, ItemQuickLinksCard, ItemStockCard } from './ItemSideCards'
 import { ItemUnitFormModal } from './ItemUnitFormModal'
@@ -112,7 +113,7 @@ interface FormValues {
   isBivac: boolean
   isActive: boolean
   defaultSupplierId: string | null
-  leadTimeDays: number | ''
+  leadTimeMonths: number | ''
   pcPerContainer: number | ''
   weightKg: number | ''
   volumeCbm: number | ''
@@ -146,7 +147,7 @@ const BLANK: FormValues = {
   isBivac: false,
   isActive: true,
   defaultSupplierId: null,
-  leadTimeDays: '',
+  leadTimeMonths: '',
   pcPerContainer: '',
   weightKg: '',
   volumeCbm: '',
@@ -180,7 +181,7 @@ function toFormValues(item: ItemDetailsDto): FormValues {
     isBivac: item.isBivac,
     isActive: item.isActive,
     defaultSupplierId: item.defaultSupplierId === null ? null : String(item.defaultSupplierId),
-    leadTimeDays: item.leadTimeDays ?? '',
+    leadTimeMonths: item.leadTimeMonths ?? '',
     pcPerContainer: item.pcPerContainer ?? '',
     weightKg: item.weightKg ?? '',
     volumeCbm: item.volumeCbm ?? '',
@@ -489,7 +490,7 @@ function ItemDetails() {
       isBivac: values.isBivac,
       isActive: values.isActive,
       defaultSupplierId: values.defaultSupplierId === null ? null : Number(values.defaultSupplierId),
-      leadTimeDays: values.leadTimeDays === '' ? null : values.leadTimeDays,
+      leadTimeMonths: values.leadTimeMonths === '' ? null : values.leadTimeMonths,
       pcPerContainer: values.pcPerContainer === '' ? null : values.pcPerContainer,
       weightKg: values.weightKg === '' ? null : values.weightKg,
       volumeCbm: values.volumeCbm === '' ? null : values.volumeCbm,
@@ -1531,6 +1532,11 @@ function ItemDetails() {
                     />
                   ) : null}
 
+                  {/* (97) What a BIVAC charge costs at each port: a saved BIVAC item only. */}
+                  {item?.isBivac && itemId !== null ? (
+                    <ItemBivacPortCostsCard itemId={itemId} itemCode={item.itemCode} canEdit={canEdit} />
+                  ) : null}
+
                   <Card radius="lg" p="lg" withBorder>
                     <Text fw={600} fz="md" mb="md">
                       Purchasing
@@ -1560,23 +1566,31 @@ function ItemDetails() {
 
                         <Grid.Col span={{ base: 12, sm: 4 }}>
                           <Field
-                            label="Lead time (days)"
-                            value={item?.leadTimeDays === null || item === null ? '—' : formatNumber(item.leadTimeDays)}
+                            label="Lead time (months)"
+                            value={item?.leadTimeMonths == null || item === null ? '—' : formatNumber(item.leadTimeMonths, 1)}
                             editing={editable}
                           >
                             <NumberInput
-                              label="Lead time (days)"
-                              placeholder="Days from order to receipt"
+                              label="Lead time (months)"
+                              placeholder="Months from order to receipt"
                               min={0}
-                              max={3650}
-                              step={1}
-                              allowDecimal={false}
+                              max={60}
+                              step={0.5}
+                              decimalScale={1}
                               allowNegative={false}
-                              value={form.values.leadTimeDays}
-                              onChange={(next) => form.setFieldValue('leadTimeDays', numberInputValue(next) ?? '')}
-                              error={form.errors.leadTimeDays}
+                              value={form.values.leadTimeMonths}
+                              onChange={(next) => form.setFieldValue('leadTimeMonths', numberInputValue(next) ?? '')}
+                              error={form.errors.leadTimeMonths}
                             />
                           </Field>
+                          {/* (98) What Shortages use first: the item's own purchase history. */}
+                          {item?.leadTimeHistoryMonths != null ? (
+                            <Text fz="xs" c="dimmed" mt={4}>
+                              Purchase history: {formatNumber(item.leadTimeHistoryMonths, 1)} months from order approval to goods
+                              receipt ({formatNumber(item.leadTimeHistoryReceipts ?? 0)} receipt
+                              {item.leadTimeHistoryReceipts === 1 ? '' : 's'}, last 12 months). Shortages use it first.
+                            </Text>
+                          ) : null}
                         </Grid.Col>
 
                         <Grid.Col span={{ base: 12, sm: 4 }}>

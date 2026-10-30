@@ -792,8 +792,13 @@ export interface ItemDetailsDto {
   defaultSupplierId: number | null
   defaultSupplierCode: string | null
   defaultSupplierName: string | null
-  /** Days between ordering and receiving. */
+  /** Days between ordering and receiving (98: months x 30, kept for older readers). */
   leadTimeDays: number | null
+  /** (98) Months between ordering and receiving, one decimal: what Item Definition shows and types. */
+  leadTimeMonths?: number | null
+  /** (98) What its purchase history says: order approval to goods receipt over the last 12 months. */
+  leadTimeHistoryMonths?: number | null
+  leadTimeHistoryReceipts?: number | null
   /** Pieces (base units) that fit in one container — the default of a shortage plan line. Only the item's own GET returns it. */
   pcPerContainer?: number | null
   /** Per BASE unit. What a charge allocated by weight is shared out on. */
@@ -879,8 +884,10 @@ export interface SaveItemRequest {
   isActive: boolean
   /** The supplier a purchase order is raised on by default. */
   defaultSupplierId?: number | null
-  /** Days between ordering and receiving. */
+  /** Days between ordering and receiving (98: sent only by older clients; the months win). */
   leadTimeDays?: number | null
+  /** (98) Months between ordering and receiving, one decimal, 0 to 60; null clears it. */
+  leadTimeMonths?: number | null
   /** Pieces (base units) per container; null clears it. */
   pcPerContainer?: number | null
   /** Per BASE unit; needed by charges allocated by weight. */

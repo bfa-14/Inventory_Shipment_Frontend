@@ -133,6 +133,21 @@ function LoadItems({ onClose, context, families, brands, existingItemIds, onAdd 
     { accessor: 'outstandingOrderBase', title: 'Outstanding', width: 110, textAlign: 'right', render: (row) => formatNumber(row.outstandingOrderBase) },
     { accessor: 'totalExpectedStockBase', title: 'Total Expected', width: 120, textAlign: 'right', render: (row) => formatNumber(row.totalExpectedStockBase) },
     { accessor: 'expectedMonthlySalesBase', title: 'Monthly Sales', width: 120, textAlign: 'right', render: (row) => formatNumber(row.expectedMonthlySalesBase, 2) },
+    {
+      // (98) Each item its own lead time: its purchase history, else Item Definition's, else the plan's.
+      accessor: 'leadTimeMonths',
+      title: 'Lead Time',
+      width: 110,
+      textAlign: 'right',
+      render: (row) => (
+        <Stack gap={0} align="flex-end">
+          <Text fz="sm">{formatNumber(row.leadTimeMonths, Number.isInteger(row.leadTimeMonths) ? 0 : 1)}</Text>
+          <Text fz={10} c="dimmed">
+            {row.leadTimeSource === 'History' ? `history (${formatNumber(row.leadTimeReceipts ?? 0)})` : row.leadTimeSource === 'Item' ? 'item' : 'plan'}
+          </Text>
+        </Stack>
+      ),
+    },
     { accessor: 'expectedRequirementBase', title: 'Requirement', width: 120, textAlign: 'right', render: (row) => formatNumber(row.expectedRequirementBase, 2) },
     {
       accessor: 'shortageBase',
@@ -173,7 +188,7 @@ function LoadItems({ onClose, context, families, brands, existingItemIds, onAdd 
   return (
     <Stack gap="md">
       <Text fz="sm" c="dimmed">
-        Live figures for <b>{context.warehouseName}</b> — Lead Time (Month) {formatNumber(context.leadTimeMonths, Number.isInteger(context.leadTimeMonths) ? 0 : 2)},
+        Live figures for <b>{context.warehouseName}</b> — Lead Time (Month) {formatNumber(context.leadTimeMonths, Number.isInteger(context.leadTimeMonths) ? 0 : 2)} for items without a purchase history or a lead time of their own,
         monthly sales = the busiest month of the last {formatNumber(context.monthsOfHistory)} month(s).
       </Text>
 

@@ -170,6 +170,9 @@ export const NO_COST_LATE_CHARGES_TEXT =
 export const NO_COST_INVOICE_TEXT =
   'This invoice does not change item costs (Configuration › Document Types): the goods received against it keep the order price (and their container charges).'
 
+/** (script 95) The reason when an invoice's goods all travel in containers: "Receive goods…" is hidden on it. */
+export const INVOICE_IN_CONTAINERS_TEXT = "This invoice's goods travel in containers: they are received with their containers."
+
 /** Why "Receive goods…" cannot be used on this supplier invoice (rule 15); null when it can. */
 export function invoiceReceiveReason(invoice: PurchaseDocumentDto): string | null {
   if (invoice.status === 'Draft') return 'Post the invoice first: goods are received against a posted invoice, or from the order.'
@@ -191,7 +194,7 @@ export function invoiceReceiveReason(invoice: PurchaseDocumentDto): string | nul
   }
   if (left <= 0) return 'Every piece of this invoice is already received.'
   if (outside > 0) return null
-  if (inContainers > 0) return "This invoice's goods travel in containers: they are received with their containers."
+  if (inContainers > 0) return INVOICE_IN_CONTAINERS_TEXT
   return 'The rest is in draft goods receipts: post or delete them first.'
 }
 
