@@ -60,7 +60,8 @@ export function ContainerFillCell({ fillPct, missingItems }: { fillPct: number |
   if (fillPct === null) {
     return (
       <Tooltip
-        label={missingItems ? `No Container unit: ${missingItems}` : 'Unknown'}
+        // (95) A Container unit of 1 piece is "not specified", the same as none.
+        label={missingItems ? `No pieces per container (Container unit missing or 1): ${missingItems}` : 'Unknown'}
         withArrow
         disabled={!missingItems}
       >

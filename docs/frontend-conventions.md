@@ -146,7 +146,7 @@ shown the card carries `.login-card--env-switch`: its 1034:772 height becomes a 
 ## The menu's groups and their order
 
 `src/navigation.ts`, in the owner's order: Home and Dashboard on top, then **Reports** (Shortages, Stock Valuation,
-Sales Profit, Customer Statement, Out-of-Stock Sales), **Logistics**, **Purchase**, **Inventory**, **Sales** and
+Sales Profit, Container Report, Customer Statement, Out-of-Stock Sales), **Logistics**, **Purchase**, **Inventory**, **Sales** and
 **Configurations** (the former Backoffice and Configuration groups: Master Data, Users & Permissions, Document Types,
 Charge Types, Container Types, Settings). A page moved to another group keeps its address and its permission; its
 breadcrumb, the menu search and the Spotlight follow the menu by themselves.
@@ -2000,6 +2000,33 @@ rather than a row of dashes, which would leak the permission as a shrug.
   with a tooltip each (they differ by one word) - with View item costs, see **Item costs** - and the Purchasing
   section carries **Weight (kg)** and **Volume (CBM)** per base unit — a charge allocated by weight or volume is
   refused for an item that has none.
+
+## Container report (script 95: containers.report.view)
+
+`/logistics/container-report` (`ContainerReportPage`, under **Reports**, "View Container Report") is the purchasing team's
+tracking sheet worked out by the system: one row per container line and per approved order line still to load, with its
+order, PI, invoices, payments, journey, charges and cost. `containerReportApi.report` answers the WHOLE report
+(`paging: 'client'`); the page never pages the server.
+
+- **Grouped by stage from the start**: `useDataGrid({ groupBy: 'stageLabel' })` - the grid engine's new `groupBy` option,
+  the column a fresh grid starts grouped by (the reader may still change or clear it from the Group by menu; it is not
+  remembered). The stage column's `value` is the server's `stageSort` and its `text` the `stageLabel`, so the groups come
+  in the journey's order (pending, newest month first, … offloaded) while they read as words. Each group carries its own
+  totals (`summary: 'sum'` on the figures), the footer the grand total.
+- **Tiles above the grid**, one per stage (containers, lines, pieces, value): a click keeps that stage's rows only (the
+  page filters the rows it hands the engine), a second click shows every stage; Clear Filters clears it too.
+- **The container ref is pinned** (`DataTable` `pinFirstColumn`, the new twin of `pinLastColumn`): fifty columns to the
+  right the reader still sees whose figures they are. Columns follow the sheet's titles in capitals ("CON. REF.", "FOB
+  PRICE", "LEAD TIME (MONTHS)").
+- **Charge columns come from the answer**: one per charge type in `chargeTypes` (the transport ones are summed in TOTAL
+  TRANSPORT AMOUNT), read from `row.charges[typeId]`. Without View Container Charges the server sends `chargesVisible:
+  false` and no charge figures, and the page draws none of those columns; the same for the payment columns and
+  `paymentsVisible` (View Supplier Payments).
+- **Estimates read as estimates**: a FOB, total or cost per unit not final yet is grey italics with "est."; a lead time
+  before the offload says "so far". Calendar dates are shown dd/MM/yyyy from their parts (`dateText`), as the export
+  writes them.
+- **Export to Excel** is the server's (`/export`): the sheet's layout, one frozen header, a title row and a subtotal per
+  stage, the grand total.
 
 ## Item costs (script 94: inventory.costs.view)
 

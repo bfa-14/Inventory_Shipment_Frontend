@@ -13,6 +13,8 @@ export const PERMISSIONS = {
   trackingView: 'containers.tracking.view',
   // Logistics › Shipments, the board of every container on its way (script 82).
   shipmentsView: 'containers.shipments.view',
+  // Reports › Container Report, the tracking sheet worked out by the system (script 95).
+  containerReportView: 'containers.report.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -264,6 +266,8 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.valuationView, icon: 'balance' },
       // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
+      // (95) Every container and order still to load, by where the goods are: the purchasing team's tracking sheet.
+      { label: 'Container Report', to: '/logistics/container-report', permission: PERMISSIONS.containerReportView, icon: 'reports' },
       { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },
       // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
       { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },

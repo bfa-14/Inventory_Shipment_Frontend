@@ -235,6 +235,11 @@ interface DataTableProps<T> {
    */
   pinLastColumn?: boolean
   /**
+   * Keeps the first column in view while a wide grid scrolls sideways - the Container Report's container ref, which
+   * says whose figures the reader is looking at fifty columns to the right.
+   */
+  pinFirstColumn?: boolean
+  /**
    * Turns on the column chooser and manual column widths, and names where the reader's choices are
    * remembered (localStorage, per browser). Leaving it out keeps the grid exactly as it was: no
    * Columns button, no resize handles, nothing stored - which is what the grids embedded in a form
@@ -317,6 +322,7 @@ export function DataTable<T>({
   isRecordSelectable,
   rowClassName,
   pinLastColumn = false,
+  pinFirstColumn = false,
   storeKey,
   summaryRecords,
   summaryScope = 'filtered',
@@ -884,6 +890,7 @@ export function DataTable<T>({
           borderRadius="md"
           verticalAlign="center"
           pinLastColumn={pinLastColumn}
+          pinFirstColumn={pinFirstColumn}
           rowClassName={(record) =>
             [rowId(record, idKey) === selectedId ? 'app-grid__row--selected' : undefined, rowClassName?.(record)]
               .filter(Boolean)

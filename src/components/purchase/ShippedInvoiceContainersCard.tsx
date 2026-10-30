@@ -344,7 +344,7 @@ export function ShippedInvoiceContainersCard({
                         <Table.Td ta="right">{formatNumber(c.quantityBase)}</Table.Td>
                         <Table.Td ta="right" data-share-of-container>
                           {c.shareOfContainerPct === null ? (
-                            <Tooltip label={`${c.itemCode} has no Container unit (Item Definition)`} withArrow>
+                            <Tooltip label={`${c.itemCode} has no pieces per container: its Container unit is missing or 1 (Item Definition)`} withArrow>
                               <Text span fz="sm" c="dimmed">
                                 —
                               </Text>

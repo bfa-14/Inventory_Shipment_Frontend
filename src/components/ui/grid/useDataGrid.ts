@@ -83,6 +83,11 @@ export interface DataGridOptions<T> {
   sort?: SortSpec[]
   pageSizeOptions?: number[]
   tree?: TreeOptions<T>
+  /**
+   * The column a fresh grid starts grouped by (the Container Report's stage). The reader can still change or clear it
+   * from the grid's Group by menu; the choice is not remembered.
+   */
+  groupBy?: string
 }
 
 export interface DataGrid<T> {
@@ -199,6 +204,7 @@ export function useDataGrid<T>({
   sort: initialSort = [],
   pageSizeOptions = CLIENT_PAGE_SIZES,
   tree,
+  groupBy: initialGroupBy,
 }: DataGridOptions<T>): DataGrid<T> {
   const byAccessor = useMemo(() => new Map(columns.map((column) => [column.accessor, column])), [columns])
 
@@ -239,7 +245,7 @@ export function useDataGrid<T>({
     )
   }, [rows, active, byAccessor])
 
-  const [groupBy, setGroupByState] = useState<string | null>(null)
+  const [groupBy, setGroupByState] = useState<string | null>(initialGroupBy ?? null)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
   const groupKeyOf = useCallback(
