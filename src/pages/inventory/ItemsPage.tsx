@@ -36,13 +36,15 @@ interface Filters {
   isBivac: string | null
 }
 
+/* THE LIST OPENS ON WHAT IS SOLD DAY TO DAY: active items that are not BIVAC. "Clear filters" returns here too; each
+   select's own clear (×) shows all. */
 const NO_FILTERS: Filters = {
   search: '',
   itemFamilyId: null,
   brandId: null,
   defaultWarehouseId: null,
-  isActive: null,
-  isBivac: null,
+  isActive: 'true',
+  isBivac: 'false',
 }
 
 /** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
