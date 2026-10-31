@@ -532,9 +532,9 @@ export function breadcrumbFor(pathname: string): string[] {
   return [leaf.section.breadcrumb, leaf.group?.label, leaf.item.label].filter((part): part is string => !!part)
 }
 
-/** Landing route after sign-in: the Users screen when allowed, otherwise Home. */
-export function landingRoute(permissions: string[] | undefined): string {
-  return permissions?.includes(PERMISSIONS.usersView) ? '/security/users' : '/'
+/** Landing route after sign-in: Home, for everyone. */
+export function landingRoute(): string {
+  return '/'
 }
 
 /**
