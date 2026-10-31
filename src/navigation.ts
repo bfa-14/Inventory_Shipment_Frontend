@@ -15,6 +15,8 @@ export const PERMISSIONS = {
   shipmentsView: 'containers.shipments.view',
   // Reports › Container Report, the tracking sheet worked out by the system (script 95).
   containerReportView: 'containers.report.view',
+  /** Reports › Attachment Report (script 101): each reader still sees only the files of documents they may open. */
+  attachmentReportView: 'reports.attachments.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -268,6 +270,8 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       // (95) Every container and order still to load, by where the goods are: the purchasing team's tracking sheet.
       { label: 'Container Report', to: '/logistics/container-report', permission: PERMISSIONS.containerReportView, icon: 'reports' },
+      // Every module's attachments by type and date, downloaded one, several or all at once (script 101).
+      { label: 'Attachment Report', to: '/reports/attachments', permission: PERMISSIONS.attachmentReportView, icon: 'documents' },
       { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },
       // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
       { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },

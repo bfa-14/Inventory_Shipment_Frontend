@@ -77,6 +77,7 @@ import { ReceiptsPage } from './pages/sales/ReceiptsPage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
+import { AttachmentReportPage } from './pages/reports/AttachmentReportPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -330,6 +331,9 @@ export default function App() {
               {/* (95) The container report: every container and order still to load, by stage. */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.containerReportView} />}>
                 <Route path="/logistics/container-report" element={<ContainerReportPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.attachmentReportView} />}>
+                <Route path="/reports/attachments" element={<AttachmentReportPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
