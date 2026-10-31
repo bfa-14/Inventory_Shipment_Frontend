@@ -123,8 +123,8 @@ export function PortsPage() {
 
   async function handleDelete(row: PortDto) {
     const go = await confirm({
-      title: 'Delete port',
-      message: `Delete port ${row.portCode} - ${row.portName}? This cannot be undone.`,
+      title: 'Delete place',
+      message: `Delete ${row.portCode} - ${row.portName}? This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
@@ -190,12 +190,12 @@ export function PortsPage() {
   return (
     <>
       <PageHeader
-        title="Ports"
+        title="Ports & Places"
         subtitle="Sea ports, border posts and inland places a container passes through."
         actions={
           canManage ? (
             <Button leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'create' })}>
-              New Port
+              New Place
             </Button>
           ) : null
         }
@@ -241,7 +241,7 @@ export function PortsPage() {
           columns={columns}
           fetching={loading}
           onRowActivate={canManage ? ({ record }) => setDialog({ kind: 'edit', port: record }) : undefined}
-          noRecordsText={grid.isDefault ? 'No ports yet.' : 'No ports found. Try clearing the filters.'}
+          noRecordsText={grid.isDefault ? 'No ports or places yet.' : 'No ports or places found. Try clearing the filters.'}
         />
       </Paper>
 
@@ -250,7 +250,7 @@ export function PortsPage() {
           mode={dialog.kind}
           port={dialog.kind === 'edit' ? dialog.port : undefined}
           onClose={() => setDialog(null)}
-          onSaved={() => void afterSave(dialog.kind === 'create' ? 'Port created successfully.' : 'Port updated successfully.')}
+          onSaved={() => void afterSave(dialog.kind === 'create' ? 'Place created successfully.' : 'Place updated successfully.')}
         />
       ) : null}
     </>

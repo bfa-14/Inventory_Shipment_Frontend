@@ -96,7 +96,7 @@ export function PortFormModal({ mode, port, onClose, onSaved }: PortFormModalPro
   return (
     <FormModal
       opened
-      title={mode === 'create' ? 'New Port' : 'Edit Port'}
+      title={mode === 'create' ? 'New Place' : 'Edit Place'}
       saveLabel="Save Port"
       saving={saving}
       onClose={onClose}

@@ -388,7 +388,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
           { label: 'Unit Types', to: '/setup/master-data/unit-types', permission: PERMISSIONS.unitTypesView },
           // The lists the container pages pick from.
-          { label: 'Ports', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
+          { label: 'Ports & Places', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
           { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
           // The lists a customer receipt line picks from.
