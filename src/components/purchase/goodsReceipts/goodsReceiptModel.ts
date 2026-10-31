@@ -7,6 +7,7 @@ import type {
 } from '../../../api/purchase/goodsReceipts'
 import type { ItemUnitDto, WarehouseLookupDto } from '../../../api/types'
 import { formatNumber } from '../../format'
+import { NOT_ONE_OF_YOURS } from '../../documents/lineWarehouses'
 
 /**
  * The goods receipt page's working shapes and the sentences more than one place says.
@@ -29,6 +30,17 @@ export const MANUAL_HINT =
 export const CONTAINERS_HINT = 'Goods in containers are received with their container.'
 export const ORDER_PRICE_HINT =
   'Pieces not invoiced yet are valued at the order price; the invoice adjusts their cost when it is posted.'
+
+/**
+ * The order-price hint as the purchase invoice type has it (script 79): with "Affects item cost" off, invoices never
+ * change the cost, so promising that "the invoice adjusts their cost" would be untrue. `affectsItemCost` undefined
+ * (types not loaded yet) reads as today's default, on.
+ */
+export function orderPriceHint(affectsItemCost: boolean | undefined): string {
+  return affectsItemCost === false
+    ? 'Pieces are valued at the order price; purchase invoices do not change item costs (Configuration › Document Types).'
+    : ORDER_PRICE_HINT
+}
 
 /** The hint of the "Cost adjustments" card. */
 export const COST_ADJUSTMENTS_HINT =
@@ -74,10 +86,12 @@ export function receiptLabel(row: { id: number; documentNumber: string | null })
 /**
  * Post confirm: "{n} pcs enter {warehouse} at {value} {USD}, ...". The sentence about the order price only when a line
  * has one (an order's or a container's line): a receipt without an order has its cost typed, and an invoice's lines
- * are invoiced already.
+ * are invoiced already. (94) A null value - a reader without View item costs - names no figure: "{n} pcs enter
+ * {warehouse}, ...".
  */
-export function postConfirmMessage(pieces: number, warehouse: string, value: number, currencyCode: string, atOrderPrice = true): string {
-  const first = `Post this goods receipt? ${formatNumber(pieces)} pcs enter ${warehouse} at ${formatNumber(value, 2)} ${currencyCode}, the item costs are updated and the number is assigned.`
+export function postConfirmMessage(pieces: number, warehouse: string, value: number | null, currencyCode: string, atOrderPrice = true): string {
+  const worth = value === null ? '' : ` at ${formatNumber(value, 2)} ${currencyCode}`
+  const first = `Post this goods receipt? ${formatNumber(pieces)} pcs enter ${warehouse}${worth}, the item costs are updated and the number is assigned.`
   return atOrderPrice
     ? `${first} Pieces not invoiced yet are valued at the order price; their cost is adjusted when the invoice is posted.`
     : first
@@ -85,13 +99,14 @@ export function postConfirmMessage(pieces: number, warehouse: string, value: num
 
 /**
  * The post confirm of a SAVED receipt, from its lines: what the page asks, and the list's row Post (which reads the
- * receipt first). The value is the server's when it has one, else the estimate of the lines.
+ * receipt first). The value is the server's when it has one, else the estimate of the lines. (94) `seesCosts` false (no
+ * View item costs): the sentence names no value - the server sent none.
  */
-export function postConfirmFor(receipt: GoodsReceiptDto, warehouses: WarehouseLookupDto[]): string {
+export function postConfirmFor(receipt: GoodsReceiptDto, warehouses: WarehouseLookupDto[], seesCosts = true): string {
   const lines = receipt.lines.map((line) => toLineForm(line))
   const pieces = lines.reduce((sum, line) => sum + receivedBaseOf(line), 0)
   const estimate = lines.reduce((sum, line) => sum + (lineValueOf(line, false) ?? 0), 0)
-  const value = receipt.currentValueBase > 0 ? receipt.currentValueBase : estimate
+  const value = !seesCosts ? null : receipt.currentValueBase !== null && receipt.currentValueBase > 0 ? receipt.currentValueBase : estimate
   const atOrderPrice = lines.some((line) => line.kind === 'order' || line.kind === 'container')
   return postConfirmMessage(pieces, warehousesOf(lines, receipt.warehouseCode, warehouses), value, receipt.baseCurrencyCode ?? 'USD', atOrderPrice)
 }
@@ -320,23 +335,33 @@ export function warehouseLabel(w: Pick<WarehouseLookupDto, 'warehouseCode' | 'wa
  * group, not a place that holds stock (scripts 70, 72): the same rule as every document line (see lineWarehouses).
  * `firstBranchId` (the receipt's or the document's branch) puts its group first. The line's current warehouse stays an
  * option even when it is no longer allowed - inactive, or a parent, marked so - so the cell never goes blank.
+ *
+ * `usableOnly` (92): only the leaves the READER may use (`canUse` of the lookup, missing = true); a kept one the reader
+ * may not use stays, marked "- not one of your warehouses" (the parent's mark wins). Left out, exactly what it was.
  */
 export function warehouseChoices(
   warehouses: WarehouseLookupDto[],
   branchId: number | null,
   keep: { id: number | null; code: string | null; name: string | null }[] = [],
   firstBranchId: number | null = null,
+  usableOnly = false,
 ): WarehouseGroup[] {
   const kept = (w: WarehouseLookupDto) => keep.some((k) => k.id === w.id)
   const isLeaf = (w: WarehouseLookupDto) => w.childCount === 0
+  const usable = (w: WarehouseLookupDto) => !usableOnly || w.canUse !== false
   const shown = warehouses
-    .filter((w) => ((w.isActive && isLeaf(w)) || kept(w)) && (branchId === null || w.branchId === branchId))
+    .filter((w) => ((w.isActive && isLeaf(w) && usable(w)) || kept(w)) && (branchId === null || w.branchId === branchId))
     .sort((a, b) => Number(b.branchId === firstBranchId) - Number(a.branchId === firstBranchId))
   const groups = new Map<string, WarehouseOption[]>()
   for (const w of shown) {
     const group = `${w.branchCode} - ${w.branchName}`
     const list = groups.get(group) ?? []
-    list.push({ value: String(w.id), label: isLeaf(w) ? warehouseLabel(w) : `${warehouseLabel(w)} - has warehouses under it, choose one of those` })
+    const label = !isLeaf(w)
+      ? `${warehouseLabel(w)} - has warehouses under it, choose one of those`
+      : usable(w)
+        ? warehouseLabel(w)
+        : `${warehouseLabel(w)} - ${NOT_ONE_OF_YOURS}`
+    list.push({ value: String(w.id), label })
     groups.set(group, list)
   }
   const missing = keep.filter((k) => k.id !== null && !shown.some((w) => w.id === k.id))

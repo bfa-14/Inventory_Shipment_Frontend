@@ -2,6 +2,7 @@ import { Anchor, Paper, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
 import { costCauseLabel, type GoodsReceiptCostChangeDto } from '../../../api/purchase/goodsReceipts'
 import { useAuth } from '../../../auth/useAuth'
+import { useSeesItemCosts } from '../../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../../navigation'
 import { routes } from '../../../routes'
 import { stamp } from '../../documents/documentKind'
@@ -19,9 +20,13 @@ interface GoodsReceiptCostAdjustmentsCardProps {
  * says how much went to the stock (the average cost) and how much to the cost of sales.
  *
  * Shown on a posted receipt that has any.
+ *
+ * (94) WITHOUT VIEW ITEM COSTS the rows stay - the date, the cause and its document, the item, the pieces - and the
+ * before / after, amount, stock and cost-of-sales columns (and their total) are not drawn: the server sends them null.
  */
 export function GoodsReceiptCostAdjustmentsCard({ changes, currencyCode }: GoodsReceiptCostAdjustmentsCardProps) {
   const { hasPermission } = useAuth()
+  const seesCosts = useSeesItemCosts()
 
   /** The document that caused it, as a link when the reader may open it. */
   function causeRoute(change: GoodsReceiptCostChangeDto): string | null {
@@ -42,7 +47,11 @@ export function GoodsReceiptCostAdjustmentsCard({ changes, currencyCode }: Goods
   }
 
   const totals = changes.reduce(
-    (sum, c) => ({ amount: sum.amount + c.amountBase, stock: sum.stock + c.inventoryBase, cogs: sum.cogs + c.cogsBase }),
+    (sum, c) => ({
+      amount: sum.amount + (c.amountBase ?? 0),
+      stock: sum.stock + (c.inventoryBase ?? 0),
+      cogs: sum.cogs + (c.cogsBase ?? 0),
+    }),
     { amount: 0, stock: 0, cogs: 0 },
   )
 
@@ -58,7 +67,7 @@ export function GoodsReceiptCostAdjustmentsCard({ changes, currencyCode }: Goods
         {COST_ADJUSTMENTS_HINT}
       </Text>
 
-      <Table.ScrollContainer minWidth={960}>
+      <Table.ScrollContainer minWidth={seesCosts ? 960 : 560}>
         <Table verticalSpacing="xs" striped>
           <Table.Thead>
             <Table.Tr>
@@ -66,10 +75,14 @@ export function GoodsReceiptCostAdjustmentsCard({ changes, currencyCode }: Goods
               <Table.Th>Cause</Table.Th>
               <Table.Th>Item</Table.Th>
               <Table.Th ta="right">Received</Table.Th>
-              <Table.Th ta="right">Unit cost before → after</Table.Th>
-              <Table.Th ta="right">Amount ({currencyCode})</Table.Th>
-              <Table.Th ta="right">To stock</Table.Th>
-              <Table.Th ta="right">To cost of sales</Table.Th>
+              {seesCosts && (
+                <>
+                  <Table.Th ta="right">Unit cost before → after</Table.Th>
+                  <Table.Th ta="right">Amount ({currencyCode})</Table.Th>
+                  <Table.Th ta="right">To stock</Table.Th>
+                  <Table.Th ta="right">To cost of sales</Table.Th>
+                </>
+              )}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -94,32 +107,38 @@ export function GoodsReceiptCostAdjustmentsCard({ changes, currencyCode }: Goods
                     </Text>
                   </Table.Td>
                   <Table.Td ta="right">{formatNumber(change.receivedBase)}</Table.Td>
-                  <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
-                    {formatNumber(before(change), 2)} → {formatNumber(after(change), 2)}
-                  </Table.Td>
-                  <Table.Td ta="right">
-                    <Text fz="sm" fw={500} c={change.amountBase < 0 ? 'teal' : undefined}>
-                      {change.amountBase > 0 ? '+' : ''}
-                      {formatNumber(change.amountBase, 2)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td ta="right">{formatNumber(change.inventoryBase, 2)}</Table.Td>
-                  <Table.Td ta="right">{formatNumber(change.cogsBase, 2)}</Table.Td>
+                  {seesCosts && (
+                    <>
+                      <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
+                        {formatNumber(before(change), 2)} → {formatNumber(after(change), 2)}
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text fz="sm" fw={500} c={(change.amountBase ?? 0) < 0 ? 'teal' : undefined}>
+                          {(change.amountBase ?? 0) > 0 ? '+' : ''}
+                          {formatNumber(change.amountBase, 2)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td ta="right">{formatNumber(change.inventoryBase, 2)}</Table.Td>
+                      <Table.Td ta="right">{formatNumber(change.cogsBase, 2)}</Table.Td>
+                    </>
+                  )}
                 </Table.Tr>
               )
             })}
           </Table.Tbody>
-          <Table.Tfoot>
-            <Table.Tr>
-              <Table.Th colSpan={5}>Total</Table.Th>
-              <Table.Th ta="right">
-                {totals.amount > 0 ? '+' : ''}
-                {formatNumber(totals.amount, 2)}
-              </Table.Th>
-              <Table.Th ta="right">{formatNumber(totals.stock, 2)}</Table.Th>
-              <Table.Th ta="right">{formatNumber(totals.cogs, 2)}</Table.Th>
-            </Table.Tr>
-          </Table.Tfoot>
+          {seesCosts && (
+            <Table.Tfoot>
+              <Table.Tr>
+                <Table.Th colSpan={5}>Total</Table.Th>
+                <Table.Th ta="right">
+                  {totals.amount > 0 ? '+' : ''}
+                  {formatNumber(totals.amount, 2)}
+                </Table.Th>
+                <Table.Th ta="right">{formatNumber(totals.stock, 2)}</Table.Th>
+                <Table.Th ta="right">{formatNumber(totals.cogs, 2)}</Table.Th>
+              </Table.Tr>
+            </Table.Tfoot>
+          )}
         </Table>
       </Table.ScrollContainer>
     </Paper>

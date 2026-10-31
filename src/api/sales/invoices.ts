@@ -406,6 +406,8 @@ export interface SalesInvoiceDto {
   cancelledAtUtc: string | null
   cancelledByName: string | null
   cancelReason: string | null
+  /** The day it was cancelled on (script 84); null on documents cancelled before. */
+  cancelDate: string | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -417,6 +419,11 @@ export interface SalesInvoiceDto {
   /** A posted invoice with something still not returned becomes a sales return draft. */
   canCreateReturn: boolean
   canDelete: boolean
+  /**
+   * (92) Why the reader may not post, cancel or delete this document: the server's sentence ("You have no access to
+   * warehouse LKS-01: ask an administrator."), null when they may. Missing from an older API: then nothing is refused.
+   */
+  warehouseAccessRefusal?: string | null
   lines: SalesInvoiceLineDto[]
   files: SalesInvoiceFileDto[]
   audit: SalesInvoiceAuditDto[]
@@ -472,8 +479,9 @@ export const salesInvoicesApi = {
   /** What posting would run into: the shortages and the policy's verdict on each. Empty = nothing to warn about. */
   stockCheck: (id: number) => request<StockCheckDto>(`${BASE}/${id}/stock-check`),
 
-  cancel: (id: number, reason: string, rowVersion: string | null) =>
-    request<SalesInvoiceDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
+  /** cancelDate: the day the cancellation counts on ("yyyy-MM-dd"); null = today (script 84). */
+  cancel: (id: number, reason: string, rowVersion: string | null, cancelDate: string | null = null) =>
+    request<SalesInvoiceDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion, cancelDate } }),
 
   /**
    * A sales return draft from a posted invoice: the remaining quantities, the invoice's prices and

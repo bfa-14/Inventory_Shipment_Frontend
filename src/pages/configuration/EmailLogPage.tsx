@@ -22,6 +22,7 @@ import {
   categoryLabel,
   EMAIL_CATEGORIES,
   emailsApi,
+  isTransferCategory,
   type EmailDto,
   type EmailListDto,
   type EmailStatus,
@@ -34,7 +35,9 @@ import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDa
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { useAuth } from '../../auth/useAuth'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
 interface Filters {
@@ -49,6 +52,16 @@ const NO_FILTERS: Filters = { search: '', status: null, category: null, dateFrom
 
 const STATUS_COLOR: Record<EmailStatus, string> = { Pending: 'gray', Sent: 'green', Failed: 'red' }
 
+/**
+ * What the Document column says: the category tells what the document is - a transfer order's emails (90) name the
+ * transfer order, every other email a purchase order, as before. The cell, its filter and the CSV read the same words:
+ * the bare number was one filter value and one CSV cell for two documents (PO 12 and TRO 12).
+ */
+function documentLabel(r: EmailListDto): string {
+  if (!r.relatedDocumentId) return ''
+  return `${isTransferCategory(r.category) ? 'Transfer order' : 'Order'} #${r.relatedDocumentId}`
+}
+
 const GRID_COLUMNS: GridColumnMeta<EmailListDto>[] = [
   { accessor: 'createdAtUtc', kind: 'date', text: (r) => formatDateTime(r.createdAtUtc), summary: 'count' },
   { accessor: 'toAddresses' },
@@ -56,7 +69,8 @@ const GRID_COLUMNS: GridColumnMeta<EmailListDto>[] = [
   { accessor: 'category', kind: 'list', text: (r) => categoryLabel(r.category) },
   { accessor: 'status', kind: 'list' },
   { accessor: 'attempts', kind: 'number' },
-  { accessor: 'relatedDocumentId', kind: 'number' },
+  // text, not number: "Order #12" and "Transfer order #12" are two documents (sorted "#9" before "#10" all the same)
+  { accessor: 'relatedDocumentId', value: documentLabel, text: documentLabel },
 ]
 
 function StatusBadge({ status }: { status: EmailStatus }) {
@@ -75,6 +89,8 @@ function StatusBadge({ status }: { status: EmailStatus }) {
  * and none of its links can act on the page around it.
  */
 export function EmailLogPage() {
+  const { hasPermission } = useAuth()
+  const canViewTransfers = hasPermission(PERMISSIONS.transfersView)
   const [openId, setOpenId] = useState<number | null>(null)
   const [queueing, setQueueing] = useState(false)
 
@@ -155,19 +171,35 @@ export function EmailLogPage() {
     {
       accessor: 'relatedDocumentId',
       title: 'Document',
-      width: 120,
+      width: 150,
+      /* THE CATEGORY SAYS WHAT THE DOCUMENT IS. A transfer order's emails (90) name the transfer order, opened only by a
+         reader who may view transfers (the name alone otherwise: a link must never lead to the Forbidden page); every
+         other email is about a purchase order, as before. */
       render: (r) =>
-        r.relatedDocumentId ? (
+        !r.relatedDocumentId ? (
+          '-'
+        ) : isTransferCategory(r.category) ? (
+          canViewTransfers ? (
+            <Anchor
+              component={Link}
+              to={routes.transferOrder(r.relatedDocumentId)}
+              fz="sm"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {documentLabel(r)}
+            </Anchor>
+          ) : (
+            <Text fz="sm">{documentLabel(r)}</Text>
+          )
+        ) : (
           <Anchor
             component={Link}
             to={routes.purchaseOrder(r.relatedDocumentId)}
             fz="sm"
             onClick={(event) => event.stopPropagation()}
           >
-            Order #{r.relatedDocumentId}
+            {documentLabel(r)}
           </Anchor>
-        ) : (
-          '-'
         ),
     },
   ]

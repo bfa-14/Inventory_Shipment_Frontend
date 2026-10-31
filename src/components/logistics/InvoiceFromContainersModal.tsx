@@ -9,6 +9,8 @@ import { distinctInOrder, oneInvoiceLine, onePerItemDescription, onePerItemLine,
 import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { FormModal } from '../ui/FormModal'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 import { notify } from '../ui/notify'
 
 interface InvoiceFromContainersModalProps {
@@ -74,6 +76,10 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
     for (const row of rows ?? []) byContainer.set(row.containerId, [...(byContainer.get(row.containerId) ?? []), row])
     return [...byContainer.values()]
   }, [rows])
+  /* DRAWN 200 CONTAINERS AT A TIME (conventions, "Lists of any length"): an order of 1,250 containers took 8 s to open
+     when every block and quantity input was drawn at once. Only the drawing is cut - every line stays ticked and
+     counted, so Create still invoices all of them. */
+  const shown = useShownRows(groups.length, rows)
 
   const chosen = (rows ?? []).filter((row) => picks[row.containerLineId]?.checked && Number(picks[row.containerLineId]?.quantity || 0) > 0)
   const invalid = chosen.find((row) => Number(picks[row.containerLineId].quantity) > row.availableBase)
@@ -169,7 +175,7 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
             Every loaded line is already in an invoice.
           </Text>
         ) : null}
-        {groups.map((group) => {
+        {groups.slice(0, shown.limit).map((group) => {
           const head = group[0]
           return (
             <div key={head.containerId}>
@@ -254,6 +260,7 @@ export function InvoiceFromContainersModal({ opened, onClose, purchaseOrderId, c
             </div>
           )
         })}
+        <ShownRowsFooter limit={shown.limit} total={groups.length} noun="containers" more={shown.more} all={shown.all} />
         <Switch
           label="One invoice per item"
           description={onePerItemDescription('Off: one invoice holds every item of an order.', choice, setting)}

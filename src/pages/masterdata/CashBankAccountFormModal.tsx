@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Alert, Anchor, Group, Select, Switch, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { ApiError } from '../../api/http'
-import { branchesApi } from '../../api/masterdata/branches'
 import {
   CASH_BANK_ACCOUNT_TYPES,
   cashBankAccountsApi,
@@ -11,7 +10,7 @@ import {
   type SaveCashBankAccountRequest,
 } from '../../api/masterdata/cashBankAccounts'
 import { currenciesApi } from '../../api/masterdata/currencies'
-import type { BranchLookupDto, CurrencyLookupDto } from '../../api/types'
+import type { CurrencyLookupDto } from '../../api/types'
 import { FormModal } from '../../components/ui/FormModal'
 
 interface CashBankAccountFormModalProps {
@@ -26,7 +25,6 @@ interface FormValues {
   accountName: string
   accountType: CashBankAccountType
   currencyId: string | null
-  branchId: string | null
   description: string
   isActive: boolean
 }
@@ -41,7 +39,6 @@ export function CashBankAccountFormModal({ mode, account, onClose, onSaved }: Ca
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
   const [currencies, setCurrencies] = useState<CurrencyLookupDto[]>([])
-  const [branches, setBranches] = useState<BranchLookupDto[]>([])
 
   /* THE CURRENCY IS LOCKED ONCE RECEIPTS USE THE ACCOUNT. The server refuses the change, because the
      lines were checked against this currency when they were saved and posted money cannot move to
@@ -51,8 +48,7 @@ export function CashBankAccountFormModal({ mode, account, onClose, onSaved }: Ca
 
   useEffect(() => {
     currenciesApi.lookup(true, account?.currencyId).then(setCurrencies).catch(() => setFormError('The currencies could not be loaded.'))
-    branchesApi.lookup(true, account?.branchId ?? undefined).then(setBranches).catch(() => setFormError('The branches could not be loaded.'))
-  }, [account?.currencyId, account?.branchId])
+  }, [account?.currencyId])
 
   const form = useForm<FormValues>({
     initialValues: toValues(account),
@@ -79,7 +75,8 @@ export function CashBankAccountFormModal({ mode, account, onClose, onSaved }: Ca
       accountName: values.accountName.trim(),
       accountType: values.accountType,
       currencyId: Number(values.currencyId),
-      branchId: values.branchId === null ? null : Number(values.branchId),
+      // An account belongs to no branch (script 76): every branch may receive into it and pay from it.
+      branchId: null,
       description: values.description.trim() || null,
       isActive: values.isActive,
       ...(mode === 'edit' ? { rowVersion } : {}),
@@ -160,16 +157,6 @@ export function CashBankAccountFormModal({ mode, account, onClose, onSaved }: Ca
         />
       </Group>
 
-      <Select
-        label="Branch"
-        description="Leave empty for an account every branch may use."
-        placeholder="All branches"
-        clearable
-        searchable
-        data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))}
-        {...form.getInputProps('branchId')}
-      />
-
       <Textarea label="Description" autosize minRows={2} maxLength={MAX_DESCRIPTION} {...form.getInputProps('description')} />
 
       <Switch
@@ -202,7 +189,6 @@ function toValues(account?: CashBankAccountDto): FormValues {
     accountName: account?.accountName ?? '',
     accountType: account?.accountType ?? 'Cash',
     currencyId: account ? String(account.currencyId) : null,
-    branchId: account?.branchId == null ? null : String(account.branchId),
     description: account?.description ?? '',
     isActive: account?.isActive ?? true,
   }

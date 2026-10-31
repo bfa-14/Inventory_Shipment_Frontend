@@ -21,6 +21,13 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { defaultLineWarehouseId } from '../../components/documents/lineWarehouses'
+import {
+  defaultBranchIdFor,
+  hasNoUsableWarehouse,
+  NO_USABLE_WAREHOUSE,
+  noAccessSentenceFor,
+  postAccessBlockedReason,
+} from '../../auth/warehouseAccess'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber, reasonSentence } from '../../components/format'
 import { GoodsReceiptCostAdjustmentsCard } from '../../components/purchase/goodsReceipts/GoodsReceiptCostAdjustmentsCard'
@@ -55,6 +62,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { ForbiddenPage } from '../ForbiddenPage'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
@@ -76,6 +84,9 @@ function focusItem(index: number, attempt = 0) {
   }
   if (attempt < 10) window.setTimeout(() => focusItem(index, attempt + 1), 40)
 }
+
+/** (94) Under the lines of a receipt without an order, for a reader without View item costs. */
+const NO_COSTS_MANUAL_NOTE = "You may not see item costs: each line is saved at the item's last cost (its average when it has none)."
 
 /**
  * One goods receipt (GRN): a draft counted and corrected, then posted - the goods enter the stock and the item costs are
@@ -102,6 +113,10 @@ export function GoodsReceiptPage() {
   const canPost = hasPermission(PERMISSIONS.goodsReceiptsPost)
   const canCancel = hasPermission(PERMISSIONS.goodsReceiptsCancel)
   const canDelete = hasPermission(PERMISSIONS.goodsReceiptsDelete)
+  /* (94) WITHOUT VIEW ITEM COSTS a receipt shows no cost or value (the server sends them null) and a line without an order
+     is priced by the server: it starts without a typed cost, and the save sends none - a saved line keeps its cost by its
+     id, a new one takes the item's last cost, else its average. */
+  const seesCosts = useSeesItemCosts()
 
   const [loading, setLoading] = useState(!isNew)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -145,6 +160,10 @@ export function GoodsReceiptPage() {
   const isPosted = status === 2
   const editable = canCreate && (isNew || (isDraft && receipt?.canEdit !== false))
   const currencyCode = receipt?.baseCurrencyCode ?? 'USD'
+  /* (94) THE COSTS ARE DRAWN WHEN THE READER MAY SEE THEM AND THE PAGE HOLDS THEM: a receipt the server sent without its
+     costs (its current value is null only then) is not drawn with empty cost boxes while the reader's permission
+     changes - it is read again below - and the save says the page drew none, so its typed costs are kept. */
+  const drawCosts = seesCosts && !(receipt !== null && receipt.currentValueBase === null)
 
   /* ── loading ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -224,6 +243,16 @@ export function GoodsReceiptPage() {
     }
   }, [receiptId, applyReceipt])
 
+  /* (94) THE READER'S PERMISSION CHANGED WHILE THE PAGE WAS OPEN (a token refreshed after "View item costs" was ticked or
+     unticked): a saved receipt with no edits is read again, so it shows what the reader may now see. With edits it stays
+     as it is, and its save says it drew no cost while it holds a receipt read without them. */
+  const seesCostsBefore = useRef(seesCosts)
+  useEffect(() => {
+    if (seesCostsBefore.current === seesCosts) return
+    seesCostsBefore.current = seesCosts
+    if (receiptId !== null && !dirty.current) void reload()
+  }, [seesCosts, receiptId, reload])
+
   /* A FILE ADDED, EDITED OR DELETED changes only the files and the audit trail; the lines being counted stay. */
   const filesChanged = useCallback(async () => {
     if (receiptId === null) return
@@ -256,11 +285,12 @@ export function GoodsReceiptPage() {
       setWarehouses(warehouseRows)
       if (!branchRows) return
       setBranches(branchRows)
-      const main = branchRows.find((b) => b.isMainBranch) ?? branchRows[0]
+      // (92) The main branch, or for a restricted reader the branch of one of their warehouses (A17): unchanged otherwise.
+      const main = defaultBranchIdFor(branchRows, warehouseRows)
       setHeader((current) => {
-        const branchId = current.branchId ?? (main ? String(main.id) : null)
+        const branchId = current.branchId ?? (main !== null ? String(main) : null)
         if (branchId === null || current.warehouseId !== null) return { ...current, branchId }
-        const warehouseId = defaultLineWarehouseId(warehouseRows, Number(branchId))
+        const warehouseId = defaultLineWarehouseId(warehouseRows, Number(branchId), true)
         return { ...current, branchId, warehouseId: warehouseId === null ? null : String(warehouseId) }
       })
     })
@@ -314,10 +344,31 @@ export function GoodsReceiptPage() {
       numbers the receipt, it does not limit its lines), the receipt's branch first. Leaves only, in both cases. */
   const branchFilter = isContainer ? (receipt?.branchId ?? null) : null
   const firstBranchId = header.branchId !== null ? Number(header.branchId) : (receipt?.branchId ?? null)
+  /* (92) Only the warehouses the reader may use; one the receipt already holds stays, marked "- not one of your
+     warehouses" (see lineWarehouses). */
   const warehouseData = useMemo(
-    () => warehouseChoices(warehouses, branchFilter, keep, firstBranchId),
+    () => warehouseChoices(warehouses, branchFilter, keep, firstBranchId, true),
     [warehouses, branchFilter, keep, firstBranchId],
   )
+
+  /* (92) Post waits while "Receive into" or a CURRENT line is in a warehouse the reader may not use (the server's
+     sentence while those are the stored draft's); Cancel… and Delete take the server's refusal of the stored receipt. */
+  const postAccessBlocked = postAccessBlockedReason(
+    warehouses,
+    [header.warehouseId === null ? null : Number(header.warehouseId), ...lines.map((l) => l.warehouseId)],
+    receipt ? [receipt.warehouseId, ...receipt.lines.map((l) => l.warehouseId)] : [],
+    receipt?.warehouseAccessRefusal,
+  )
+  const accessRefusal = receipt?.warehouseAccessRefusal ?? null
+  /* (92) A container's receipt is received in the container's branch: when that branch has warehouses but none the reader
+     may use, the page says so in the database's words (W8) - "Receive into" offers nothing they could choose - and Post
+     waits with the same sentence while no warehouse is chosen. */
+  const containerNoAccess = useMemo(() => {
+    if (!isContainer || branchFilter === null) return null
+    const leaves = warehouses.filter((w) => w.isActive && !w.isTransit && w.childCount === 0 && w.branchId === branchFilter)
+    return leaves.length > 0 && leaves.every((w) => w.canUse === false) ? noAccessSentenceFor(leaves.map((w) => w.warehouseCode)) : null
+  }, [isContainer, branchFilter, warehouses])
+  const postAccessReason = postAccessBlocked ?? (header.warehouseId === null ? containerNoAccess : null)
 
   /* ── editing ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -333,7 +384,7 @@ export function GoodsReceiptPage() {
     // A new branch leaves the lines alone: their warehouses may be of any branch (script 72, as Ali's 69 / 70 for the
     // documents). Only "Receive into", where NEW lines start, goes to the new branch's main warehouse (or first leaf).
     if ('branchId' in patch && patch.branchId !== header.branchId) {
-      const main = patch.branchId ? defaultLineWarehouseId(warehouses, Number(patch.branchId)) : null
+      const main = patch.branchId ? defaultLineWarehouseId(warehouses, Number(patch.branchId), true) : null
       setHeader((current) => ({ ...current, warehouseId: main === null ? null : String(main) }))
     }
     // "Receive into" sets every line's warehouse on an order, an invoice or a typed receipt (a line may then change it).
@@ -366,7 +417,8 @@ export function GoodsReceiptPage() {
                 itemUnitId: base?.id ?? null,
                 unitTypeName: base?.unitTypeName ?? '',
                 packingFormula: base?.packingFormula ?? 1,
-                manualUnitCostBase: details.lastCost ?? null,
+                // (94) proposed as an Inventory In line is: the last cost when it is not 0, else the average (C13)
+                manualUnitCostBase: seesCosts ? (details.lastCost ? details.lastCost : details.averageCost ? details.averageCost : null) : null,
                 error: undefined,
               }
             : line,
@@ -375,7 +427,7 @@ export function GoodsReceiptPage() {
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
     }
-  }, [])
+  }, [seesCosts])
 
   function addLine() {
     markDirty()
@@ -479,8 +531,13 @@ export function GoodsReceiptPage() {
       notes: header.notes.trim() || null,
       rowVersion: receipt?.rowVersion ?? null,
       ...(isNew ? { sourceKind: 'Manual' as const } : {}),
+      // (94) No cost drawn: the server keeps each saved line's typed cost by its id (a reader whose token still holds the
+      // permission included), and prices a new one at the item's last cost, else its average.
+      costsHidden: !drawCosts,
       lines: lines.map((line, index) => ({
         lineNumber: index + 1,
+        // (94) The line's id as it was read (null on a new row): how the server finds the cost a saved line keeps.
+        id: line.id,
         itemId: line.itemId!,
         itemUnitId: line.itemUnitId!,
         quantity: line.quantity,
@@ -493,7 +550,7 @@ export function GoodsReceiptPage() {
         varianceReasonCode: line.varianceReasonCode,
         varianceReason: line.varianceReason.trim() || null,
         closeShort: line.kind !== 'container' && line.poLineId !== null ? line.closeShort : false,
-        manualUnitCostBase: line.kind === 'manual' ? line.manualUnitCostBase : null,
+        manualUnitCostBase: line.kind === 'manual' && drawCosts ? line.manualUnitCostBase : null,
         expiryDate: line.expiryDate,
         notes: line.notes.trim() || null,
       })),
@@ -550,7 +607,7 @@ export function GoodsReceiptPage() {
 
     const go = await confirm({
       title: 'Post goods receipt',
-      message: postConfirmFor(saved, warehouses),
+      message: postConfirmFor(saved, warehouses, seesCosts),
       confirmLabel: 'Post',
     })
     if (!go) return
@@ -719,12 +776,14 @@ export function GoodsReceiptPage() {
           icon: <IconTrash size={16} />,
           colour: 'red',
           visible: canDelete && receipt !== null,
-          disabled: receipt !== null && !receipt.canDelete,
-          disabledReason: receipt?.deleteBlockedReason ?? 'This draft cannot be deleted.',
+          disabled: (receipt !== null && !receipt.canDelete) || accessRefusal !== null,
+          disabledReason: accessRefusal ?? receipt?.deleteBlockedReason ?? 'This draft cannot be deleted.',
+          menuWhenDisabled: accessRefusal !== null,
           loading: saving,
           onClick: () => void remove(),
         },
-        { key: 'save', label: 'Save', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
+        // (92) Post refused for a warehouse that is not the reader's: Save is then the primary (a phone's big button).
+        { key: 'save', label: 'Save', icon: DocumentIcons.save, variant: postAccessReason !== null ? 'filled' : undefined, colour: postAccessReason !== null ? 'teal' : undefined, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void leave() },
         {
           key: 'post',
@@ -733,8 +792,9 @@ export function GoodsReceiptPage() {
           variant: 'filled',
           colour: 'teal',
           visible: canPost && (isNew ? canCreate : true),
-          disabled: postBlocked,
-          disabledReason: receipt?.postBlockedReason ?? 'This goods receipt cannot be posted.',
+          disabled: postBlocked || postAccessReason !== null,
+          disabledReason: postAccessReason ?? receipt?.postBlockedReason ?? 'This goods receipt cannot be posted.',
+          menuWhenDisabled: postAccessReason !== null,
           loading: saving,
           onClick: () => void post(),
         },
@@ -747,8 +807,9 @@ export function GoodsReceiptPage() {
           icon: <IconArrowBackUp size={16} />,
           colour: 'red',
           visible: canCancel && isPosted,
-          disabled: receipt !== null && !receipt.canCancel,
-          disabledReason: receipt?.cancelBlockedReason ?? 'This goods receipt cannot be cancelled.',
+          disabled: (receipt !== null && !receipt.canCancel) || accessRefusal !== null,
+          disabledReason: accessRefusal ?? receipt?.cancelBlockedReason ?? 'This goods receipt cannot be cancelled.',
+          menuWhenDisabled: accessRefusal !== null,
           onClick: () => setCancelOpen(true),
         },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(routes.goodsReceipts) },
@@ -771,6 +832,11 @@ export function GoodsReceiptPage() {
       />
 
       <DocumentActionBar actions={actions} />
+      {editable && !containerNoAccess && hasNoUsableWarehouse(warehouses) && (
+        <Alert color="orange" data-no-usable-warehouse>
+          {NO_USABLE_WAREHOUSE}
+        </Alert>
+      )}
 
       {receipt && isPosted && (
         <Alert color="green" title={`Posted — ${receipt.documentNumber ?? ''}`}>
@@ -801,6 +867,11 @@ export function GoodsReceiptPage() {
         <Alert color="orange" data-no-warehouse>
           Choose the warehouse the goods are received into: the container's warehouse is not set, does not belong to branch{' '}
           {branchText} or has warehouses under it (stock is kept only in the warehouses at the bottom of the tree).
+        </Alert>
+      )}
+      {receipt && isDraft && editable && containerNoAccess && (
+        <Alert color="orange" data-receipt-no-access>
+          {containerNoAccess}
         </Alert>
       )}
       {receipt && isDraft && isContainer && receipt.containerStatus === 2 && receipt.containerRef && (
@@ -849,7 +920,13 @@ export function GoodsReceiptPage() {
           items={items}
           warehouseData={warehouseData}
           currencyCode={currencyCode}
+          showCosts={drawCosts}
         />
+        {isManual && editable && !seesCosts && (
+          <Text size="sm" c="dimmed" mt="xs">
+            {NO_COSTS_MANUAL_NOTE}
+          </Text>
+        )}
       </Paper>
 
       {receipt && !isDraft && receipt.costChanges.length > 0 && (

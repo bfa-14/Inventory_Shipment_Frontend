@@ -34,6 +34,8 @@ interface DocumentHeaderCardProps {
   errors: Partial<Record<keyof DocumentHeaderValue, string>>
   /** What Reference No. suggests typing (the document kind's); absent, a delivery note or a count sheet. */
   referencePlaceholder?: string
+  /** A gray hint under the Reason while it is edited, about the reason chosen (the page decides which); absent, none. */
+  reasonHint?: string | null
 }
 
 /**
@@ -60,6 +62,7 @@ export function DocumentHeaderCard({
   readOnly,
   errors,
   referencePlaceholder = 'Delivery note, count sheet…',
+  reasonHint = null,
 }: DocumentHeaderCardProps) {
   const numberText = documentNumber
     ?? (isNew ? (numberOnPost ? 'Assigned on posting' : 'Assigned on save') : 'DRAFT')
@@ -126,16 +129,23 @@ export function DocumentHeaderCard({
           {readOnly ? (
             field('Reason', reasons.find((r) => String(r.id) === value.reasonId)?.reasonName ?? '')
           ) : (
-            <Select
-              label="Reason"
-              withAsterisk={reasonRequired}
-              placeholder="Choose a reason"
-              data={reasonOptions}
-              value={value.reasonId}
-              onChange={(next) => onChange({ reasonId: next })}
-              error={errors.reasonId}
-              searchable
-            />
+            <>
+              <Select
+                label="Reason"
+                withAsterisk={reasonRequired}
+                placeholder="Choose a reason"
+                data={reasonOptions}
+                value={value.reasonId}
+                onChange={(next) => onChange({ reasonId: next })}
+                error={errors.reasonId}
+                searchable
+              />
+              {reasonHint ? (
+                <Text fz="xs" c="dimmed" mt={4}>
+                  {reasonHint}
+                </Text>
+              ) : null}
+            </>
           )}
         </Grid.Col>
 

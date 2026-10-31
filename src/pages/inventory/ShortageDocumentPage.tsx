@@ -17,7 +17,7 @@ import { DocumentActionBar, type DocumentAction } from '../../components/documen
 import { DocumentIcons } from '../../components/documents/documentIcons'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { PURCHASE_ORDER, PURCHASE_STATUS_COLOURS, purchaseStatusLabel, supplierLabel } from '../../components/purchase/purchaseKind'
+import { PURCHASE_ORDER, purchaseStatusColour, purchaseStatusLabel, supplierLabel } from '../../components/purchase/purchaseKind'
 import { LoadItemsDrawer } from '../../components/shortages/LoadItemsDrawer'
 import { ShortageHeaderCard, type ShortageHeader, type ShortageHeaderErrors } from '../../components/shortages/ShortageHeaderCard'
 import { ShortageLinesGrid } from '../../components/shortages/ShortageLinesGrid'
@@ -248,6 +248,7 @@ export function ShortageDocumentPage() {
         expectedMonthlySalesManual: line.expectedMonthlySalesManual,
         pcPerContainer: line.pcPerContainer,
         notes: line.notes.trim() || null,
+        leadTimeMonths: line.leadTimeManual,   // (98) only a typed one
       })),
     }
   }
@@ -378,8 +379,8 @@ export function ShortageDocumentPage() {
                     {/* An order is numbered on saving, but a draft that has not been may still exist. */}
                     {order.documentNumber ?? `Draft, created ${dateLabel(order.createdAtUtc)}`}
                   </Text>
-                  <Badge size="sm" variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>
-                    {purchaseStatusLabel(order.status)}
+                  <Badge size="sm" variant="light" color={purchaseStatusColour(order.status, 'PO', order.invoicingStatus)}>
+                    {purchaseStatusLabel(order.status, 'PO', order.invoicingStatus)}
                   </Badge>
                 </Group>
               ))}

@@ -28,6 +28,11 @@ export type AttachmentDocumentKind =
   | 'BIV_OUT'
   /** Goods receipts (scripts 64-65): the delivery note, the packing list, the signed count sheet. */
   | 'GRN'
+  /**
+   * Transfer orders (script 90): the request, the waybill, the signed dispatch note. One kind for the order and its
+   * dispatches and receipts, which have no files of their own; its "Used for" rows start as Inventory Out's.
+   */
+  | 'TRO'
 
 export interface DocumentFileDto {
   id: number

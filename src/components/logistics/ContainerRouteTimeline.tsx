@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { Alert, Anchor, Badge, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Table, Text, Timeline, Title } from '@mantine/core'
+import { Alert, Anchor, Badge, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Table, Text, Timeline, Title, Tooltip } from '@mantine/core'
 import { IconArrowRight, IconPlus, IconRoute } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import type { ContainerDto, ContainerMovementDto } from '../../api/logistics/containers'
-import { movementsApi, movementStatusColour, type MovementListDto } from '../../api/logistics/movements'
+import { movementsApi, movementStatusColour, type MovementJoinCandidateDto } from '../../api/logistics/movements'
 import { dateLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber, todayDateOnly } from '../format'
 import { notify } from '../ui/notify'
@@ -19,17 +21,33 @@ interface ContainerRouteTimelineProps {
   canManage: boolean
   /** Re-reads the container after it joined a movement. */
   onChanged: () => void
+  /**
+   * The container's next step, shown in the card's header when the page asks for it: on a phone or a tablet the card is
+   * the top of the page and the action bar its bottom, a whole page of scrolling away. Null or absent: not shown.
+   */
+  step?: { label: string; disabledReason: string | null; onClick: () => void; colour?: string; icon?: ReactNode } | null
+  /**
+   * (82) The way back its movement links carry, so Back on that movement returns where the reader came from: the
+   * container's page by default ("?from=container/12"), the Shipments board from its drawer ("?from=shipments").
+   */
+  returnQuery?: string
 }
 
 /**
  * The container's route, leg by leg, oldest first: what kind of leg, from where to where, when, with
  * whom, and what it cost. A leg whose ETA has passed while it is still planned or running shows the
  * ETA in red - that is the leg to chase.
+ *
+ * WHERE IT IS COMES FIRST (script 80): the card sits at the top of the right column (the top of the page on a phone) and
+ * opens with one line - travelling with which movement, at which place since when, or not moved yet - and the planned
+ * next movement when there is one. The next step itself is the button next to Save, and on a narrow screen also the
+ * card's own first button (`step`), so it is in the first screen the user sees.
  */
-export function ContainerRouteTimeline({ container, canManage, onChanged }: ContainerRouteTimelineProps) {
+export function ContainerRouteTimeline({ container, canManage, onChanged, step, returnQuery }: ContainerRouteTimelineProps) {
   const navigate = useNavigate()
   const [pickOpen, setPickOpen] = useState(false)
   const legs = container.movements
+  const backQuery = returnQuery ?? `?from=container/${container.id}`
   // The line is drawn up to the last completed leg; a running leg is the active bullet.
   const active = legs.reduce((last, leg, index) => (leg.status === 2 || leg.status === 3 ? index : last), -1)
   // A container that has arrived, or never set off, cannot join a leg.
@@ -39,17 +57,44 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
     <Paper radius="lg" p="md" withBorder>
       <Group justify="space-between" mb="sm" wrap="wrap" gap="xs">
         <Title order={5}>Route</Title>
-        {canJoin ? (
+        {canJoin || step ? (
           <Group gap="xs">
-            <Button size="xs" variant="default" leftSection={<IconRoute size={14} />} onClick={() => setPickOpen(true)}>
-              Add to a movement...
-            </Button>
-            <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}`)}>
-              New movement for this container
-            </Button>
+            {step ? (
+              <Tooltip label={step.disabledReason} disabled={!step.disabledReason} withArrow multiline maw={320}>
+                <Button
+                  size="xs"
+                  variant="light"
+                  color={step.colour ?? 'indigo'}
+                  leftSection={step.icon ?? <IconRoute size={14} />}
+                  disabled={step.disabledReason !== null}
+                  onClick={step.onClick}
+                  data-route-next-step
+                >
+                  {step.label}
+                </Button>
+              </Tooltip>
+            ) : null}
+            {canJoin ? (
+              <>
+                <Button size="xs" variant="default" leftSection={<IconRoute size={14} />} onClick={() => setPickOpen(true)}>
+                  Add to a movement…
+                </Button>
+                <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/new?containerId=${container.id}&from=container/${container.id}`)}>
+                  New movement for this container
+                </Button>
+              </>
+            ) : null}
           </Group>
         ) : null}
       </Group>
+      {/* A phone shows no tooltip: the reason a step is disabled is said under the buttons. */}
+      {step?.disabledReason ? (
+        <Text fz="xs" c="dimmed" mt={-6} mb="xs">
+          {step.disabledReason}
+        </Text>
+      ) : null}
+
+      <WhereNow container={container} />
 
       {legs.length === 0 ? (
         <Text c="dimmed" fz="sm" ta="center" py="sm">
@@ -63,7 +108,7 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
               color={stageColour(leg.stage)}
               lineVariant={leg.status === 1 ? 'dashed' : 'solid'}
               bullet={<StageIcon stage={leg.stage} size={16} color="currentColor" />}
-              title={<LegTitle leg={leg} />}
+              title={<LegTitle leg={leg} returnQuery={backQuery} />}
             >
               <LegBody leg={leg} />
             </Timeline.Item>
@@ -85,7 +130,51 @@ export function ContainerRouteTimeline({ container, canManage, onChanged }: Cont
   )
 }
 
-function LegTitle({ leg }: { leg: ContainerMovementDto }) {
+/** "Travelling with MOV-… Sea freight: Chennai → Dar es Salaam, ETA …", "At Dar es Salaam since …", "Not moved yet: …". */
+function WhereNow({ container }: { container: ContainerDto }) {
+  if (container.movementCount === undefined) return null
+  const now =
+    container.status >= 6
+      ? null
+      : container.activeMovementId
+        ? `Travelling with ${container.activeMovementNo} ${container.activeMovementTypeName ?? ''}: ${container.activeMovementFromName ?? ''}${
+            container.activeMovementToName && container.activeMovementToName !== container.activeMovementFromName ? ` → ${container.activeMovementToName}` : ''
+          }${container.activeMovementEta ? `, ETA ${dateLabel(container.activeMovementEta)}` : ''}.`
+        : (container.movementCount ?? 0) === 0
+          ? container.placeName
+            ? `Not moved yet: it leaves from its port of loading, ${container.placeName}.`
+            : 'Not moved yet, and no port of loading: any place can be its first From.'
+          : container.plannedMovementId && container.plannedMovementFromName
+            ? // Its place is the planned leg's To already (the From of a leg after it); it is still where that leg leaves from.
+              `At ${container.plannedMovementFromName}${container.lastMovementEndDate ? ` since ${dateLabel(container.lastMovementEndDate)}` : ''}.`
+            : container.placeName
+              ? `At ${container.placeName}${container.placeSince ? ` since ${dateLabel(container.placeSince)}` : ''}.`
+              : null
+  const planned = container.plannedMovementId
+    ? `Next: ${container.plannedMovementNo} ${container.plannedMovementTypeName ?? ''} (planned${container.plannedMovementDate ? ` ${dateLabel(container.plannedMovementDate)}` : ''}).`
+    : null
+  if (!now && !planned) return null
+  return (
+    <Stack gap={2} mb="sm" data-where-now>
+      {now ? (
+        <Text fz="sm" fw={600}>
+          {now}
+        </Text>
+      ) : null}
+      {planned ? (
+        <Text fz="sm" c="dimmed">
+          {planned}
+        </Text>
+      ) : null}
+    </Stack>
+  )
+}
+
+function LegTitle({ leg, returnQuery }: { leg: ContainerMovementDto; returnQuery: string }) {
+  // The movement's own page needs View Movements (script 75); its number is shown either way. The link carries the way
+  // back (?from=container/12, or ?from=shipments in the board's drawer): Back and the breadcrumb of that movement return
+  // where the reader came from, not to the list.
+  const canOpen = useAuth().hasPermission(PERMISSIONS.movementsView)
   return (
     <Group gap="xs" wrap="wrap">
       <Text fz="sm" fw={600}>
@@ -94,9 +183,13 @@ function LegTitle({ leg }: { leg: ContainerMovementDto }) {
       <Badge size="sm" variant="light" color={movementStatusColour(leg.status)}>
         {STATUS_NAMES[leg.status] ?? leg.status}
       </Badge>
-      <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}`} fz="xs">
-        {leg.movementNo}
-      </Anchor>
+      {canOpen ? (
+        <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${leg.movementId}${returnQuery}`} fz="xs">
+          {leg.movementNo}
+        </Anchor>
+      ) : (
+        <Text span fz="xs">{leg.movementNo}</Text>
+      )}
     </Group>
   )
 }
@@ -145,28 +238,28 @@ function DateBit({ label, value, colour }: { label: string; value: string | null
   )
 }
 
-/** The planned movements this container can still join; picking one adds it and leaves the rest alone. */
+/**
+ * The planned movements this container can really join (script 80, `join-candidates`): after its latest movement and at
+ * its place, so the save never refuses it for where it is. Picking one adds it and leaves the rest alone.
+ */
 function AddToMovementModal({ container, onClose, onAdded }: { container: ContainerDto; onClose: () => void; onAdded: () => void }) {
-  const [rows, setRows] = useState<MovementListDto[] | null>(null)
+  const [rows, setRows] = useState<MovementJoinCandidateDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
     movementsApi
-      .list({ status: 1, pageSize: 50, sortBy: 'MovementNo', sortDir: 'desc' }, controller.signal)
-      .then((result) => {
-        const already = new Set(container.movements.map((m) => m.movementId))
-        setRows(result.items.filter((m) => !already.has(m.id)))
-      })
+      .joinCandidates(container.id, controller.signal)
+      .then((list) => setRows(list))
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setError(err instanceof ApiError ? err.message : 'The planned movements could not be loaded.')
       })
     return () => controller.abort()
-  }, [container.movements])
+  }, [container.id])
 
-  async function add(row: MovementListDto) {
+  async function add(row: MovementJoinCandidateDto) {
     setBusyId(row.id)
     try {
       // Re-read, so the save carries the movement's current fields and row version, not the list's.
@@ -175,9 +268,10 @@ function AddToMovementModal({ container, onClose, onAdded }: { container: Contai
         movementTypeId: movement.movementTypeId,
         fromPlaceId: movement.fromPlaceId,
         toPlaceId: movement.toPlaceId,
-        plannedDate: movement.plannedDate,
-        startDate: movement.startDate,
-        eta: movement.eta,
+        // The API reads plain dates: "2026-10-15T00:00:00" as it comes back was refused ("Planned Date is not a valid date.").
+        plannedDate: movement.plannedDate?.slice(0, 10) ?? null,
+        startDate: movement.startDate?.slice(0, 10) ?? null,
+        eta: movement.eta?.slice(0, 10) ?? null,
         carrierPartyId: movement.carrierPartyId,
         vehicleOrVessel: movement.vehicleOrVessel,
         voyageNo: movement.voyageNo,
@@ -205,7 +299,7 @@ function AddToMovementModal({ container, onClose, onAdded }: { container: Contai
         </Group>
       ) : rows.length === 0 ? (
         <Text c="dimmed" fz="sm" ta="center" py="md">
-          No planned movement to join. Create a new movement for this container instead.
+          {`No planned movement can take ${container.containerRef}${container.placeName ? ` at ${container.placeName}` : ''}. Use the button next to Save for its next leg instead.`}
         </Text>
       ) : (
         <ScrollArea type="auto" mah={420}>

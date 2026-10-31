@@ -8,8 +8,12 @@ import { notify } from '../ui/notify'
 
 interface QuickItemSearchProps {
   disabled?: boolean
-  /** Called with the item the operator settled on. The page decides what a line made of it looks like. */
-  onPick: (item: ItemListDto) => void
+  /**
+   * Called with the item the operator settled on. The page decides what a line made of it looks like. `term` is what
+   * was scanned or typed (trimmed), for a page that takes the unit whose barcode it is (the transfer order, script 90);
+   * the other pages leave it out.
+   */
+  onPick: (item: ItemListDto, term: string) => void
   /**
    * Only items with "BIVAC Item" ticked: a document type whose bivacItemsOnly is set (BIVAC Out). The
    * search itself is narrowed, so a code of another item is "not found" here rather than a line the
@@ -34,6 +38,8 @@ export function QuickItemSearch({ disabled, onPick, bivacOnly = false }: QuickIt
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [matches, setMatches] = useState<ItemListDto[]>([])
+  /** The term the ambiguous matches were found for: a pick from the list was scanned as that. */
+  const [matchTerm, setMatchTerm] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function submit() {
@@ -62,10 +68,11 @@ export function QuickItemSearch({ disabled, onPick, bivacOnly = false }: QuickIt
          their own code would be the thing that makes the fast path slow. */
       const exact = items.find((i) => i.itemCode.toLowerCase() === term.toLowerCase())
       if (exact || items.length === 1) {
-        take(exact ?? items[0])
+        take(exact ?? items[0], term)
         return
       }
 
+      setMatchTerm(term)
       setMatches(items)
     } catch (error) {
       notify.error(error instanceof ApiError ? error.message : 'The item could not be looked up.')
@@ -74,8 +81,8 @@ export function QuickItemSearch({ disabled, onPick, bivacOnly = false }: QuickIt
     }
   }
 
-  function take(item: ItemListDto) {
-    onPick(item)
+  function take(item: ItemListDto, term: string) {
+    onPick(item, term)
     setText('')
     setMatches([])
     // Straight back to the box: the next scan is already on its way.
@@ -113,7 +120,7 @@ export function QuickItemSearch({ disabled, onPick, bivacOnly = false }: QuickIt
             {matches.length} items match — pick one
           </Text>
           {matches.map((item) => (
-            <UnstyledButton key={item.id} onClick={() => take(item)}>
+            <UnstyledButton key={item.id} onClick={() => take(item, matchTerm)}>
               <Paper p="xs" radius="sm" withBorder={false} className="quick-pick">
                 <Text size="sm" fw={500}>
                   {item.itemCode}

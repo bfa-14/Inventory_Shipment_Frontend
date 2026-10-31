@@ -108,10 +108,10 @@ export function todayDateOnly(): string {
 }
 
 /**
- * " Reason: Fully invoiced and received." - a stored reason as its own sentence, after "Closed by … on ….".
+ * " Reason: Damaged in transit." - a stored reason as its own sentence, after "Cancelled by … on ….".
  *
- * The full stop is added here because a reason is typed (or set by the database: "Fully invoiced and received",
- * "Fully received", "Closed manually") without one, and the banner often goes on with another sentence. A reason
+ * The full stop is added here because a reason is typed without one, and the banner often goes on with another
+ * sentence. A reason
  * that already ends with . ! or ? keeps its own. Empty when there is no reason.
  */
 export function reasonSentence(reason: string | null | undefined): string {

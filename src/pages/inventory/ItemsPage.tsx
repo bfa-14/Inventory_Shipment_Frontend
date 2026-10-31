@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconEye, IconFilterOff, IconPlus, IconRefresh, IconSearch, IconTableExport } from '@tabler/icons-react'
@@ -21,7 +21,9 @@ import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
+import { saveItemSequence } from './itemSequence'
 import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
 
 /** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
@@ -34,13 +36,15 @@ interface Filters {
   isBivac: string | null
 }
 
+/* THE LIST OPENS ON WHAT IS SOLD DAY TO DAY: active items that are not BIVAC. "Clear filters" returns here too; each
+   select's own clear (×) shows all. */
 const NO_FILTERS: Filters = {
   search: '',
   itemFamilyId: null,
   brandId: null,
   defaultWarehouseId: null,
-  isActive: null,
-  isBivac: null,
+  isActive: 'true',
+  isBivac: 'false',
 }
 
 /** What each column IS, for the grid engine: its kind and what it shows. How a cell LOOKS stays below. */
@@ -68,6 +72,9 @@ export function ItemsPage() {
   const narrow = useMediaQuery(NARROW)
   /* The cost column is for the desk, not the phone: below 1024 px the row has no room for it. */
   const wide = useMediaQuery('(min-width: 1024px)')
+  /* (94) And for a reader who may see item costs: without View item costs the two columns are not drawn (the server
+     sends them null). GRID_COLUMNS keeps their meta: a meta without its column is inert. */
+  const seesCosts = useSeesItemCosts()
   const [busyId, setBusyId] = useState<number | null>(null)
 
   const canCreate = hasPermission(PERMISSIONS.itemsCreate)
@@ -118,6 +125,13 @@ export function ItemsPage() {
     sort: [{ accessor: 'itemCode', direction: 'asc' }],
   })
 
+  /* PREVIOUS / NEXT ON THE ITEM PAGE walk these rows: every row that survives the filters, in the order on screen
+     (itemSequence.ts). Remembered on each change, so whichever way an item is opened from here it finds them. */
+  useEffect(() => {
+    if (loading) return
+    saveItemSequence(engine.rows.map((i) => ({ id: i.id, itemCode: i.itemCode, isActive: i.isActive })))
+  }, [engine.rows, loading])
+
   function exportCsv() {
     downloadCsv(
       'items.csv',
@@ -144,7 +158,7 @@ export function ItemsPage() {
   async function handleDelete(item: ItemListDto) {
     const confirmed = await confirm({
       title: 'Delete item',
-      message: `Delete item ${item.itemCode} - ${item.itemName}? Its units, image and documents go with it. This cannot be undone.`,
+      message: `Delete item ${item.itemCode} - ${item.itemName}? Its units, image, documents and stock levels per warehouse go with it. This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
@@ -299,7 +313,7 @@ export function ItemsPage() {
         </Text>
       ),
     },
-    ...(wide
+    ...(wide && seesCosts
       ? [
           {
             accessor: 'averageCost',

@@ -154,8 +154,11 @@ export interface GoodsReceiptListItemDto {
   shortBase: number
   /** Received pieces matched to posted supplier invoices. */
   invoicedBase: number
-  /** At the current cost per piece, in the base currency; an estimate on a draft (isValueEstimate). */
-  valueBase: number
+  /**
+   * At the current cost per piece, in the base currency; an estimate on a draft (isValueEstimate). (94) Null without View
+   * item costs (inventory.costs.view).
+   */
+  valueBase: number | null
   isValueEstimate: boolean
   postedAtUtc: string | null
   postedByName: string | null
@@ -169,8 +172,8 @@ export interface GoodsReceiptListItemDto {
 /** The totals row of the search: what month-end asks about (posted lines received and not matched to a posted invoice). */
 export interface GoodsReceiptTotalsDto {
   receivedNotInvoicedBase: number
-  /** The same pieces at the order price, in the base currency. */
-  receivedNotInvoicedValueBase: number
+  /** The same pieces at the order price, in the base currency. (94) Null without View item costs (the pieces stay). */
+  receivedNotInvoicedValueBase: number | null
   /** Receipts matching the filters, and how many of them are drafts. */
   receiptCount: number
   draftCount: number
@@ -273,6 +276,7 @@ export interface GoodsReceiptLineDto {
   /** Container lines: the loaded pieces. */
   loadedBase: number | null
   expiryDate: string | null
+  /* (94) The costs and values below are null without View item costs (inventory.costs.view); the source names stay. */
   /** The order price per piece in the base currency (frozen at posting). */
   poFobBase: number | null
   /** The order price per piece (frozen, or as it stands on a draft). */
@@ -296,8 +300,6 @@ export interface GoodsReceiptLineDto {
   /** Received × the current cost, in the base currency. */
   valueBase: number | null
   notes: string | null
-  itemLastCost: number | null
-  itemAverageCost: number | null
 }
 
 /** Which received pieces each posted invoice line pays for. */
@@ -313,7 +315,7 @@ export interface GoodsReceiptMatchDto {
   invoicePostedAtUtc: string | null
   invoiceLineNumber: number
   quantityBase: number
-  /** The invoice's FOB per piece in the base currency. */
+  /** The invoice's FOB per piece in the base currency. (94) Null, with the landed cost, without View item costs. */
   invoiceFobBase: number | null
   /** The invoice's landed cost per piece in the base currency. */
   invoiceUnitCostBase: number | null
@@ -336,15 +338,16 @@ export interface GoodsReceiptCostChangeDto {
   causeNumber: string | null
   receivedBase: number
   inStockBase: number | null
+  /* (94) The figures below are null without View item costs; the cause, the document, the date and the pieces stay. */
   fobBefore: number | null
   fobAfter: number | null
   unitCostBefore: number | null
   unitCostAfter: number | null
-  amountBase: number
+  amountBase: number | null
   /** The part still in stock: it changed the average cost. */
-  inventoryBase: number
+  inventoryBase: number | null
   /** The part already sold: it went to the cost of sales. */
-  cogsBase: number
+  cogsBase: number | null
   createdByName: string | null
 }
 
@@ -424,10 +427,10 @@ export interface GoodsReceiptDto {
   totalReceivedBase: number
   totalShortBase: number
   totalInvoicedBase: number
-  /** Σ received × cost at receipt, fixed at posting. */
-  valueAtReceiptBase: number
+  /** Σ received × cost at receipt, fixed at posting. (94) Null, with the value now, without View item costs. */
+  valueAtReceiptBase: number | null
   /** Σ received × the current cost; an estimate on a draft (isValueEstimate). */
-  currentValueBase: number
+  currentValueBase: number | null
   isValueEstimate: boolean
   baseCurrencyCode: string | null
   postedAtUtc: string | null
@@ -448,6 +451,11 @@ export interface GoodsReceiptDto {
   postBlockedReason: string | null
   cancelBlockedReason: string | null
   deleteBlockedReason: string | null
+  /**
+   * (92) Why the reader may not post, cancel or delete this document: the server's sentence ("You have no access to
+   * warehouse LKS-01: ask an administrator."), null when they may. Missing from an older API: then nothing is refused.
+   */
+  warehouseAccessRefusal?: string | null
   /** When goods receipts started; null before the switch. */
   switchedAtUtc: string | null
   rowVersion: string | null
@@ -462,6 +470,11 @@ export interface GoodsReceiptDto {
 
 export interface GoodsReceiptLineRequest {
   lineNumber: number
+  /**
+   * (94) The line's id as it was read (null on a new row): lets the server keep the typed cost of a saved line without an
+   * order for a reader who may not see item costs. The lines are still a full replace.
+   */
+  id?: number | null
   itemId: number
   itemUnitId: number
   /** In the line's unit. */
@@ -474,7 +487,10 @@ export interface GoodsReceiptLineRequest {
   varianceReasonCode: VarianceReasonCode | null
   varianceReason: string | null
   closeShort: boolean
-  /** Manual lines: the typed cost per piece, in the base currency. */
+  /**
+   * Manual lines: the typed cost per piece, in the base currency; null = the item's last cost, else its average. (94)
+   * Dropped for a reader without View item costs: a saved line (its id, the same item and unit) keeps its cost.
+   */
   manualUnitCostBase: number | null
   expiryDate: string | null
   notes: string | null
@@ -491,6 +507,11 @@ export interface GoodsReceiptSaveRequest {
   lines: GoodsReceiptLineRequest[]
   /** On a create only: a receipt made on its own page is a receipt without an order. */
   sourceKind?: 'Manual'
+  /**
+   * (94) The page drew no cost (its reader may not see item costs, or the receipt it holds came without them): a line
+   * without an order keeps its saved cost (by its id) whatever it carries. It can only keep a stored figure.
+   */
+  costsHidden?: boolean
 }
 
 /* ── Receive goods… (order, invoice, container) ─────────────────────────────────────────────── */
@@ -558,6 +579,7 @@ export interface ReceivableLineDto {
   /** What "Receive now" starts at: 0 on an order or invoice shipped in containers, else toReceiveBase. */
   defaultReceiveBase: number
   /** The price per piece in the base currency: the order's (order and container lines) or the invoice's. */
+  /** (94) Null without View item costs: the invoice's is the FOB the goods take. No dialog draws it. */
   unitPriceBase: number | null
 }
 
@@ -567,7 +589,7 @@ export interface ReceivableDocumentDto {
   id: number
   documentNumber: string | null
   documentDate: string
-  /** The purchase document's status code: 2 Posted (an approved order), 4 Closed… */
+  /** The purchase document's status code: 2 Posted (an approved order, or a posted invoice). */
   status: number
   branchId: number
   branchCode: string | null
@@ -627,8 +649,12 @@ export interface ReceivableContainerDto {
   movementInProgressNo: string | null
   /** Status 2-5 and no draft or posted receipt. */
   canReceive: boolean
+  /** (script 95) Why it cannot be received now ("KTG-2026-0031 has not been delivered yet: …"), null when it can. */
+  receiveBlockedReason?: string | null
   /** Confirmed and never dispatched (status 2): "has not left the supplier". */
   notDispatched: boolean
+  /** "From a container…" (script 78): how many containers match, of which at most 200 are listed; 0 for one container. */
+  totalCount?: number
 }
 
 /** What `GET …/receivable` answers: the documents (one order, one invoice, or a supplier's orders) or the container, and the lines. */
@@ -784,6 +810,8 @@ export interface ReceiptCostPreviewLineDto {
   /** The goods receipts those pieces came from: "GRN-BR-002-000001, GRN-BR-002-000003". */
   receipts: string | null
   isEstimate: boolean
+  /** (79) The PINV type changes item costs: false, the pieces keep their cost (no difference). */
+  affectsCost?: boolean
 }
 
 /**
@@ -794,7 +822,7 @@ export interface ReceiptCostPreviewLineDto {
 export interface ReceiptCostPreviewDto {
   invoiceId: number
   documentNumber: string | null
-  /** Draft, Posted, Cancelled or Closed: only a draft is previewed. */
+  /** Draft, Posted or Cancelled: only a draft is previewed. */
   status: string
   baseCurrencyCode: string | null
   /** Received pieces whose cost the posting would adjust. */
@@ -804,6 +832,8 @@ export interface ReceiptCostPreviewDto {
   estimatedCogsBase: number
   hasReceivedGoods: boolean
   isEstimate: boolean
+  /** (79) Posting it changes the cost of the goods received against it; false, the message says they keep their cost. */
+  affectsCost?: boolean
   message: string | null
   lines: ReceiptCostPreviewLineDto[]
 }
@@ -887,7 +917,7 @@ export const goodsReceiptsApi = {
     normaliseDocument(await request<GoodsReceiptDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } })),
 
   /**
-   * The lines and the to-receive figures of an order, an invoice, a container, or every posted / closed order of a
+   * The lines and the to-receive figures of an order, an invoice, a container, or every approved order of a
    * supplier with something to receive (exactly one of the four).
    */
   receivable: async (
@@ -898,7 +928,7 @@ export const goodsReceiptsApi = {
     return { ...answer, documents: answer.documents ?? [], lines: answer.lines ?? [], container: answer.container ?? null }
   },
 
-  /** "+ New › From a container…": the containers Confirmed to Cleared with no receipt (at most 200, delivered first). */
+  /** "+ New › From a container…": the containers Confirmed to Cleared with no receipt (at most 200, delivered first; totalCount says how many match). */
   receivableContainers: (query: ReceivableContainersQuery = {}, signal?: AbortSignal) =>
     request<ReceivableContainerDto[]>(`${BASE}/receivable-containers${toQueryString(query)}`, { signal }),
 

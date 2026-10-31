@@ -21,12 +21,34 @@ src/pages/        one folder per module (inventory, purchase, logistics, sales, 
                   configuration, public = the emailed approval page)
 src/components/   shared UI (components/ui: grid, filters, modals), per-module components, RequirePermission
 src/navigation.ts the menu, each item guarded by a permission code
-src/auth/         session, AuthProvider, ProtectedRoute
+src/auth/         session, AuthProvider, ProtectedRoute, useAuth().hasPermission(code)
+src/hooks/        useGridQuery (server grids), useSeesItemCosts (script 94), the menu counts
+public/templates/ the Excel templates the import pages offer for download
+scripts/          dev.mjs (starts the API, then Vite) and tests/*.test.ts (node --test)
 ```
+
+## Rules every page follows
+
+- **Permissions decide the layout.** The page is routed behind `ProtectedRoute` with its permission, every button and
+  row action is gated with `hasPermission(...)` (codes in `src/navigation.ts`), and a figure the reader may not see is
+  decided by the permission, never by the data (`useSeesItemCosts()` for item costs). A button the user may not use
+  *now* stays visible and **disabled with a tooltip saying why**; it is hidden only without the permission.
+- **API messages are shown as they come** (`ApiError.message`, its `code` for the branches the page handles; a 409 says
+  "Someone else changed … Reload the page."). The server's reasons for a disabled button come from the document's
+  abilities, not from a rule re-written in the page.
+- Lists are `PageHeader` + `FilterBar` + `DataTable` on `useGridQuery` (column chooser, funnels, CSV from the columns
+  drawn); details in drawers; actions in `FormModal`s; `confirm` before anything destructive, `notify` after.
+- Every page works at **1440 px and 390 px**. The checklist at the end of `docs/frontend-conventions.md` ("Checklist
+  for a new page") is the definition of done.
 
 ## Checks before pushing
 
-`npm run lint`, `npm run typecheck`, `npm run build`. `npm run dev` starts the API too (see README.md).
+`npm run lint` (oxlint), `npm run typecheck`, `npm run test` (node's test runner over `scripts/tests/*.test.ts`; one
+file: `node --test scripts/tests/trackingNumbers.test.ts`), `npm run build`.
+
+`npm run dev` probes the API's `/health` first and starts it (`dotnet run`, the **https** profile on `7089`) only
+when nothing answers, then Vite on `5174`, which proxies `/api` (README.md: ports, `.env.development`,
+`VITE_API_PROXY_TARGET`). A stale API shows 404 / 405 on new endpoints: stop both and run `npm run dev` again.
 
 ## Production
 

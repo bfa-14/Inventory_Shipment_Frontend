@@ -2,9 +2,11 @@ import { Anchor, Badge, Paper, Stack, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
 import { routes } from '../../routes'
 import type { ShortagePurchaseOrderDto } from '../../api/inventory/shortages'
+import { useAuth } from '../../auth/useAuth'
+import { PERMISSIONS } from '../../navigation'
 import { dateLabel } from '../documents/documentKind'
 import { formatMoney } from '../format'
-import { PURCHASE_STATUS_COLOURS, purchaseStatusLabel } from '../purchase/purchaseKind'
+import { purchaseStatusColour, purchaseStatusLabel } from '../purchase/purchaseKind'
 
 /**
  * The purchase orders created from this plan — the second link of Shortage → PO → Purchase Invoice.
@@ -12,6 +14,10 @@ import { PURCHASE_STATUS_COLOURS, purchaseStatusLabel } from '../purchase/purcha
  * "was this ever ordered?" should see that it was, and what became of it.
  */
 export function ShortagePurchaseOrdersCard({ orders }: { orders: ShortagePurchaseOrderDto[] }) {
+  /* (94) THE AMOUNT IS DRAWN FOR A READER WHO MAY SEE PURCHASE ORDERS OR ITEM COSTS: the server sends it null to anybody
+     else, since a plan's order is priced at the item's last cost. Decided by the permissions, never by the data. */
+  const { hasPermission } = useAuth()
+  const showAmount = hasPermission(PERMISSIONS.purchaseOrdersView) || hasPermission(PERMISSIONS.costsView)
   return (
     <Paper radius="lg" p="md" withBorder id="purchase-orders" data-shortage-orders>
       <Title order={5} mb="sm">Purchase orders</Title>
@@ -26,7 +32,7 @@ export function ShortagePurchaseOrdersCard({ orders }: { orders: ShortagePurchas
                 <Table.Th>Number</Table.Th>
                 <Table.Th>Date</Table.Th>
                 <Table.Th>Status</Table.Th>
-                <Table.Th ta="right">Amount</Table.Th>
+                {showAmount && <Table.Th ta="right">Amount</Table.Th>}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -38,8 +44,10 @@ export function ShortagePurchaseOrdersCard({ orders }: { orders: ShortagePurchas
                     </Anchor>
                   </Table.Td>
                   <Table.Td><Text fz="sm">{dateLabel(order.documentDate)}</Text></Table.Td>
-                  <Table.Td><Badge variant="light" color={PURCHASE_STATUS_COLOURS[order.status] ?? 'gray'}>{purchaseStatusLabel(order.status)}</Badge></Table.Td>
-                  <Table.Td ta="right"><Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{formatMoney(order.totalAmount, order.currencyCode)}</Text></Table.Td>
+                  <Table.Td><Badge variant="light" color={purchaseStatusColour(order.status, 'PO', order.invoicingStatus)}>{purchaseStatusLabel(order.status, 'PO', order.invoicingStatus)}</Badge></Table.Td>
+                  {showAmount && (
+                    <Table.Td ta="right"><Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{order.totalAmount === null ? '—' : formatMoney(order.totalAmount, order.currencyCode)}</Text></Table.Td>
+                  )}
                 </Table.Tr>
               ))}
             </Table.Tbody>

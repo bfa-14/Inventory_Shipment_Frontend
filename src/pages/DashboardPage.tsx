@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { Alert, Group, Loader, SegmentedControl, Select } from '@mantine/core'
+import { Alert, Group, Loader, SegmentedControl, Select, Tooltip } from '@mantine/core'
 import { AreaChart, BarChart, DonutChart, LineChart } from '@mantine/charts'
 import { useMediaQuery } from '@mantine/hooks'
 import {
@@ -18,7 +18,9 @@ import { formatDateOnly, formatNumber, todayDateOnly } from '../components/forma
 import { PageHeader } from '../components/ui/PageHeader'
 import { useAuth } from '../auth/useAuth'
 import { PERMISSIONS } from '../navigation'
+import { routes } from '../routes'
 import { useApprovalsMe } from '../hooks/useApprovalsMe'
+import { useSeesItemCosts } from '../hooks/useSeesItemCosts'
 import css from './DashboardPage.module.css'
 
 /** The periods every widget answers for, and what each one is compared with. */
@@ -212,13 +214,18 @@ export function DashboardPage() {
 
         {data && (
           <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 120ms' }}>
-            <Board data={data} ccy={ccy} />
+            <Board data={data} ccy={ccy} branchChosen={branchId !== null} />
           </div>
         )}
       </div>
 
       {data && (
-        <NeedsAttention data={data} ccy={ccy} approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null} />
+        <NeedsAttention
+          data={data}
+          ccy={ccy}
+          approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null}
+          branchId={branchId}
+        />
       )}
     </>
   )
@@ -226,7 +233,14 @@ export function DashboardPage() {
 
 /* ── the board ─────────────────────────────────────────────────────────────────────────────────── */
 
-function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
+function Board({ data, ccy, branchChosen }: { data: DashboardSummaryDto; ccy: string; branchChosen: boolean }) {
+  const { hasPermission } = useAuth()
+  // Script 75: the statement and the valuation have their own permissions; fall back to the lists.
+  const receivablesTo = hasPermission(PERMISSIONS.statementView) ? '/sales/receipts/statement' : '/sales/invoices'
+  const valuationTo = hasPermission(PERMISSIONS.valuationView) ? '/inventory/valuation' : '/inventory/items'
+  /* (94) The inventory value and the value by warehouse are stock at the average cost: without View item costs the pill
+     counts the items in stock instead, and there is no donut (the server sends both null). */
+  const seesCosts = useSeesItemCosts()
   const { sales, receivables, payables, inventory, onTheWay } = data
   const money = (value: number | null | undefined) => `${formatNumber(value ?? 0, 2)} ${ccy}`
 
@@ -270,7 +284,7 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   const pills: ReactNode[] = []
   if (receivables) {
     pills.push(
-      <Pill key="receivables" to="/sales/receipts/statement" icon={<IconUsers size={17} />} colour={CHART.pink}
+      <Pill key="receivables" to={receivablesTo} icon={<IconUsers size={17} />} colour={CHART.pink}
         label="Customers owe" value={money(receivables.outstandingBase)}
         chip={receivables.overdueCount > 0 ? { text: `${receivables.overdueCount} overdue`, className: css.chipRed } : { text: 'on time', className: css.chipGreen }} />,
     )
@@ -283,10 +297,18 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
         label="We owe" value={money(total)} chip={{ text: `${count} open`, className: css.chipDim }} />,
     )
   }
-  if (inventory) {
+  if (inventory && !seesCosts) {
     pills.push(
-      <Pill key="inventory" to="/inventory/valuation" icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
-        label="Inventory value" value={money(inventory.valueBase)} chip={{ text: `${inventory.itemsInStock} items`, className: css.chipDim }} />,
+      <Pill key="inventory" to={valuationTo} icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
+        label="Items in stock" value={formatNumber(inventory.itemsInStock)} />,
+    )
+  } else if (inventory) {
+    pills.push(
+      <Pill key="inventory" to={valuationTo} icon={<IconBuildingWarehouse size={17} />} colour={CHART.cyan}
+        label="Inventory value" value={money(inventory.valueBase)} chip={{ text: `${inventory.itemsInStock} items`, className: css.chipDim }}
+        // (90) A branch's stock counts what transfers have dispatched to it and it has not received yet: those goods
+        // sit in its On the way warehouse. The company's figure never moves during a transfer, so it needs no word.
+        tooltip={branchChosen ? "Includes goods on the way to this branch's warehouses (transfer orders)." : undefined} />,
     )
   }
   if (onTheWay) {
@@ -341,7 +363,7 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   if (data.salesByFamily) {
     donuts.push(<Donut key="family" title="Sales by item family" slices={data.salesByFamily} ccy={ccy} empty="No sales in the period." />)
   }
-  if (data.stockByWarehouse) {
+  if (data.stockByWarehouse && seesCosts) {
     donuts.push(<Donut key="warehouse" title="Stock value by warehouse" slices={data.stockByWarehouse} ccy={ccy} empty="No stock on hand." />)
   }
   if (donuts.length > 0) left.push(<div key="donuts" className={css.row}>{donuts}</div>)
@@ -381,24 +403,28 @@ function Board({ data, ccy }: { data: DashboardSummaryDto; ccy: string }) {
   )
 }
 
-function Pill({ to, icon, colour, label, value, chip }: {
+function Pill({ to, icon, colour, label, value, chip, tooltip }: {
   to: string
   icon: ReactNode
   colour: string
   label: string
   value: string
-  chip: { text: string; className: string }
+  /** The chip at the right; left out (94: "Items in stock", whose count is the figure itself), the pill has none. */
+  chip?: { text: string; className: string }
+  /** What the figure includes, on hover; left out, the pill has no tooltip. */
+  tooltip?: string
 }) {
-  return (
+  const pill = (
     <Link to={to} className={css.pill}>
       <span className={css.pillIcon} style={{ color: colour, background: `${colour}26` }}>{icon}</span>
       <span className={css.pillText}>
         <div className={css.pillLabel}>{label}</div>
         <div className={css.pillValue}>{value}</div>
       </span>
-      <span className={`${css.chip} ${chip.className}`}>{chip.text}</span>
+      {chip && <span className={`${css.chip} ${chip.className}`}>{chip.text}</span>}
     </Link>
   )
+  return tooltip ? <Tooltip label={tooltip} withArrow multiline w={280}>{pill}</Tooltip> : pill
 }
 
 function Donut({ title, slices, ccy, empty }: { title: string; slices: { label: string; valueBase: number }[]; ccy: string; empty: string }) {
@@ -464,7 +490,18 @@ function Line({ to, label, sub, value, colour }: { to: string; label: string; su
   )
 }
 
-function NeedsAttention({ data, ccy, approvalsPending }: { data: DashboardSummaryDto; ccy: string; approvalsPending: number | null }) {
+function NeedsAttention({
+  data,
+  ccy,
+  approvalsPending,
+  branchId,
+}: {
+  data: DashboardSummaryDto
+  ccy: string
+  approvalsPending: number | null
+  /** The branch chosen at the top (null: the company): the stock-level links open Stock Levels on it (script 91). */
+  branchId: string | null
+}) {
   const { hasPermission } = useAuth()
   const money = (value: number | null | undefined) => `${formatNumber(value ?? 0, 2)} ${ccy}`
   const cards: ReactNode[] = []
@@ -492,16 +529,41 @@ function NeedsAttention({ data, ccy, approvalsPending }: { data: DashboardSummar
 
   if (data.stockAlerts) {
     const a = data.stockAlerts
-    const count = a.belowMinimum + a.negativeStock + (a.outOfStockSales ?? 0)
+    const belowWarehouseMin = a.belowWarehouseMin ?? 0
+    const count = a.belowMinimum + a.negativeStock + (a.outOfStockSales ?? 0) + belowWarehouseMin
+    /* (91) "Items below their minimum" is the COMPANY's Minimum Quantity: it opens Stock Levels' company view, which
+       computes the same figure, on the branch chosen here (Item Definition without View Stock Levels). Each warehouse's
+       own Min has its own line, "Warehouse levels below Min", opening Per warehouse on that branch. */
+    const canLevels = hasPermission(PERMISSIONS.stockLevelsView)
+    const belowMinimumTo = canLevels
+      ? routes.stockLevelsLink({ view: 'company', status: 'BelowMin', branchId })
+      : '/inventory/items'
     cards.push(
       <AttentionCard key="stock" title="Stock alerts" count={count} clear="No item below its minimum, no stock below zero.">
-        {a.belowMinimum > 0 && <Line to="/inventory/shortages" label="Items below their minimum" value={formatNumber(a.belowMinimum)} colour="#ffb547" />}
+        {a.belowMinimum > 0 && (
+          <Line
+            to={belowMinimumTo}
+            label="Items below their minimum"
+            sub="Company Minimum Quantity (Item Definition)"
+            value={formatNumber(a.belowMinimum)}
+            colour="#ffb547"
+          />
+        )}
         {(data.belowMinimum ?? []).map((i) => (
           <Line key={i.itemId} to={`/inventory/items/${i.itemId}`} label={i.itemCode} sub={i.itemName}
             value={`${formatNumber(i.onHand)} / ${formatNumber(i.minQuantity)}`} colour="#ffb547" />
         ))}
-        {a.negativeStock > 0 && <Line to="/inventory/valuation" label="Item and warehouse below zero" value={formatNumber(a.negativeStock)} colour="#ff6b8a" />}
+        {a.negativeStock > 0 && <Line to={hasPermission(PERMISSIONS.valuationView) ? '/inventory/valuation' : '/inventory/items'} label="Item and warehouse below zero" value={formatNumber(a.negativeStock)} colour="#ff6b8a" />}
         {(a.outOfStockSales ?? 0) > 0 && <Line to="/sales/out-of-stock-audit" label="Out-of-stock sales in the period" value={formatNumber(a.outOfStockSales)} colour="#ffb547" />}
+        {belowWarehouseMin > 0 && (
+          <Line
+            to={routes.stockLevelsLink({ status: 'BelowMin', branchId })}
+            label="Warehouse levels below Min"
+            sub="Projected stock below a warehouse's own Min"
+            value={formatNumber(belowWarehouseMin)}
+            colour="#ffb547"
+          />
+        )}
       </AttentionCard>,
     )
   }

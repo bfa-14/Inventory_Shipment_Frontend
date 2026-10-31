@@ -34,16 +34,32 @@ const ACTION_COLOURS: Record<string, string> = {
   FileAdded: 'gray',
   FileUpdated: 'gray',
   FileDeleted: 'gray',
-  // Purchase orders: the approval decision; containers: their own steps.
+  // Purchase orders: the approval decision (and "Closed" in the history of an order closed before script 77);
+  // containers: their own steps.
   Approved: 'green',
   Rejected: 'red',
   Closed: 'teal',
   Confirmed: 'teal',
   Offloaded: 'green',
   OffloadCancelled: 'orange',
-  // Movements (built on the page from their stamps).
+  // Movements (built on the page from their stamps), and (82) a movement that arrived in parts: the original lost
+  // containers to a movement of their own, the new one came from it - and the split undone when that one is cancelled.
   Started: 'blue',
   Completed: 'green',
+  'Split off': 'orange',
+  'Split from': 'violet',
+  'Split undone': 'orange',
+  // (90) Transfer orders: waiting is yellow as its status, a step back orange, the goods moving green.
+  SentForApproval: 'yellow',
+  ApprovedAndReleased: 'green',
+  BackToDraft: 'orange',
+  NothingMoreSent: 'teal',
+  DispatchedAndReceived: 'green',
+  ReturnCreated: 'teal',
+  ReturnOf: 'teal',
+  // (91) Transfer orders: the draft's lines set or added from the destination's stock levels.
+  FillToMax: 'violet',
+  ItemsAddedBelowMin: 'violet',
 }
 
 /**
@@ -61,6 +77,20 @@ const ACTION_LABELS: Record<string, string> = {
   FileDeleted: 'File deleted',
   OffloadCancelled: 'Offload cancelled',
   ChequeStatus: 'Cheque status',
+  // (90) Transfer orders: the codes whose words are not the code split up ("EtaChanged" would read "Eta changed",
+  // "ReturnOf" "Return of"); the others are written out so a transfer's trail reads the same wherever it is shown.
+  SentForApproval: 'Sent for approval',
+  ApprovedAndReleased: 'Approved and released',
+  BackToDraft: 'Back to draft',
+  NothingMoreSent: 'Nothing more will be sent',
+  DispatchedAndReceived: 'Dispatched and received',
+  EtaChanged: 'ETA changed',
+  ReturnCreated: 'Return created',
+  ReturnOf: 'Return',
+  DetailsUpdated: 'Details updated',
+  // (91) "Fill to Max" keeps its capitals (split it would read "Fill to max"); the drawer's lines added.
+  FillToMax: 'Fill to Max',
+  ItemsAddedBelowMin: 'Items below Min added',
 }
 
 /** "CostAdjusted" -> "Cost adjusted", "POCreated" -> "PO created": the map first, else the code split into words. */
@@ -86,7 +116,15 @@ function actionLabel(code: string): string {
  * FIVE ENTRIES, THEN THE REST ON ASKING. A document that has been edited eleven times would
  * otherwise push its own lines off the screen with its history.
  */
-export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
+export function AuditTrail({ entries, wrapLabels = false }: {
+  entries: AuditEntry[]
+  /**
+   * The user name goes under a label too long to sit beside it, rather than cut the label ("Nothing more will be
+   * sent" read "Nothing more will be…" on a phone): the transfer order's trail. Opt-in: every other trail keeps its
+   * one line.
+   */
+  wrapLabels?: boolean
+}) {
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? entries : entries.slice(0, PREVIEW)
 
@@ -105,8 +143,14 @@ export function AuditTrail({ entries }: { entries: AuditEntry[] }) {
           <Timeline bulletSize={14} lineWidth={2}>
             {shown.map((entry, index) => (
               <Timeline.Item key={`${entry.atUtc}-${index}`}>
-                <Group gap="xs" wrap="nowrap">
-                  <Badge size="sm" variant="light" color={ACTION_COLOURS[entry.action] ?? 'gray'}>
+                {/* wrapLabels: the name goes under a long label rather than cut it. */}
+                <Group gap="xs" wrap={wrapLabels ? 'wrap' : 'nowrap'}>
+                  <Badge
+                    size="sm"
+                    variant="light"
+                    color={ACTION_COLOURS[entry.action] ?? 'gray'}
+                    style={wrapLabels ? { minWidth: 'max-content' } : undefined}
+                  >
                     {actionLabel(entry.action)}
                   </Badge>
                   <Text size="sm">{entry.userName ?? 'System'}</Text>

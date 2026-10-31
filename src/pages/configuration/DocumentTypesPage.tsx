@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Badge, Paper, Text } from '@mantine/core'
+import { Alert, Badge, Paper, Text, Tooltip } from '@mantine/core'
 import { IconAlertTriangle } from '@tabler/icons-react'
 import type { DocumentTypeDto } from '../../api/inventory/stockDocuments'
 import { useAuth } from '../../auth/useAuth'
@@ -13,11 +13,11 @@ import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { DocumentTypeFormModal } from './DocumentTypeFormModal'
+import { effectsText, stockColour, stockText } from './documentTypeEffects'
 
 const PRICING_COLOURS: Record<string, string> = { Cost: 'blue', PriceList: 'grape', None: 'gray' }
 
 const yesNo = (value: boolean) => (value ? 'Yes' : 'No')
-const stockText = (t: DocumentTypeDto) => (t.stockDirection > 0 ? 'In' : t.stockDirection < 0 ? 'Out' : 'None')
 const pricingText = (t: DocumentTypeDto) => (t.defaultPricing === 'PriceList' ? 'Price list' : t.defaultPricing)
 
 /**
@@ -39,6 +39,8 @@ const GRID_COLUMNS: GridColumnMeta<DocumentTypeDto>[] = [
   { accessor: 'defaultPricing', text: pricingText },
   { accessor: 'priceEditable', kind: 'boolean', text: (t) => yesNo(t.priceEditable) },
   { accessor: 'bivacItemsOnly', kind: 'boolean', text: (t) => yesNo(t.bivacItemsOnly) },
+  // (79) the switches of the purchase invoice and goods receipt types, (90) the transfer order's approval, "-" on the others
+  { accessor: 'effects', value: effectsText, text: effectsText },
   { accessor: 'isActive', kind: 'boolean', text: (t) => (t.isActive ? 'Active' : 'Inactive') },
 ]
 
@@ -96,11 +98,14 @@ export function DocumentTypesPage() {
     {
       accessor: 'stockDirection',
       title: 'Stock',
-      width: 90,
+      width: 190,
+      // A supplier invoice moves no stock of its own since goods receipts: the badge says what really happens.
       render: (t) => (
-        <Badge variant="light" color={t.stockDirection > 0 ? 'green' : t.stockDirection < 0 ? 'orange' : 'gray'}>
-          {t.stockDirection > 0 ? 'In' : t.stockDirection < 0 ? 'Out' : 'None'}
-        </Badge>
+        <Tooltip label={stockText(t)} disabled={stockText(t).length < 18} withinPortal>
+          <Badge variant="light" color={stockColour(t)} maw={180}>
+            {stockText(t)}
+          </Badge>
+        </Tooltip>
       ),
     },
     {
@@ -139,6 +144,17 @@ export function DocumentTypesPage() {
     flag('priceEditable', 'Price editable', 110),
     // Read-only like Family and Stock: set by the script that creates the type (BIVAC Out), never in the form.
     flag('bivacItemsOnly', 'BIVAC items only', 130),
+    {
+      accessor: 'effects',
+      title: 'What it does',
+      width: 250,
+      // Edited in the form, on the type each switch belongs to; "-" (dimmed) on the others.
+      render: (t) => (
+        <Text fz="sm" c={effectsText(t) === '-' ? 'dimmed' : undefined}>
+          {effectsText(t)}
+        </Text>
+      ),
+    },
     {
       accessor: 'isActive',
       title: 'Active',

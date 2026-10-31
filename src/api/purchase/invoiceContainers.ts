@@ -49,8 +49,7 @@ export interface InvoiceLinkedContainerDto {
 
 /**
  * What the invoice can do with containers now, and why not (script 47). The rules: 1 a purchase invoice, draft or
- * posted; 2 created from a purchase order; 3 one item (a draft); 4 shipped in containers; 5 its order approved or
- * closed; 6 pieces not in a container; 7 the order lines still allow pieces; 8 at most maxAddQty in a new container;
+ * posted; 2 created from a purchase order; 3 one item (a draft); 4 shipped in containers; 5 its order approved; 6 pieces not in a container; 7 the order lines still allow pieces; 8 at most maxAddQty in a new container;
  * 9 the reader's permissions. The reasons are the server's sentences - the add and the link refuse with the same.
  */
 export interface InvoiceContainerStateDto {
@@ -112,6 +111,9 @@ export interface AddInvoiceContainerRequest {
   portOfLoadingId: number | null
   portOfDestinationId: number | null
   eta: string | null
+  /** (78) The dialog's defaults: the order's last container's forwarder (else its supplier), the supplier's country. */
+  forwarderId?: number | null
+  countryOfOrigin?: string | null
   allowOverCapacity: boolean
 }
 

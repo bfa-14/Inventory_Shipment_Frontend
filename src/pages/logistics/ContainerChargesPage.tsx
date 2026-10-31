@@ -13,8 +13,6 @@ import {
   type ContainerChargeListDto,
   type ContainerChargeQuery,
 } from '../../api/logistics/containerCharges'
-import { containersApi } from '../../api/logistics/containers'
-import { movementsApi } from '../../api/logistics/movements'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
 import { allocationMethodLabel, chargeTypesApi } from '../../api/purchase/chargeTypes'
@@ -31,6 +29,8 @@ import { FilterBar } from '../../components/ui/FilterBar'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
+import { SearchSelect } from '../../components/ui/SearchSelect'
+import { loadContainers, loadMovements, resolveContainer, resolveMovement } from '../../components/purchase/documentSearch'
 import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
@@ -107,10 +107,9 @@ function toQuery(filters: Filters): ContainerChargeQuery {
 export function ContainerChargesPage() {
   const { hasPermission } = useAuth()
   const canCreate = hasPermission(PERMISSIONS.containerChargesCreate)
+  const canOpenMovements = hasPermission(PERMISSIONS.movementsView)
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
 
-  const [containers, setContainers] = useState<Option[]>([])
-  const [movements, setMovements] = useState<Option[]>([])
   const [chargeTypes, setChargeTypes] = useState<Option[]>([])
   const [providers, setProviders] = useState<Option[]>([])
   const [baseCode, setBaseCode] = useState('USD')
@@ -158,15 +157,8 @@ export function ContainerChargesPage() {
     sort: [{ accessor: 'chargeDate', direction: 'desc' }],
   })
 
+  // The container and movement filters search the server as they are typed (script 78), where they held the 200 newest.
   useEffect(() => {
-    containersApi
-      .list({ pageSize: 200, sortBy: 'ContainerRef', sortDir: 'desc' })
-      .then((r) => setContainers(r.items.map((c) => ({ value: String(c.id), label: c.containerNo ? `${c.containerRef} (${c.containerNo})` : c.containerRef }))))
-      .catch(() => {})
-    movementsApi
-      .list({ pageSize: 200 })
-      .then((r) => setMovements(r.items.map((m) => ({ value: String(m.id), label: `${m.movementNo} - ${m.typeName}` }))))
-      .catch(() => {})
     chargeTypesApi
       .lookup(false)
       .then((types) => setChargeTypes(types.map((t) => ({ value: String(t.id), label: `${t.chargeCode} - ${t.chargeName}` }))))
@@ -277,9 +269,13 @@ export function ContainerChargesPage() {
         width: 170,
         render: (row) =>
           row.movementId ? (
-            <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${row.movementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }}>
-              {row.movementNo ?? `#${row.movementId}`}
-            </Anchor>
+            canOpenMovements ? (
+              <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${row.movementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }}>
+                {row.movementNo ?? `#${row.movementId}`}
+              </Anchor>
+            ) : (
+              <Text span fz="sm" style={{ whiteSpace: 'nowrap' }}>{row.movementNo ?? `#${row.movementId}`}</Text>
+            )
           ) : (
             '—'
           ),
@@ -386,10 +382,28 @@ export function ContainerChargesPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
-          <Select label="Container" placeholder="All containers" data={containers} value={filters.containerId} onChange={(next) => setFilter('containerId', next)} clearable searchable nothingFoundMessage="No container matches" />
+          <SearchSelect
+            label="Container"
+            placeholder="All containers"
+            load={loadContainers}
+            resolve={resolveContainer}
+            value={filters.containerId}
+            onChange={(next) => setFilter('containerId', next)}
+            clearable
+            nothingFoundMessage="No container matches"
+          />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
-          <Select label="Movement" placeholder="All movements" data={movements} value={filters.movementId} onChange={(next) => setFilter('movementId', next)} clearable searchable nothingFoundMessage="No movement matches" />
+          <SearchSelect
+            label="Movement"
+            placeholder="All movements"
+            load={loadMovements}
+            resolve={resolveMovement}
+            value={filters.movementId}
+            onChange={(next) => setFilter('movementId', next)}
+            clearable
+            nothingFoundMessage="No movement matches"
+          />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
           <Select label="Charge type" placeholder="All types" data={chargeTypes} value={filters.chargeTypeId} onChange={(next) => setFilter('chargeTypeId', next)} clearable searchable nothingFoundMessage="No charge type matches" />

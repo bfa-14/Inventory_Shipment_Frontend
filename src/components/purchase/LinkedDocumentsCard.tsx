@@ -13,7 +13,7 @@ import { dateLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
-import { PURCHASE_STATUS_COLOURS, purchaseKindOf, purchaseStatusLabel } from './purchaseKind'
+import { purchaseKindOf, purchaseStatusColour, purchaseStatusLabel } from './purchaseKind'
 
 interface LinkedDocumentsCardProps {
   linked: LinkedPurchaseDocumentDto[]
@@ -32,8 +32,9 @@ interface LinkedDocumentsCardProps {
  * The chain this document sits in: what it came from, and what was made from it.
  *
  * AN ORDER'S INVOICES, ITS GOODS RECEIPTS AND AN INVOICE'S RETURNS ARE WHERE THE GOODS WENT, so they are one click
- * away rather than a search. Each is named with its kind and its status, because a cancelled invoice under an order
- * means the order is open again and a reader should see that here. A goods receipt is a link only for a reader who may
+ * away rather than a search. Each is named with its kind and its status (an order: Saved, Partially posted or Posted,
+ * from its posted invoices), because a cancelled invoice under an order brings the order back to Partially posted or
+ * Saved and a reader should see that here. A goods receipt is a link only for a reader who may
  * open goods receipts.
  */
 export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted, goodsReceipts = [] }: LinkedDocumentsCardProps) {
@@ -102,8 +103,8 @@ export function LinkedDocumentsCard({ linked, canPostInvoices = false, onPosted,
             </Text>
           </div>
         </Group>
-        <Badge color={PURCHASE_STATUS_COLOURS[doc.status] ?? 'gray'} variant="light" style={{ flexShrink: 0 }}>
-          {purchaseStatusLabel(doc.status)}
+        <Badge color={purchaseStatusColour(doc.status, doc.documentTypeCode, doc.invoicingStatus)} variant="light" style={{ flexShrink: 0 }}>
+          {purchaseStatusLabel(doc.status, doc.documentTypeCode, doc.invoicingStatus)}
         </Badge>
       </Group>
     )

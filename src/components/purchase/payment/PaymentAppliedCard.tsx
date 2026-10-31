@@ -1,9 +1,11 @@
+import { Fragment } from 'react'
 import { ActionIcon, Anchor, Badge, Group, Paper, Table, Text, Title, Tooltip } from '@mantine/core'
 import { IconX } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import type { PaymentAllocationDto } from '../../../api/purchase/payments'
 import { dateLabel, stamp } from '../../documents/documentKind'
 import { formatNumber } from '../../format'
+import { containerStatusColour } from './paymentModel'
 
 interface PaymentAppliedCardProps {
   allocations: PaymentAllocationDto[]
@@ -43,7 +45,8 @@ export function PaymentAppliedCard({ allocations, paymentCurrencyCode, canRemove
           </Table.Thead>
           <Table.Tbody>
             {allocations.map((a) => (
-              <Table.Tr key={a.id} c={a.isLive ? undefined : 'dimmed'}>
+              <Fragment key={a.id}>
+              <Table.Tr c={a.isLive ? undefined : 'dimmed'}>
                 <Table.Td>
                   <Group gap="xs" wrap="nowrap">
                     {a.documentKind === 'PINV' ? (
@@ -74,6 +77,29 @@ export function PaymentAppliedCard({ allocations, paymentCurrencyCode, canRemove
                   )}
                 </Table.Td>
               </Table.Tr>
+              {/* Script 73: how an invoice allocation is split over the invoice's containers. */}
+              {a.containers
+                .filter((c) => c.allocatedAmount > 0)
+                .map((c) => (
+                  <Table.Tr key={`${a.id}-${c.containerId ?? 0}`} c={a.isLive ? undefined : 'dimmed'}>
+                    <Table.Td pl="xl">
+                      <Text size="sm">
+                        ↳ {c.containerId === null ? <i>Unlinked items</i> : c.containerRef}
+                        {c.containerNo ? <Text span size="xs" c="dimmed"> {c.containerNo}</Text> : null}
+                      </Text>
+                      {c.items && <Text size="xs" c="dimmed">{c.items}</Text>}
+                    </Table.Td>
+                    <Table.Td />
+                    <Table.Td><Badge size="xs" variant="light" color={containerStatusColour(c.paymentStatus)}>{c.paymentStatus}</Badge></Table.Td>
+                    <Table.Td ta="right">{formatNumber(c.allocatedAmount, a.documentDecimalPlaces)} {a.documentCurrencyCode}</Table.Td>
+                    <Table.Td colSpan={4}>
+                      <Text size="xs" c="dimmed">
+                        of {formatNumber(c.containerAmount, a.documentDecimalPlaces)} · outstanding {formatNumber(c.outstandingAmount, a.documentDecimalPlaces)}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Fragment>
             ))}
           </Table.Tbody>
           <Table.Tfoot>

@@ -6,6 +6,7 @@ import type { ItemLookupDto, ItemUnitDto } from '../../api/types'
 import { unitLabel } from '../documents/documentKind'
 import { formatMoney, formatNumber, numberInputValue } from '../format'
 import { invoiceLineTotal } from './salesLines'
+import { notYoursNote } from '../documents/lineWarehouses'
 
 /**
  * One invoice line while it is on the page.
@@ -269,7 +270,8 @@ export function SalesInvoiceLinesGrid({
                         if (!next) return
                         onChange(line.key, { warehouseId: Number(next), onHandBase: null })
                       }}
-                      error={Boolean(line.error) && line.warehouseId === null}
+                      // (92) a warehouse the reader may not use says so under the cell, which cuts the label's mark
+                      error={notYoursNote(warehouses, line.warehouseId) ?? (Boolean(line.error) && line.warehouseId === null)}
                       comboboxProps={{ withinPortal: true }}
                     />
                   )}

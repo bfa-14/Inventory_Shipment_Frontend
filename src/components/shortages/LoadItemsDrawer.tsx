@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Drawer, Grid, Group, Select, Stack, Switch, Text, TextInput } from '@mantine/core'
+import { Alert, Badge, Button, Drawer, Grid, Group, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
 import { IconPlus, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -9,6 +9,7 @@ import { brandLabel, familyOptions } from '../../pages/inventory/lookups'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber } from '../format'
 import { DataTable, type DataTableColumn } from '../ui/DataTable'
+import { TRANSFERS_IN_HINT } from './shortageMath'
 
 /** The header values the live calculation runs with. */
 export interface LoadItemsContext {
@@ -117,9 +118,36 @@ function LoadItems({ onClose, context, families, brands, existingItemIds, onAdd 
     },
     { accessor: 'currentInventoryBase', title: 'Current Inventory', width: 120, textAlign: 'right', render: (row) => formatNumber(row.currentInventoryBase) },
     { accessor: 'transitBase', title: 'Transit', width: 90, textAlign: 'right', render: (row) => formatNumber(row.transitBase) },
+    // (90) On the way from other warehouses by transfer orders; the server's Total Expected already counts it.
+    {
+      accessor: 'transfersInBase',
+      title: (
+        <Tooltip label={TRANSFERS_IN_HINT} multiline w={260} withArrow>
+          <span>Transfers in</span>
+        </Tooltip>
+      ),
+      width: 110,
+      textAlign: 'right',
+      render: (row) => formatNumber(row.transfersInBase ?? 0),
+    },
     { accessor: 'outstandingOrderBase', title: 'Outstanding', width: 110, textAlign: 'right', render: (row) => formatNumber(row.outstandingOrderBase) },
     { accessor: 'totalExpectedStockBase', title: 'Total Expected', width: 120, textAlign: 'right', render: (row) => formatNumber(row.totalExpectedStockBase) },
     { accessor: 'expectedMonthlySalesBase', title: 'Monthly Sales', width: 120, textAlign: 'right', render: (row) => formatNumber(row.expectedMonthlySalesBase, 2) },
+    {
+      // (98) Each item its own lead time: its purchase history, else Item Definition's, else the plan's.
+      accessor: 'leadTimeMonths',
+      title: 'Lead Time',
+      width: 110,
+      textAlign: 'right',
+      render: (row) => (
+        <Stack gap={0} align="flex-end">
+          <Text fz="sm">{formatNumber(row.leadTimeMonths, Number.isInteger(row.leadTimeMonths) ? 0 : 1)}</Text>
+          <Text fz={10} c="dimmed">
+            {row.leadTimeSource === 'History' ? `history (${formatNumber(row.leadTimeReceipts ?? 0)})` : row.leadTimeSource === 'Item' ? 'item' : 'plan'}
+          </Text>
+        </Stack>
+      ),
+    },
     { accessor: 'expectedRequirementBase', title: 'Requirement', width: 120, textAlign: 'right', render: (row) => formatNumber(row.expectedRequirementBase, 2) },
     {
       accessor: 'shortageBase',
@@ -160,8 +188,8 @@ function LoadItems({ onClose, context, families, brands, existingItemIds, onAdd 
   return (
     <Stack gap="md">
       <Text fz="sm" c="dimmed">
-        Live figures for <b>{context.warehouseName}</b> — Lead Time (Month) {formatNumber(context.leadTimeMonths, Number.isInteger(context.leadTimeMonths) ? 0 : 2)},
-        monthly sales from the last {formatNumber(context.monthsOfHistory)} month(s).
+        Live figures for <b>{context.warehouseName}</b> — Lead Time (Month) {formatNumber(context.leadTimeMonths, Number.isInteger(context.leadTimeMonths) ? 0 : 2)} for items without a purchase history or a lead time of their own,
+        monthly sales = the busiest month of the last {formatNumber(context.monthsOfHistory)} month(s).
       </Text>
 
       <Grid align="flex-end">

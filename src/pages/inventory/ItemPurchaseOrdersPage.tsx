@@ -4,11 +4,10 @@ import { Alert, Anchor, Badge, Button, Group, Loader, Paper, SegmentedControl, S
 import { IconArrowLeft } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
-import type { PurchaseDocumentStatus } from '../../api/purchase/documents'
 import type { ItemPurchaseOrdersDto } from '../../api/types'
 import { dateLabel } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
-import { PURCHASE_STATUS_COLOURS, purchaseStatusLabel } from '../../components/purchase/purchaseKind'
+import { purchaseStatusColour, purchaseStatusLabel } from '../../components/purchase/purchaseKind'
 import { PageHeader } from '../../components/ui/PageHeader'
 
 /**
@@ -17,8 +16,9 @@ import { PageHeader } from '../../components/ui/PageHeader'
  *
  * WHAT EACH ORDER ASKS FOR OF THIS ITEM, not the order's totals: an order of twenty items is one
  * row here, with this item's ordered, received and still-to-come quantities. "Still to come" is
- * counted on open orders only - a draft has not been sent, and a cancelled or closed order will not
- * deliver any more - so the On order figure is stock that is really on its way.
+ * counted on approved orders only - a draft has not been sent, and a cancelled order will not deliver
+ * any more - so the On order figure is stock that is really on its way. The status is the order's own (an approved
+ * one shows Saved, Partially posted or Posted from all its posted invoices).
  */
 export function ItemPurchaseOrdersPage() {
   const { id } = useParams<{ id: string }>()
@@ -135,8 +135,8 @@ export function ItemPurchaseOrdersPage() {
                         <Table.Td>{o.supplierName}</Table.Td>
                         <Table.Td>{o.branchName}</Table.Td>
                         <Table.Td>
-                          <Badge color={PURCHASE_STATUS_COLOURS[o.status as PurchaseDocumentStatus] ?? 'gray'} variant="light">
-                            {purchaseStatusLabel(o.status as PurchaseDocumentStatus)}
+                          <Badge color={purchaseStatusColour(o.status, 'PO', o.invoicingStatus)} variant="light">
+                            {purchaseStatusLabel(o.status, 'PO', o.invoicingStatus)}
                           </Badge>
                         </Table.Td>
                         <Table.Td ta="right">{formatNumber(o.orderedBase)}</Table.Td>

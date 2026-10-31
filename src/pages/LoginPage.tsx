@@ -17,7 +17,7 @@ import { landingRoute } from '../navigation'
  */
 
 export function LoginPage() {
-  const { status, user, login } = useAuth()
+  const { status, login } = useAuth()
   const { environment, switchUrl } = useEnvironment()
   // Only when the server says which environment this is AND where the other one lives: nothing in
   // `npm run dev`, nothing on a server that runs one environment alone.
@@ -32,12 +32,12 @@ export function LoginPage() {
   const [errors, setErrors] = useState<string[]>([])
 
   // Honour the page the user was sent away from (?returnUrl=, a path of this site only - anything else
-  // is the home page); without one, land on Users when allowed.
+  // is the home page); without one, land on Home.
   const returnUrl = searchParams.get('returnUrl')
   const requested = returnUrl === null ? undefined : safeReturnUrl(returnUrl)
 
   if (status === 'authenticated') {
-    return <Navigate to={requested ?? landingRoute(user?.permissions)} replace />
+    return <Navigate to={requested ?? landingRoute()} replace />
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -60,8 +60,8 @@ export function LoginPage() {
 
     setSubmitting(true)
     try {
-      const signedIn = await login(identifier, secret)
-      navigate(requested ?? landingRoute(signedIn.permissions), { replace: true })
+      await login(identifier, secret)
+      navigate(requested ?? landingRoute(), { replace: true })
     } catch (error) {
       setErrors(error instanceof ApiError ? error.messages : ['Sign-in failed. Please try again.'])
       setPassword('')

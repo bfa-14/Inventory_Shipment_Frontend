@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ActionIcon, Anchor, Badge, Group, NumberInput, Text, TextInput, Tooltip } from '@mantine/core'
+import { ActionIcon, Anchor, Badge, Group, NumberInput, Stack, Text, TextInput, Tooltip } from '@mantine/core'
 import { IconAlertTriangle, IconRestore, IconTrash } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { unitLabel } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from '../ui/DataTable'
-import { derive, type ShortageDerived, type ShortageLine } from './shortageMath'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
+import { derive, leadTimeSourceText, STOCK_PLUS_TRANSIT_HINT, TRANSFERS_IN_HINT, type ShortageDerived, type ShortageLine } from './shortageMath'
 
 /** A line with its place on the document and every derived cell — what the grid sorts and draws. */
 type Row = ShortageLine & ShortageDerived & { lineNo: number }
@@ -52,13 +53,16 @@ function compare(a: Row, b: Row, status: DataTableSortStatus<Row>): number {
  * clicked (and when lines are added or removed) and kept until the next click — a row can be out
  * of place by its new value, and clicking the header again puts it right.
  *
- * WIDE ON PURPOSE, SCROLLING INSIDE ITS CARD. Nineteen columns is the customer's study; the "#" and
+ * WIDE ON PURPOSE, SCROLLING INSIDE ITS CARD. Twenty columns is the customer's study; the "#" and
  * Item columns stay put while the rest scroll (`.shortage-lines` in app.css), so a figure at the far
  * right is still a figure *of something*.
  */
 export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, readOnly }: ShortageLinesGridProps) {
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Row>>(LINE_ORDER)
   const [order, setOrder] = useState<string[]>([])
+  /* (94) Last cost is an item cost: without View item costs the column is not drawn (the server sends it null), so it
+     cannot be sorted either. */
+  const seesCosts = useSeesItemCosts()
 
   const rows: Row[] = lines.map((line, index) => ({ ...line, ...derive(line, leadTimeMonths), lineNo: index + 1 }))
   const byKey = new Map(rows.map((row) => [row.key, row]))
@@ -119,8 +123,24 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
         </Tooltip>
       ),
       sortable: true, width: 125, textAlign: 'right', render: (row) => number(row.transitBase) },
+    // (90) Goods transfer orders are bringing from another warehouse: counted with the transit, never bought twice.
+    {
+      accessor: 'transfersInBase',
+      title: (
+        <Tooltip label={TRANSFERS_IN_HINT} multiline w={260} withArrow>
+          <span>Transfers in</span>
+        </Tooltip>
+      ),
+      sortable: true, width: 135, textAlign: 'right', render: (row) => number(row.transfersInBase) },
     { accessor: 'outstandingOrderBase', title: 'Outstanding Order Qty', sortable: true, width: 200, textAlign: 'right', render: (row) => number(row.outstandingOrderBase) },
-    { accessor: 'stockPlusTransitBase', title: 'Stock + Transit', sortable: true, width: 150, textAlign: 'right', render: (row) => number(row.stockPlusTransitBase) },
+    {
+      accessor: 'stockPlusTransitBase',
+      title: (
+        <Tooltip label={STOCK_PLUS_TRANSIT_HINT} withArrow>
+          <span>Stock + Transit</span>
+        </Tooltip>
+      ),
+      sortable: true, width: 150, textAlign: 'right', render: (row) => number(row.stockPlusTransitBase) },
     { accessor: 'totalExpectedStockBase', title: 'Total Expected Stock', sortable: true, width: 185, textAlign: 'right', render: (row) => <Text fz="sm" fw={500}>{formatNumber(row.totalExpectedStockBase)}</Text> },
     {
       accessor: 'effectiveMonthlySales',
@@ -166,7 +186,36 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
           </div>
         ),
     },
-    { accessor: 'leadTime', title: 'Lead Time (Month)', width: 175, textAlign: 'right', render: () => number(leadTimeMonths, Number.isInteger(leadTimeMonths) ? 0 : 2) },
+    {
+      // (98) Each line its own lead time: typed, else the item's (purchase history, Item Definition), else the plan's.
+      accessor: 'leadTime',
+      title: 'Lead Time (Month)',
+      width: 175,
+      textAlign: 'right',
+      render: (row) =>
+        readOnly ? (
+          <Stack gap={0} align="flex-end">
+            <Text fz="sm">{number(row.leadTimeMonths, Number.isInteger(row.leadTimeMonths) ? 0 : 2)}</Text>
+            <Text fz={10} c="dimmed">{leadTimeSourceText(row)}</Text>
+          </Stack>
+        ) : (
+          <div>
+            <NumberInput
+              value={row.leadTimeManual ?? ''}
+              placeholder={formatNumber(row.leadTimeAuto ?? leadTimeMonths, 1)}
+              min={0.1}
+              max={60}
+              decimalScale={1}
+              allowNegative={false}
+              onChange={(next) => onChange(row.key, { leadTimeManual: numberInputValue(next) })}
+              aria-label={`Lead time of line ${row.lineNo}`}
+            />
+            <Text fz={10} c="dimmed" ta="right" mt={2}>
+              {leadTimeSourceText(row)}
+            </Text>
+          </div>
+        ),
+    },
     { accessor: 'expectedRequirementBase', title: 'Expected Requirement', sortable: true, width: 195, textAlign: 'right', render: (row) => number(row.expectedRequirementBase, 2) },
     {
       accessor: 'shortageBase',
@@ -186,7 +235,7 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
         row.coverageMonths === null ? (
           <Tooltip label="Nothing sells: months of coverage have no meaning" withArrow><Text fz="sm" c="dimmed">—</Text></Tooltip>
         ) : (
-          <Text fz="sm" fw={row.coverageMonths < leadTimeMonths ? 700 : 400} c={row.coverageMonths < leadTimeMonths ? 'red' : undefined}>{formatNumber(row.coverageMonths, 2)}</Text>
+          <Text fz="sm" fw={row.coverageMonths < row.leadTimeMonths ? 700 : 400} c={row.coverageMonths < row.leadTimeMonths ? 'red' : undefined}>{formatNumber(row.coverageMonths, 2)}</Text>
         ),
     },
     {
@@ -256,7 +305,18 @@ export function ShortageLinesGrid({ lines, leadTimeMonths, onChange, onRemove, r
     { accessor: 'containerRequirement', title: 'Container Requirement', sortable: true, width: 200, textAlign: 'right', render: (row) => <Text fz="sm" data-line-containers={row.key}>{formatNumber(row.containerRequirement, 2)}</Text> },
     { accessor: 'minQuantity', title: 'Min', sortable: true, width: 80, textAlign: 'right', render: (row) => number(row.minQuantity) },
     { accessor: 'maxQuantity', title: 'Max', sortable: true, width: 80, textAlign: 'right', render: (row) => number(row.maxQuantity) },
-    { accessor: 'lastCost', title: 'Last cost', sortable: true, width: 120, textAlign: 'right', render: (row) => number(row.lastCost, 2) },
+    ...(seesCosts
+      ? [
+          {
+            accessor: 'lastCost',
+            title: 'Last cost',
+            sortable: true,
+            width: 120,
+            textAlign: 'right',
+            render: (row: Row) => number(row.lastCost, 2),
+          } satisfies DataTableColumn<Row>,
+        ]
+      : []),
     {
       accessor: 'notes',
       title: 'Notes',

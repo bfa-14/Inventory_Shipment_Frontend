@@ -1,5 +1,20 @@
 /** Permission codes the API guards its endpoints with. */
 export const PERMISSIONS = {
+  // The Dashboard (script 74): who may open it at all; each figure still follows its own screen's permission.
+  dashboardView: 'dashboard.view',
+  // Screens with their own permission since script 75 (they borrowed another screen's before).
+  valuationView: 'inventory.valuation.view',
+  // (94) What an item costs - average, last and FOB cost, stock values - on the inventory screens, goods receipts, the
+  // Dashboard and transfer orders. Without it the API sends those figures null and the pages draw none of them
+  // (useSeesItemCosts). Stock Valuation, purchase documents and sales margins keep their own permissions.
+  costsView: 'inventory.costs.view',
+  statementView: 'sales.statement.view',
+  movementsView: 'containers.movements.view',
+  trackingView: 'containers.tracking.view',
+  // Logistics › Shipments, the board of every container on its way (script 82).
+  shipmentsView: 'containers.shipments.view',
+  // Reports › Container Report, the tracking sheet worked out by the system (script 95).
+  containerReportView: 'containers.report.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -62,6 +77,23 @@ export const PERMISSIONS = {
   bivacOutPost: 'inventory.bivacout.post',
   bivacOutCancel: 'inventory.bivacout.cancel',
   bivacOutDelete: 'inventory.bivacout.delete',
+  // Transfer orders (script 90): stock moved between two warehouses of any branch, dispatched onto the hidden "On the
+  // way" warehouse of the destination branch and received from it. Approve is the decision's own right (when Document
+  // Types asks for approval); dispatch and receive are separate because two warehouses, often two people, do them.
+  transfersView: 'inventory.transfers.view',
+  transfersCreate: 'inventory.transfers.create',
+  transfersDelete: 'inventory.transfers.delete',
+  transfersRelease: 'inventory.transfers.release',
+  transfersApprove: 'inventory.transfers.approve',
+  transfersDispatch: 'inventory.transfers.dispatch',
+  transfersReceive: 'inventory.transfers.receive',
+  transfersClose: 'inventory.transfers.close',
+  transfersCancel: 'inventory.transfers.cancel',
+  transfersReverse: 'inventory.transfers.reverse',
+  // Stock levels per warehouse (script 91): each warehouse's own Min / Max, Inventory › Stock Levels and Item
+  // Definition's card. Edit sets, changes, removes and imports them; Fill to Max on a transfer order is transfers.create.
+  stockLevelsView: 'inventory.stocklevels.view',
+  stockLevelsEdit: 'inventory.stocklevels.edit',
   invoicesImport: 'sales.invoices.import',
   invoicesPriceOverride: 'sales.invoices.priceoverride',
   invoicesView: 'sales.invoices.view',
@@ -163,7 +195,7 @@ export interface NavItem {
    */
   requires?: 'canApproveInApp'
   /** A live count shown in red beside the label (see NavFacts), hidden at 0: what waits for the reader. */
-  countOf?: 'pendingApprovals' | 'draftGoodsReceipts'
+  countOf?: 'pendingApprovals' | 'draftGoodsReceipts' | 'transfersWaiting'
   /** Key into the sidebar icon set (see NavIcon). Sub-items use a bullet instead. */
   icon?: string
   /**
@@ -186,12 +218,18 @@ export interface NavFacts {
   pendingApprovals: number
   /** Draft goods receipts waiting to be posted (GET api/purchase/goods-receipts/waiting, useGoodsReceiptsWaiting). */
   draftGoodsReceipts: number
+  /**
+   * Transfer orders waiting for approval (GET api/inventory/transfers/waiting, useTransfersWaiting) plus (92) those on
+   * the way to the reader's own warehouses: asked only for a reader holding Approve or Receive Transfer Orders, 0 for
+   * everybody else.
+   */
+  transfersWaiting: number
 }
 
 export interface NavSection {
   /** Heading shown above the section in the sidebar; the first section has none. */
   title?: string
-  /** Label this section contributes to the breadcrumb (BACKOFFICE reads "Setup" there). */
+  /** Label this section contributes to the breadcrumb ("Reports", "Configurations", ...). */
   breadcrumb?: string
   items: NavItem[]
 }
@@ -199,46 +237,54 @@ export interface NavSection {
 /**
  * The whole menu. Items the user has no permission for are hidden, groups that end up empty are
  * hidden with them, and a section whose items all disappear is dropped too.
+ *
+ * THE ORDER IS THE OWNER'S: Home and Dashboard on top, then Reports, Logistics, Purchase, Inventory, Sales and
+ * Configurations. A page that moves group keeps its address and its permission - only the menu, the breadcrumb and
+ * the search path change.
  */
 export const NAVIGATION: NavSection[] = [
   {
     items: [
       { label: 'Home', to: '/', icon: 'home' },
-      { label: 'Dashboard', to: '/dashboard', icon: 'dashboard' },
+      { label: 'Dashboard', to: '/dashboard', permission: PERMISSIONS.dashboardView, icon: 'dashboard' },
       { label: 'Purchase Planning', icon: 'clipboard', comingSoon: true, children: [] },
       { label: 'Purchase Orders', icon: 'cart', comingSoon: true },
       { label: 'Invoices', icon: 'invoice', comingSoon: true },
       { label: 'Costs & Payments', icon: 'wallet', comingSoon: true, children: [] },
       { label: 'Documents', icon: 'documents', comingSoon: true },
-      { label: 'Reports', icon: 'reports', comingSoon: true },
     ],
   },
   {
-    // The stock screens are not built yet, but Item Definition is the heart of the application and
-    // belongs in its own section rather than buried under Master Data.
-    title: 'INVENTORY',
-    breadcrumb: 'Inventory',
+    // THE PAGES THAT ANSWER QUESTIONS rather than record documents, gathered in one place: what is missing, what the
+    // stock is worth, what the sales earned, what a customer owes, and who sold below zero.
+    title: 'REPORTS',
+    breadcrumb: 'Reports',
     items: [
-      { label: 'Item Definition', to: '/inventory/items', permission: PERMISSIONS.itemsView, icon: 'box' },
-      {
-        label: 'Price Lists',
-        to: '/inventory/price-lists',
-        permission: PERMISSIONS.priceListsView,
-        icon: 'price',
-        breadcrumb: ['Setup', 'Inventory', 'Price Lists'],
-      },
-      // The stock document screens sit directly under Item Definition: they are what people open all
-      // day, and the read-only stock views below them are answers to questions these documents ask.
-      { label: 'Inventory In', to: '/inventory/stock-in', permission: PERMISSIONS.stockInView, icon: 'box' },
-      { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
-      // An Inventory Out of BIVAC items only (script 66): its own list, numbers (BIV-) and permissions.
-      { label: 'BIVAC Out', to: '/inventory/bivac-out', permission: PERMISSIONS.bivacOutView, icon: 'box' },
-      // What the shelves are worth: the item list with its money shown, behind the same permission.
-      { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.itemsView, icon: 'balance' },
-      { label: 'Stock Balance', icon: 'balance', comingSoon: true },
-      { label: 'Stock Movement', icon: 'movement', comingSoon: true },
       // Shortage plans: saved planning documents (draft, then a posted snapshot) that purchase orders are created from.
       { label: 'Shortages', to: '/inventory/shortages', permission: PERMISSIONS.shortagesView, icon: 'shortage' },
+      // What the shelves are worth: the item list with its money shown, behind the same permission.
+      { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.valuationView, icon: 'balance' },
+      // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
+      { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
+      // (95) Every container and order still to load, by where the goods are: the purchasing team's tracking sheet.
+      { label: 'Container Report', to: '/logistics/container-report', permission: PERMISSIONS.containerReportView, icon: 'reports' },
+      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },
+      // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
+      { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },
+    ],
+  },
+  {
+    // THE SHIPMENT BETWEEN THE ORDER AND THE WAREHOUSE: containers loaded from purchase orders, the
+    // movements they travel with, the charges that make their real cost, and the tracking board. The Shipments board
+    // comes first (script 82): where every container is, by stage, and what each does next.
+    title: 'LOGISTICS',
+    breadcrumb: 'Logistics',
+    items: [
+      { label: 'Shipments', to: '/logistics/shipments', permission: PERMISSIONS.shipmentsView, icon: 'board' },
+      { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
+      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsView, icon: 'ship' },
+      { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
+      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.trackingView, icon: 'route' },
     ],
   },
   {
@@ -276,15 +322,37 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
-    // THE SHIPMENT BETWEEN THE ORDER AND THE WAREHOUSE: containers loaded from purchase orders, the
-    // movements they travel with, the charges that make their real cost, and the tracking board.
-    title: 'LOGISTICS',
-    breadcrumb: 'Logistics',
+    // Item Definition is the heart of the application and belongs in its own section rather than buried under Master
+    // Data. Its read-only views (Stock Valuation, Shortages) are under Reports.
+    title: 'INVENTORY',
+    breadcrumb: 'Inventory',
     items: [
-      { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
-      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.containersView, icon: 'ship' },
-      { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
-      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.containersView, icon: 'route' },
+      { label: 'Item Definition', to: '/inventory/items', permission: PERMISSIONS.itemsView, icon: 'box' },
+      {
+        label: 'Price Lists',
+        to: '/inventory/price-lists',
+        permission: PERMISSIONS.priceListsView,
+        icon: 'price',
+        breadcrumb: ['Configurations', 'Inventory', 'Price Lists'],
+      },
+      // The stock document screens sit directly under Item Definition: they are what people open all day.
+      { label: 'Inventory In', to: '/inventory/stock-in', permission: PERMISSIONS.stockInView, icon: 'box' },
+      { label: 'Inventory Out', to: '/inventory/stock-out', permission: PERMISSIONS.stockOutView, icon: 'box' },
+      // An Inventory Out of BIVAC items only (script 66): its own list, numbers (BIV-) and permissions.
+      { label: 'BIVAC Out', to: '/inventory/bivac-out', permission: PERMISSIONS.bivacOutView, icon: 'box' },
+      // Stock moved between warehouses (script 90) without changing its cost; the count is the orders waiting for the
+      // reader's approval and (92) those on the way to the reader's own warehouses.
+      {
+        label: 'Transfer Orders',
+        to: '/inventory/transfers',
+        permission: PERMISSIONS.transfersView,
+        icon: 'movement',
+        countOf: 'transfersWaiting',
+      },
+      // Each warehouse's own Min / Max and where it stands (script 91): what Fill to Max on a transfer order tops up to.
+      { label: 'Stock Levels', to: '/inventory/stock-levels', permission: PERMISSIONS.stockLevelsView, icon: 'levels' },
+      { label: 'Stock Balance', icon: 'balance', comingSoon: true },
+      { label: 'Stock Movement', icon: 'movement', comingSoon: true },
     ],
   },
   {
@@ -295,12 +363,7 @@ export const NAVIGATION: NavSection[] = [
     breadcrumb: 'Sales',
     items: [
       { label: 'Sales Invoices', to: '/sales/invoices', permission: PERMISSIONS.invoicesView, icon: 'invoice' },
-      // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
-      { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       { label: 'Receipts', to: '/sales/receipts', permission: PERMISSIONS.receiptsView, icon: 'wallet' },
-      { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.receiptsView, icon: 'reports' },
-      // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
-      { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },
       {
         label: 'Import Sales from Excel',
         to: '/sales/import-preview',
@@ -311,8 +374,10 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
-    title: 'BACKOFFICE',
-    breadcrumb: 'Setup',
+    // ONE PLACE FOR EVERYTHING SET UP ONCE AND LEFT ALONE (the former Backoffice and Configuration groups): the master
+    // data, who may do what, how documents number and behave, the charge and container types, and the settings.
+    title: 'CONFIGURATIONS',
+    breadcrumb: 'Configurations',
     items: [
       {
         label: 'Master Data',
@@ -327,7 +392,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Parties', to: '/setup/master-data/parties', permission: PERMISSIONS.partiesView },
           { label: 'Unit Types', to: '/setup/master-data/unit-types', permission: PERMISSIONS.unitTypesView },
           // The lists the container pages pick from.
-          { label: 'Ports', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
+          { label: 'Ports & Places', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
           { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
           // The lists a customer receipt line picks from.
@@ -349,16 +414,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Login audit', to: '/security/login-audit', permission: PERMISSIONS.auditView },
         ],
       },
-      { label: 'Integration', icon: 'plug', comingSoon: true },
-      { label: 'Audit & Logs', icon: 'history', comingSoon: true, children: [] },
-    ],
-  },
-  {
-    // WHAT A BUSINESS OWNER CHANGES ONCE AND LEAVES ALONE: how documents number, price and behave.
-    // Its own section rather than a group under Setup, so it is found by the people who own it.
-    title: 'CONFIGURATION',
-    breadcrumb: 'Configuration',
-    items: [
+      // How documents number, price and behave.
       {
         label: 'Document Types',
         to: '/configuration/document-types',
@@ -381,6 +437,8 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Purchase approval', to: '/configuration/purchase-approval', permission: PERMISSIONS.approvalManage },
         ],
       },
+      { label: 'Integration', icon: 'plug', comingSoon: true },
+      { label: 'Audit & Logs', icon: 'history', comingSoon: true, children: [] },
     ],
   },
 ]
@@ -459,7 +517,7 @@ export function findLeaf(pathname: string, sections: NavSection[] = NAVIGATION):
   return matches.sort((a, b) => (b.item.to as string).length - (a.item.to as string).length)[0]
 }
 
-/** Breadcrumb for a route, e.g. ['Setup', 'Master Data', 'Branches / Sites']. */
+/** Breadcrumb for a route, e.g. ['Configurations', 'Master Data', 'Branches / Sites']. */
 export function breadcrumbFor(pathname: string): string[] {
   const leaf = findLeaf(pathname)
   if (!leaf) {
@@ -474,9 +532,9 @@ export function breadcrumbFor(pathname: string): string[] {
   return [leaf.section.breadcrumb, leaf.group?.label, leaf.item.label].filter((part): part is string => !!part)
 }
 
-/** Landing route after sign-in: the Users screen when allowed, otherwise Home. */
-export function landingRoute(permissions: string[] | undefined): string {
-  return permissions?.includes(PERMISSIONS.usersView) ? '/security/users' : '/'
+/** Landing route after sign-in: Home, for everyone. */
+export function landingRoute(): string {
+  return '/'
 }
 
 /**

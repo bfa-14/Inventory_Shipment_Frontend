@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Button, Group, Menu, Paper, Text, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconDotsVertical } from '@tabler/icons-react'
@@ -20,10 +20,28 @@ export interface DocumentAction {
   loading?: boolean
   variant?: 'filled' | 'default' | 'light' | 'subtle'
   colour?: string
+  /**
+   * Below 768 px, stays a button beside the primary instead of going into the "⋮" menu: for the one action that IS the
+   * page's next step (a container's "Arrived at Dar es Salaam…"), which nobody looks for in a menu.
+   */
+  pinnedOnPhone?: boolean
+  /**
+   * Below 768 px, never the big button while disabled: it goes into the "⋮" menu, where its reason is read (a phone
+   * shows no tooltip). For a secondary action that would otherwise be the last one shown, and that nobody can press
+   * then anyway: a completed movement's "Cancel…" refused by a later leg.
+   */
+  menuWhenDisabled?: boolean
 }
 
 interface DocumentActionBarProps {
   actions: DocumentAction[]
+  /**
+   * Below 768 px, the "⋮" menu opens towards the room - downwards while the bar is in the upper half of the screen,
+   * upwards otherwise - and is never taller than that room (it scrolls). For a page whose menu is long (a transfer
+   * order: ten actions, each disabled one with its reason under its label), which opened upwards from a bar at the top
+   * of the page and ran off the screen. Opt-in: every other page keeps the menu as it opened before (upwards).
+   */
+  menuTowardsRoom?: boolean
 }
 
 /**
@@ -41,27 +59,62 @@ interface DocumentActionBarProps {
  * edge and the end of the reason, the part that says what to do, was cut off. The menu is held
  * inside the screen and the reason sits on its own line under the label; on a wide screen the
  * tooltip wraps for the same reason.
+ *
+ * A DISABLED ACTION MARKED menuWhenDisabled IS NOT THE PHONE'S BIG BUTTON. A phone shows no tooltip,
+ * so as the last action shown it was a big greyed button that said nothing (a completed movement's
+ * "Cancel…" with a later leg); it goes into the menu with its reason, and the action before it takes
+ * the big button. Opt-in: elsewhere the last action shown is chosen on purpose (a container's
+ * pinned next step). It holds for the page's filled primary too (92: a Save & Post refused because a
+ * line is in a warehouse that is not the reader's goes into the menu with that sentence).
  */
-export function DocumentActionBar({ actions }: DocumentActionBarProps) {
+export function DocumentActionBar({ actions, menuTowardsRoom = false }: DocumentActionBarProps) {
   const compact = useMediaQuery('(max-width: 768px)')
+  const barRef = useRef<HTMLDivElement>(null)
+  /* THE MENU OPENS TOWARDS THE ROOM (menuTowardsRoom). The phone bar sits at the top of the document until it sticks to
+     the bottom of the screen; a long menu (ten actions, each disabled one with its reason) opened upwards from the top
+     ran off the screen, out of reach. It opens downwards while the bar is in the upper half, upwards otherwise, and
+     never grows taller than the room it has (it scrolls). */
+  const [menuPosition, setMenuPosition] = useState<'top-end' | 'bottom-end'>('top-end')
+  const placeMenu = () => {
+    const top = barRef.current?.getBoundingClientRect().top
+    if (top !== undefined) setMenuPosition(top < window.innerHeight / 2 ? 'bottom-end' : 'top-end')
+  }
   const shown = actions.filter((a) => a.visible !== false)
   if (shown.length === 0) return null
 
   if (compact) {
-    // The primary is whatever the page marked filled; it is what somebody came to do.
-    const primary = shown.find((a) => a.variant === 'filled') ?? shown[shown.length - 1]
-    const rest = shown.filter((a) => a.key !== primary.key)
+    // The primary is whatever the page marked filled; it is what somebody came to do. Else the last action. An action
+    // disabled with its reason and marked menuWhenDisabled is never the big button nor pinned beside it, filled or not:
+    // a phone shows no tooltip, so it goes into the menu, its reason under its label.
+    const toMenu = (a: DocumentAction) => Boolean(a.disabled && a.menuWhenDisabled && a.disabledReason)
+    const primary =
+      shown.find((a) => a.variant === 'filled' && !toMenu(a)) ??
+      shown.findLast((a) => !toMenu(a)) ??
+      shown[shown.length - 1]
+    const pinned = shown.filter((a) => a.pinnedOnPhone && a.key !== primary.key && !toMenu(a))
+    const rest = shown.filter((a) => a.key !== primary.key && !pinned.includes(a))
 
     return (
-      <Paper
-        radius="lg"
-        p="xs"
-        withBorder
-        pos="sticky"
-        bottom={0}
-        style={{ zIndex: 3 }}
-      >
-        <Group justify="space-between" wrap="nowrap">
+      <Paper ref={barRef} radius="lg" p="xs" withBorder pos="sticky" bottom={0} style={{ zIndex: 3 }}>
+        <Group justify="space-between" wrap="nowrap" gap="xs">
+          {pinned.map((action) => (
+            <Button
+              key={action.key}
+              leftSection={action.icon}
+              variant={action.variant ?? 'light'}
+              color={action.colour}
+              disabled={action.disabled}
+              loading={action.loading}
+              onClick={action.onClick}
+              flex={1}
+              miw={0}
+              title={action.disabled ? action.disabledReason : action.label}
+            >
+              <Text span inherit truncate="end">
+                {action.label}
+              </Text>
+            </Button>
+          ))}
           <Button
             leftSection={primary.icon}
             onClick={primary.onClick}
@@ -74,13 +127,18 @@ export function DocumentActionBar({ actions }: DocumentActionBarProps) {
           </Button>
 
           {rest.length > 0 && (
-            <Menu position="top-end" withinPortal>
+            <Menu
+              position={menuTowardsRoom ? menuPosition : 'top-end'}
+              withinPortal
+              onOpen={menuTowardsRoom ? placeMenu : undefined}
+              middlewares={menuTowardsRoom ? { flip: true, shift: true, size: { padding: 8 } } : undefined}
+            >
               <Menu.Target>
                 <Button variant="default" px="xs" aria-label="More actions">
                   <IconDotsVertical size={18} />
                 </Button>
               </Menu.Target>
-              <Menu.Dropdown maw="calc(100vw - 32px)">
+              <Menu.Dropdown maw="calc(100vw - 32px)" style={menuTowardsRoom ? { overflowY: 'auto' } : undefined}>
                 {rest.map((action) => {
                   const reason = action.disabled ? action.disabledReason : undefined
                   return (

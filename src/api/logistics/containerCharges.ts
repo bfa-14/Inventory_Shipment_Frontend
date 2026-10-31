@@ -191,6 +191,13 @@ export interface ContainerChargeDto extends ChargeFlags {
   updatedAtUtc: string | null
   updatedByName: string | null
   rowVersion: string
+  /** (97) A BIVAC / Inspection charge names its BIVAC item; posting it posts a BIVAC Out of 1 pc, cancelling it cancels that. */
+  bivacItemId: number | null
+  bivacItemCode: string | null
+  bivacItemName: string | null
+  bivacOutDocumentId: number | null
+  bivacOutNumber: string | null
+  bivacOutStatus: number | null
   /** Every line of the container with this charge's share (0 when it took none). */
   allocations: ContainerChargeShareDto[]
   attachments: ContainerChargeAttachmentDto[]
@@ -215,7 +222,36 @@ export interface CreateContainerChargeRequest {
   /** Null = the charge type's method. */
   allocationMethod: AllocationMethod | null
   notes: string | null
+  /** (97) Required for a BIV charge: each container then takes the item's cost at its port (base currency). */
+  bivacItemId?: number | null
 }
+
+/** (97) A BIVAC item a BIVAC charge on the chosen containers may name. */
+export interface BivacChargeOptionDto {
+  itemId: number
+  itemCode: string
+  itemName: string
+  containers: number
+  /** The containers whose port has a cost for the item: all of them, or the charge is refused. */
+  priced: number
+  totalBase: number | null
+  missingPorts: string | null
+}
+
+export interface BivacContainerPortDto {
+  containerId: number
+  containerRef: string
+  portId: number | null
+  portName: string | null
+}
+
+export interface BivacChargeOptionsDto {
+  items: BivacChargeOptionDto[]
+  containers: BivacContainerPortDto[]
+}
+
+/** The charge type whose charges name a BIVAC item (script 97). */
+export const BIVAC_CHARGE_CODE = 'BIV'
 
 export interface UpdateContainerChargeRequest {
   movementId: number | null
@@ -316,6 +352,10 @@ export const containerChargesApi = {
     request<ContainerChargeDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
+
+  /** (97) The BIVAC items a BIVAC charge on these containers may name, and each container's port. */
+  bivacOptions: (containerIds: number[], signal?: AbortSignal) =>
+    request<BivacChargeOptionsDto>(`${BASE}/bivac-options`, { method: 'POST', body: { containerIds }, signal }),
 
   copyCandidates: (id: number, query: { search?: string; sameOrder: boolean }, signal?: AbortSignal) =>
     request<ChargeCopyCandidateDto[]>(`${BASE}/${id}/copy-candidates${toQueryString(query)}`, { signal }),

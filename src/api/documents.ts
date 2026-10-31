@@ -15,7 +15,13 @@ export interface BulkActionItemResult {
   ok: boolean
   /** NO_LINES, INSUFFICIENT_STOCK, NOT_DRAFT, FORBIDDEN… when not ok. */
   code: string | null
+  /** The refusal when not ok; when ok, what the action did besides ("Goods received: GRN-…"), else null. */
   message: string | null
+  /**
+   * Ok, but part of it did not happen: a supplier invoice posted whose goods receipt was refused ("Invoice posted; the
+   * goods receipt was not: {reason}. Use Receive goods…", script 79). Absent from the other families.
+   */
+  warning?: string | null
 }
 
 /** The answer to a bulk post or delete: counts, and one result per id in the order sent. */
@@ -58,6 +64,10 @@ export interface ImportCreateDocument {
   itemId?: number | null
   itemCode?: string | null
   itemName?: string | null
+  /** A supplier invoice posted whose goods receipt was refused (its type receives the goods, script 79). */
+  warning?: string | null
+  /** The goods receipt made and posted with the invoice, when its type receives the goods (script 79). */
+  goodsReceiptNumber?: string | null
 }
 
 export interface ImportCreateFailure {

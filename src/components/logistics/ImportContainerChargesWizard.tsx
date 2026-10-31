@@ -327,16 +327,28 @@ function WizardBody({ opened, onClose, onImported }: ImportContainerChargesWizar
 
   /* ── closing ────────────────────────────────────────────────────────────────────────────────── */
 
+  /**
+   * The discard question is open. Escape on it reaches this dialog too (Mantine listens on every open modal): without
+   * the guard that Escape answered "no" and asked the same question again, so Escape could never dismiss it (the same
+   * guard as the stock levels import, script 91).
+   */
+  const asking = useRef(false)
+
   /** Asks before throwing away a validation that was not imported, and only then. */
   async function requestClose() {
-    if (importing) return
+    if (importing || asking.current) return
     if (validation !== null && result === null && importable.length > 0) {
+      asking.current = true
       const go = await confirm({
         title: 'Discard this import?',
         message: `${count(importable.length, 'row')} ${importable.length === 1 ? 'has' : 'have'} been validated but not imported. Closing now discards them.`,
         confirmLabel: 'Discard',
         danger: true,
       })
+      // Released after the key event that answered has finished, so that same Escape cannot ask again.
+      window.setTimeout(() => {
+        asking.current = false
+      }, 0)
       if (!go) return
     }
     onClose()

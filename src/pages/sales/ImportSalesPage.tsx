@@ -47,6 +47,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { PERMISSIONS } from '../../navigation'
 import { defaultLineWarehouseId } from '../../components/documents/lineWarehouses'
+import { defaultBranchIdFor, isWarehouseRestricted } from '../../auth/warehouseAccess'
 
 /** The wizard's draft reference: new for every batch of lines, stable while they sit on the page. */
 const newDraftReference = () => `IMPORT-${Date.now().toString(36).toUpperCase()}`
@@ -108,6 +109,9 @@ export function ImportSalesPage() {
 
   /** Set once the reader picks a price list by hand; a client's default no longer overrides it. */
   const priceListTouched = useRef(false)
+  /** (92) The reader chose the branch: the restricted reader's default branch (A17) is then left alone. */
+  const branchTouched = useRef(false)
+  const branchSettled = useRef(false)
 
   const [rate, setRate] = useState<RateResolutionDto | null>(null)
   /** Which price list / type / date the rate above answers, so a stale answer reads as loading. */
@@ -182,7 +186,8 @@ export function ImportSalesPage() {
   }, [])
 
   /* Every branch's warehouses (the default may be of any branch, a leaf); refetched when the branch
-     changes only so the default moves to the new branch's main warehouse. */
+     changes only so the default moves to the new branch's main warehouse. (92) The reader's own: a restricted reader
+     starts in the branch of one of their warehouses (A17), once, while they have not chosen a branch. */
   useEffect(() => {
     if (header.branchId === null) return
 
@@ -192,9 +197,20 @@ export function ImportSalesPage() {
       .then((rows) => {
         if (cancelled) return
         setWarehouses(rows)
+        const settle = !branchSettled.current && branches.length > 0
+        if (settle) branchSettled.current = true
+        const restrictedBranch =
+          settle && !branchTouched.current && isWarehouseRestricted(rows)
+            ? defaultBranchIdFor(branches, rows, Number(header.branchId))
+            : null
+        const moveTo = restrictedBranch !== null && restrictedBranch !== Number(header.branchId) ? restrictedBranch : null
         setHeader((current) => {
+          if (moveTo !== null && current.branchId === header.branchId) {
+            const usable = defaultLineWarehouseId(rows, moveTo, true)
+            return { ...current, branchId: String(moveTo), warehouseId: usable === null ? null : String(usable) }
+          }
           if (current.warehouseId !== null) return current
-          const main = defaultLineWarehouseId(rows, Number(header.branchId))
+          const main = defaultLineWarehouseId(rows, Number(header.branchId), true)
           return main !== null ? { ...current, warehouseId: String(main) } : current
         })
       })
@@ -205,6 +221,8 @@ export function ImportSalesPage() {
     return () => {
       cancelled = true
     }
+    // The branches arrive with the first branch: they are read for the first warehouse list only (branchSettled).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [header.branchId])
 
   /* The rate follows the price list, the type and the date. Its answer carries the key it was
@@ -251,6 +269,7 @@ export function ImportSalesPage() {
     const next = { ...patch }
 
     if (next.priceListId !== undefined) priceListTouched.current = true
+    if (next.branchId !== undefined) branchTouched.current = true
 
     // A client with a default price list pre-fills it, unless the reader already chose one.
     if (next.clientId && !priceListTouched.current) {
@@ -683,7 +702,6 @@ export function ImportSalesPage() {
           accounts={cashAccounts}
           currencyId={rate?.currencyId ?? null}
           currencyCode={rate?.currencyCode ?? priceList?.currencyCode ?? 'USD'}
-          branchId={header.branchId === null ? null : Number(header.branchId)}
           readOnly={false}
           disabled={posting}
           errors={paymentErrors}

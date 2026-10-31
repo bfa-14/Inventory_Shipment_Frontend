@@ -731,7 +731,6 @@ export function ReceiptPage() {
         methods={methods}
         accounts={accounts}
         currencies={currencies}
-        branchId={header.branchId === null ? null : Number(header.branchId)}
         baseCurrencyCode={baseCurrencyCode}
         headerBase={headerBase}
         linesBase={linesBase}

@@ -36,8 +36,26 @@ export interface MovementFlags {
   canEdit: boolean
   canStart: boolean
   canComplete: boolean
+  /**
+   * The status allows it (planned, in progress or completed). (script 83) On the movement itself (`MovementDto`) also
+   * false when its Cancel would be refused now, with `cancelBlockedReason`; the list row stays the status alone (the
+   * Movements list offers no Cancel).
+   */
   canCancel: boolean
   canDelete: boolean
+  /**
+   * (script 80) A planned movement: the refusal Start would give now (no container, a draft, a container travelling, its
+   * previous leg not completed, not at the From); null when it can start. Optional: an older API sends none.
+   */
+  startBlockedReason?: string | null
+  /**
+   * The earliest start date: the latest end of its containers' previous movements (refused before it, 70018). Also on a
+   * movement in progress, whose start date the page lets the user change (the Save refuses an earlier one).
+   */
+  startNotBefore?: string | null
+  /** The movement that ended on that date, and where: "MOV-2026-000046 reached Dar es Salaam". */
+  startNotBeforeMovementNo?: string | null
+  startNotBeforePlaceName?: string | null
 }
 
 export interface MovementListDto extends MovementFlags {
@@ -94,6 +112,13 @@ export interface MovementContainerDto extends MovementContainerReceiptInfo {
   draftChargesBase: number | null
   attachmentCount: number
   containerRowVersion: string
+  /**
+   * (script 82) "Only some containers arrived" in the Complete dialog: the movement is in progress, carries other
+   * containers, and this one has no later leg, so it can arrive alone. Absent from an older API.
+   */
+  canSplitOff?: boolean
+  /** Why not ("KTG-… already has the next leg MOV-… planned: complete MOV-… for every container, or take it off MOV-… first."). */
+  splitOffBlockedReason?: string | null
 }
 
 /**
@@ -155,6 +180,21 @@ export interface MovementAttachmentDto {
   createdByName: string | null
 }
 
+/** (script 82) What happened to a movement beyond its own stamps: a split, on both movements, newest first. */
+export interface MovementAuditDto {
+  id: number
+  /** "Split off" (the original), "Split from" (the movement of the containers that arrived), "Split undone" (both, when the latter is cancelled). */
+  action: string
+  /**
+   * "Split off into MOV-2026-000052: KTG-2026-0031" / "Split from MOV-2026-000046: KTG-2026-0031 arrived on its own." /
+   * "Split undone: KTG-2026-0031 back on MOV-2026-000046" / "Back from MOV-2026-000052 (split undone): KTG-2026-0031".
+   */
+  details: string | null
+  userId: number | null
+  userName: string | null
+  atUtc: string
+}
+
 export interface MovementDto extends MovementFlags {
   id: number
   documentTypeId: number
@@ -196,6 +236,41 @@ export interface MovementDto extends MovementFlags {
   updatedByName: string | null
   rowVersion: string
   isLate: boolean
+  /** (script 82) The movement it was split off, when only part of that one arrived: "Split from MOV-2026-000046". */
+  splitFromMovementId?: number | null
+  splitFromMovementNo?: string | null
+  /**
+   * (script 82) CANCELLING A SPLIT-OFF MOVEMENT UNDOES THE SPLIT: the movement its containers go back to (the one they were
+   * split from, or where that one's own undone split sent its containers), as its Cancel dialog says it first. Null on a
+   * movement that was not split off.
+   */
+  splitUndoMovementId?: number | null
+  splitUndoMovementNo?: string | null
+  /** That movement's status: 2 in progress (they travel on with it), 3 completed (they arrived with it), 4 cancelled. */
+  splitUndoStatus?: number | null
+  splitUndoEndDate?: string | null
+  splitUndoToName?: string | null
+  /** The stage of its type: a completed Delivery leaves them delivered, not received (no draft goods receipt). */
+  splitUndoStage?: string | null
+  /**
+   * (script 83) The refusal its Cancel would give now, in the server's words ("MOV-… is not the last leg of KTG-…: cancel
+   * MOV-… first.", "Container KTG-… is already offloaded: its route can no longer change.", "The movement is already
+   * cancelled."); null when it can be cancelled. The page disables "Cancel…" with it. Absent from an older API.
+   */
+  cancelBlockedReason?: string | null
+  /** (script 82) Its history beyond its own stamps (created, started, completed, cancelled): its splits, newest first. */
+  history?: MovementAuditDto[]
+  /**
+   * (script 82) Only on the answer to Cancel of a split-off movement: the split was undone - where its containers went and
+   * the server's notification ("MOV-… cancelled, the split undone: KTG-… are back on MOV-…, still in progress.").
+   */
+  splitUndone?: MovementSplitUndoneDto | null
+  /**
+   * (79) The goods receipt type's "Create goods receipts when a Delivery is completed" (Configuration › Document Types):
+   * false, completing a Delivery drafts none - they are made by hand with Receive goods… on each container. Missing (an
+   * older API) = true.
+   */
+  goodsReceiptsAutomatic?: boolean
   containers: MovementContainerDto[]
   charges: MovementChargeDto[]
   attachments: MovementAttachmentDto[]
@@ -211,6 +286,84 @@ export interface MovementDto extends MovementFlags {
    * Use Receive goods… on each container."), or one container's row ("{ref}: the draft goods receipt was not created…").
    */
   warnings?: string[]
+}
+
+/** (script 82) A cancel that undid a split: the movement the containers went back to, as it is now, and the containers. */
+export interface MovementSplitUndoneDto {
+  movementId: number
+  movementNo: string
+  /** 2 in progress, 3 completed, 4 cancelled. */
+  status: number
+  endDate: string | null
+  toName: string
+  stage: string
+  containerCount: number
+  /** "KTG-2026-0030,KTG-2026-0031": the first ten. */
+  containerRefs: string | null
+  /** The server's notification, shown as it comes. */
+  message: string
+}
+
+/**
+ * (script 82) "Only some containers arrived": the ticked containers of a movement in progress leave it for their own, which
+ * is completed on the date; the others stay on it, in progress.
+ */
+export interface CompleteSomeRequest {
+  /** Some of the movement's containers, not all. */
+  containerIds: number[]
+  /** 'YYYY-MM-DD'; null = today. Never in the future, never before the start. */
+  date: string | null
+  rowVersion: string | null
+}
+
+/**
+ * (script 82) The answer to "Only some containers arrived": the split is committed. `ok` false = SPLIT BUT NOT COMPLETED
+ * ("MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page."), `movement` then the new movement,
+ * in progress - shown as a warning, never as a failure of the whole.
+ */
+export interface MovementSplitResultDto {
+  ok: boolean
+  code: string | null
+  /** "KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026 with MOV-2026-000052 (split off MOV-2026-000046). Now At Port. The 11 others are still on MOV-2026-000046." */
+  message: string
+  originalMovementId: number
+  originalMovementNo: string
+  /** The containers still on the original, in progress. */
+  remainingContainerCount: number
+  /** The containers' own movement, always given: `movement` may be null when the database did not answer its read. */
+  movementId: number
+  movementNo: string
+  /** The containers' own movement as it is now (a completed Delivery carries goodsReceipts and goodsReceiptsMessage). */
+  movement: MovementDto | null
+  warnings: string[]
+}
+
+/** (script 80) A planned movement a container can join: after its latest movement and at its place (`GET join-candidates`). */
+export interface MovementJoinCandidateDto {
+  id: number
+  movementNo: string
+  movementTypeId: number
+  typeCode: string
+  typeName: string
+  stage: string
+  fromPlaceId: number
+  fromCode: string
+  fromName: string
+  toPlaceId: number
+  toCode: string
+  toName: string
+  plannedDate: string | null
+  eta: string | null
+  status: MovementStatusCode
+  carrierPartyId: number | null
+  carrierName: string | null
+  vehicleOrVessel: string | null
+  containerCount: number
+  /** "KTG-2026-0006 +1" */
+  containerRefs: string | null
+  /** What the save says of the container there: "Not moved yet - port of loading: Chennai.", "Draft: confirm it…". */
+  note: string | null
+  rowVersion: string
 }
 
 export interface SaveMovementRequest {
@@ -254,8 +407,12 @@ export interface ShipContainersRequest {
   containerIds: number[]
   /** Null = SEA. */
   movementTypeId?: number | null
-  /** Null = the containers' common ports (Sea only). */
+  /**
+   * Null = where the containers are (script 80): the place they are all at once one of them moved, else (Sea, none moved)
+   * their common port of loading.
+   */
   fromPlaceId?: number | null
+  /** Null = the common port of destination (Sea, none moved), the From for a stay (Port, Customs, Border). */
   toPlaceId?: number | null
   /** Null = today (the planned date when startNow is false). */
   startDate?: string | null
@@ -306,7 +463,7 @@ export interface MovementContainerCandidateQuery {
   /** Also the ones the save would refuse: canAdd false, with the reason. */
   includeBlocked?: boolean
   page?: number
-  /** At most 200. */
+  /** At most 5,000 (script 78). */
   pageSize?: number
 }
 
@@ -380,7 +537,10 @@ export const movementsApi = {
   update: (id: number, payload: SaveMovementRequest) =>
     request<MovementDto>(`${BASE}/${id}`, { method: 'PUT', body: payload }),
 
-  /** date = start date (default today). 409 CONTAINER_BUSY when a container travels with another movement. */
+  /**
+   * date = start date (default today). 409 CONTAINER_BUSY when a container travels with another movement,
+   * START_BEFORE_PREVIOUS_LEG before its previous leg ended; 400 for a date in the future (script 80).
+   */
   start: (id: number, date: string | null, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/start`, { method: 'POST', body: { date, rowVersion } }),
 
@@ -391,12 +551,25 @@ export const movementsApi = {
   complete: (id: number, date: string | null, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/complete`, { method: 'POST', body: { date, rowVersion } }),
 
+  /**
+   * (script 82) Only the ticked containers arrived: they get their own movement, completed on the date; the others stay on
+   * this one, in progress. Refusals before anything is split are ProblemDetails: 400 VALIDATION (none ticked, one not on
+   * the movement, a date in the future or before the start), 404, 409 CONCURRENCY or INVALID_STATUS (not in progress,
+   * every container ticked, a container with a later leg).
+   */
+  completeSome: (id: number, body: CompleteSomeRequest) =>
+    request<MovementSplitResultDto>(`${BASE}/${id}/complete-some`, { method: 'POST', body }),
+
   /** A completed Delivery: its automatic draft goods receipts are deleted with it. */
   cancel: (id: number, reason: string, rowVersion: string | null) =>
     request<MovementDto>(`${BASE}/${id}/cancel`, { method: 'POST', body: { reason, rowVersion } }),
 
   /** Planned only. */
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
+
+  /** (script 80) The planned movements the container can join, newest first ("Add to a movement…"). */
+  joinCandidates: (containerId: number, signal?: AbortSignal) =>
+    request<MovementJoinCandidateDto[]>(`${BASE}/join-candidates${toQueryString({ containerId })}`, { signal }),
 
   /** 409 CONTAINER_BUSY names a container travelling with another movement; nothing is created then. */
   shipContainers: (payload: ShipContainersRequest) =>
@@ -406,7 +579,7 @@ export const movementsApi = {
   containerCandidates: (query: MovementContainerCandidateQuery, signal?: AbortSignal) =>
     request<PagedResult<MovementContainerCandidateDto>>(`${BASE}/container-candidates${toQueryString(query)}`, { signal }),
 
-  /** Numbers or refs in the order of the file; nothing is saved. 400 without a number or above 500 of them. */
+  /** Numbers or refs in the order of the file; nothing is saved. 400 without a number or above 10,000 of them (matchAll sends more in parts). */
   matchContainers: (query: MovementPlaceQuery, numbers: string[], signal?: AbortSignal) =>
     request<MovementContainerMatchDto[]>(`${BASE}/match-containers`, { method: 'POST', body: { ...query, numbers }, signal }),
 

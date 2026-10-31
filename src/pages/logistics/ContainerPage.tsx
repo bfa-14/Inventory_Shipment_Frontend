@@ -21,6 +21,7 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
+import { useMediaQuery } from '@mantine/hooks'
 import {
   IconArrowBackUp,
   IconArrowLeft,
@@ -32,6 +33,7 @@ import {
   IconLockOpen,
   IconPackageImport,
   IconPrinter,
+  IconRoute,
   IconTrash,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -88,6 +90,8 @@ import {
   WAREHOUSE_PROPOSED_HINT,
 } from '../../components/logistics/containerReceipt'
 import { ReceiveContainerModal } from '../../components/logistics/ReceiveContainerModal'
+import { isMovementStep } from '../../components/logistics/nextStep'
+import { useNextStep } from '../../components/logistics/useNextStep'
 import { cancelDescription } from '../../components/purchase/goodsReceipts/goodsReceiptModel'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
@@ -97,6 +101,7 @@ import { COUNTRIES, countryLabel } from '../../data/countries'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
 import { CONTAINERS_ROUTE } from './ContainersPage'
+import { noAccessSentenceFor } from '../../auth/warehouseAccess'
 
 type ReasonDialog = 'cancel' | 'cancelOffload' | null
 
@@ -180,6 +185,9 @@ export function ContainerPage() {
     dirty.current = true
   }
 
+  // The route goes to the top of the right column, and to the top of the page on a phone (the columns stack there).
+  const wide = useMediaQuery('(min-width: 75em)', true, { getInitialValueInEffect: false })
+
   const form = useForm<ContainerFormValues>({
     initialValues: emptyValues(null),
     onValuesChange: markDirty,
@@ -224,6 +232,11 @@ export function ContainerPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  /* (81) THE NEXT STEP OF ITS JOURNEY, one button next to Save: "Start shipment…", "Start Inland transport…", "Arrived
+     at Dar es Salaam…", "Cleared customs at Kasumbalesa…", "Inland transport to Kasumbalesa…" - one dialog, already
+     filled in, the same as the row's "…" menu on the Containers list. */
+  const nextStep = useNextStep(() => void load(), 'container')
 
   /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
      files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the
@@ -276,6 +289,11 @@ export function ContainerPage() {
   }, [])
 
   const receipt = containerReceiptOf(container)
+  /** The warehouses its goods may be received into: active leaves of its branch (whoever the reader is). */
+  const receiveLeaves = useMemo(
+    () => (container ? warehouses.filter((w) => w.isActive && w.branchId === container.branchId && w.childCount === 0) : []),
+    [warehouses, container],
+  )
   /** "Receive goods…" is offered: no open receipt and not received, offloaded, closed or cancelled. */
   const receivable = container !== null && receipt === null && container.status <= 5
   const canReceiveNow = container !== null && receivable && container.status !== 1 && container.canReceive !== false
@@ -671,10 +689,31 @@ export function ContainerPage() {
   }
 
   const saved = container !== null
+  const step = container ? nextStep.action(container) : null
+  // Unsaved edits first: the next step reloads the container, and a leg needs what the page shows saved.
+  const stepBlocked = step === null ? null : (step.disabledReason ?? (dirty.current ? 'Save your changes first.' : null))
+  /* DELIVERED: the goods receipt is the next step - "Open goods receipt (draft)" / "Receive goods…" below are that step,
+     with their own rules; a rare extra leg after a Delivery is still one click away on the route card ("New movement
+     for this container"). */
+  const stepIsMovement = step !== null && (isMovementStep(step.kind) || step.kind === 'Done')
   /** Received by a goods receipt: its cancel replaces Cancel Offload, which stays for the offloads of before. */
   const receivedByReceipt = receipt?.status === 2 || container?.receivedBy === 'GRN'
   const draftReceipt = receipt?.status === 1 ? receipt : null
   const postedReceipt = receipt?.status === 2 ? receipt : null
+  // (95) the server's reason first: a container that travels with movements is received once its Delivery is completed
+  const receiveBlocked = canReceiveNow
+    ? null
+    : (container?.receiveBlockedReason ?? (container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.'))
+  /* DELIVERED, NOT RECEIVED: the next step is "Open goods receipt (draft)" or "Receive goods…", the page's own buttons
+     with their own permissions. On a narrow screen the Route card repeats it as it repeats a leg: the action bar is a
+     whole page below (7,300 px on a phone), and the card's "New movement for this container" was the first thing seen. */
+  const receiptStep: { label: string; disabledReason: string | null; onClick: () => void; colour: string; icon: ReactNode } | null =
+    step?.kind === 'OpenReceipt' && draftReceipt && perm.viewReceipt
+      ? { label: 'Open goods receipt (draft)', disabledReason: null, onClick: () => void navigate(routes.goodsReceipt(draftReceipt.id)), colour: 'green', icon: <IconPackageImport size={14} /> }
+      : step?.kind === 'Receive' && receivable && perm.receive
+        ? { label: 'Receive goods…', disabledReason: receiveBlocked, onClick: () => void openReceive(), colour: 'green', icon: <IconPackageImport size={14} /> }
+        : null
+  const receiptIsStep = receiptStep !== null
   // Why the posted receipt cannot be cancelled: the receipt's own reason, else the closed container's (rule 12).
   const cancelReceiptBlocked = receiptDoc
     ? receiptDoc.canCancel
@@ -745,6 +784,8 @@ export function ContainerPage() {
       variant: 'light',
       colour: 'green',
       visible: saved && draftReceipt !== null && perm.viewReceipt,
+      // Delivered: the goods receipt is the next step, so a phone keeps it beside Save, not in "More actions".
+      pinnedOnPhone: receiptIsStep,
     },
     {
       key: 'receive',
@@ -755,13 +796,45 @@ export function ContainerPage() {
       colour: 'green',
       visible: saved && receivable && perm.receive,
       disabled: !canReceiveNow,
-      disabledReason: container?.status === 1 ? CONFIRM_FIRST : 'This container cannot be received now.',
+      disabledReason: receiveBlocked ?? undefined,
+      pinnedOnPhone: receiptIsStep,
     },
     { key: 'confirm', label: 'Confirm', icon: <IconCheck size={16} />, onClick: () => void confirmPlan(), variant: 'light', loading: busyAction === 'confirm', visible: saved && container.canConfirm && perm.confirm },
+    {
+      key: 'ship',
+      label: step?.label ?? 'Next step…',
+      icon: <IconRoute size={16} />,
+      onClick: () => {
+        if (container) nextStep.run(container)
+      },
+      variant: 'light',
+      colour: 'indigo',
+      // Hidden without containers.movements.manage; disabled with the reason once the journey is over.
+      visible: saved && stepIsMovement,
+      disabled: stepBlocked !== null,
+      disabledReason: stepBlocked ?? undefined,
+      pinnedOnPhone: true,
+    },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
   ]
 
   const title = container ? `Container ${container.containerRef}` : 'New Container'
+  const journey = container ? (
+    <ContainerRouteTimeline
+      container={container}
+      canManage={perm.movements && container.status < 6}
+      onChanged={() => void load()}
+      // NARROW SCREENS: the Route card is the top of the page and the action bar its bottom, a whole page away (6,400 px
+      // on a phone). The next step is repeated in the card, so it is in the first screen the user sees.
+      step={
+        wide
+          ? null
+          : stepIsMovement && step
+            ? { label: step.label, disabledReason: stepBlocked, onClick: () => nextStep.run(container) }
+            : receiptStep
+      }
+    />
+  ) : null
 
   return (
     <div>
@@ -832,6 +905,7 @@ export function ContainerPage() {
       <Grid gap="md">
         <Grid.Col span={{ base: 12, lg: 8 }}>
           <Stack gap="md">
+            {wide ? null : journey}
             <Section title="1. Identification">
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
                 <ViewField label="Container Ref." value={container?.containerRef ?? 'Assigned on save'} dimmed={!container} />
@@ -984,14 +1058,12 @@ export function ContainerPage() {
 
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Stack gap="md">
+            {wide ? journey : null}
             <ContainerCapacityCard typeLabel={type ? `${type.typeCode} - ${type.typeName}` : null} fill={fill} totalOil={totalOil} />
             {container ? <ContainerCostCard container={container} baseCurrencyCode="USD" /> : null}
             {/* Keyed on the movements, so the map reloads when the route changes. */}
             {container ? (
               <ContainerRouteMapCard key={container.movements.map((m) => `${m.movementId}:${m.status}`).join(',')} containerId={container.id} />
-            ) : null}
-            {container ? (
-              <ContainerRouteTimeline container={container} canManage={perm.movements && container.status < 6} onChanged={() => void load()} />
             ) : null}
             {container ? (
               <Paper radius="lg" p="md" withBorder>
@@ -1050,13 +1122,23 @@ export function ContainerPage() {
         />
       ) : null}
 
+      {nextStep.dialogs}
+
       {receiveOpen && container ? (
         <ReceiveContainerModal
           opened
           onClose={() => setReceiveOpen(false)}
           container={container}
-          /* The container's branch, and a leaf: stock is kept only at the bottom of the tree (scripts 70, 72). */
-          warehouses={warehouses.filter((w) => w.isActive && w.branchId === container.branchId && w.childCount === 0)}
+          /* The container's branch, and a leaf: stock is kept only at the bottom of the tree (scripts 70, 72). (92) And
+             one the reader may use (W9): a warehouse named here is checked at once, so one that is not theirs is not
+             offered; the container's own then starts empty ("Choose the warehouse"). None of the branch's is the
+             reader's: the dialog says so, in the database's words, rather than an empty list (W8). */
+          warehouses={receiveLeaves.filter((w) => w.canUse !== false)}
+          accessRefusal={
+            receiveLeaves.length > 0 && receiveLeaves.every((w) => w.canUse === false)
+              ? noAccessSentenceFor(receiveLeaves.map((w) => w.warehouseCode))
+              : null
+          }
           canPost={perm.postReceipt}
           onCreated={(created) => receiptCreated(created.id)}
         />

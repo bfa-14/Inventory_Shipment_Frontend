@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { IconArrowsExchange, IconFiles, IconScale, IconShoppingCart, IconTruck } from '@tabler/icons-react'
 import type { ItemDetailsDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { formatDateOnly, formatDateTime, formatNumber } from '../../components/format'
 
@@ -56,44 +57,54 @@ export function ItemAuditCard({ item }: { item: ItemDetailsDto }) {
  * READ-ONLY BY DESIGN. The average is a moving average written by every posting that adds stock and by
  * every cost adjustment, the last cost and supplier by the last goods receipt; a box that let somebody type over them would let
  * the same stock leave at a value it never entered at.
+ *
+ * (94) WITHOUT VIEW ITEM COSTS the card is "Stock": On Hand, Last Supplier and Last Purchase; the four cost rows and the
+ * footnote are not drawn (the server sends them null). Decided by the permission, never by the figures.
  */
 export function ItemStockCard({ item }: { item: ItemDetailsDto | null }) {
+  const seesCosts = useSeesItemCosts()
   const money = (value: number | null | undefined) => (value === null || value === undefined ? '—' : `${formatNumber(value, 2)} USD`)
 
   return (
     <Card radius="lg" p="lg" withBorder>
       <Text fw={600} fz="md" mb="sm">
-        Stock &amp; Costs
+        {seesCosts ? 'Stock & Costs' : 'Stock'}
       </Text>
       <Stack gap="xs">
         <Row label="On Hand" value={item ? formatNumber(item.onHand) : '0'} />
-        <Row
-          label="FOB Purchase Cost"
-          value={money(item?.fobCost)}
-          hint="What the supplier charged per base unit on the last goods receipt (the order price until the invoice is posted), before freight, customs and the rest."
-        />
-        <Row
-          label="Last Cost (landed)"
-          value={money(item?.lastCost)}
-          hint="The last goods receipt, FOB plus every charge allocated to it. An Inventory In does not touch it."
-        />
-        <Row
-          label="Average Cost"
-          value={money(item?.averageCost)}
-          hint="The moving weighted average, moved by the postings that add stock and by cost adjustments (late charges, invoice price differences). What a sale is costed at."
-        />
-        <Row
-          label="Inventory Value"
-          value={money(item?.inventoryValue)}
-          hint="On hand × average cost."
-        />
+        {seesCosts && (
+          <>
+            <Row
+              label="FOB Purchase Cost"
+              value={money(item?.fobCost)}
+              hint="What the supplier charged per base unit on the last goods receipt (the order price until the invoice is posted), before freight, customs and the rest."
+            />
+            <Row
+              label="Last Cost (landed)"
+              value={money(item?.lastCost)}
+              hint="The last goods receipt, FOB plus every charge allocated to it. An Inventory In does not touch it."
+            />
+            <Row
+              label="Average Cost"
+              value={money(item?.averageCost)}
+              hint="The moving weighted average, moved by the postings that add stock and by cost adjustments (late charges, invoice price differences). What a sale is costed at."
+            />
+            <Row
+              label="Inventory Value"
+              value={money(item?.inventoryValue)}
+              hint="On hand × average cost."
+            />
+          </>
+        )}
         <Row label="Last Supplier" value={item?.lastSupplierName ?? '—'} dimmed={!item?.lastSupplierName} />
         <Row label="Last Purchase" value={item?.lastPurchaseAtUtc ? formatDateOnly(item.lastPurchaseAtUtc.slice(0, 10)) : '—'} dimmed={!item?.lastPurchaseAtUtc} />
       </Stack>
-      <Text c="dimmed" fz="xs" mt="sm">
-        Per base unit, in USD. FOB is what the supplier charged; the landed cost adds the freight, customs and clearing
-        allocated to the goods.
-      </Text>
+      {seesCosts && (
+        <Text c="dimmed" fz="xs" mt="sm">
+          Per base unit, in USD. FOB is what the supplier charged; the landed cost adds the freight, customs and clearing
+          allocated to the goods.
+        </Text>
+      )}
     </Card>
   )
 }

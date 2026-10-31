@@ -14,6 +14,62 @@ export interface UserDto {
   isActive: boolean
   lastLoginAtUtc: string | null
   createdAtUtc: string
+  /**
+   * (92) Where the user may move stock. Filled on the Users list only (`GET api/users`); missing from an older API or
+   * another answer, which means All warehouses. A system administrator uses every warehouse whatever is stored.
+   */
+  allWarehouses?: boolean
+  isSystemAdministrator?: boolean
+  /** (92) The warehouses ticked while `allWarehouses` is false (a ticked parent gives its whole tree); empty otherwise. */
+  warehouses?: UserWarehouseRefDto[]
+}
+
+/** (92) One warehouse ticked for a user, as the Users list shows it. */
+export interface UserWarehouseRefDto {
+  id: number
+  code: string
+  name: string
+  branchCode: string
+  isActive: boolean
+  /** A parent: the tick gives every warehouse under it, also those added later. */
+  hasChildren: boolean
+}
+
+/** (92) One ticked warehouse in the "Warehouses of {user}" dialog. */
+export interface UserWarehouseDto extends UserWarehouseRefDto {
+  branchId: number
+  branchName: string
+  grantedAtUtc: string
+  grantedByName: string
+}
+
+/** (92) One change of a user's warehouses: "All warehouses" → "Only: LKS-01, LUB" (a deleted warehouse included). */
+export interface UserWarehouseChangeDto {
+  id: number
+  before: string
+  after: string
+  changedAtUtc: string
+  changedByName: string
+}
+
+/** (92) `GET api/users/{id}/warehouses`: what the "Warehouses of {user}" dialog shows. */
+export interface UserWarehousesDto {
+  userId: number
+  username: string
+  fullName: string
+  allWarehouses: boolean
+  isSystemAdministrator: boolean
+  /** The leaves the ticks give (On the way warehouses never count). */
+  usableCount: number
+  warehouses: UserWarehouseDto[]
+  /** The newest first, at most 100. */
+  history: UserWarehouseChangeDto[]
+}
+
+/** (92) `PUT api/users/{id}/warehouses`. `warehouseIds` is read only when `allWarehouses` is false. */
+export interface SetUserWarehousesRequest {
+  allWarehouses: boolean
+  warehouseIds: number[]
 }
 
 /**
@@ -226,6 +282,12 @@ export interface WarehouseDto {
   isActive: boolean
   /** Sales invoices selling more than it holds: true allows (after a warning), false refuses, null follows the global setting. */
   allowOutOfStockOverride: boolean | null
+  /**
+   * (90) The branch's "On the way" warehouse: where transferred goods sit between their dispatch and their receipt.
+   * Made and kept by the system (one per branch, never a parent, never deactivated); only its name and address are
+   * edited. Missing from an older API, which means false.
+   */
+  isTransit?: boolean
   createdAtUtc: string
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
@@ -293,6 +355,23 @@ export interface WarehouseLookupDto {
   childCount: number
   /** Already used in transactions: it cannot be chosen as a parent (script 71). */
   isUsed: boolean
+  /**
+   * (91) What `isUsed` is made of: used by stock or a document, and holding stock levels per warehouse (a warehouse with
+   * levels cannot become a parent either). Missing from an older API: then `isUsed` alone says it.
+   */
+  isUsedInTransactions?: boolean
+  hasStockLevels?: boolean
+  /**
+   * (90) An On the way warehouse. The lookup lists them only when asked (`includeTransit`: Stock Valuation), or the one
+   * named by `includeId`; missing from an older API, which means false.
+   */
+  isTransit?: boolean
+  /**
+   * (92) The READER may move stock in this warehouse (post, cancel, receive, dispatch, set its levels), worked out on
+   * the server for each request, so a change of the reader's warehouses shows at the next read. False on an On the way
+   * warehouse (nobody's). Missing from an older API, which means true. Viewing is never limited by it.
+   */
+  canUse?: boolean
 }
 
 // ----- master data: currencies -----
@@ -649,8 +728,8 @@ export interface ItemListDto {
   lastCost: number | null
   /** What the supplier charged on the last posted invoice, before the charges around it. */
   fobCost: number | null
-  /** On hand × average cost, in the base currency. */
-  inventoryValue: number
+  /** On hand × average cost, in the base currency. (94) Null, with the three costs, without View item costs. */
+  inventoryValue: number | null
   defaultSupplierId: number | null
   defaultSupplierName: string | null
   isBivac: boolean
@@ -660,6 +739,20 @@ export interface ItemListDto {
   /** Base64 ROWVERSION; send it back on update so concurrent edits are detected. */
   rowVersion: string
 }
+
+/**
+ * (93) HOW AN ITEM IS TRACKED (Item Definition › Tracking): no numbers, a batch no. per group of pieces, or a serial no.
+ * per piece (a TVS chassis no.). Asked on transfer dispatches only (script 93): the flags are generic, the screens that
+ * ask for them say so.
+ */
+export type TrackingMode = 'None' | 'Batch' | 'Serial'
+
+/**
+ * (93) WHAT A DISPATCH ASKS FOR, derived from the item and never stored on it: Serial (one row per piece), Batch (batch
+ * no., expiry, pcs) or Expiry (an item of no tracking that requires an expiry date: expiry, pcs); null = nothing. A
+ * dispatch line keeps the kind it left with, and its receipt follows it whatever the item says now.
+ */
+export type TrackingKind = 'Serial' | 'Batch' | 'Expiry'
 
 /** An item with its units and the metadata of its files - what the details page reads. */
 export interface ItemDetailsDto {
@@ -689,15 +782,23 @@ export interface ItemDetailsDto {
   averageCost: number | null
   /** What the supplier charged per base unit on the last posted invoice, before freight, customs and the rest. */
   fobCost: number | null
-  /** On hand × average cost, in the base currency. */
-  inventoryValue: number
+  /**
+   * On hand × average cost, in the base currency. (94) Null, with lastCost, averageCost, fobCost and lastPurchaseCost,
+   * without View item costs (inventory.costs.view).
+   */
+  inventoryValue: number | null
   lastPurchaseCost: number | null
   /** The supplier a purchase order is raised on by default. */
   defaultSupplierId: number | null
   defaultSupplierCode: string | null
   defaultSupplierName: string | null
-  /** Days between ordering and receiving. */
+  /** Days between ordering and receiving (98: months x 30, kept for older readers). */
   leadTimeDays: number | null
+  /** (98) Months between ordering and receiving, one decimal: what Item Definition shows and types. */
+  leadTimeMonths?: number | null
+  /** (98) What its purchase history says: order approval to goods receipt over the last 12 months. */
+  leadTimeHistoryMonths?: number | null
+  leadTimeHistoryReceipts?: number | null
   /** Pieces (base units) that fit in one container — the default of a shortage plan line. Only the item's own GET returns it. */
   pcPerContainer?: number | null
   /** Per BASE unit. What a charge allocated by weight is shared out on. */
@@ -707,6 +808,18 @@ export interface ItemDetailsDto {
   lastSupplierId: number | null
   lastSupplierName: string | null
   lastPurchaseAtUtc: string | null
+  /** Free text, several lines (script 87). */
+  note?: string | null
+  /** An http(s) web address, opened in a new tab (script 87). */
+  link?: string | null
+  /* (93) Tracking on transfers. Missing from an older API, which means None / no / any length. */
+  trackingMode?: TrackingMode
+  /** Each dispatch gives the expiry date of its pieces. */
+  requiresExpiry?: boolean
+  /** Serial items: the exact length of a serial no. (17 = a TVS chassis no.); null = any length. */
+  serialLength?: number | null
+  /** What a dispatch asks for: derived from the two above. */
+  trackingKind?: TrackingKind | null
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
@@ -771,14 +884,29 @@ export interface SaveItemRequest {
   isActive: boolean
   /** The supplier a purchase order is raised on by default. */
   defaultSupplierId?: number | null
-  /** Days between ordering and receiving. */
+  /** Days between ordering and receiving (98: sent only by older clients; the months win). */
   leadTimeDays?: number | null
+  /** (98) Months between ordering and receiving, one decimal, 0 to 60; null clears it. */
+  leadTimeMonths?: number | null
   /** Pieces (base units) per container; null clears it. */
   pcPerContainer?: number | null
   /** Per BASE unit; needed by charges allocated by weight. */
   weightKg?: number | null
   /** Per BASE unit, in cubic metres; needed by charges allocated by volume. */
   volumeCbm?: number | null
+  /** Free text, several lines, up to 2000 characters; null clears it. */
+  note?: string | null
+  /** An absolute http:// or https:// address, up to 500 characters; null clears it. */
+  link?: string | null
+  /**
+   * (93) None | Batch | Serial. Left out on an update, the tracking stays as it is (with requiresExpiry and
+   * serialLength); on a new item it is None.
+   */
+  trackingMode?: TrackingMode | null
+  /** (93) Null = false when trackingMode is given. */
+  requiresExpiry?: boolean | null
+  /** (93) Serial items only: 1-50 characters; null = any length. */
+  serialLength?: number | null
   /** Required on update to detect concurrent edits. */
   rowVersion?: string | null
 }
@@ -958,8 +1086,9 @@ export interface ItemStockBalanceRowDto {
   /** Base units; negative when out-of-stock selling took it below zero. */
   onHandBase: number
   lastMovementAtUtc: string | null
+  /** (94) Null, with inventoryValue, without View item costs. */
   averageCost: number | null
-  inventoryValue: number
+  inventoryValue: number | null
 }
 
 /** The item card's Stock Balance: the item, its stock per warehouse and the totals. */
@@ -969,14 +1098,15 @@ export interface ItemStockBalanceDto {
   itemName: string
   warehouses: ItemStockBalanceRowDto[]
   totalOnHandBase: number
-  totalInventoryValue: number
+  /** (94) Null without View item costs. */
+  totalInventoryValue: number | null
 }
 
 /** One movement on an item's stock statement, with the balance after it. */
 export interface ItemStockMovementDto {
   id: number
   movementDate: string
-  /** Inventory | Sales | Purchase - with the type and id, what the row links to. */
+  /** Inventory | Sales | Purchase | Transfer (90) - with the type and id, what the row links to. */
   documentFamily: string
   documentTypeCode: string
   documentTypeName: string | null
@@ -993,6 +1123,7 @@ export interface ItemStockMovementDto {
   quantityIn: number
   quantityOut: number
   balance: number
+  /** (94) Null without View item costs. */
   unitCostBase: number | null
   /** The client of a sale or the supplier of a purchase. */
   counterparty: string | null
@@ -1006,6 +1137,12 @@ export interface ItemStockMovementDto {
   sourceContainerId?: number | null
   sourcePurchaseOrderId?: number | null
   sourceInvoiceId?: number | null
+  /**
+   * (90) A transfer's dispatch (TRD) or receipt (TRR): the order it belongs to, which both the row's number and its
+   * sourceReference (the order's TRO number) open - a dispatch or a receipt has no page of its own. Its counterparty
+   * reads "LKS-01 → LUB-01".
+   */
+  transferOrderId?: number | null
 }
 
 /** An item's stock statement: brought forward, the movements, and what is left. */
@@ -1027,8 +1164,10 @@ export interface ItemPurchaseOrderDto {
   documentDate: string
   expectedDate: string | null
   statusCode: number
-  /** Draft | PendingApproval | Posted | Closed | Cancelled. */
+  /** Draft | PendingApproval | Posted (approved: see invoicingStatus) | Cancelled. */
   status: string
+  /** The whole order's stage when approved (script 77): 0 Saved, 1 Partially posted, 2 Posted. */
+  invoicingStatus?: number | null
   supplierCode: string
   supplierName: string
   branchName: string
@@ -1041,7 +1180,7 @@ export interface ItemPurchaseOrderDto {
   invoicedBase?: number
   /** Settled short: recorded as never coming (a short container line, "Nothing more will come"). */
   shortBase?: number
-  /** Still to come (Shortages' figure): ordered − received − short on an open order, invoiced − … on a closed one. */
+  /** Still to come (Shortages' figure): ordered − received − short on an approved order, 0 otherwise. */
   outstandingBase: number
   amount: number
 }

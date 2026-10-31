@@ -31,9 +31,19 @@ import { fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
+import { SearchSelect } from '../ui/SearchSelect'
+import {
+  defaultForwarderOption,
+  forwarderHint,
+  loadForwarders,
+  useContainerOrderDefaults,
+  useCountryOptions,
+  type ContainerOrderSupplier,
+} from './containerDefaults'
+import { OrderSupplierLine } from './OrderSupplierLine'
 
-/** The order the container is created from: its id and where its goods land. */
-export interface ContainerOrder {
+/** The order the container is created from: its id, its supplier (shown, never typed) and where its goods land. */
+export interface ContainerOrder extends ContainerOrderSupplier {
   id: number
   documentNumber: string | null
   branchId: number
@@ -87,6 +97,9 @@ interface LoadRow {
  * the lines in list order until the type's capacity is reached. Over capacity the bar turns orange —
  * a warning, never a block: saving asks for confirmation and sends allowOverCapacity only when the
  * reader holds containers.overcapacity; otherwise the server's 409 message is shown.
+ *
+ * THE SUPPLIER IS AUTOMATIC (script 78), as in Auto-plan: shown from the order; the Forwarder starts as the order's last
+ * container's forwarder, else the supplier, and the country of origin as the supplier's. Both stay editable.
  */
 export function AddContainerModal({ opened, onClose, order, invoice, canOverCapacity, onSaved, onInvoiceSaved }: AddContainerModalProps) {
   const maxOf = (line: AvailablePoLineDto) => line.maxHereBase
@@ -105,6 +118,15 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
   const [portOfLoadingId, setPortOfLoadingId] = useState<string | null>(null)
   const [portOfDestinationId, setPortOfDestinationId] = useState<string | null>(null)
   const [eta, setEta] = useState<string | null>(null)
+  const { defaults } = useContainerOrderDefaults(order.id)
+  const countryOptions = useCountryOptions()
+  // The forwarder and the country start as the order's defaults (undefined = not changed by hand yet); a value the
+  // reader picks or clears wins over them.
+  const [forwarderPick, setForwarderPick] = useState<string | null | undefined>(undefined)
+  const [countryPick, setCountryPick] = useState<string | null | undefined>(undefined)
+  const forwarderId = forwarderPick !== undefined ? forwarderPick : defaults ? String(defaults.forwarderId) : null
+  const countryOfOrigin = countryPick !== undefined ? countryPick : (defaults?.countryOfOrigin ?? null)
+  const forwarderDefault = useMemo(() => defaultForwarderOption(defaults), [defaults])
   const [typeError, setTypeError] = useState<string | null>(null)
   // Invoice mode: one quantity of one item, the oil as the order line has it (when the order is still open).
   const [qty, setQty] = useState<number | ''>(invoice ? invoice.maxAddQty : '')
@@ -120,10 +142,11 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
     containerTypesApi.lookup(true).then((list) => live && setTypes(list)).catch(() => {})
     portsApi.lookup(true).then((list) => live && setPorts(list)).catch(() => {})
     containersApi
-      .availablePoLines({ purchaseOrderId: order.id })
+      // Every line of the order (the server lists 200 unless asked for more; 500 is its most).
+      .availablePoLines({ purchaseOrderId: order.id, top: 500 })
       .then((lines) => {
         if (!live) return
-        // An invoice takes one quantity: the order lines only give the oil of its item (none once the order is closed).
+        // An invoice takes one quantity: the order lines only give the oil of its item.
         if (invoice) {
           const ofItem = lines.find((line) => String(line.itemId) === (invoice.items[0] ? String(invoice.items[0].itemId) : null))
           if (ofItem && (ofItem.itemOilQtyPerUnit ?? 0) > 0) {
@@ -255,6 +278,8 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
           portOfLoadingId: portOfLoadingId ? Number(portOfLoadingId) : null,
           portOfDestinationId: portOfDestinationId ? Number(portOfDestinationId) : null,
           eta,
+          forwarderId: forwarderId ? Number(forwarderId) : null,
+          countryOfOrigin,
           allowOverCapacity,
         })
         notify.success(`Container ${result.created[0]?.containerRef ?? ''} created and linked to this invoice.`)
@@ -276,8 +301,8 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
       description: null,
       orderDate,
       shippingMethod: 'Sea',
-      countryOfOrigin: null,
-      forwarderId: null,
+      countryOfOrigin,
+      forwarderId: forwarderId ? Number(forwarderId) : null,
       transporterId: null,
       shippingLine: null,
       vesselName: null,
@@ -352,9 +377,10 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
     >
       <Stack gap="md">
         <div>
-          <Title order={6} mb="xs">
-            Container
-          </Title>
+          <Group justify="space-between" mb="xs" wrap="wrap" gap="xs">
+            <Title order={6}>Container</Title>
+            <OrderSupplierLine supplier={defaults ?? order} />
+          </Group>
           <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
             <Select
               label="Type"
@@ -387,6 +413,27 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
               clearable
               value={fromIsoDate(eta)}
               onChange={(next) => setEta(next ? isoDate(next) : null)}
+            />
+            <SearchSelect
+              label="Forwarder"
+              description={forwarderHint(defaults)}
+              inputWrapperOrder={['label', 'input', 'description', 'error']}
+              placeholder="Type a supplier code or name"
+              value={forwarderId}
+              selected={forwarderDefault}
+              load={loadForwarders}
+              onChange={(next) => setForwarderPick(next)}
+              clearable
+              data-forwarder
+            />
+            <Select
+              label="Country of Origin"
+              data={countryOptions}
+              value={countryOfOrigin}
+              onChange={(next) => setCountryPick(next)}
+              searchable
+              clearable
+              nothingFoundMessage="Nothing matches"
             />
           </SimpleGrid>
           <Text fz="xs" c="dimmed" mt={6}>

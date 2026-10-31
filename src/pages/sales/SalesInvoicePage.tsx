@@ -26,7 +26,7 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentAttachmentsCard } from '../../components/documents/DocumentAttachmentsCard'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { DocumentIcons } from '../../components/documents/documentIcons'
-import { isoDate, stamp } from '../../components/documents/documentKind'
+import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { QuickItemSearch } from '../../components/documents/QuickItemSearch'
 import { formatNumber, reasonSentence } from '../../components/format'
 import { ImportInvoiceItemsWizard, type ImportedLine } from '../../components/sales/ImportInvoiceItemsWizard'
@@ -43,6 +43,13 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
+import {
+  defaultBranchIdFor,
+  hasNoUsableWarehouse,
+  isWarehouseRestricted,
+  NO_USABLE_WAREHOUSE,
+  postAccessBlockedReason,
+} from '../../auth/warehouseAccess'
 
 const ROUTE = '/sales/invoices'
 const TYPE = 'SINV'
@@ -338,8 +345,23 @@ export function SalesInvoicePage() {
 
   useEffect(() => {
     if (header.branchId === null) return
-    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId)))
+    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId), true))
   }, [header.branchId, warehouses])
+
+  /* (92) A NEW INVOICE OF A RESTRICTED READER STARTS WHERE THEY MAY MOVE STOCK (A17): the main branch when it holds one
+     of their warehouses, else the branch of their first one. Once, when both lists are in, and only while the reader has
+     not changed anything; an unrestricted reader keeps the main branch, as before. */
+  const branchSettled = useRef(false)
+  useEffect(() => {
+    if (!isNew || branchSettled.current || branches.length === 0 || warehouses.length === 0) return
+    branchSettled.current = true
+    if (dirty.current || !isWarehouseRestricted(warehouses)) return
+    const branchId = defaultBranchIdFor(branches, warehouses, header.branchId === null ? null : Number(header.branchId))
+    if (branchId !== null && String(branchId) !== header.branchId) {
+      setDefaultWarehouseId(null)
+      setHeader((current) => ({ ...current, branchId: String(branchId) }))
+    }
+  }, [isNew, branches, warehouses, header.branchId])
 
   /* The rates follow the currency, the price list, the type and the date — but overwrite a loaded
      invoice's own rates only once the reader changed one of them. TWO RATES: the invoice
@@ -902,11 +924,11 @@ export function SalesInvoicePage() {
     }
   }
 
-  async function cancelInvoice(reason: string) {
+  async function cancelInvoice(reason: string, cancelDate: string | null) {
     if (!invoice) return
     setCancelBusy(true)
     try {
-      applyInvoice(await salesInvoicesApi.cancel(invoice.id, reason, invoice.rowVersion))
+      applyInvoice(await salesInvoicesApi.cancel(invoice.id, reason, invoice.rowVersion, cancelDate))
       notify.success('Invoice cancelled.')
       setCancelOpen(false)
     } catch (error) {
@@ -967,6 +989,16 @@ export function SalesInvoicePage() {
 
   const canImportHere = editable && canImport && header.branchId !== null && defaultWarehouseId !== null && header.priceListId !== null
 
+  /* (92) Save & Post waits while a CURRENT line is in a warehouse the reader may not use (the server's sentence while
+     those are the stored draft's); Cancel takes the server's refusal of the stored document. */
+  const postAccessBlocked = postAccessBlockedReason(
+    warehouses,
+    lines.map((l) => l.warehouseId),
+    invoice ? [invoice.warehouseId, ...invoice.lines.map((l) => l.warehouseId)] : [],
+    invoice?.warehouseAccessRefusal,
+  )
+  const accessRefusal = invoice?.warehouseAccessRefusal ?? null
+
   /* The Documents card: its count scrolls to it; "Add document…" opens its popup (any status, with the create permission). */
   const documentActions: DocumentAction[] = [
     { key: 'documents', label: `Documents (${formatNumber(invoice?.files.length ?? 0)})`, icon: DocumentIcons.documents, onClick: () => documentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
@@ -978,15 +1010,16 @@ export function SalesInvoicePage() {
         ...documentActions,
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
         { key: 'create-return', label: 'Create Return', icon: <IconArrowBackUp size={16} />, colour: 'orange', visible: canCreate && invoice?.canCreateReturn === true, loading: saving, onClick: () => void createReturn() },
-        { key: 'cancel-doc', label: 'Cancel Invoice', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && invoice?.canCancel === true, onClick: () => setCancelOpen(true) },
+        { key: 'cancel-doc', label: 'Cancel Invoice', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && invoice?.canCancel === true, disabled: accessRefusal !== null, disabledReason: accessRefusal ?? undefined, menuWhenDisabled: true, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(ROUTE) },
       ]
     : [
         ...documentActions,
         { key: 'import', label: 'Import from Excel', icon: DocumentIcons.import, visible: canImportHere, onClick: () => setImportOpen(true) },
-        { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
+        // (92) Save & Post refused for a warehouse that is not the reader's: Save Draft is then the primary (a phone's big button).
+        { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, variant: postAccessBlocked !== null ? 'filled' : undefined, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
-        { key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', visible: editable && canPost, loading: saving, onClick: () => void saveAndPost() },
+        { key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', visible: editable && canPost, disabled: postAccessBlocked !== null, disabledReason: postAccessBlocked ?? undefined, menuWhenDisabled: true, loading: saving, onClick: () => void saveAndPost() },
       ]
 
   return (
@@ -994,6 +1027,11 @@ export function SalesInvoicePage() {
       <PageHeader title={isNew ? 'New Sales Invoice' : `Sales Invoice ${invoice?.documentNumber ?? `draft #${invoice?.id}`}`} />
 
       <DocumentActionBar actions={actions} />
+      {editable && hasNoUsableWarehouse(warehouses) && (
+        <Alert color="orange" data-no-usable-warehouse>
+          {NO_USABLE_WAREHOUSE}
+        </Alert>
+      )}
 
       {invoice && status === 'Posted' && (
         <Alert color="green" title={`Posted — ${invoice.documentNumber}`}>
@@ -1002,7 +1040,10 @@ export function SalesInvoicePage() {
       )}
       {invoice && status === 'Cancelled' && (
         <Alert color="red" title={`Cancelled — ${invoice.documentNumber ?? 'draft'}`}>
-          Cancelled by {invoice.cancelledByName ?? 'unknown'} on {stamp(invoice.cancelledAtUtc)}.{reasonSentence(invoice.cancelReason)}
+          {invoice.cancelDate
+            ? `Cancelled on ${dateLabel(invoice.cancelDate)} by ${invoice.cancelledByName ?? 'unknown'} (entered ${stamp(invoice.cancelledAtUtc)}).`
+            : `Cancelled by ${invoice.cancelledByName ?? 'unknown'} on ${stamp(invoice.cancelledAtUtc)}.`}
+          {reasonSentence(invoice.cancelReason)}
         </Alert>
       )}
 
@@ -1034,7 +1075,6 @@ export function SalesInvoicePage() {
         accounts={cashAccounts}
         currencyId={invoiceCurrencyId}
         currencyCode={currencyCode}
-        branchId={header.branchId === null ? null : Number(header.branchId)}
         readOnly={!editable}
         disabled={saving}
         errors={paymentErrors}
@@ -1087,7 +1127,7 @@ export function SalesInvoicePage() {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId))}
+          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId), true)}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => {
             markDirty()
@@ -1144,7 +1184,8 @@ export function SalesInvoicePage() {
         onClose={() => setCancelOpen(false)}
         documentLabel={invoice?.documentNumber ?? `draft #${invoice?.id}`}
         busy={cancelBusy}
-        onConfirm={(reason) => void cancelInvoice(reason)}
+        withDate={{ minDate: invoice?.documentDate?.slice(0, 10) ?? null }}
+        onConfirm={(reason, cancelDate) => void cancelInvoice(reason, cancelDate)}
         description={
           invoice?.receiptStatus === 'Posted'
             ? `Cancelling writes the opposite stock movements AND reverses this cash sale's receipt ${invoice.receiptNumber ?? ''}, with the same reason. The invoice and the receipt stay in place as a record. It cannot be undone.`

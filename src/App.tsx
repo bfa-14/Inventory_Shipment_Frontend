@@ -23,9 +23,13 @@ import { ItemsPage } from './pages/inventory/ItemsPage'
 import { ShortageDocumentPage } from './pages/inventory/ShortageDocumentPage'
 import { ShortagePrintPage } from './pages/inventory/ShortagePrintPage'
 import { ShortagesPage } from './pages/inventory/ShortagesPage'
+import { StockLevelsPage } from './pages/inventory/StockLevelsPage'
 import { StockValuationPage } from './pages/inventory/StockValuationPage'
 import { StockDocumentPage } from './pages/inventory/StockDocumentPage'
 import { StockDocumentsPage } from './pages/inventory/StockDocumentsPage'
+import { TransferDispatchPrintPage } from './pages/inventory/TransferDispatchPrintPage'
+import { TransferOrderPage } from './pages/inventory/TransferOrderPage'
+import { TransferOrdersPage } from './pages/inventory/TransferOrdersPage'
 import { LoginPage } from './pages/LoginPage'
 import { PublicPurchaseApprovalPage } from './pages/public/PublicPurchaseApprovalPage'
 import { BranchesPage } from './pages/masterdata/BranchesPage'
@@ -45,6 +49,7 @@ import { ContainersPage } from './pages/logistics/ContainersPage'
 import { ContainerChargesPage } from './pages/logistics/ContainerChargesPage'
 import { MovementPage } from './pages/logistics/MovementPage'
 import { MovementsPage } from './pages/logistics/MovementsPage'
+import { ShipmentsBoardPage } from './pages/logistics/ShipmentsBoardPage'
 import { TrackingPage } from './pages/logistics/TrackingPage'
 import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
 import { PaymentMethodsPage } from './pages/masterdata/PaymentMethodsPage'
@@ -71,6 +76,7 @@ import { OutOfStockAuditPage } from './pages/sales/OutOfStockAuditPage'
 import { ReceiptsPage } from './pages/sales/ReceiptsPage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
+import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -96,6 +102,8 @@ export default function App() {
             {/* Receipts and statements on paper: outside the shell, like the shortage plan. */}
             <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
               <Route path="/sales/receipts/:id/print" element={<ReceiptPrintPage />} />
+            </Route>
+            <Route element={<ProtectedRoute permission={PERMISSIONS.statementView} />}>
               <Route path="/sales/receipts/statement/print" element={<CustomerStatementPrintPage />} />
             </Route>
             <Route element={<ProtectedRoute permission={PERMISSIONS.paymentsView} />}>
@@ -105,10 +113,16 @@ export default function App() {
             <Route element={<ProtectedRoute permission={PERMISSIONS.goodsReceiptsView} />}>
               <Route path="/purchase/goods-receipts/:id/print" element={<GoodsReceiptPrintPage />} />
             </Route>
+            {/* A transfer's dispatch note on paper, for the truck (script 90): no costs, three signatures. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.transfersView} />}>
+              <Route path="/inventory/transfers/:id/dispatches/:postingId/print" element={<TransferDispatchPrintPage />} />
+            </Route>
 
             <Route element={<AppShell />}>
               <Route index element={<HomePage />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route element={<ProtectedRoute permission={PERMISSIONS.dashboardView} />}>
+                <Route path="/dashboard" element={<DashboardPage />} />
+              </Route>
               <Route path="/account/password" element={<ChangePasswordPage />} />
               <Route path="/forbidden" element={<ForbiddenPage />} />
 
@@ -161,9 +175,19 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.containersView} />}>
                 <Route path="/logistics/containers" element={<ContainersPage />} />
                 <Route path="/logistics/containers/:id" element={<ContainerPage />} />
+              </Route>
+              {/* Movements and Tracking: screens of their own (script 75). A container's page still shows
+                  its movements and route with the container permission. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.movementsView} />}>
                 <Route path="/logistics/movements" element={<MovementsPage />} />
                 <Route path="/logistics/movements/:id" element={<MovementPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.trackingView} />}>
                 <Route path="/logistics/tracking" element={<TrackingPage />} />
+              </Route>
+              {/* The Shipments board (script 82): a screen of its own; its cards open the container's next step. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.shipmentsView} />}>
+                <Route path="/logistics/shipments" element={<ShipmentsBoardPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementsManage} />}>
                 <Route path="/logistics/movements/new" element={<MovementPage />} />
@@ -210,13 +234,28 @@ export default function App() {
                 <Route path="/inventory/bivac-out/new" element={<StockDocumentPage kind={BIVAC_OUT} />} />
                 <Route path="/inventory/bivac-out/:id" element={<StockDocumentPage kind={BIVAC_OUT} />} />
               </Route>
+              {/* Transfer orders (script 90): the list and the order sit behind the view permission; "new" also needs
+                  the create one, which the page checks itself - kept under the same route as /:id so the first save
+                  turns /new into /:id without remounting the page, as the goods receipt does. Every action (release,
+                  approval, dispatch, receipt, reversal…) is checked on the page and by the API. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.transfersView} />}>
+                <Route path="/inventory/transfers" element={<TransferOrdersPage />} />
+                <Route path="/inventory/transfers/new" element={<TransferOrderPage />} />
+                <Route path="/inventory/transfers/:id" element={<TransferOrderPage />} />
+              </Route>
+              {/* Stock levels per warehouse (script 91): the page reads with the view permission; setting, removing and
+                  importing are checked on the page and by the API (stocklevels.edit), creating a transfer order from
+                  ticked rows too (transfers.create). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.stockLevelsView} />}>
+                <Route path="/inventory/stock-levels" element={<StockLevelsPage />} />
+              </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.priceListsView} />}>
                 <Route path="/inventory/price-lists" element={<PriceListsPage />} />
               </Route>
-              {/* What the shelves are worth: the item list with its money shown, so it is guarded
-                  by the item permission rather than one of its own. */}
-              <Route element={<ProtectedRoute permission={PERMISSIONS.itemsView} />}>
+              {/* What the shelves are worth: its own permission (script 75), since seeing items is not
+                  seeing what they are worth. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.valuationView} />}>
                 <Route path="/inventory/valuation" element={<StockValuationPage />} />
               </Route>
               {/* Shortage plans: the list and the document sit behind the view permission; "new" needs
@@ -288,6 +327,11 @@ export default function App() {
                 <Route path="/sales/profit" element={<SalesProfitPage />} />
               </Route>
 
+              {/* (95) The container report: every container and order still to load, by stage. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.containerReportView} />}>
+                <Route path="/logistics/container-report" element={<ContainerReportPage />} />
+              </Route>
+
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
                 <Route path="/sales/out-of-stock-audit" element={<OutOfStockAuditPage />} />
               </Route>
@@ -308,9 +352,13 @@ export default function App() {
                   reversing and allocating are checked on the page (and by the API). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.receiptsView} />}>
                 <Route path="/sales/receipts" element={<ReceiptsPage />} />
-                <Route path="/sales/receipts/statement" element={<CustomerStatementPage />} />
                 <Route path="/sales/receipts/new" element={<ReceiptPage />} />
                 <Route path="/sales/receipts/:id" element={<ReceiptPage />} />
+              </Route>
+              {/* The Customer Statement: its own permission (script 75). "statement" is a static segment,
+                  so react-router never takes it for a receipt id. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.statementView} />}>
+                <Route path="/sales/receipts/statement" element={<CustomerStatementPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.documentTypesManage} />}>

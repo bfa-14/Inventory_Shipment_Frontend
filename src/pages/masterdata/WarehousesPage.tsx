@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionIcon, Alert, Box, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Box, Button, Group, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import {
   IconBuildingWarehouse,
   IconChevronDown,
@@ -29,6 +29,7 @@ import { RowActions } from '../../components/ui/RowActions'
 import { MainFlag, StatusBadge } from '../../components/ui/StatusBadge'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { transitHint } from './transitWarehouse'
 import { WarehouseFormModal } from './WarehouseFormModal'
 
 /* ── the branch tree ──────────────────────────────────────────────────────────────────────────────
@@ -179,10 +180,24 @@ export function WarehousesPage() {
     }
   }
 
+  /**
+   * (91) Whether the warehouse holds stock levels per warehouse, which its delete takes with it: only the lookup says it
+   * (the list's rows do not). Asked when Delete is pressed; a lookup that fails says nothing more.
+   */
+  async function holdsStockLevels(id: number): Promise<boolean> {
+    try {
+      const all = await warehousesApi.lookup(false, undefined, id)
+      return all.find((w) => w.id === id)?.hasStockLevels === true
+    } catch {
+      return false
+    }
+  }
+
   async function handleDelete(warehouse: WarehouseDto) {
+    const levels = await holdsStockLevels(warehouse.id)
     const confirmed = await confirm({
       title: 'Delete warehouse',
-      message: `Delete warehouse ${warehouse.warehouseCode} - ${warehouse.warehouseName}? This cannot be undone.`,
+      message: `Delete warehouse ${warehouse.warehouseCode} - ${warehouse.warehouseName}?${levels ? ' Its stock levels go with it.' : ''} This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
@@ -257,6 +272,14 @@ export function WarehousesPage() {
                 ({row.childCount})
               </Text>
             ) : null}
+            {/* (90) The branch's On the way warehouse: transfers keep it, nobody puts stock in it by hand. */}
+            {row.isTransit ? (
+              <Tooltip label={transitHint(row)} withArrow multiline w={280}>
+                <Badge size="xs" variant="light" color="blue">
+                  On the way
+                </Badge>
+              </Tooltip>
+            ) : null}
           </Group>
         )
       },
@@ -307,15 +330,17 @@ export function WarehousesPage() {
         <RowActions
           label={warehouse.warehouseCode}
           edit={{ visible: canEdit, onClick: () => setDialog({ kind: 'edit', warehouse }) }}
+          /* (90) An On the way warehouse stays active and goes only with its branch: neither action exists for it,
+             so neither is offered (the server refuses both, 52009). Its pencil edits its name and address. */
           toggleStatus={{
-            visible: canEdit,
+            visible: canEdit && !warehouse.isTransit,
             active: warehouse.isActive,
             disabled: warehouse.isMainWarehouse && warehouse.isActive,
             disabledReason: 'The main warehouse cannot be deactivated',
             onClick: () => void handleToggleStatus(warehouse),
           }}
           remove={{
-            visible: canDelete,
+            visible: canDelete && !warehouse.isTransit,
             // A parent's children have to be moved or deleted first; the procedure says so too.
             disabled: warehouse.isMainWarehouse || warehouse.childCount > 0,
             disabledReason: warehouse.isMainWarehouse

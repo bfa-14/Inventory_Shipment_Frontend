@@ -575,12 +575,38 @@ function ChargeBody({
               label="Movement"
               value={
                 dto.movementId ? (
-                  <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${dto.movementId}`} fz="sm">
-                    {dto.movementNo ?? `#${dto.movementId}`}
-                  </Anchor>
+                  hasPermission(PERMISSIONS.movementsView) ? (
+                    <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${dto.movementId}`} fz="sm">
+                      {dto.movementNo ?? `#${dto.movementId}`}
+                    </Anchor>
+                  ) : (
+                    dto.movementNo ?? `#${dto.movementId}`
+                  )
                 ) : null
               }
             />
+            {dto.bivacItemId !== null && (
+              <Field label="BIVAC item" value={`${dto.bivacItemCode ?? ''} - ${dto.bivacItemName ?? ''}`} />
+            )}
+            {dto.bivacItemId !== null && (
+              <Field
+                label="BIVAC Out"
+                value={
+                  dto.bivacOutDocumentId ? (
+                    hasPermission(PERMISSIONS.bivacOutView) ? (
+                      <Anchor component={Link} to={`/inventory/bivac-out/${dto.bivacOutDocumentId}`} fz="sm">
+                        {dto.bivacOutNumber ?? `#${dto.bivacOutDocumentId}`}
+                        {dto.bivacOutStatus === 3 ? ' (cancelled)' : ''}
+                      </Anchor>
+                    ) : (
+                      `${dto.bivacOutNumber ?? `#${dto.bivacOutDocumentId}`}${dto.bivacOutStatus === 3 ? ' (cancelled)' : ''}`
+                    )
+                  ) : (
+                    'Posted with the charge: 1 pc from the container\'s warehouse'
+                  )
+                }
+              />
+            )}
             <Field label="Amount" value={formatMoney(dto.amount, dto.currencyCode)} />
             <Field label={`Amount (${baseCode})`} value={formatNumber(dto.amountBase, 2)} />
             <Field label="Exchange rate" value={formatNumber(dto.exchangeRate, 6)} />

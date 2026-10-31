@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, isValidElement, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ActionIcon, Badge, Button, Checkbox, Group, Menu, Modal, Stack, Table, Text, Tooltip, UnstyledButton } from '@mantine/core'
 import {
   IconChevronDown,
@@ -44,6 +44,24 @@ const INTERACTIVE = 'button, a, input, select, textarea, [role="button"], [role=
  * widths the rest of the grid is laid out against.
  */
 const FIXED_ACCESSORS = new Set(['__rowNumber', 'actions'])
+
+/**
+ * A column's caption as words, for the chooser, the filter dialog, the footer menu and the CSV header: its title when
+ * that is a string, else the text inside the node it is (a caption wrapped in a Tooltip that explains it: "COGS
+ * adjustments (USD)", not "Cogs Adjustments Base"), else the accessor in words. A tooltip's own label is a prop, not a
+ * child, so it never becomes part of the caption.
+ */
+function captionOf(title: ReactNode, accessor: string): string {
+  if (typeof title === 'string') return title
+  return textOf(title).trim() || humanize(accessor)
+}
+
+function textOf(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map((child: ReactNode) => textOf(child)).join('')
+  if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children)
+  return ''
+}
 
 /* ── the summary row ──────────────────────────────────────────────────────────────────────────── */
 
@@ -217,6 +235,11 @@ interface DataTableProps<T> {
    */
   pinLastColumn?: boolean
   /**
+   * Keeps the first column in view while a wide grid scrolls sideways - the Container Report's container ref, which
+   * says whose figures the reader is looking at fifty columns to the right.
+   */
+  pinFirstColumn?: boolean
+  /**
    * Turns on the column chooser and manual column widths, and names where the reader's choices are
    * remembered (localStorage, per browser). Leaving it out keeps the grid exactly as it was: no
    * Columns button, no resize handles, nothing stored - which is what the grids embedded in a form
@@ -299,6 +322,7 @@ export function DataTable<T>({
   isRecordSelectable,
   rowClassName,
   pinLastColumn = false,
+  pinFirstColumn = false,
   storeKey,
   summaryRecords,
   summaryScope = 'filtered',
@@ -356,7 +380,7 @@ export function DataTable<T>({
       const meta = engine.meta.find((entry) => entry.accessor === accessor)
       if (!meta || FIXED_ACCESSORS.has(accessor)) return column
 
-      const label = typeof column.title === 'string' ? column.title : humanize(accessor)
+      const label = captionOf(column.title, accessor)
       const kind = meta.kind ?? 'text'
       const filterable = meta.filterable !== false
       const sortable = meta.sortable !== false
@@ -456,7 +480,7 @@ export function DataTable<T>({
   /** A column's caption from the page's own definition - the header may be a node by now (sort badge, filter box). */
   const labelOf = (accessor: string): string => {
     const original = resizableColumns.find((column) => String(column.accessor) === accessor)
-    return typeof original?.title === 'string' ? original.title : humanize(accessor)
+    return captionOf(original?.title, accessor)
   }
 
   const columnsWithSummary = useMemo(() => {
@@ -491,7 +515,7 @@ export function DataTable<T>({
         ...column,
         footer: (
           <SummaryCell
-            label={typeof column.title === 'string' ? column.title : humanize(accessor)}
+            label={captionOf(column.title, accessor)}
             kind={kind}
             value={computeSummary(summaryRecords, accessor, kind)}
             numeric={numbersIn(summaryRecords, accessor).length > 0}
@@ -509,7 +533,7 @@ export function DataTable<T>({
       Object.fromEntries(
         resizableColumns.map((column) => [
           String(column.accessor),
-          typeof column.title === 'string' ? column.title : humanize(String(column.accessor)),
+          captionOf(column.title, String(column.accessor)),
         ]),
       ),
     [resizableColumns],
@@ -866,6 +890,7 @@ export function DataTable<T>({
           borderRadius="md"
           verticalAlign="center"
           pinLastColumn={pinLastColumn}
+          pinFirstColumn={pinFirstColumn}
           rowClassName={(record) =>
             [rowId(record, idKey) === selectedId ? 'app-grid__row--selected' : undefined, rowClassName?.(record)]
               .filter(Boolean)

@@ -31,6 +31,7 @@ import {
   IconPencil,
   IconPlus,
   IconPrinter,
+  IconRoute,
   IconTableExport,
   IconTrash,
 } from '@tabler/icons-react'
@@ -43,11 +44,12 @@ import {
   containerStatusColour,
   INVOICING_STATUSES,
   type ContainerListDto,
+  type ContainerNextStepFilter,
+  type ContainerJourneyStatus,
   type ContainerStatusCode,
 } from '../../api/logistics/containers'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
-import { purchaseDocumentsApi } from '../../api/purchase/documents'
 import type { ItemLookupDto, PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
@@ -57,11 +59,18 @@ import { ContainerReceiptCell } from '../../components/logistics/ContainerReceip
 import { containerReceiptOf, receiptBlocksCancelText, RECEIVABLE_STATUSES } from '../../components/logistics/containerReceipt'
 import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
+import { useNextStep } from '../../components/logistics/useNextStep'
+import { NEXT_STEP_FILTERS, nextStepColumnText, nextStepOf } from '../../components/logistics/nextStep'
+import { NextStepFilterPopover } from '../../components/logistics/NextStepFilterPopover'
+import { JourneyFilterPopover } from '../../components/logistics/JourneyFilterPopover'
+import { JOURNEY_COLOURS, JOURNEY_FILTERS, journeyLegText, journeySinceText, journeyStatusText } from '../../components/logistics/journey'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { downloadCsv } from '../../components/masterdata/csv'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
+import { SearchSelect } from '../../components/ui/SearchSelect'
+import { loadNothing, loadPurchaseInvoices, loadPurchaseOrders, resolvePurchaseDocument } from '../../components/purchase/documentSearch'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
@@ -78,6 +87,10 @@ interface Filters {
   containerRef: string
   supplierId: string | null
   status: string | null
+  /** (81) The logistics to-do list: the Next step column's funnel, filtered on the server. */
+  nextStep: ContainerNextStepFilter | null
+  /** (95) Where they are on their journey: the Journey column's funnel, filtered on the server. */
+  journey: ContainerJourneyStatus | null
   /** 'YYYY-MM-01' of the picked month. */
   orderMonth: string | null
   // advanced
@@ -96,6 +109,8 @@ const NO_FILTERS: Filters = {
   containerRef: '',
   supplierId: null,
   status: null,
+  nextStep: null,
+  journey: null,
   orderMonth: null,
   purchaseOrderId: null,
   purchaseDocumentId: null,
@@ -107,7 +122,7 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-const ADVANCED: (keyof Filters)[] = ['purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
+const ADVANCED: (keyof Filters)[] = ['nextStep', 'journey', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
 /**
  * The Status filter's own choice beside the statuses: a completed Delivery-stage movement and no posted goods receipt
@@ -143,12 +158,18 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'totalQtyBase', kind: 'number', summary: 'sum' },
   { accessor: 'fillPct', kind: 'number', text: (r) => (r.fillPct === null ? '' : formatNumber(r.fillPct, 1)) },
   { accessor: 'chargesPostedBase', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.chargesPostedBase, 2) },
-  { accessor: 'currentMovementNo', text: (r) => r.currentMovementNo ?? '' },
+  // (80) a planned next movement too: "MOV-2026-000046 · Planned: MOV-2026-000051"
+  { accessor: 'currentMovementNo', text: (r) => [r.currentMovementNo, r.plannedMovementNo ? `Planned: ${r.plannedMovementNo}` : null].filter(Boolean).join(' · ') },
   { accessor: 'blNo', text: (r) => r.blNo ?? '' },
   { accessor: 'dispatchDate', kind: 'date' },
   { accessor: 'eta', kind: 'date' },
+  // (95) the latest leg that started, and whether it is on its way or arrived (filtered on the server: its funnel)
+  { accessor: 'journeyLeg', text: journeyLegText },
+  { accessor: 'journeyStatus', text: journeyStatusText, filterable: false },
   { accessor: 'currentLocation', text: (r) => r.currentLocation ?? '' },
   { accessor: 'status', kind: 'list', text: (r) => r.statusName },
+  // (81) Filtered on the server (its funnel is the page's own): a browser filter would see the loaded rows only.
+  { accessor: 'nextStep', text: nextStepColumnText, filterable: false },
   { accessor: 'goodsReceiptNumber', text: receiptText },
 ]
 
@@ -173,6 +194,7 @@ export function ContainersPage() {
   const { hasPermission } = useAuth()
 
   const canCreate = hasPermission(PERMISSIONS.containersCreate)
+  const canOpenMovements = hasPermission(PERMISSIONS.movementsView)
   const canReceive = hasPermission(PERMISSIONS.goodsReceiptsCreate)
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
   const canClose = hasPermission(PERMISSIONS.containersClose)
@@ -186,8 +208,6 @@ export function ContainersPage() {
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
   const [items, setItems] = useState<ItemLookupDto[]>([])
-  const [invoices, setInvoices] = useState<{ value: string; label: string }[]>([])
-  const [orders, setOrders] = useState<{ value: string; label: string }[]>([])
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -214,6 +234,8 @@ export function ContainersPage() {
                   ? undefined
                   : (Number(filters.status) as ContainerStatusCode),
               deliveredNotReceived: filters.status === DELIVERED_NOT_RECEIVED || undefined,
+              nextStep: filters.nextStep ?? undefined,
+              journey: filters.journey ?? undefined,
               orderMonthKey: monthKey(filters.orderMonth),
               purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
               purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
@@ -237,6 +259,8 @@ export function ContainersPage() {
 
   const { filters, setFilter, data, loading, error } = grid
   const load = grid.reload
+  // (81) A container's next step from its row: the same action, and the same dialog, as the button next to Save on its page.
+  const nextStep = useNextStep(() => void load(), 'containers')
   // The ticked rows as they are now: a reload after a bulk action brings their new status.
   const selectedRows = refreshSelection(selected, data?.items ?? [])
   const rows = useMemo(() => data?.items ?? [], [data])
@@ -255,35 +279,13 @@ export function ContainersPage() {
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
     itemsApi.lookup(false).then(setItems).catch(() => {})
-    // The PI filter needs the invoice list, which is the invoices' own permission: without it the
-    // filter simply offers nothing, and the list is not asked for at all - a refused request is a 403
-    // in the browser console, not a quiet empty list.
-    if (canViewInvoices) {
-      purchaseDocumentsApi
-        .list({ documentTypeCode: 'PINV', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-        .then((result) =>
-          setInvoices(
-            result.items
-              .filter((i) => i.documentNumber)
-              .map((i) => ({ value: String(i.id), label: `${i.documentNumber} - ${i.supplierName}` })),
-          ),
-        )
-        .catch(() => {})
-    }
-    // Same for the orders filter: the orders' own permission.
-    if (canViewOrders) {
-      purchaseDocumentsApi
-        .list({ documentTypeCode: 'PO', pageSize: 200, sortBy: 'DocumentDate', sortDir: 'desc' })
-        .then((result) =>
-          setOrders(
-            result.items
-              .filter((o) => o.documentNumber && o.status !== 'Draft' && o.status !== 'Cancelled')
-              .map((o) => ({ value: String(o.id), label: `${o.documentNumber} - ${o.supplierName}` })),
-          ),
-        )
-        .catch(() => {})
-    }
-  }, [canViewInvoices, canViewOrders])
+  }, [])
+
+  // The PO and PI filters search the server as they are typed (script 78), where they held the 200 newest. Each needs
+  // its own list's permission: without it the filter offers nothing and asks nothing - a refused request is a 403 in
+  // the browser console, not a quiet empty list.
+  const orderLoader = canViewOrders ? loadPurchaseOrders : loadNothing
+  const invoiceLoader = canViewInvoices ? loadPurchaseInvoices : loadNothing
 
   // The advanced panel opens by itself when one of its filters is in use, so a filter is never hidden.
   const advancedActive = ADVANCED.some((key) => filters[key] !== NO_FILTERS[key])
@@ -354,16 +356,26 @@ export function ContainersPage() {
     downloadCsv(
       'containers.csv',
       ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
-        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'Current Location', 'Status', 'Goods receipt'],
+        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'From → To', 'Journey', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
       engine.rows.map((r) => [
         r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
         r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
         formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
-        r.currentLocation ?? '', r.statusName, receiptText(r),
+        journeyLegText(r), journeyStatusText(r), r.currentLocation ?? '', r.statusName, nextStepColumnText(r), receiptText(r),
       ]),
     )
   }
 
+  const movementLink = (id: number, no: string, size: 'sm' | 'xs' = 'sm') =>
+    canOpenMovements ? (
+      <Anchor component={Link} to={`/logistics/movements/${id}`} fz={size} style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+        {no}
+      </Anchor>
+    ) : (
+      <Text span fz={size} style={{ whiteSpace: 'nowrap' }}>
+        {no}
+      </Text>
+    )
   const dash = <Text fz="sm" c="dimmed">—</Text>
   const text = (value: string | null) => (value ? <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{value}</Text> : dash)
 
@@ -441,11 +453,18 @@ export function ContainersPage() {
       accessor: 'currentMovementNo',
       title: 'Movement',
       width: 160,
+      // The movement in progress, else the last completed one - and (80) its planned next movement, which decides where
+      // the container "is" for its next leg and was invisible here.
       render: (row) =>
-        row.currentMovementId ? (
-          <Anchor component={Link} to={`/logistics/movements/${row.currentMovementId}`} fz="sm" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-            {row.currentMovementNo}
-          </Anchor>
+        row.currentMovementId || row.plannedMovementId ? (
+          <Stack gap={0}>
+            {row.currentMovementId ? movementLink(row.currentMovementId, row.currentMovementNo ?? '') : null}
+            {row.plannedMovementId ? (
+              <Text fz="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }} data-planned-movement>
+                Planned: {movementLink(row.plannedMovementId, row.plannedMovementNo ?? '', 'xs')}
+              </Text>
+            ) : null}
+          </Stack>
         ) : (
           dash
         ),
@@ -453,6 +472,51 @@ export function ContainersPage() {
     { accessor: 'blNo', title: 'B/L No.', width: 110, render: (row) => text(row.blNo) },
     { accessor: 'dispatchDate', title: 'Dispatch Date', width: 140, render: (row) => dateLabel(row.dispatchDate) },
     { accessor: 'eta', title: 'ETA', width: 105, render: (row) => dateLabel(row.eta) },
+    {
+      accessor: 'journeyLeg',
+      title: 'From → To',
+      width: 220,
+      // (95) the latest leg that started (in progress or completed); never moved: its port of loading → port of destination
+      render: (row) =>
+        journeyLegText(row) ? (
+          <Stack gap={0}>
+            <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>
+              {journeyLegText(row)}
+            </Text>
+            {row.journeyMovementNo ? (
+              <Text fz="xs" c="dimmed">
+                {row.journeyMovementNo}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : (
+          dash
+        ),
+    },
+    {
+      accessor: 'journeyStatus',
+      title: 'Journey',
+      width: 190,
+      filter: ({ close }: { close: () => void }) => (
+        <JourneyFilterPopover value={filters.journey} onApply={(next) => setFilter('journey', next)} close={close} />
+      ),
+      filtering: filters.journey !== null,
+      render: (row) =>
+        row.journeyStatus ? (
+          <Stack gap={2} data-journey-cell={row.journeyStatus}>
+            <Badge color={JOURNEY_COLOURS[row.journeyStatus]} variant="light" w="fit-content" style={{ whiteSpace: 'nowrap' }}>
+              {journeyStatusText(row)}
+            </Badge>
+            {journeySinceText(row) ? (
+              <Text fz="xs" c="dimmed">
+                {journeySinceText(row)}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : (
+          dash
+        ),
+    },
     {
       accessor: 'currentLocation',
       title: 'Current Location',
@@ -484,6 +548,34 @@ export function ContainersPage() {
       ),
     },
     {
+      accessor: 'nextStep',
+      title: 'Next step',
+      width: 230,
+      // The logistics to-do list: what each container does next, a gray reason when it cannot. Its funnel asks the
+      // server (`nextStep`), so it holds across every container, not only the rows loaded.
+      filter: ({ close }: { close: () => void }) => (
+        <NextStepFilterPopover value={filters.nextStep} onApply={(next) => setFilter('nextStep', next)} close={close} />
+      ),
+      filtering: filters.nextStep !== null,
+      render: (row) => {
+        const step = nextStepOf(row)
+        if (!step) return dash
+        const done = step.kind === 'Done'
+        return (
+          <Stack gap={0} data-next-step-cell={step.kind ?? ''}>
+            <Text fz="sm" c={done ? 'dimmed' : undefined} style={{ whiteSpace: 'nowrap' }}>
+              {nextStepColumnText(row)}
+            </Text>
+            {step.disabledReason && !done ? (
+              <Text fz="xs" c="dimmed" maw={260} style={{ whiteSpace: 'normal' }}>
+                {step.disabledReason}
+              </Text>
+            ) : null}
+          </Stack>
+        )
+      },
+    },
+    {
       accessor: 'goodsReceiptNumber',
       title: 'Goods receipt',
       width: 175,
@@ -496,17 +588,37 @@ export function ContainersPage() {
       textAlign: 'right',
       render: (row) => {
         const receipt = containerReceiptOf(row)
-        const more = [
+        // (81) Its next step first, "Next step: Inland transport to Kasumbalesa…": the same dialog as on its page.
+        const step = nextStep.action(row)
+        const stepEntry = {
+          key: 'nextStep',
+          show: step !== null,
+          // A journey over has no next step to name ("Next step: Next step…"): the entry reads like the column, disabled
+          // with the reason.
+          label: step ? (step.kind === 'Done' ? 'Next step: journey over' : `Next step: ${step.label}`) : '',
+          icon: <IconRoute size={16} />,
+          disabled: step?.disabledReason != null,
+          reason: step?.disabledReason ?? undefined,
+          color: undefined as string | undefined,
+          onClick: () => nextStep.run(row),
+        }
+        // Delivered: the next step IS the goods receipt - its own entry would say it twice.
+        const receiptIsNext = step?.kind === 'Receive' || step?.kind === 'OpenReceipt'
+        const entries = [
+          stepEntry,
           {
             key: 'receive',
-            show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.canReceive !== false,
+            // (95) shown, disabled with the server's reason, until the container is delivered
+            show: canReceive && receipt === null && RECEIVABLE_STATUSES.includes(row.status) && row.status !== 1 && !(receiptIsNext && step?.kind === 'Receive'),
+            disabled: row.canReceive === false,
+            reason: row.canReceive === false ? (row.receiveBlockedReason ?? 'This container cannot be received now.') : undefined,
             label: 'Receive goods',
             icon: <IconPackageImport size={16} />,
             onClick: () => void navigate(`${CONTAINERS_ROUTE}/${row.id}?receive=1`),
           },
           {
             key: 'receipt',
-            show: canViewReceipts && receipt !== null,
+            show: canViewReceipts && receipt !== null && !(receiptIsNext && step?.kind === 'OpenReceipt'),
             label: 'Goods receipt',
             icon: <IconPackageImport size={16} />,
             onClick: () => {
@@ -538,7 +650,8 @@ export function ContainersPage() {
           },
           { key: 'delete', show: canDelete && row.canDelete, label: 'Delete', icon: <IconTrash size={16} />, color: 'red', onClick: () => void remove(row) },
           { key: 'export', show: true, label: 'Export', icon: <IconFileSpreadsheet size={16} />, onClick: () => void exportOne(row) },
-        ].filter((a) => a.show)
+        ]
+        const more = entries.filter((a) => a.show)
 
         return (
           <Group gap={4} justify="flex-end" wrap="nowrap">
@@ -642,10 +755,50 @@ export function ContainersPage() {
         <Collapse expanded={advancedShown}>
           <FilterBar>
             <FilterBar.Col span={3}>
-              <Select label="Purchase order" placeholder="Any order" data={orders} value={filters.purchaseOrderId} onChange={(next) => setFilter('purchaseOrderId', next)} clearable searchable nothingFoundMessage="No order matches" />
+              <Select
+                label="Next step"
+                placeholder="Any step"
+                data={NEXT_STEP_FILTERS}
+                value={filters.nextStep}
+                onChange={(next) => setFilter('nextStep', next as ContainerNextStepFilter | null)}
+                clearable
+                data-next-step-filter-select
+              />
             </FilterBar.Col>
             <FilterBar.Col span={3}>
-              <Select label="PI No." placeholder="Any invoice" data={invoices} value={filters.purchaseDocumentId} onChange={(next) => setFilter('purchaseDocumentId', next)} clearable searchable nothingFoundMessage="No invoice matches" />
+              <Select
+                label="Journey"
+                placeholder="Any"
+                data={JOURNEY_FILTERS}
+                value={filters.journey}
+                onChange={(next) => setFilter('journey', next as ContainerJourneyStatus | null)}
+                clearable
+                data-journey-filter-select
+              />
+            </FilterBar.Col>
+            <FilterBar.Col span={3}>
+              <SearchSelect
+                label="Purchase order"
+                placeholder="Type an order no. or supplier"
+                load={orderLoader}
+                resolve={canViewOrders ? resolvePurchaseDocument : undefined}
+                value={filters.purchaseOrderId}
+                onChange={(next) => setFilter('purchaseOrderId', next)}
+                clearable
+                nothingFoundMessage="No order matches"
+              />
+            </FilterBar.Col>
+            <FilterBar.Col span={3}>
+              <SearchSelect
+                label="PI No."
+                placeholder="Type an invoice no. or supplier"
+                load={invoiceLoader}
+                resolve={canViewInvoices ? resolvePurchaseDocument : undefined}
+                value={filters.purchaseDocumentId}
+                onChange={(next) => setFilter('purchaseDocumentId', next)}
+                clearable
+                nothingFoundMessage="No invoice matches"
+              />
             </FilterBar.Col>
             <FilterBar.Col span={3}>
               <TextInput label="Commercial Invoice No." value={filters.commercialInvoiceNo} onChange={(e) => setFilter('commercialInvoiceNo', e.currentTarget.value)} onKeyDown={(e) => { if (e.key === 'Enter') grid.commitFilters() }} />
@@ -720,6 +873,8 @@ export function ContainersPage() {
         confirmLabel="Cancel container"
         description="The container is cancelled and its invoices are free to load elsewhere. No stock moves."
       />
+
+      {nextStep.dialogs}
 
       {/* One row of the file = one charge on one container; the Charges column changes with what is posted. */}
       <ImportContainerChargesWizard

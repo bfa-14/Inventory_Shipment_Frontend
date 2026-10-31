@@ -6,10 +6,11 @@ import { IconArrowLeft } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import type { ItemStockMovementDto, ItemStockStatementDto } from '../../api/types'
-import { fromIsoDate, isoDate } from '../../components/documents/documentKind'
+import { dateLabel, fromIsoDate, isoDate } from '../../components/documents/documentKind'
 import { formatDateTime, formatNumber } from '../../components/format'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useAuth } from '../../auth/useAuth'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 
@@ -32,6 +33,10 @@ function documentRoute(m: ItemStockMovementDto, can: (permission: string) => boo
     case 'GRN': return gated(PERMISSIONS.goodsReceiptsView, routes.goodsReceipt(m.documentId))
     // container offloading (before goods receipts) received the goods against the container
     case 'CNT': return gated(PERMISSIONS.containersView, `/logistics/containers/${m.documentId}`)
+    // (90) a transfer's dispatch or receipt lives on its order: the row's id is the posting's, the order is named apart
+    case 'TRD':
+    case 'TRR':
+      return m.transferOrderId ? gated(PERMISSIONS.transfersView, routes.transferOrder(m.transferOrderId)) : null
     default: return null
   }
 }
@@ -53,8 +58,15 @@ export function ItemStockMovementsPage() {
   const canViewContainers = hasPermission(PERMISSIONS.containersView)
   const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
-  /** Where a goods receipt row's source opens: its container, else its order, else its invoice (with the view right). */
+  const canViewTransfers = hasPermission(PERMISSIONS.transfersView)
+  /* (94) The Unit Cost column is an item cost: without View item costs it is not drawn (the server sends it null). */
+  const seesCosts = useSeesItemCosts()
+  /**
+   * Where a goods receipt row's source opens: its container, else its order, else its invoice (with the view right).
+   * (90) A transfer's row names its order (TRO-…), which opens the order.
+   */
   const sourceRoute = (m: ItemStockMovementDto): string | null => {
+    if (m.transferOrderId) return canViewTransfers ? routes.transferOrder(m.transferOrderId) : null
     if (m.sourceContainerId) return canViewContainers ? routes.container(m.sourceContainerId) : null
     if (m.sourcePurchaseOrderId) return canViewOrders ? `/purchase/orders/${m.sourcePurchaseOrderId}` : null
     if (m.sourceInvoiceId) return canViewInvoices ? `/purchase/invoices/${m.sourceInvoiceId}` : null
@@ -177,7 +189,7 @@ export function ItemStockMovementsPage() {
                     <Table.Th ta="right">In</Table.Th>
                     <Table.Th ta="right">Out</Table.Th>
                     <Table.Th ta="right">Balance</Table.Th>
-                    <Table.Th ta="right">Unit Cost (USD)</Table.Th>
+                    {seesCosts && <Table.Th ta="right">Unit Cost (USD)</Table.Th>}
                     <Table.Th>By</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -187,7 +199,7 @@ export function ItemStockMovementsPage() {
                       <Text fz="sm" fw={600}>{from ? 'Balance brought forward' : 'Opening balance'}</Text>
                     </Table.Td>
                     <Table.Td ta="right"><Text fz="sm" fw={600}>{formatNumber(data.openingBase)}</Text></Table.Td>
-                    <Table.Td colSpan={2} />
+                    <Table.Td colSpan={seesCosts ? 2 : 1} />
                   </Table.Tr>
                   {data.movements.map((m) => {
                     const route = documentRoute(m, hasPermission)
@@ -204,7 +216,8 @@ export function ItemStockMovementsPage() {
                                 ) : (
                                   <Text fz="sm" fw={500}>{m.documentNumber ?? `#${m.documentId}`}</Text>
                                 )}
-                                {/* A goods receipt names what brought the goods: "GRN-BR-002-000001 · KTG-2026-0031", both links. */}
+                                {/* A goods receipt names what brought the goods: "GRN-BR-002-000001 · KTG-2026-0031", both links;
+                                    a transfer's dispatch or receipt its order: "TRD-BR-003-000004 · TRO-BR-003-000012". */}
                                 {m.sourceReference ? (
                                   <>
                                     <Text fz="sm" c="dimmed">·</Text>
@@ -216,22 +229,36 @@ export function ItemStockMovementsPage() {
                                   </>
                                 ) : null}
                               </Group>
+                              {/* (93) A transfer row's expiry, under its number (no new column): the other families'
+                                  expiry comes from fields no screen shows. */}
+                              {m.documentFamily === 'Transfer' && m.expiryDate ? (
+                                <Text fz="xs" c="dimmed" data-movement-expiry>Expiry {dateLabel(m.expiryDate)}</Text>
+                              ) : null}
                             </div>
-                            {m.isReversal && <Badge size="xs" color="orange" variant="light">Cancelled</Badge>}
+                            {/* (90) A transfer's dispatch or receipt is reversed, never cancelled (Cancel order… is another action). */}
+                            {m.isReversal &&
+                              (m.documentTypeCode === 'TRD' || m.documentTypeCode === 'TRR' ? (
+                                // As wide as its word: squeezed by the long numbers beside it, it read "Rever…".
+                                <Badge size="xs" color="orange" variant="light" style={{ minWidth: 'max-content' }}>
+                                  Reversed
+                                </Badge>
+                              ) : (
+                                <Badge size="xs" color="orange" variant="light">Cancelled</Badge>
+                              ))}
                           </Group>
                         </Table.Td>
                         <Table.Td>{m.counterparty ?? m.reasonCode ?? '—'}</Table.Td>
                         <Table.Td ta="right">{m.quantityIn ? <Text fz="sm" c="teal">{formatNumber(m.quantityIn)}</Text> : ''}</Table.Td>
                         <Table.Td ta="right">{m.quantityOut ? <Text fz="sm" c="red">{formatNumber(m.quantityOut)}</Text> : ''}</Table.Td>
                         <Table.Td ta="right"><Text fz="sm" fw={600} c={m.balance < 0 ? 'red' : undefined}>{formatNumber(m.balance)}</Text></Table.Td>
-                        <Table.Td ta="right">{m.unitCostBase === null ? '—' : formatNumber(m.unitCostBase, 2)}</Table.Td>
+                        {seesCosts && <Table.Td ta="right">{m.unitCostBase === null ? '—' : formatNumber(m.unitCostBase, 2)}</Table.Td>}
                         <Table.Td>{m.createdByName ?? '—'}</Table.Td>
                       </Table.Tr>
                     )
                   })}
                   {data.movements.length === 0 && (
                     <Table.Tr>
-                      <Table.Td colSpan={8}>
+                      <Table.Td colSpan={seesCosts ? 8 : 7}>
                         <Text c="dimmed" ta="center" py="md">No movement in this period.</Text>
                       </Table.Td>
                     </Table.Tr>
@@ -243,7 +270,7 @@ export function ItemStockMovementsPage() {
                     <Table.Th ta="right">{formatNumber(data.totalIn)}</Table.Th>
                     <Table.Th ta="right">{formatNumber(data.totalOut)}</Table.Th>
                     <Table.Th ta="right">{formatNumber(data.closingBase)}</Table.Th>
-                    <Table.Th colSpan={2} />
+                    <Table.Th colSpan={seesCosts ? 2 : 1} />
                   </Table.Tr>
                 </Table.Tfoot>
               </Table>

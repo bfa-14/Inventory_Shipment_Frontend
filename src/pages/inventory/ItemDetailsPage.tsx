@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
+  Anchor,
   Badge,
+  Box,
   Button,
   Card,
   Checkbox,
@@ -21,7 +23,17 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { IconArrowLeft, IconCopy, IconDeviceFloppy, IconInfoCircle, IconPencil } from '@tabler/icons-react'
+import { useMediaQuery } from '@mantine/hooks'
+import {
+  IconArrowLeft,
+  IconChevronLeft,
+  IconChevronRight,
+  IconCopy,
+  IconDeviceFloppy,
+  IconExternalLink,
+  IconInfoCircle,
+  IconPencil,
+} from '@tabler/icons-react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import type { DocumentFileDto } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
@@ -29,26 +41,62 @@ import { itemsApi } from '../../api/inventory/items'
 import { partiesApi } from '../../api/masterdata/parties'
 import type { PartyLookupDto } from '../../api/types'
 import { formatNumber, numberInputValue } from '../../components/format'
-import type { ItemDetailsDto, ItemUnitDto, SaveItemRequest, SaveItemUnitRequest } from '../../api/types'
+import type { ItemDetailsDto, ItemUnitDto, SaveItemRequest, SaveItemUnitRequest, TrackingMode } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { AttachmentsPanel, type AttachmentsSource } from '../../components/attachments/AttachmentsPanel'
 import { confirm } from '../../components/ui/confirm'
+import { TrackingBadge } from '../../components/tracking/TrackingBadge'
+import { trackingKindOf, trackingSummary } from '../../components/tracking/trackingNumbers'
 import { MoreActionsMenu } from '../../components/ui/MoreActionsMenu'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { COUNTRIES, countryLabel, findCountry } from '../../data/countries'
 import { PERMISSIONS } from '../../navigation'
+import { CONTENT_BG } from '../../theme'
 import { ItemImageCard } from './ItemImageCard'
+import { ItemBivacPortCostsCard } from './ItemBivacPortCostsCard'
+import { ItemStockLevelsCard } from './ItemStockLevelsCard'
 import { ItemAuditCard, ItemQuickLinksCard, ItemStockCard } from './ItemSideCards'
 import { ItemUnitFormModal } from './ItemUnitFormModal'
 import { ItemUnitsCard } from './ItemUnitsCard'
+import {
+  activeNeighboursByCode,
+  neighboursIn,
+  readItemSequence,
+  updateItemInSequence,
+  type ItemNeighbours,
+  type ItemSequenceEntry,
+} from './itemSequence'
 import { brandLabel, familyOptions, useItemLookups, warehouseOptions } from './lookups'
 
 const MAX_CODE = 30
 const MAX_NAME = 200
 const MAX_MODEL = 100
 const MAX_DESCRIPTION = 1000
+const MAX_NOTE = 2000
+const MAX_LINK = 500
+
+/**
+ * A link the page will open: an absolute http(s) address with a host and no spaces. The API and
+ * usp_Item_SetNotes (script 87) refuse anything else, so a javascript: or file: address can never reach
+ * window.open.
+ */
+function isWebAddress(value: string): boolean {
+  if (!value || /\s/.test(value)) return false
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname !== ''
+  } catch {
+    return false
+  }
+}
+
+/** A new tab, cut off from this one (noopener: the page cannot reach back into the app; noreferrer: no Referer). */
+function openLink(value: string) {
+  const link = value.trim()
+  if (isWebAddress(link)) window.open(link, '_blank', 'noopener,noreferrer')
+}
 
 interface FormValues {
   itemCode: string
@@ -65,11 +113,24 @@ interface FormValues {
   isBivac: boolean
   isActive: boolean
   defaultSupplierId: string | null
-  leadTimeDays: number | ''
+  leadTimeMonths: number | ''
   pcPerContainer: number | ''
   weightKg: number | ''
   volumeCbm: number | ''
+  note: string
+  link: string
+  /** (93) Tracking on transfer dispatches; the length for serial items only. */
+  trackingMode: TrackingMode
+  requiresExpiry: boolean
+  serialLength: number | ''
 }
+
+/** (93) Item Definition › Tracking: what a transfer dispatch asks for the item's pieces. */
+const TRACKING_OPTIONS: { value: TrackingMode; label: string }[] = [
+  { value: 'None', label: 'None' },
+  { value: 'Batch', label: 'Batch numbers' },
+  { value: 'Serial', label: 'Serial numbers' },
+]
 
 const BLANK: FormValues = {
   itemCode: '',
@@ -86,10 +147,15 @@ const BLANK: FormValues = {
   isBivac: false,
   isActive: true,
   defaultSupplierId: null,
-  leadTimeDays: '',
+  leadTimeMonths: '',
   pcPerContainer: '',
   weightKg: '',
   volumeCbm: '',
+  note: '',
+  link: '',
+  trackingMode: 'None',
+  requiresExpiry: false,
+  serialLength: '',
 }
 
 /** What Copy Item hands the new page: the source's values, its units, and the code it came from. */
@@ -115,10 +181,15 @@ function toFormValues(item: ItemDetailsDto): FormValues {
     isBivac: item.isBivac,
     isActive: item.isActive,
     defaultSupplierId: item.defaultSupplierId === null ? null : String(item.defaultSupplierId),
-    leadTimeDays: item.leadTimeDays ?? '',
+    leadTimeMonths: item.leadTimeMonths ?? '',
     pcPerContainer: item.pcPerContainer ?? '',
     weightKg: item.weightKg ?? '',
     volumeCbm: item.volumeCbm ?? '',
+    note: item.note ?? '',
+    link: item.link ?? '',
+    trackingMode: item.trackingMode ?? 'None',
+    requiresExpiry: item.requiresExpiry === true,
+    serialLength: item.trackingMode === 'Serial' && item.serialLength ? item.serialLength : '',
   }
 }
 
@@ -153,6 +224,9 @@ function ItemDetails() {
   const canCreate = hasPermission(PERMISSIONS.itemsCreate)
   const canEdit = hasPermission(PERMISSIONS.itemsEdit)
   const canDelete = hasPermission(PERMISSIONS.itemsDelete)
+  // (91) Stock levels per warehouse: their own permissions - the card saves on its own, in view mode too.
+  const canViewLevels = hasPermission(PERMISSIONS.stockLevelsView)
+  const canEditLevels = hasPermission(PERMISSIONS.stockLevelsEdit)
 
   const copySource = (location.state as { copyFrom?: CopySource } | null)?.copyFrom ?? null
 
@@ -212,6 +286,21 @@ function ItemDetails() {
         value.trim().length > MAX_DESCRIPTION
           ? `Description cannot be longer than ${MAX_DESCRIPTION} characters.`
           : null,
+      note: (value) => (value.trim().length > MAX_NOTE ? `Note cannot be longer than ${MAX_NOTE} characters.` : null),
+      link: (value) => {
+        const link = value.trim()
+        if (!link) return null
+        if (link.length > MAX_LINK) return `Link cannot be longer than ${MAX_LINK} characters.`
+        return isWebAddress(link)
+          ? null
+          : 'Enter a web address starting with http:// or https://, for example https://www.tvsmotor.com.'
+      },
+      serialLength: (value, values) => {
+        if (value === '' || values.trackingMode !== 'Serial') return null
+        if (!Number.isInteger(value) || value < 1 || value > 50)
+          return 'Serial no. length must be between 1 and 50, or empty for any length.'
+        return null
+      },
       warrantyMonths: (value) => {
         if (value === '') return null
         if (!Number.isInteger(value) || value < 0) return 'Warranty must be a whole number of months.'
@@ -296,6 +385,45 @@ function ItemDetails() {
     return () => controller.abort()
   }, [itemId, load])
 
+  /* PREVIOUS / NEXT: the active items either side of this one in the Items list as the reader left it (filters and sort,
+     itemSequence.ts). Read again whenever the item is (re)loaded - a status change here is written to that list first. */
+  const listNeighbours = useMemo<ItemNeighbours | null>(
+    () => (item ? neighboursIn(readItemSequence() ?? [], item.id) : null),
+    [item],
+  )
+  /* Not in that list (opened from a link or another page, or the list was never opened in this tab): every active item
+     by code, this one placed by its own code - so an inactive item still finds its nearest active neighbours. */
+  const [codeNeighbours, setCodeNeighbours] = useState<{ itemId: number; neighbours: ItemNeighbours } | null>(null)
+  useEffect(() => {
+    if (!item || listNeighbours) return
+    const controller = new AbortController()
+    const { id, itemCode } = item
+    activeNeighboursByCode(id, itemCode, controller.signal)
+      .then((neighbours) => {
+        if (!controller.signal.aborted) setCodeNeighbours({ itemId: id, neighbours })
+      })
+      .catch(() => {
+        /* Previous and Next stay disabled; the item itself is unaffected. */
+      })
+    return () => controller.abort()
+  }, [item, listNeighbours])
+  const neighbours =
+    listNeighbours ?? (codeNeighbours !== null && codeNeighbours.itemId === item?.id ? codeNeighbours.neighbours : null)
+
+  /** Below this the header keeps one row of buttons: arrows without their words, Copy Item and Back to list in the menu. */
+  const narrow = useMediaQuery('(max-width: 576px)')
+
+  /* AN ITEM OPENS AT THE TOP. The router keeps the window's scroll, so an item opened from far down the list (or with
+     Next from the bottom of a long item) used to open half-way down. Once per item: the page is remounted for each one
+     (ItemDetailsPage's key), while view <-> edit is the same mount and keeps its place. Before paint, so nothing jumps. */
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
+
+  function goToItem(entry: ItemSequenceEntry | null | undefined) {
+    if (entry) void navigate(`/inventory/items/${entry.id}`)
+  }
+
   // The browser's own guard - closing the tab or reloading is outside the router's reach.
   useEffect(() => {
     function onBeforeUnload(event: BeforeUnloadEvent) {
@@ -362,10 +490,16 @@ function ItemDetails() {
       isBivac: values.isBivac,
       isActive: values.isActive,
       defaultSupplierId: values.defaultSupplierId === null ? null : Number(values.defaultSupplierId),
-      leadTimeDays: values.leadTimeDays === '' ? null : values.leadTimeDays,
+      leadTimeMonths: values.leadTimeMonths === '' ? null : values.leadTimeMonths,
       pcPerContainer: values.pcPerContainer === '' ? null : values.pcPerContainer,
       weightKg: values.weightKg === '' ? null : values.weightKg,
       volumeCbm: values.volumeCbm === '' ? null : values.volumeCbm,
+      note: values.note.trim() ? values.note.trim() : null,
+      link: values.link.trim() ? values.link.trim() : null,
+      // (93) Always sent by this page (it knows the fields); the length only for a serial item.
+      trackingMode: values.trackingMode,
+      requiresExpiry: values.requiresExpiry,
+      serialLength: values.trackingMode === 'Serial' && values.serialLength !== '' ? values.serialLength : null,
       ...(isNew ? {} : { rowVersion: item?.rowVersion ?? null }),
     }
   }
@@ -522,6 +656,10 @@ function ItemDetails() {
       else if (key.includes('itemfamilyid')) mapped.itemFamilyId = message
       else if (key.includes('defaultwarehouseid')) mapped.defaultWarehouseId = message
       else if (key.includes('description')) mapped.description = message
+      else if (key.includes('note')) mapped.note = message
+      else if (key.includes('link')) mapped.link = message
+      else if (key.includes('seriallength')) mapped.serialLength = message
+      else if (key.includes('trackingmode')) mapped.trackingMode = message
       else if (key.includes('warrantymonths')) mapped.warrantyMonths = message
       else if (key.includes('minquantity')) mapped.minQuantity = message
       else if (key.includes('maxquantity')) mapped.maxQuantity = message
@@ -701,6 +839,7 @@ function ItemDetails() {
 
     try {
       await itemsApi.setStatus(item.id, activating)
+      updateItemInSequence(item.id, { isActive: activating })
       await load(item.id)
       notify.success(activating ? 'Item activated.' : 'Item deactivated.')
     } catch (error) {
@@ -712,7 +851,7 @@ function ItemDetails() {
     if (!item) return
     const confirmed = await confirm({
       title: 'Delete item',
-      message: `Delete ${item.itemCode} - ${item.itemName}? Its units, image and documents go with it. This cannot be undone.`,
+      message: `Delete ${item.itemCode} - ${item.itemName}? Its units, image, documents and stock levels per warehouse go with it. This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     })
@@ -720,6 +859,7 @@ function ItemDetails() {
 
     try {
       await itemsApi.remove(item.id)
+      updateItemInSequence(item.id, 'removed')
       notify.success('Item deleted successfully.')
       void navigate('/inventory/items')
     } catch (error) {
@@ -732,6 +872,7 @@ function ItemDetails() {
         if (deactivate) {
           try {
             await itemsApi.setStatus(item.id, false)
+            updateItemInSequence(item.id, { isActive: false })
             await load(item.id)
             notify.success('Item deactivated.')
           } catch (err) {
@@ -766,7 +907,12 @@ function ItemDetails() {
   const countryOptions = useMemo(() => COUNTRIES.map((c) => ({ value: c.code, label: countryLabel(c) })), [])
 
   const title = isNew ? (copySource ? 'New Item (copy)' : 'New Item') : (item?.itemCode ?? 'Item')
-  const subtitle = isNew ? 'Define an item, its packing units and its documents.' : (item?.itemName ?? '')
+  const subtitle = isNew
+    ? 'Define an item, its packing units and its documents.'
+    : item
+      ? `${item.itemName} · ${item.familyName} · ${item.brandName}`
+      : ''
+
 
   if (loadError) {
     return (
@@ -790,56 +936,101 @@ function ItemDetails() {
 
   return (
     <>
-      <PageHeader
-        title={title}
-        subtitle={subtitle}
-        breadcrumbs={BREADCRUMBS}
-        actions={
-          <Group gap="sm" wrap="wrap">
-            {!editing && item ? (
-              <>
-                {canEdit ? (
-                  <Button leftSection={<IconPencil size={16} />} onClick={startEditing}>
-                    Edit Item
-                  </Button>
+      {/* THE WHOLE HEADER IS FROZEN under the app's fixed header - breadcrumbs, code and status, name, and the actions
+          with Previous / Next - because an item is taller than a screen and what it is and what can be done to it should
+          not scroll away. Its own background (the page's), stretched over the page's side padding, stops the cards
+          showing through; no parent of the page clips overflow, which would cancel the sticking. Previous / Next only in
+          view mode: moving away from half-typed changes is what the Cancel / Save bar is for. */}
+      <Box
+        style={{
+          position: 'sticky',
+          top: 'var(--app-shell-header-offset, 64px)',
+          zIndex: 3,
+          background: CONTENT_BG,
+          marginInline: 'calc(var(--mantine-spacing-md) * -1)',
+          paddingInline: 'var(--mantine-spacing-md)',
+          marginTop: 'calc(var(--mantine-spacing-xs) * -1)',
+          paddingTop: 'var(--mantine-spacing-xs)',
+          marginBottom: 'var(--mantine-spacing-md)',
+          borderBottom: '1px solid var(--mantine-color-gray-3)',
+        }}
+      >
+        <PageHeader
+          title={title}
+          subtitle={subtitle}
+          breadcrumbs={BREADCRUMBS}
+          truncateTitle
+          wrapTitleExtra={item ? trackingKindOf(item.trackingMode, item.requiresExpiry) !== null : false}
+          titleExtra={
+            item ? (
+              <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+                <StatusBadge active={item.isActive} />
+                {item.isBivac ? (
+                  <Badge variant="light" color="orange">
+                    BIVAC
+                  </Badge>
                 ) : null}
-                {canCreate ? (
-                  <Button variant="default" leftSection={<IconCopy size={16} />} onClick={copyItem}>
-                    Copy Item
-                  </Button>
-                ) : null}
-                {canEdit || canDelete ? (
-                  <MoreActionsMenu
-                    actions={[
-                      ...(canEdit
-                        ? [{ label: item.isActive ? 'Deactivate' : 'Activate', onClick: () => void toggleStatus() }]
-                        : []),
-                      ...(canDelete ? [{ label: 'Delete', onClick: () => void deleteItem() }] : []),
-                    ]}
-                  />
-                ) : null}
-              </>
-            ) : null}
-            <Button variant="subtle" leftSection={<IconArrowLeft size={16} />} onClick={() => void goBackToList()}>
-              Back to list
-            </Button>
-          </Group>
-        }
-      />
-
-      {item && !editing ? (
-        <Group gap="xs" mb="md">
-          <StatusBadge active={item.isActive} />
-          {item.isBivac ? (
-            <Badge variant="light" color="orange">
-              BIVAC
-            </Badge>
-          ) : null}
-          <Text c="dimmed" fz="sm">
-            {item.familyName} · {item.brandName}
-          </Text>
-        </Group>
-      ) : null}
+                {/* (93) How a transfer dispatch asks for its pieces: "Serial nos.", "Batches + expiry", … */}
+                <TrackingBadge
+                  kind={trackingKindOf(item.trackingMode, item.requiresExpiry)}
+                  withExpiry={item.requiresExpiry === true}
+                />
+              </Group>
+            ) : undefined
+          }
+          actions={
+            <Group gap="sm" wrap="wrap">
+              {!editing && item ? (
+                <>
+                  <Group gap={6} wrap="nowrap">
+                    <ItemStepButton
+                      direction="previous"
+                      target={neighbours?.previous ?? null}
+                      iconOnly={narrow}
+                      onStep={goToItem}
+                    />
+                    <ItemStepButton direction="next" target={neighbours?.next ?? null} iconOnly={narrow} onStep={goToItem} />
+                  </Group>
+                  {canEdit ? (
+                    <Button leftSection={<IconPencil size={16} />} onClick={startEditing}>
+                      Edit Item
+                    </Button>
+                  ) : null}
+                  {canCreate && !narrow ? (
+                    <Button variant="default" leftSection={<IconCopy size={16} />} onClick={copyItem}>
+                      Copy Item
+                    </Button>
+                  ) : null}
+                  {/* On a phone the header keeps one row of buttons: arrows, Edit Item, and the rest (Copy Item, Back
+                      to list) in the "…" menu. */}
+                  {canEdit || canDelete || narrow ? (
+                    <MoreActionsMenu
+                      compact={narrow}
+                      actions={[
+                        ...(narrow && canCreate
+                          ? [{ label: 'Copy Item', icon: <IconCopy size={16} />, onClick: () => copyItem() }]
+                          : []),
+                        ...(canEdit
+                          ? [{ label: item.isActive ? 'Deactivate' : 'Activate', onClick: () => void toggleStatus() }]
+                          : []),
+                        ...(canDelete ? [{ label: 'Delete', onClick: () => void deleteItem() }] : []),
+                        ...(narrow
+                          ? [{ label: 'Back to list', icon: <IconArrowLeft size={16} />, onClick: () => void goBackToList() }]
+                          : []),
+                      ]}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+              {editing || !item || !narrow ? (
+                <Button variant="subtle" leftSection={<IconArrowLeft size={16} />} onClick={() => void goBackToList()}>
+                  Back to list
+                </Button>
+              ) : null}
+            </Group>
+          }
+        />
+      </Box>
 
       {copySource ? (
         <Alert
@@ -1038,20 +1229,98 @@ function ItemDetails() {
                           </Field>
                         </Grid.Col>
 
+                        {/* Beside the Default Warehouse, with its own "Open link". */}
+                        <Grid.Col span={{ base: 12, sm: 6 }}>
+                          {editable ? (
+                            <Group gap="xs" align="flex-start" wrap="nowrap">
+                              <TextInput
+                                type="url"
+                                label="Link"
+                                placeholder="https://www.tvsmotor.com/..."
+                                maxLength={MAX_LINK}
+                                style={{ flex: 1 }}
+                                miw={0}
+                                {...form.getInputProps('link')}
+                                // Checked on leaving the field, so a typo shows before Save rather than after.
+                                onBlur={() => form.validateField('link')}
+                              />
+                              <Button
+                                variant="default"
+                                // Level with the input: the label above it is 25 px tall.
+                                mt={25}
+                                leftSection={<IconExternalLink size={16} />}
+                                disabled={!isWebAddress(form.values.link.trim())}
+                                onClick={() => openLink(form.values.link)}
+                              >
+                                Open link
+                              </Button>
+                            </Group>
+                          ) : (
+                            <Group gap="xs" align="flex-end" wrap="nowrap" justify="space-between">
+                              <Stack gap={2} miw={0}>
+                                <Text c="dimmed" fz="xs" fw={500}>
+                                  Link
+                                </Text>
+                                {item?.link && isWebAddress(item.link) ? (
+                                  <Anchor
+                                    href={item.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    fz="sm"
+                                    truncate="end"
+                                    title={item.link}
+                                  >
+                                    {item.link}
+                                  </Anchor>
+                                ) : (
+                                  <Text fz="sm">{item?.link || '—'}</Text>
+                                )}
+                              </Stack>
+                              <Button
+                                variant="default"
+                                size="xs"
+                                leftSection={<IconExternalLink size={14} />}
+                                disabled={!item?.link || !isWebAddress(item.link)}
+                                onClick={() => openLink(item?.link ?? '')}
+                                style={{ flexShrink: 0 }}
+                              >
+                                Open link
+                              </Button>
+                            </Group>
+                          )}
+                        </Grid.Col>
+
+                        {/* One column, so the Note follows the Description closely instead of a whole grid gap below its
+                            character count. */}
                         <Grid.Col span={12}>
-                          <Field label="Description" value={item?.description ?? '—'} editing={editable}>
-                            <Textarea
-                              label="Description"
-                              placeholder="What this item is..."
-                              autosize
-                              minRows={3}
-                              maxLength={MAX_DESCRIPTION}
-                              inputWrapperOrder={['label', 'input', 'description', 'error']}
-                              description={`${form.values.description.length}/${MAX_DESCRIPTION}`}
-                              styles={{ description: { textAlign: 'right' } }}
-                              {...form.getInputProps('description')}
-                            />
-                          </Field>
+                          <Stack gap={editable ? 2 : 'sm'}>
+                            <Field label="Description" value={item?.description ?? '—'} editing={editable}>
+                              <Textarea
+                                label="Description"
+                                placeholder="What this item is..."
+                                autosize
+                                minRows={3}
+                                maxLength={MAX_DESCRIPTION}
+                                inputWrapperOrder={['label', 'input', 'description', 'error']}
+                                description={`${form.values.description.length}/${MAX_DESCRIPTION}`}
+                                styles={{ description: { textAlign: 'right' } }}
+                                {...form.getInputProps('description')}
+                              />
+                            </Field>
+                            <Field label="Note" value={item?.note ?? '—'} editing={editable} multiline>
+                              <Textarea
+                                label="Note"
+                                placeholder="Anything the team should remember about this item..."
+                                autosize
+                                minRows={3}
+                                maxLength={MAX_NOTE}
+                                inputWrapperOrder={['label', 'input', 'description', 'error']}
+                                description={`${form.values.note.length}/${MAX_NOTE}`}
+                                styles={{ description: { textAlign: 'right' } }}
+                                {...form.getInputProps('note')}
+                              />
+                            </Field>
+                          </Stack>
                         </Grid.Col>
                       </Grid>
                     )}
@@ -1122,6 +1391,90 @@ function ItemDetails() {
                           </Field>
                         </Grid.Col>
 
+                        {/* (91) TWO MIN / MAX, NEVER READ AS ONE: these two are the company's (the Dashboard's figure);
+                            each warehouse's own are on the card below. In both modes, directly under the row. */}
+                        <Grid.Col span={12} pt={0}>
+                          <Text fz="xs" c="dimmed" data-item-company-levels-hint>
+                            Minimum and Maximum Quantity are for the whole company: the Dashboard&apos;s Items below their
+                            minimum.
+                            {canViewLevels ? " Each warehouse's own Min / Max are in Stock levels per warehouse below." : ''}
+                          </Text>
+                        </Grid.Col>
+
+                        {/* (93) TRACKING: after the Min / Max hint, before BIVAC / Active. Asked on transfers only. */}
+                        {editable ? (
+                          <>
+                            <Grid.Col span={{ base: 12, sm: form.values.trackingMode === 'Serial' ? 4 : 6 }}>
+                              <Select
+                                label="Tracking"
+                                description="Asked when goods are dispatched on a transfer order."
+                                // The hints under the boxes, so the three controls of the row line up at the top.
+                                inputWrapperOrder={['label', 'input', 'description', 'error']}
+                                data={TRACKING_OPTIONS}
+                                allowDeselect={false}
+                                {...form.getInputProps('trackingMode')}
+                                onChange={(next) => {
+                                  const mode = (next as TrackingMode | null) ?? 'None'
+                                  form.setFieldValue('trackingMode', mode)
+                                  // The length is a serial item's only: emptied when Tracking leaves Serial.
+                                  if (mode !== 'Serial') form.setFieldValue('serialLength', '')
+                                }}
+                                data-item-tracking
+                              />
+                            </Grid.Col>
+                            {form.values.trackingMode === 'Serial' ? (
+                              <Grid.Col span={{ base: 12, sm: 4 }}>
+                                <NumberInput
+                                  label="Serial no. length"
+                                  description="Every serial no. of this item has exactly this many characters (a TVS chassis no. has 17)."
+                                  placeholder="Any length"
+                                  inputWrapperOrder={['label', 'input', 'description', 'error']}
+                                  min={1}
+                                  max={50}
+                                  // Never clamped: 60 typed is refused with its sentence on Save, not saved as 50.
+                                  clampBehavior="none"
+                                  step={1}
+                                  allowDecimal={false}
+                                  allowNegative={false}
+                                  {...form.getInputProps('serialLength')}
+                                  data-item-serial-length
+                                />
+                              </Grid.Col>
+                            ) : null}
+                            <Grid.Col span={{ base: 12, sm: form.values.trackingMode === 'Serial' ? 4 : 6 }}>
+                              <Group gap={6} pt={{ base: 0, sm: 32 }}>
+                                <Checkbox
+                                  label="Requires expiry date"
+                                  {...form.getInputProps('requiresExpiry', { type: 'checkbox' })}
+                                  data-item-requires-expiry
+                                />
+                                <Tooltip
+                                  label="Each dispatch gives the expiry date of its pieces: per batch, per serial no., or per group of pieces."
+                                  withArrow
+                                  multiline
+                                  w={280}
+                                >
+                                  <ThemeIcon variant="subtle" color="gray" size="sm" aria-label="About the expiry date">
+                                    <IconInfoCircle size={16} />
+                                  </ThemeIcon>
+                                </Tooltip>
+                              </Group>
+                            </Grid.Col>
+                          </>
+                        ) : item ? (
+                          <Grid.Col span={12}>
+                            <Text fz="sm" data-item-tracking-summary>
+                              {trackingSummary(item.trackingMode, item.requiresExpiry, item.serialLength)}
+                            </Text>
+                          </Grid.Col>
+                        ) : null}
+                        <Grid.Col span={12} pt={0}>
+                          <Text fz="xs" c="dimmed" data-item-tracking-hint>
+                            Batch, serial and expiry details are asked on transfer dispatches (Inventory › Transfer Orders).
+                            Goods receipts, sales and Inventory In / Out do not ask for them.
+                          </Text>
+                        </Grid.Col>
+
                         <Grid.Col span={12}>
                           {editable ? (
                             <Group gap="xl" wrap="wrap" mt="xs">
@@ -1167,6 +1520,23 @@ function ItemDetails() {
                     )}
                   </Card>
 
+                  {canViewLevels ? (
+                    <ItemStockLevelsCard
+                      // The route's id, so an item still loading is not taken for a new one.
+                      itemId={itemId}
+                      itemCode={item?.itemCode ?? ''}
+                      companyMin={item?.minQuantity ?? null}
+                      companyMax={item?.maxQuantity ?? null}
+                      itemLoaded={item !== null}
+                      canEdit={canEditLevels}
+                    />
+                  ) : null}
+
+                  {/* (97) What a BIVAC charge costs at each port: a saved BIVAC item only. */}
+                  {item?.isBivac && itemId !== null ? (
+                    <ItemBivacPortCostsCard itemId={itemId} itemCode={item.itemCode} canEdit={canEdit} />
+                  ) : null}
+
                   <Card radius="lg" p="lg" withBorder>
                     <Text fw={600} fz="md" mb="md">
                       Purchasing
@@ -1196,23 +1566,31 @@ function ItemDetails() {
 
                         <Grid.Col span={{ base: 12, sm: 4 }}>
                           <Field
-                            label="Lead time (days)"
-                            value={item?.leadTimeDays === null || item === null ? '—' : formatNumber(item.leadTimeDays)}
+                            label="Lead time (months)"
+                            value={item?.leadTimeMonths == null || item === null ? '—' : formatNumber(item.leadTimeMonths, 1)}
                             editing={editable}
                           >
                             <NumberInput
-                              label="Lead time (days)"
-                              placeholder="Days from order to receipt"
+                              label="Lead time (months)"
+                              placeholder="Months from order to receipt"
                               min={0}
-                              max={3650}
-                              step={1}
-                              allowDecimal={false}
+                              max={60}
+                              step={0.5}
+                              decimalScale={1}
                               allowNegative={false}
-                              value={form.values.leadTimeDays}
-                              onChange={(next) => form.setFieldValue('leadTimeDays', numberInputValue(next) ?? '')}
-                              error={form.errors.leadTimeDays}
+                              value={form.values.leadTimeMonths}
+                              onChange={(next) => form.setFieldValue('leadTimeMonths', numberInputValue(next) ?? '')}
+                              error={form.errors.leadTimeMonths}
                             />
                           </Field>
+                          {/* (98) What Shortages use first: the item's own purchase history. */}
+                          {item?.leadTimeHistoryMonths != null ? (
+                            <Text fz="xs" c="dimmed" mt={4}>
+                              Purchase history: {formatNumber(item.leadTimeHistoryMonths, 1)} months from order approval to goods
+                              receipt ({formatNumber(item.leadTimeHistoryReceipts ?? 0)} receipt
+                              {item.leadTimeHistoryReceipts === 1 ? '' : 's'}, last 12 months). Shortages use it first.
+                            </Text>
+                          ) : null}
                         </Grid.Col>
 
                         <Grid.Col span={{ base: 12, sm: 4 }}>
@@ -1373,11 +1751,14 @@ function Field({
   label,
   value,
   editing,
+  multiline = false,
   children,
 }: {
   label: string
   value: string | undefined
   editing: boolean
+  /** Keeps the line breaks typed in a textarea (the Note). */
+  multiline?: boolean
   children: React.ReactNode
 }) {
   if (editing) return <>{children}</>
@@ -1387,8 +1768,58 @@ function Field({
       <Text c="dimmed" fz="xs" fw={500}>
         {label}
       </Text>
-      <Text fz="sm">{value === undefined || value === '' ? '—' : value}</Text>
+      <Text fz="sm" style={multiline ? { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } : undefined}>
+        {value === undefined || value === '' ? '—' : value}
+      </Text>
     </Stack>
+  )
+}
+
+/**
+ * Previous or Next in the item header. Disabled at either end of the list; the code it leads to is its tooltip.
+ * Icon-only on a phone, where the words would push the item's code off the bar.
+ */
+function ItemStepButton({
+  direction,
+  target,
+  iconOnly,
+  onStep,
+}: {
+  direction: 'previous' | 'next'
+  target: ItemSequenceEntry | null
+  iconOnly: boolean
+  onStep: (entry: ItemSequenceEntry | null) => void
+}) {
+  const label = direction === 'previous' ? 'Previous' : 'Next'
+  const icon = direction === 'previous' ? <IconChevronLeft size={16} /> : <IconChevronRight size={16} />
+  const hint = target
+    ? `${label}: ${target.itemCode}`
+    : direction === 'previous'
+      ? 'This is the first active item in the list.'
+      : 'This is the last active item in the list.'
+
+  return (
+    <Tooltip label={hint} withArrow>
+      {/* data-disabled rather than disabled: a disabled button swallows the hover the tooltip needs. */}
+      <Button
+        variant="default"
+        px={iconOnly ? 10 : undefined}
+        aria-label={iconOnly ? hint : undefined}
+        data-disabled={target ? undefined : true}
+        aria-disabled={target ? undefined : true}
+        onClick={(event) => {
+          if (!target) {
+            event.preventDefault()
+            return
+          }
+          onStep(target)
+        }}
+        leftSection={direction === 'previous' && !iconOnly ? icon : undefined}
+        rightSection={direction === 'next' && !iconOnly ? icon : undefined}
+      >
+        {iconOnly ? icon : label}
+      </Button>
+    </Tooltip>
   )
 }
 

@@ -20,14 +20,17 @@ import { IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
   ALLOCATION_METHODS,
+  BIVAC_CHARGE_CODE,
   containerChargesApi,
   SPLIT_RULES,
   type AllocationMethod,
+  type BivacChargeOptionsDto,
   type ChargeGroupMemberDto,
   type SplitRule,
 } from '../../api/logistics/containerCharges'
-import { containersApi } from '../../api/logistics/containers'
+import { containersApi, type ContainerLookupDto } from '../../api/logistics/containers'
 import { movementsApi, type MovementContainerDto, type MovementListDto } from '../../api/logistics/movements'
+import { itemsApi } from '../../api/inventory/items'
 import { currenciesApi } from '../../api/masterdata/currencies'
 import { partiesApi } from '../../api/masterdata/parties'
 import { allocationMethodLabel, chargeTypesApi, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
@@ -38,6 +41,8 @@ import { PERMISSIONS } from '../../navigation'
 import { currencyLabel, formatMoney, formatNumber, numberInputValue, todayDateOnly } from '../format'
 import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
+import { SearchMultiSelect, SearchSelect, type SearchOption, type SearchOptionsLoader } from '../ui/SearchSelect'
+import { containerLabel } from '../purchase/documentSearch'
 
 interface NewChargeModalProps {
   opened: boolean
@@ -62,6 +67,24 @@ const LAST_CHARGEABLE_STATUS = 6
 
 function movementContainer(c: MovementContainerDto): ContainerOption {
   return { id: c.containerId, ref: c.containerRef, containerNo: c.containerNo, pieces: c.totalAllocatedBase }
+}
+
+function lookupContainer(c: ContainerLookupDto): ContainerOption {
+  return { id: c.id, ref: c.containerRef, containerNo: c.containerNo, pieces: c.pieces }
+}
+
+function containerOption(c: ContainerOption): SearchOption {
+  return { value: String(c.id), label: containerLabel({ containerRef: c.ref, containerNo: c.containerNo }) }
+}
+
+function movementLabel(m: Pick<MovementListDto, 'movementNo' | 'typeName' | 'fromCode' | 'toCode'>): string {
+  return `${m.movementNo} - ${m.typeName} (${m.fromCode} → ${m.toCode})`
+}
+
+/** Movements that are not cancelled, by number, from the server (not a preloaded 200). */
+const loadMovements: SearchOptionsLoader = async (search, signal) => {
+  const page = await movementsApi.list({ search: search || undefined, pageSize: 50 }, signal)
+  return page.items.filter((m) => m.status !== 4).map((m) => ({ value: String(m.id), label: movementLabel(m) }))
 }
 
 function round2(value: number): number {
@@ -122,9 +145,10 @@ function NewChargeDialog({
   const { hasPermission } = useAuth()
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
 
-  const [allContainers, setAllContainers] = useState<ContainerOption[]>([])
+  /** Every container this dialog has seen - the presets, the search answers, a movement's - by id: the split needs their pieces. */
+  const [known, setKnown] = useState<Map<number, ContainerOption>>(new Map())
   const [movementContainers, setMovementContainers] = useState<ContainerOption[] | null>(null)
-  const [movements, setMovements] = useState<MovementListDto[]>([])
+  const [pickedMovement, setPickedMovement] = useState<SearchOption | null>(null)
   const [chargeTypes, setChargeTypes] = useState<ChargeTypeLookupDto[]>([])
   const [currencies, setCurrencies] = useState<CurrencyLookupDto[]>([])
   const [providers, setProviders] = useState<PartyLookupDto[]>([])
@@ -144,6 +168,11 @@ function NewChargeDialog({
   const [total, setTotal] = useState<number | null>(null)
   const [splitRule, setSplitRule] = useState<SplitRule>(presetSplitRule)
   const [notes, setNotes] = useState('')
+  // (97) A BIVAC / Inspection charge names its BIVAC item and takes that item's cost at each container's port.
+  const [bivacItemId, setBivacItemId] = useState<string | null>(null)
+  // Each answer is kept with what it was read for, so a stale one is never shown (and no effect has to clear it).
+  const [bivacOptionsRead, setBivacOptionsRead] = useState<{ key: string; data: BivacChargeOptionsDto } | null>(null)
+  const [bivacCostsRead, setBivacCostsRead] = useState<{ itemId: string; costs: Map<number, number> } | null>(null)
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
@@ -157,47 +186,54 @@ function NewChargeDialog({
   const currency = currencies.find((c) => String(c.id) === currencyId)
   const isBase = currency?.isBaseCurrency ?? true
   const chargeType = chargeTypes.find((t) => String(t.id) === chargeTypeId)
+  const isBivac = chargeType?.chargeCode.trim().toUpperCase() === BIVAC_CHARGE_CODE
+
+  const remember = useCallback((rows: ContainerOption[]) => {
+    setKnown((current) => {
+      const next = new Map(current)
+      for (const row of rows) next.set(row.id, row)
+      return next
+    })
+  }, [])
+
+  /** The containers a charge can still be typed for, matching what is typed - from the server, any number of them. */
+  const loadContainers = useCallback<SearchOptionsLoader>(
+    async (search, signal) => {
+      const rows = (await containersApi.lookup({ search: search || undefined, maxStatus: LAST_CHARGEABLE_STATUS, top: 50 }, signal)).map(lookupContainer)
+      remember(rows)
+      return rows.map(containerOption)
+    },
+    [remember],
+  )
 
   /** A movement restricts the containers to the ones it carries, and preselects them all. */
   const loadMovement = useCallback(async (id: number) => {
     try {
       const movement = await movementsApi.get(id)
       const rows = movement.containers.map(movementContainer)
+      remember(rows)
       setMovementContainers(rows)
       setContainerIds(rows.map((r) => String(r.id)))
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The movement could not be loaded.')
     }
-  }, [])
+  }, [remember])
 
   const [presetIds] = useState<number[]>(presetContainerIds ?? [])
   const [presetMovement] = useState<number | null>(presetMovementId)
 
-  // Lookups, once per opening. A preset container that is not in the list (a later status) is read on its own.
+  // Lookups, once per opening. The preset containers - any number of them (script 78) - are read in ONE call, where
+  // they were looked for in the 200 newest and the others read one GET each.
   useEffect(() => {
     let alive = true
-    containersApi
-      .list({ pageSize: 200, sortBy: 'ContainerRef', sortDir: 'desc' })
-      .then(async (result) => {
-        const rows: ContainerOption[] = result.items
-          .filter((c) => c.status <= LAST_CHARGEABLE_STATUS)
-          .map((c) => ({ id: c.id, ref: c.containerRef, containerNo: c.containerNo, pieces: c.totalQtyBase }))
-        const missing = presetIds.filter((id) => !rows.some((r) => r.id === id))
-        const extra = await Promise.all(
-          missing.map((id) =>
-            containersApi
-              .get(id)
-              .then((c): ContainerOption => ({ id: c.id, ref: c.containerRef, containerNo: c.containerNo, pieces: c.totalAllocatedBase }))
-              .catch(() => null),
-          ),
-        )
-        if (alive) setAllContainers([...rows, ...extra.filter((c): c is ContainerOption => c !== null)])
-      })
-      .catch(() => notify.error('The containers could not be loaded.'))
-    movementsApi
-      .list({ pageSize: 200 })
-      .then((result) => alive && setMovements(result.items.filter((m) => m.status !== 4)))
-      .catch(() => {})
+    if (presetIds.length > 0) {
+      containersApi
+        .lookup({ ids: presetIds })
+        .then((rows) => {
+          if (alive) remember(rows.map(lookupContainer))
+        })
+        .catch(() => notify.error('The containers could not be loaded.'))
+    }
     chargeTypesApi.lookup().then((types) => alive && setChargeTypes(types)).catch(() => notify.error('The charge types could not be loaded.'))
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: true }).then((p) => alive && setProviders(p)).catch(() => {})
     currenciesApi
@@ -215,6 +251,8 @@ function NewChargeDialog({
         .then((movement) => {
           if (!alive) return
           const rows = movement.containers.map(movementContainer)
+          remember(rows)
+          setPickedMovement({ value: String(movement.id), label: movementLabel(movement) })
           setMovementContainers(rows)
           setContainerIds(rows.map((r) => String(r.id)))
         })
@@ -224,7 +262,7 @@ function NewChargeDialog({
       alive = false
     }
     // The presets are held in state: read once per opening, as the dialog was opened.
-  }, [presetIds, presetMovement])
+  }, [presetIds, presetMovement, remember])
 
   function chooseMovement(next: string | null) {
     setMovementId(next)
@@ -257,18 +295,44 @@ function NewChargeDialog({
     [currencies],
   )
 
-  const options = movementContainers ?? allContainers
-  const containerData = useMemo(
-    () => options.map((c) => ({ value: String(c.id), label: c.containerNo ? `${c.ref} (${c.containerNo})` : c.ref })),
-    [options],
+  // (97) The BIVAC items the chosen containers may take, read again whenever the containers change.
+  const containerKey = containerIds.join(',')
+  useEffect(() => {
+    if (!isBivac || containerKey === '') return
+    const controller = new AbortController()
+    containerChargesApi
+      .bivacOptions(containerKey.split(',').map(Number), controller.signal)
+      .then((answer) => setBivacOptionsRead({ key: containerKey, data: answer }))
+      .catch((err) => {
+        if (!controller.signal.aborted) notify.error(err instanceof ApiError ? err.message : 'The BIVAC items could not be loaded.')
+      })
+    return () => controller.abort()
+  }, [isBivac, containerKey])
+
+  useEffect(() => {
+    if (!isBivac || bivacItemId === null) return
+    const controller = new AbortController()
+    itemsApi
+      .bivacPortCosts(Number(bivacItemId), controller.signal)
+      .then((rows) => setBivacCostsRead({ itemId: bivacItemId, costs: new Map(rows.map((r) => [r.portId, r.costBase])) }))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [isBivac, bivacItemId])
+
+  const bivacOptions = isBivac && bivacOptionsRead?.key === containerKey ? bivacOptionsRead.data : null
+  const bivacCosts = bivacCostsRead !== null && bivacCostsRead.itemId === bivacItemId ? bivacCostsRead.costs : null
+  const bivacOption = bivacOptions?.items.find((o) => String(o.itemId) === bivacItemId) ?? null
+  const bivacPortOf = useMemo(
+    () => new Map((bivacOptions?.containers ?? []).map((c) => [c.containerId, c])),
+    [bivacOptions],
   )
+
+  const movementData = useMemo(() => (movementContainers ?? []).map(containerOption), [movementContainers])
   const chosen = useMemo(
-    () =>
-      containerIds
-        .map((id) => options.find((c) => String(c.id) === id) ?? allContainers.find((c) => String(c.id) === id))
-        .filter((c): c is ContainerOption => c !== undefined),
-    [containerIds, options, allContainers],
+    () => containerIds.map((id) => known.get(Number(id))).filter((c): c is ContainerOption => c !== undefined),
+    [containerIds, known],
   )
+  const chosenOptions = useMemo(() => chosen.map(containerOption), [chosen])
   const preview = splitPreview(splitRule, total ?? 0, chosen)
   const previewSum = preview ? preview.reduce((acc, value) => acc + value, 0) : null
   const effectiveRate = isBase ? 1 : rate
@@ -286,6 +350,13 @@ function NewChargeDialog({
     if (containerIds.length === 0) found.containers = 'Choose at least one container.'
     if (!chargeTypeId) found.chargeTypeId = 'Choose a charge type.'
     if (!date) found.date = 'Enter the charge date.'
+    if (isBivac) {
+      if (!bivacItemId) found.bivacItemId = 'Choose which BIVAC.'
+      else if (bivacOption && bivacOption.priced < bivacOption.containers)
+        found.bivacItemId = `${bivacOption.itemCode} has no BIVAC cost for ${bivacOption.missingPorts ?? 'some ports'}: set it on Item Definition (BIVAC cost per port).`
+      else if (bivacOption && (bivacOption.totalBase ?? 0) <= 0) found.bivacItemId = `${bivacOption.itemCode} costs 0 at these ports: nothing to charge.`
+      return found
+    }
     if (!currencyId) found.currencyId = 'Choose a currency.'
     if (!isBase && (rate === null || rate <= 0)) found.rate = 'Enter the exchange rate.'
     if (total === null || total <= 0) found.total = 'Enter an amount above zero.'
@@ -307,13 +378,14 @@ function NewChargeDialog({
         providerPartyId: providerId === null ? null : Number(providerId),
         reference: reference.trim() || null,
         chargeDate: date,
-        currencyId: currencyId === null ? null : Number(currencyId),
+        currencyId: isBivac ? (baseCurrency?.id ?? null) : currencyId === null ? null : Number(currencyId),
         rateType: 1,
-        exchangeRate: isBase ? 1 : rate,
-        totalAmount: total ?? 0,
-        splitRule,
+        exchangeRate: isBivac || isBase ? 1 : rate,
+        totalAmount: isBivac ? (bivacOption?.totalBase ?? 0) : (total ?? 0),
+        splitRule: isBivac ? 'Same' : splitRule,
         allocationMethod: method,
         notes: notes.trim() || null,
+        bivacItemId: isBivac && bivacItemId !== null ? Number(bivacItemId) : null,
       })
       setCreated(drafts)
       notify.success(drafts.length === 1 ? 'Draft charge created.' : `${formatNumber(drafts.length)} draft charges created.`)
@@ -366,7 +438,7 @@ function NewChargeDialog({
               {created.map((row) => (
                 <Table.Tr key={row.id}>
                   <Table.Td>{row.containerRef}</Table.Td>
-                  <Table.Td ta="right">{formatMoney(row.amount, code)}</Table.Td>
+                  <Table.Td ta="right">{formatMoney(row.amount, isBivac ? baseCode : code)}</Table.Td>
                   <Table.Td ta="right">{formatNumber(row.amountBase, 2)}</Table.Td>
                   <Table.Td>
                     <Badge variant="light" color={posted ? 'green' : 'gray'}>{posted ? 'Posted' : row.statusName}</Badge>
@@ -376,6 +448,12 @@ function NewChargeDialog({
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
+        {isBivac && !posted && (
+          <Alert color="blue">
+            Posting a BIVAC charge also posts a BIVAC Out of 1 pc of {bivacOption?.itemCode ?? 'the BIVAC item'} from each container's
+            warehouse; cancelling the charge cancels it.
+          </Alert>
+        )}
         {method === 'Manual' && !posted && (
           <Alert color="yellow">Manual allocation: open each draft and set its split over the items before posting.</Alert>
         )}
@@ -397,29 +475,47 @@ function NewChargeDialog({
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" verticalSpacing="sm">
         {/* openOnFocus off: the dialog opens with the cursor here, and an open list over the form would take
             the next click - picking a movement replaces the containers the dialog was opened with. */}
-        <Select
+        <SearchSelect
           openOnFocus={false}
           label="Movement"
-          placeholder="Optional"
+          placeholder="Optional - type a movement no."
           description="Picking one puts the charge on its containers"
-          data={movements.map((m) => ({ value: String(m.id), label: `${m.movementNo} - ${m.typeName} (${m.fromCode} → ${m.toCode})` }))}
+          load={loadMovements}
+          selected={pickedMovement}
           value={movementId}
-          onChange={chooseMovement}
-          searchable
+          onChange={(next) => chooseMovement(next)}
           clearable
           nothingFoundMessage="No movement matches"
         />
-        <MultiSelect
-          label="Containers"
-          withAsterisk
-          placeholder={containerIds.length ? undefined : 'Choose containers'}
-          data={containerData}
-          value={containerIds}
-          onChange={setContainerIds}
-          searchable
-          nothingFoundMessage="No container matches"
-          error={errors.containers}
-        />
+        {movementContainers ? (
+          <MultiSelect
+            label="Containers"
+            withAsterisk
+            description={`The containers of the movement: ${formatNumber(containerIds.length)} chosen`}
+            placeholder={containerIds.length ? undefined : 'Choose containers'}
+            data={movementData}
+            value={containerIds}
+            onChange={setContainerIds}
+            searchable
+            hidePickedOptions
+            nothingFoundMessage="No container matches"
+            error={errors.containers}
+          />
+        ) : (
+          <SearchMultiSelect
+            label="Containers"
+            withAsterisk
+            description={containerIds.length > 0 ? `${formatNumber(containerIds.length)} chosen` : 'Type a container ref or no.'}
+            placeholder={containerIds.length ? undefined : 'Choose containers'}
+            load={loadContainers}
+            selected={chosenOptions}
+            value={containerIds}
+            onChange={setContainerIds}
+            hidePickedOptions
+            nothingFoundMessage="No container matches"
+            error={errors.containers}
+          />
+        )}
 
         <Stack gap={4}>
           <Select
@@ -481,54 +577,84 @@ function NewChargeDialog({
         />
         <TextInput label="Description" placeholder="Optional" maxLength={200} value={description} onChange={(e) => setDescription(e.currentTarget.value)} />
 
-        <Select
-          label="Currency"
-          withAsterisk
-          data={currencies.map((c) => ({ value: String(c.id), label: currencyLabel(c) }))}
-          value={currencyId}
-          onChange={(next) => {
-            setCurrencyId(next)
-            void resolveRate(next, date)
-          }}
-          searchable
-          allowDeselect={false}
-          error={errors.currencyId}
-        />
-        {isBase ? (
-          <TextInput label="Exchange rate" value="1 (base currency)" readOnly />
-        ) : (
-          <NumberInput
-            label={`Exchange rate (${code} per 1 ${baseCode})`}
+        {isBivac ? (
+          <Select
+            label="Which BIVAC?"
             withAsterisk
-            placeholder={rateLoading ? 'Looking up…' : 'Enter a rate'}
-            value={rate ?? ''}
-            min={0}
-            decimalScale={6}
-            thousandSeparator=","
+            placeholder={containerIds.length === 0 ? 'Choose the containers first' : 'The BIVAC item'}
+            description={`Each container takes the item's cost at its port, in ${baseCode} (Item Definition › BIVAC cost per port)`}
+            data={(bivacOptions?.items ?? []).map((o) => ({
+              value: String(o.itemId),
+              label: `${o.itemCode} - ${o.itemName}${o.priced < o.containers ? ` (no cost for ${o.missingPorts ?? 'some ports'})` : ''}`,
+            }))}
+            value={bivacItemId}
+            onChange={setBivacItemId}
+            disabled={containerIds.length === 0}
+            searchable
+            nothingFoundMessage="No BIVAC item: tick BIVAC Item on an item in Item Definition"
+            error={errors.bivacItemId}
+          />
+        ) : (
+          <>
+          <Select
+            label="Currency"
+            withAsterisk
+            data={currencies.map((c) => ({ value: String(c.id), label: currencyLabel(c) }))}
+            value={currencyId}
             onChange={(next) => {
-              const parsed = numberInputValue(next)
-              setRate(parsed !== null && parsed > 0 ? parsed : null)
+              setCurrencyId(next)
+              void resolveRate(next, date)
             }}
-            error={errors.rate ?? (rateMissing && rate === null ? 'No rate is defined for this date — enter one.' : undefined)}
+            searchable
+            allowDeselect={false}
+            error={errors.currencyId}
+          />
+          {isBase ? (
+            <TextInput label="Exchange rate" value="1 (base currency)" readOnly />
+          ) : (
+            <NumberInput
+              label={`Exchange rate (${code} per 1 ${baseCode})`}
+              withAsterisk
+              placeholder={rateLoading ? 'Looking up…' : 'Enter a rate'}
+              value={rate ?? ''}
+              min={0}
+              decimalScale={6}
+              thousandSeparator=","
+              onChange={(next) => {
+                const parsed = numberInputValue(next)
+                setRate(parsed !== null && parsed > 0 ? parsed : null)
+              }}
+              error={errors.rate ?? (rateMissing && rate === null ? 'No rate is defined for this date — enter one.' : undefined)}
+            />
+          )}
+
+          <NumberInput
+            label={`Total amount (${code})`}
+            withAsterisk
+            placeholder="0.00"
+            value={total ?? ''}
+            min={0}
+            decimalScale={2}
+            fixedDecimalScale
+            thousandSeparator=","
+            onChange={(next) => setTotal(numberInputValue(next))}
+            description={!isBase && totalBase !== null ? `≈ ${formatMoney(totalBase, baseCode)}` : undefined}
+            error={errors.total}
+          />
+          </>
+        )}
+        {isBivac && (
+          <TextInput
+            label={`Total amount (${baseCode})`}
+            readOnly
+            value={bivacOption?.totalBase != null ? formatNumber(bivacOption.totalBase, 2) : '-'}
+            description="The sum of the costs at each container's port"
           />
         )}
-
-        <NumberInput
-          label={`Total amount (${code})`}
-          withAsterisk
-          placeholder="0.00"
-          value={total ?? ''}
-          min={0}
-          decimalScale={2}
-          fixedDecimalScale
-          thousandSeparator=","
-          onChange={(next) => setTotal(numberInputValue(next))}
-          description={!isBase && totalBase !== null ? `≈ ${formatMoney(totalBase, baseCode)}` : undefined}
-          error={errors.total}
-        />
         <Textarea label="Notes" autosize minRows={1} maxLength={500} value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
       </SimpleGrid>
 
+      {!isBivac && (
       <Radio.Group
         label="Split over the containers"
         value={splitRule}
@@ -540,6 +666,7 @@ function NewChargeDialog({
           ))}
         </SimpleGrid>
       </Radio.Group>
+      )}
 
       {chosen.length > 0 && (
         <Table.ScrollContainer minWidth={320}>
@@ -547,17 +674,27 @@ function NewChargeDialog({
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Container</Table.Th>
+                {isBivac && <Table.Th>Port</Table.Th>}
                 <Table.Th ta="right">Pieces</Table.Th>
-                <Table.Th ta="right">Amount ({code})</Table.Th>
+                <Table.Th ta="right">Amount ({isBivac ? baseCode : code})</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {chosen.map((row, index) => (
                 <Table.Tr key={row.id}>
                   <Table.Td>{row.ref}</Table.Td>
+                  {isBivac && <Table.Td>{bivacPortOf.get(row.id)?.portName ?? 'No port'}</Table.Td>}
                   <Table.Td ta="right">{formatNumber(row.pieces)}</Table.Td>
                   <Table.Td ta="right">
-                    {preview ? (
+                    {isBivac ? (
+                      bivacItemId === null ? (
+                        <Text span fz="sm" c="dimmed">choose the BIVAC</Text>
+                      ) : (() => {
+                        const portId = bivacPortOf.get(row.id)?.portId
+                        const cost = portId != null ? bivacCosts?.get(portId) : undefined
+                        return cost !== undefined ? formatNumber(cost, 2) : <Text span fz="sm" c="red">no cost for this port</Text>
+                      })()
+                    ) : preview ? (
                       formatNumber(preview[index], 2)
                     ) : (
                       <Text span fz="sm" c="dimmed">
@@ -568,7 +705,7 @@ function NewChargeDialog({
                 </Table.Tr>
               ))}
             </Table.Tbody>
-            {previewSum !== null && (
+            {!isBivac && previewSum !== null && (
               <Table.Tfoot>
                 <Table.Tr>
                   <Table.Th colSpan={2}>Total of the drafts</Table.Th>

@@ -6,8 +6,13 @@ interface DocumentSummaryProps {
   totalItems: number
   /** Base units, the measure the ledger moves in. */
   totalQuantity: number
-  totalCost: number
+  totalCost: number | null
   currencyCode: string
+  /**
+   * (94) False for a reader without View item costs (inventory.costs.view): the Total Cost row and the divider above it
+   * are not drawn. Absent: true.
+   */
+  showCost?: boolean
 }
 
 /**
@@ -21,7 +26,7 @@ interface DocumentSummaryProps {
  * types. The server's own totals are what a saved document shows, and the two agree because they are
  * the same arithmetic — but a total that only updated on save would make the form feel broken.
  */
-export function DocumentSummary({ totalItems, totalQuantity, totalCost, currencyCode }: DocumentSummaryProps) {
+export function DocumentSummary({ totalItems, totalQuantity, totalCost, currencyCode, showCost = true }: DocumentSummaryProps) {
   return (
     <Paper radius="lg" p="md" withBorder>
       <Title order={5} mb="sm">
@@ -39,12 +44,16 @@ export function DocumentSummary({ totalItems, totalQuantity, totalCost, currency
           <Text fw={500}>{formatNumber(totalQuantity)}</Text>
         </Group>
 
-        <Divider />
+        {showCost && (
+          <>
+            <Divider />
 
-        <Group justify="space-between">
-          <Text fw={600}>Total Cost</Text>
-          <Text fw={700} fz="lg">{money(totalCost, currencyCode)}</Text>
-        </Group>
+            <Group justify="space-between">
+              <Text fw={600}>Total Cost</Text>
+              <Text fw={700} fz="lg">{money(totalCost, currencyCode)}</Text>
+            </Group>
+          </>
+        )}
       </Stack>
     </Paper>
   )

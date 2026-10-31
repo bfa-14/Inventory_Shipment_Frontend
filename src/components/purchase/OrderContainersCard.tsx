@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Anchor, Badge, Checkbox, Group, Paper, Progress, ScrollArea, Table, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
+import { ContainerRowMenu } from '../logistics/ContainerRowMenu'
+import { useNextStep } from '../logistics/useNextStep'
+import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { containersApi, containerStatusColour, containerStatusLabel, type ContainerListDto } from '../../api/logistics/containers'
 import type { PurchaseInvoiceContainerDto } from '../../api/purchase/documents'
 import { dateLabel } from '../documents/documentKind'
@@ -8,8 +11,11 @@ import { formatNumber } from '../format'
 import { fillColour } from '../logistics/containerFill'
 import { ContainerFillCell } from '../logistics/ContainerFillLine'
 import { containerReceiptOf } from '../logistics/containerReceipt'
+import { WHOLE_BADGE } from '../logistics/movementContainers'
 import { ContainerSelectionBar } from '../logistics/ContainerSelectionBar'
 import { refreshSelection } from '../logistics/containerSelection'
+import { ShownRowsFooter } from '../ui/ShownRows'
+import { useShownRows } from '../ui/useShownRows'
 
 interface OrderContainersCardProps {
   purchaseOrderId: number
@@ -46,7 +52,9 @@ function receivedText(date: string, warehouseCode: string | null, row: Container
  * TICKED ROWS ARE CONTAINER LIST ROWS. The order's own figures come with the order; the rest — the
  * capacity and fill, the movement in progress that the quick selectors read — is the container
  * list for this order, asked again whenever the order is reloaded. Without containers.view that
- * list is refused and the card stays as it was: no checkboxes, no fill.
+ * list is refused and the card stays as it was: no checkboxes, no fill. EVERY PAGE OF IT (script 78:
+ * any number of containers): one page of 200 left the containers after it without a checkbox, out of
+ * "Select every container" and of the bulk actions.
  */
 export function OrderContainersCard({
   purchaseOrderId,
@@ -58,12 +66,20 @@ export function OrderContainersCard({
   emptyText = 'No container yet - use Add Container or Auto-plan.',
 }: OrderContainersCardProps) {
   const [rows, setRows] = useState<ContainerListDto[]>([])
+  // Drawn in steps (2,000 rows at once froze the page); every row is loaded, so the selection reaches all of them.
+  const shown = useShownRows(containers.length)
+  // (82) Each row's "…" menu takes the container's next step - the same dialog as on its page; the order reloads after.
+  const nextStep = useNextStep(onChanged, 'container')
 
   useEffect(() => {
     const controller = new AbortController()
-    containersApi
-      .list({ purchaseOrderId, pageSize: 200, sortBy: 'ContainerRef', sortDir: 'asc' }, controller.signal)
-      .then((result) => setRows(result.items))
+    fetchAllPages(
+      (page, pageSize) => containersApi.list({ purchaseOrderId, page, pageSize, sortBy: 'ContainerRef', sortDir: 'asc' }, controller.signal),
+      { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE },
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setRows(result.items)
+      })
       .catch(() => {
         if (!controller.signal.aborted) setRows([])
       })
@@ -128,10 +144,11 @@ export function OrderContainersCard({
                   <Table.Th ta="right">Received</Table.Th>
                   <Table.Th>Current location</Table.Th>
                   <Table.Th>ETA</Table.Th>
+                  <Table.Th w={44} aria-label="Actions" />
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {containers.map((c) => {
+                {containers.slice(0, shown.limit).map((c) => {
                   const row = byId.get(c.id)
                   return (
                     <Table.Tr key={c.id} bg={selectedIds.has(c.id) ? 'var(--mantine-color-blue-0)' : undefined} data-container-row={c.containerRef}>
@@ -148,14 +165,14 @@ export function OrderContainersCard({
                         </Table.Td>
                       ) : null}
                       <Table.Td>
-                        <Anchor component={Link} to={`/logistics/containers/${c.id}`} fz="sm" fw={600}>
+                        <Anchor component={Link} to={`/logistics/containers/${c.id}`} fz="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>
                           {c.containerRef}
                         </Anchor>
                       </Table.Td>
                       <Table.Td>{c.containerNo ?? '—'}</Table.Td>
                       <Table.Td>{c.containerTypeCode}</Table.Td>
                       <Table.Td>
-                        <Badge color={containerStatusColour(c.status)} variant={c.status === 7 ? 'filled' : 'light'}>
+                        <Badge color={containerStatusColour(c.status)} variant={c.status === 7 ? 'filled' : 'light'} styles={WHOLE_BADGE}>
                           {containerStatusLabel(c.status)}
                         </Badge>
                       </Table.Td>
@@ -178,14 +195,19 @@ export function OrderContainersCard({
                         {c.offloadedDate ? receivedText(c.offloadedDate, c.warehouseCode, row) : (c.currentLocation ?? '—')}
                       </Table.Td>
                       <Table.Td>{c.eta ? dateLabel(c.eta) : '—'}</Table.Td>
+                      <Table.Td>
+                        <ContainerRowMenu containerId={c.id} containerRef={c.containerRef} step={row ? nextStep.action(row) : null} onStep={() => row && nextStep.run(row)} />
+                      </Table.Td>
                     </Table.Tr>
                   )
                 })}
               </Table.Tbody>
             </Table>
           </ScrollArea>
+          <ShownRowsFooter limit={shown.limit} total={containers.length} noun="containers" more={shown.more} all={shown.all} />
         </>
       )}
+      {nextStep.dialogs}
     </Paper>
   )
 }

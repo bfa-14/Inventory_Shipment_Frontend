@@ -51,8 +51,8 @@ export const PURCHASE_ORDER: PurchaseKind = {
   route: '/purchase/orders',
   colour: 'blue',
   postVerb: 'Confirm',
-  postConfirm: () => 'Confirm this purchase order? The number is assigned and the ordered quantities count as incoming stock until they are received or the order is closed.',
-  postedBanner: 'The order is open: its quantities count as incoming stock, and goods can be received and invoiced against it.',
+  postConfirm: () => 'Confirm this purchase order? The number is assigned and the ordered quantities count as incoming stock until they are received.',
+  postedBanner: 'Its quantities count as incoming stock until they are received, and goods can be received and invoiced against it.',
   permissions: {
     view: PERMISSIONS.purchaseOrdersView,
     create: PERMISSIONS.purchaseOrdersCreate,
@@ -151,6 +151,28 @@ export function receiveNowLabel(warehouses: string[]): string {
   return `Receive the goods now into ${warehouses.join(', ')}`
 }
 
+/**
+ * (79) The PINV type receives the goods itself ("Affects on-hand"): said in the post confirmation instead of the
+ * "Receive the goods now" tick.
+ */
+/** (79) The post confirmation's first sentence then: the stock DOES change, through the goods receipt said below it. */
+export const INVOICE_POST_CONFIRM_RECEIVING = 'Post this purchase invoice? The number is assigned and the amount becomes payable to the supplier.'
+
+export function receiveOnPostText(warehouses: string[]): string {
+  return `Its goods are received at once into ${warehouses.join(', ')}: a goods receipt is made and posted with the invoice (Configuration › Document Types).`
+}
+
+/** (79) The Charges card of such an invoice: why it takes no late charge (the server refuses one with 67013). */
+export const NO_COST_LATE_CHARGES_TEXT =
+  'Late charges are not taken on this invoice: it does not change item costs, so a landed cost adjustment would change no cost. Container charges still enter the cost of goods received in containers.'
+
+/** (79) An invoice that does not change item costs: the "Cost of received goods" card and the page say why it is empty. */
+export const NO_COST_INVOICE_TEXT =
+  'This invoice does not change item costs (Configuration › Document Types): the goods received against it keep the order price (and their container charges).'
+
+/** (script 95) The reason when an invoice's goods all travel in containers: "Receive goods…" is hidden on it. */
+export const INVOICE_IN_CONTAINERS_TEXT = "This invoice's goods travel in containers: they are received with their containers."
+
 /** Why "Receive goods…" cannot be used on this supplier invoice (rule 15); null when it can. */
 export function invoiceReceiveReason(invoice: PurchaseDocumentDto): string | null {
   if (invoice.status === 'Draft') return 'Post the invoice first: goods are received against a posted invoice, or from the order.'
@@ -172,7 +194,7 @@ export function invoiceReceiveReason(invoice: PurchaseDocumentDto): string | nul
   }
   if (left <= 0) return 'Every piece of this invoice is already received.'
   if (outside > 0) return null
-  if (inContainers > 0) return "This invoice's goods travel in containers: they are received with their containers."
+  if (inContainers > 0) return INVOICE_IN_CONTAINERS_TEXT
   return 'The rest is in draft goods receipts: post or delete them first.'
 }
 
@@ -180,20 +202,81 @@ export function purchaseKindOf(code: PurchaseDocumentTypeCode | string | null | 
   return PURCHASE_KINDS.find((k) => k.code === code)
 }
 
-/** Draft grey, waiting for approval yellow, Posted green, Cancelled red — and Closed teal: finished, not undone. */
-export const PURCHASE_STATUS_COLOURS: Record<PurchaseDocumentStatus, string> = {
-  Draft: 'gray',
-  PendingApproval: 'yellow',
-  Posted: 'green',
-  Cancelled: 'red',
-  Closed: 'teal',
+/**
+ * WHAT A PURCHASE DOCUMENT SHOWS (script 77). The API's status, except on an approved order: the API keeps 'Posted' for
+ * every approved order (each "is it approved?" test reads it), and the order SHOWS how far its posted invoices cover it,
+ * from `invoicingStatus`: 0 Saved (none yet), 1 Partially posted, 2 Posted (everything ordered). Draft invoices and
+ * purchase returns do not change it. Invoices and returns show their own status. There is no Closed any more.
+ */
+export type PurchaseStatusShown = PurchaseDocumentStatus | 'Saved' | 'PartiallyPosted'
+
+export function purchaseStatusShown(
+  status: PurchaseDocumentStatus | string,
+  documentTypeCode?: PurchaseDocumentTypeCode | string | null,
+  invoicingStatus?: number | null,
+): PurchaseStatusShown | string {
+  if (status !== 'Posted' || documentTypeCode !== 'PO') return status
+  return invoicingStatus === 2 ? 'Posted' : invoicingStatus === 1 ? 'PartiallyPosted' : 'Saved'
 }
 
-export const PURCHASE_STATUSES: readonly PurchaseDocumentStatus[] = ['Draft', 'PendingApproval', 'Posted', 'Cancelled', 'Closed']
+/** Draft grey, waiting for approval yellow, Cancelled red; an order Saved blue, Partially posted orange, Posted green. */
+export const PURCHASE_STATUS_COLOURS: Record<PurchaseStatusShown, string> = {
+  Draft: 'gray',
+  PendingApproval: 'yellow',
+  Saved: 'blue',
+  PartiallyPosted: 'orange',
+  Posted: 'green',
+  Cancelled: 'red',
+}
 
-/** How a status reads on screen: the API's names, except the one that is two words run together. */
-export function purchaseStatusLabel(status: PurchaseDocumentStatus | string): string {
-  return status === 'PendingApproval' ? 'Waiting for approval' : status
+/** How a status reads on screen. Pass the document type and, for an order, its `invoicingStatus`. */
+export function purchaseStatusLabel(
+  status: PurchaseDocumentStatus | string,
+  documentTypeCode?: PurchaseDocumentTypeCode | string | null,
+  invoicingStatus?: number | null,
+): string {
+  const shown = purchaseStatusShown(status, documentTypeCode, invoicingStatus)
+  if (shown === 'PendingApproval') return 'Waiting for approval'
+  if (shown === 'PartiallyPosted') return 'Partially posted'
+  return shown
+}
+
+export function purchaseStatusColour(
+  status: PurchaseDocumentStatus | string,
+  documentTypeCode?: PurchaseDocumentTypeCode | string | null,
+  invoicingStatus?: number | null,
+): string {
+  return PURCHASE_STATUS_COLOURS[purchaseStatusShown(status, documentTypeCode, invoicingStatus) as PurchaseStatusShown] ?? 'gray'
+}
+
+/** One choice of a list's Status filter: the status sent to the API and, for an order's stage, its invoicing status. */
+export interface PurchaseStatusFilter {
+  value: string
+  label: string
+  status: PurchaseDocumentStatus
+  invoicingStatus?: 0 | 1 | 2
+}
+
+/**
+ * The Status filter of a list. Orders: Draft, Waiting for approval, Saved, Partially posted, Posted, Cancelled (the three
+ * stages are status Posted + invoicingStatus 0 / 1 / 2). Invoices and returns are never waiting for approval.
+ */
+export function purchaseStatusFilters(code: PurchaseDocumentTypeCode): PurchaseStatusFilter[] {
+  if (code !== 'PO') {
+    return [
+      { value: 'Draft', label: 'Draft', status: 'Draft' },
+      { value: 'Posted', label: 'Posted', status: 'Posted' },
+      { value: 'Cancelled', label: 'Cancelled', status: 'Cancelled' },
+    ]
+  }
+  return [
+    { value: 'Draft', label: 'Draft', status: 'Draft' },
+    { value: 'PendingApproval', label: 'Waiting for approval', status: 'PendingApproval' },
+    { value: 'Saved', label: 'Saved', status: 'Posted', invoicingStatus: 0 },
+    { value: 'PartiallyPosted', label: 'Partially posted', status: 'Posted', invoicingStatus: 1 },
+    { value: 'Posted', label: 'Posted', status: 'Posted', invoicingStatus: 2 },
+    { value: 'Cancelled', label: 'Cancelled', status: 'Cancelled' },
+  ]
 }
 
 /** "SUP-0001 - TVS Motor Company" — code first, so a typed code finds the supplier at once. */
@@ -204,4 +287,23 @@ export function supplierLabel(party: { partyCode: string; partyName: string }): 
 /** "CDF - Congolese Franc" */
 export function currencyLabel(currency: { currencyCode: string; currencyName: string }): string {
   return `${currency.currencyCode} - ${currency.currencyName}`
+}
+
+/**
+ * WHAT CANCELLING DOES, said in its dialog, for the page and the list alike. An invoice that brought no stock of its own
+ * (posted since goods receipts, or shipped in containers) moves no stock when cancelled: its received pieces go back to
+ * the order price (the server's PINVCANCEL true-up). An order never moves stock. Only an old local invoice reverses its
+ * stock rows, which is the dialog's default sentence (undefined here). The list knows no usesGoodsReceipts: it passes
+ * null, and a local invoice there keeps the default sentence.
+ */
+export function cancelDescription(
+  documentTypeCode: PurchaseDocumentTypeCode | string,
+  usesGoodsReceipts: boolean | null | undefined,
+  receiptMode: number | null | undefined,
+): string | undefined {
+  if (documentTypeCode === 'PINV' && (usesGoodsReceipts === true || receiptMode === 2))
+    return 'Cancelling makes the amount no longer payable and leaves the invoice in place as a record. The stock does not change: goods already received go back to the order price (goods without an order keep their cost at receipt), and the difference is booked to the stock value and the cost of sales. It cannot be undone.'
+  if (documentTypeCode === 'PO')
+    return 'Cancelling leaves the order in place as a record: it no longer counts as incoming stock, and nothing can be received or invoiced against it. The stock does not change. It cannot be undone.'
+  return undefined
 }

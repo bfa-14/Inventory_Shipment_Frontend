@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Anchor, Breadcrumbs, Group, Stack, Text, Title } from '@mantine/core'
 import { Link } from 'react-router'
 
@@ -14,12 +14,41 @@ interface PageHeaderProps {
   breadcrumbs?: Crumb[]
   /** Buttons shown on the right of the header. */
   actions?: ReactNode
+  /** Shown on the title's line, after it - status badges. */
+  titleExtra?: ReactNode
+  /**
+   * Title and subtitle on one line each, cut with an ellipsis, and the title block gives way before the actions do.
+   * For a header that stays on screen (Item Definition's sticky header), where a wrapped title would push the buttons
+   * out of reach on a phone.
+   */
+  truncateTitle?: boolean
+  /**
+   * With `truncateTitle`: the badges of `titleExtra` may go under the title when both do not fit on one line (script
+   * 93: a tracked item's code and its four badges). Off by default, so every other header keeps one line.
+   */
+  wrapTitleExtra?: boolean
 }
 
-export function PageHeader({ title, subtitle, breadcrumbs, actions }: PageHeaderProps) {
+const ONE_LINE: CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }
+
+export function PageHeader({
+  title,
+  subtitle,
+  breadcrumbs,
+  actions,
+  titleExtra,
+  truncateTitle = false,
+  wrapTitleExtra = false,
+}: PageHeaderProps) {
+  const titleNode = (
+    <Title order={2} style={truncateTitle ? ONE_LINE : undefined} title={truncateTitle ? title : undefined}>
+      {title}
+    </Title>
+  )
+
   return (
     <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm" mb="md">
-      <Stack gap={4}>
+      <Stack gap={4} style={truncateTitle ? { minWidth: 0, flex: '1 1 16rem' } : undefined}>
         {breadcrumbs && breadcrumbs.length > 0 ? (
           <Breadcrumbs separator="›" fz="sm" mb={2}>
             {breadcrumbs.map((crumb) =>
@@ -36,9 +65,23 @@ export function PageHeader({ title, subtitle, breadcrumbs, actions }: PageHeader
           </Breadcrumbs>
         ) : null}
 
-        <Title order={2}>{title}</Title>
+        {titleExtra ? (
+          /* With truncateTitle the badges stay beside the title, which cuts with an ellipsis; wrapTitleExtra (script 93,
+             a tracked item: its code, status, BIVAC and tracking badges) lets them go under it instead. */
+          <Group
+            gap="sm"
+            wrap={truncateTitle && !wrapTitleExtra ? 'nowrap' : 'wrap'}
+            miw={0}
+            style={wrapTitleExtra ? { rowGap: 4 } : undefined}
+          >
+            {titleNode}
+            {titleExtra}
+          </Group>
+        ) : (
+          titleNode
+        )}
         {subtitle ? (
-          <Text c="dimmed" fz="sm">
+          <Text c="dimmed" fz="sm" style={truncateTitle ? ONE_LINE : undefined} title={truncateTitle ? subtitle : undefined}>
             {subtitle}
           </Text>
         ) : null}

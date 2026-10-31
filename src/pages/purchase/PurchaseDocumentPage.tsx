@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Alert, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
+import { Alert, Badge, Button, Grid, Group, Loader, Paper, Progress, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
 import {
   IconArrowBackUp,
   IconArrowsSplit,
@@ -8,7 +8,6 @@ import {
   IconBoxMultiple,
   IconCheck,
   IconFileInvoice,
-  IconLock,
   IconMail,
   IconPackageImport,
   IconPlus,
@@ -52,7 +51,6 @@ import { InvoiceFromContainersModal } from '../../components/logistics/InvoiceFr
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { announceApproved } from '../../components/purchase/approvalNotices'
 import { ApprovalTimeline } from '../../components/purchase/ApprovalTimeline'
-import { CloseOrderModal } from '../../components/purchase/CloseOrderModal'
 import { LinkedDocumentsCard } from '../../components/purchase/LinkedDocumentsCard'
 import { CreateInvoiceFromOrderModal } from '../../components/purchase/CreateInvoiceFromOrderModal'
 import { CreatedInvoicesModal } from '../../components/purchase/CreatedInvoicesModal'
@@ -82,10 +80,16 @@ import { PurchaseHeaderCard, type PurchaseHeader, type PurchaseHeaderErrors } fr
 import {
   invoicePostedBanner,
   invoiceReceiveReason,
+  INVOICE_IN_CONTAINERS_TEXT,
   LEGACY_INVOICE_TEXTS,
+  NO_COST_INVOICE_TEXT,
+  NO_COST_LATE_CHARGES_TEXT,
   PURCHASE_INVOICE,
   PURCHASE_RETURN,
+  purchaseStatusColour,
+  purchaseStatusLabel,
   type PurchaseKind,
+  cancelDescription as purchaseCancelDescription,
 } from '../../components/purchase/purchaseKind'
 import { defaultPurchasePrice, lineMaximum, purchaseUnitOf } from '../../components/purchase/purchaseLines'
 import { PurchaseLinesGrid, type PurchaseLine } from '../../components/purchase/PurchaseLinesGrid'
@@ -101,6 +105,14 @@ import { pricingOf, useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 import { defaultLineWarehouseId, lineWarehouseOptions } from '../../components/documents/lineWarehouses'
+import {
+  canUseWarehouse,
+  defaultBranchIdFor,
+  hasNoUsableWarehouse,
+  isWarehouseRestricted,
+  NO_USABLE_WAREHOUSE,
+  postAccessBlockedReason,
+} from '../../auth/warehouseAccess'
 
 let keySeed = 0
 const nextKey = () => `pur-${++keySeed}`
@@ -112,6 +124,18 @@ function emptyLine(warehouseId: number | null): PurchaseLine {
     units: [], quantity: 1, unitPrice: null, discountPercent: 0, expiryDate: null, notes: '', onHandBase: null,
     importRowNumber: null, sourceLineId: null, sourceRemainingBase: null,
   }
+}
+
+/**
+ * What an approved order's posted invoices cover (script 77): the sentence under its Saved / Partially posted / Posted
+ * banner. Draft invoices do not count; the progress card below has the figures.
+ */
+function orderStageSentence(order: PurchaseDocumentDto): string {
+  const ordered = order.orderedBase ?? 0
+  const invoiced = order.invoicedBase ?? 0
+  if (order.invoicingStatus === 2) return `Posted invoices cover everything ordered (${formatNumber(ordered)} pcs).`
+  if (order.invoicingStatus === 1) return `Posted invoices cover ${formatNumber(invoiced)} of ${formatNumber(ordered)} pcs.`
+  return 'No supplier invoice is posted against it yet.'
 }
 
 /** Focuses an input a state change is about to draw; a few short retries because React commits on its own schedule. */
@@ -209,8 +233,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   const [importOpen, setImportOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelBusy, setCancelBusy] = useState(false)
-  const [closeOpen, setCloseOpen] = useState(false)
-  const [closeBusy, setCloseBusy] = useState(false)
   /* An order shipped in containers: Add Container and the invoice made from its containers. */
   const [addContainerOpen, setAddContainerOpen] = useState(false)
   const [autoPlanOpen, setAutoPlanOpen] = useState(false)
@@ -278,16 +300,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
      posted (the server marks it then). */
   const legacyInvoice =
     kind.code === 'PINV' && document != null && document.status !== 'Draft' && document.usesGoodsReceipts !== true && document.receiptMode === 1
-  /* WHAT CANCELLING DOES, said in its dialog (decision 3). An invoice that brought no stock of its own (posted since goods
-     receipts, or shipped in containers) moves no stock when cancelled: its received pieces go back to the order price
-     (the server's PINVCANCEL true-up). An order never moves stock. Only an old local invoice reverses its stock rows,
-     which is the dialog's default sentence. */
-  const cancelDescription =
-    kind.code === 'PINV' && document != null && (document.usesGoodsReceipts === true || document.receiptMode === 2)
-      ? 'Cancelling makes the amount no longer payable and leaves the invoice in place as a record. The stock does not change: goods already received go back to the order price (goods without an order keep their cost at receipt), and the difference is booked to the stock value and the cost of sales. It cannot be undone.'
-      : kind.code === 'PO'
-        ? 'Cancelling leaves the order in place as a record: it no longer counts as incoming stock, and nothing can be received or invoiced against it. The stock does not change. It cannot be undone.'
-        : undefined
+  /* What cancelling does, said in its dialog (decision 3): purchaseKind.cancelDescription. */
+  const cancelDescription = purchaseCancelDescription(kind.code, document?.usesGoodsReceipts, document?.receiptMode)
   /* The gray "Posted before goods receipts" hint: an old local invoice, and an older "Shipped in containers" one whose
      containers were all offloaded the old way - the server gives exactly that reason for "Receive goods…" then. */
   const legacyHint =
@@ -530,10 +544,27 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     }
   }, [])
 
+  /* (92) WAREHOUSE ACCESS LIMITS A PURCHASE RETURN ONLY: orders and invoices move no stock (A6), so their pickers keep
+     every leaf. A return's lines offer the reader's own warehouses, a held one kept and marked. */
+  const accessLimited = kind.code === 'PRET'
+
   useEffect(() => {
     if (header.branchId === null) return
-    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId)))
-  }, [header.branchId, warehouses])
+    setDefaultWarehouseId((current) => current ?? defaultLineWarehouseId(warehouses, Number(header.branchId), accessLimited))
+  }, [header.branchId, warehouses, accessLimited])
+
+  /* (92) A NEW RETURN OF A RESTRICTED READER STARTS WHERE THEY MAY MOVE STOCK (A17), once, while nothing is changed. */
+  const branchSettled = useRef(false)
+  useEffect(() => {
+    if (!accessLimited || !isNew || branchSettled.current || branches.length === 0 || warehouses.length === 0) return
+    branchSettled.current = true
+    if (dirty.current || !isWarehouseRestricted(warehouses)) return
+    const branchId = defaultBranchIdFor(branches, warehouses, header.branchId === null ? null : Number(header.branchId))
+    if (branchId !== null && String(branchId) !== header.branchId) {
+      setDefaultWarehouseId(null)
+      setHeader((current) => ({ ...current, branchId: String(branchId) }))
+    }
+  }, [accessLimited, isNew, branches, warehouses, header.branchId])
 
   /* The rate follows the currency, the type and the date — but overwrites a loaded document's own
      rate only once the reader changed one of the three. */
@@ -982,7 +1013,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     if (kind.code === 'PINV') {
       // A supplier invoice moves no stock: the question says so, estimates what it does to the goods already received,
       // and may receive the goods at once (rule 15a).
-      const answer = await askInvoicePost(saved, canReceiveGoods && canPostReceipts)
+      const answer = await askInvoicePost(saved, canReceiveGoods && canPostReceipts, (warehouseId) =>
+        canUseWarehouse(warehouses.find((w) => w.id === warehouseId)),
+      )
       if (!answer.post) return
       receiveNow = answer.receiveNow
     } else {
@@ -1009,9 +1042,14 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   /**
    * What the posting did besides posting, in the server's words: the cost of goods already received adjusted, and with
    * "Receive the goods now" the receipt - or why it was not made (the invoice stays posted either way).
+   *
+   * A RECEIPT WAS TRIED when the tick asked for one, or when the invoice's type receives its goods (script 79): then the
+   * tick is not offered, so the answer itself says it - a receipt made, or the refusal in its warning. A refusal is
+   * never left unsaid behind "posted".
    */
   function announcePosting(result: PostPurchaseDocumentResult, receiveNow: boolean) {
-    if (!receiveNow) {
+    const tried = receiveNow || result.goodsReceipt !== null || result.receiveWarning !== null
+    if (!tried) {
       if (result.message) notify.info(result.message)
       return
     }
@@ -1040,20 +1078,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       showApiError(error)
     } finally {
       setCancelBusy(false)
-    }
-  }
-
-  async function closeOrder(reason: string | null) {
-    if (!document) return
-    setCloseBusy(true)
-    try {
-      applyDocument(await purchaseDocumentsApi.close(document.id, reason, document.rowVersion))
-      notify.success('Purchase order closed.')
-      setCloseOpen(false)
-    } catch (error) {
-      showApiError(error)
-    } finally {
-      setCloseBusy(false)
     }
   }
 
@@ -1313,6 +1337,19 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
   }
 
   const documentLabel = document?.documentNumber ?? `draft #${document?.id}`
+  /* (92) A purchase return's Save & Post waits while a CURRENT line is in a warehouse the reader may not use (the
+     server's sentence while those are the stored draft's); its Cancel takes the server's refusal. Never on PO / PINV,
+     except the Cancel of a supplier invoice posted before goods receipts: it takes the invoice's own stock back out, so
+     the server sends its refusal for that invoice too (null on every other invoice). */
+  const postAccessBlocked = accessLimited
+    ? postAccessBlockedReason(
+        warehouses,
+        lines.map((l) => l.warehouseId),
+        document ? [document.warehouseId, ...document.lines.map((l) => l.warehouseId)] : [],
+        document?.warehouseAccessRefusal,
+      )
+    : null
+  const accessRefusal = accessLimited || kind.code === 'PINV' ? (document?.warehouseAccessRefusal ?? null) : null
   const canImportHere = editable && canImport && !fromSource && header.branchId !== null && defaultWarehouseId !== null
   const source = document && document.sourceDocumentId !== null
     ? { id: document.sourceDocumentId, documentNumber: document.sourceDocumentNumber, documentTypeCode: document.sourceDocumentTypeCode ?? (kind.code === 'PRET' ? 'PINV' : 'PO') }
@@ -1339,7 +1376,11 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
     kind.code === 'PO'
       ? (abilities?.receiveGoods ?? { visible: false, blockedBy: null })
       : kind.code === 'PINV' && document
-        ? { visible: canReceiveGoods, blockedBy: canReceiveGoods ? invoiceReceiveReason(document) : null }
+        ? // (95) hidden while every piece travels in containers: they are received from the delivered container
+          {
+            visible: canReceiveGoods && invoiceReceiveReason(document) !== INVOICE_IN_CONTAINERS_TEXT,
+            blockedBy: canReceiveGoods ? invoiceReceiveReason(document) : null,
+          }
         : { visible: false, blockedBy: null }
   const receiveAction: DocumentAction = {
     key: 'receive-goods',
@@ -1363,7 +1404,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       : null
   /* Received / Invoiced / Short on an approved order's lines, Received on a posted invoice's. */
   const lineReceipts =
-    kind.code === 'PO' && (status === 'Posted' || status === 'Closed')
+    kind.code === 'PO' && status === 'Posted'
       ? ('order' as const)
       : kind.code === 'PINV' && (status === 'Posted' || status === 'Cancelled')
         ? ('invoice' as const)
@@ -1383,8 +1424,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.createInvoice), loading: saving, onClick: () => void createFromThis() },
         { key: 'create-return', label: 'Create Purchase Return', icon: <IconArrowBackUp size={16} />, variant: 'filled', colour: 'orange', visible: canCreateReturn && document?.canCreateReturn === true, loading: saving, onClick: () => void createFromThis() },
-        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
-        { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, onClick: () => setCancelOpen(true) },
+        { key: 'cancel-doc', label: 'Cancel Document', icon: DocumentIcons.cancel, colour: 'red', visible: canCancelDoc && document?.canCancel === true, disabled: accessRefusal !== null, disabledReason: accessRefusal ?? undefined, menuWhenDisabled: accessRefusal !== null, onClick: () => setCancelOpen(true) },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(kind.route) },
       ]
     : [
@@ -1396,8 +1436,8 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         // its goods are received once it is posted.
         receiveAction,
         { key: 'create-invoice', label: 'Create Purchase Invoice', icon: <IconFileInvoice size={16} />, colour: 'green', ...orderAction(abilities?.createInvoice), onClick: () => void createFromThis() },
-        { key: 'close', label: 'Close Order', icon: <IconLock size={16} />, colour: 'teal', ...orderAction(abilities?.closeOrder), onClick: () => setCloseOpen(true) },
-        { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, visible: editable, loading: saving, onClick: () => void saveDraft() },
+        // (92) A return's Save & Post refused for a warehouse that is not the reader's: Save Draft is then the primary.
+        { key: 'save', label: 'Save Draft', icon: DocumentIcons.save, variant: postAccessBlocked !== null ? 'filled' : undefined, colour: postAccessBlocked !== null ? kind.colour : undefined, visible: editable, loading: saving, onClick: () => void saveDraft() },
         { key: 'cancel', label: 'Cancel', icon: DocumentIcons.cancel, onClick: () => void leave() },
         ...(creating
           ? ([
@@ -1413,14 +1453,29 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
                 { key: 'send-approval', label: 'Send for approval', icon: <IconSend size={16} />, variant: abilities?.approveDirect.visible ? 'default' : 'filled', colour: kind.colour, ...orderAction(abilities?.sendForApproval), loading: saving || approvalBusy, onClick: () => void sendForApproval() },
                 { key: 'approve-now', label: 'Approve & post', icon: <IconCheck size={16} />, variant: 'filled', colour: 'green', ...orderAction(abilities?.approveDirect), loading: saving || approvalBusy, onClick: () => void approveNow() },
               ] satisfies DocumentAction[])
-            : [{ key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: editable && canPost, loading: saving, onClick: () => void saveAndPost() } satisfies DocumentAction]),
+            : [{ key: 'post', label: 'Save & Post', icon: DocumentIcons.post, variant: 'filled', colour: kind.colour, visible: editable && canPost, disabled: postAccessBlocked !== null, disabledReason: postAccessBlocked ?? undefined, menuWhenDisabled: postAccessBlocked !== null, loading: saving, onClick: () => void saveAndPost() } satisfies DocumentAction]),
       ]
 
   return (
     <Stack>
-      <PageHeader title={isNew ? `New ${kind.title}` : `${kind.title} ${documentLabel}`} />
+      <PageHeader
+        title={isNew ? `New ${kind.title}` : `${kind.title} ${documentLabel}`}
+        actions={
+          document ? (
+            // What the document shows: an approved order says how far its posted invoices go (script 77).
+            <Badge size="lg" variant="light" color={purchaseStatusColour(status, kind.code, document.invoicingStatus)} data-status-badge>
+              {purchaseStatusLabel(status, kind.code, document.invoicingStatus)}
+            </Badge>
+          ) : undefined
+        }
+      />
 
       <DocumentActionBar actions={actions} />
+      {editable && accessLimited && hasNoUsableWarehouse(warehouses) && (
+        <Alert color="orange" data-no-usable-warehouse>
+          {NO_USABLE_WAREHOUSE}
+        </Alert>
+      )}
 
       {/* A rejected order is a draft again: why, first, so the author knows what to change before sending it again. */}
       {approvalState?.status === 'Draft' && approvalState.lastRejectReason && (
@@ -1453,8 +1508,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       )}
 
       {document && status === 'Posted' && (
-        <Alert color={kind.colour} title={`${kind.code === 'PO' ? 'Confirmed' : 'Posted'} — ${document.documentNumber}`}>
+        <Alert color={kind.colour} title={`${kind.code === 'PO' ? purchaseStatusLabel(status, kind.code, document.invoicingStatus) : 'Posted'} — ${document.documentNumber}`}>
           {kind.code === 'PO' ? 'Confirmed' : 'Posted'} by {document.postedByName ?? 'unknown'} on {stamp(document.postedAtUtc)}.{' '}
+          {kind.code === 'PO' && `${orderStageSentence(document)} `}
           {/* An invoice says what has come in; only an old local invoice keeps its old sentence (its posting added the stock). */}
           {kind.code !== 'PINV' || legacyInvoice ? kind.postedBanner : invoicePostedBanner(invoiceReceived, invoiceQuantity)}
           {approvalState?.sentToSupplierAtUtc ? ` Sent to the supplier on ${stamp(approvalState.sentToSupplierAtUtc)}.` : ''}
@@ -1465,15 +1521,9 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           )}
         </Alert>
       )}
-      {approvalState?.supplierNotEmailed && (status === 'Posted' || status === 'Closed') && (
+      {approvalState?.supplierNotEmailed && status === 'Posted' && (
         <Alert color="orange" title="Not sent to the supplier" data-supplier-not-emailed>
           Not sent to the supplier: no email address. Add it to the supplier, then use Send to supplier.
-        </Alert>
-      )}
-      {document && status === 'Closed' && (
-        <Alert color="teal" title={`Closed — ${document.documentNumber}`}>
-          Closed by {document.closedByName ?? 'unknown'} on {stamp(document.closedAtUtc)}.{reasonSentence(document.closeReason)}{' '}
-          {kind.code === 'PO' ? 'No more invoices will be made from it; goods already invoiced and not yet received can still be received.' : ''}
         </Alert>
       )}
       {document && status === 'Cancelled' && (
@@ -1605,7 +1655,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onRemove={removeLine}
           onAdd={addEmptyLine}
           items={items}
-          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId))}
+          warehouses={lineWarehouseOptions(warehouses, header.branchId === null ? null : Number(header.branchId), lines.map((l) => l.warehouseId), accessLimited)}
           onItemChosen={(key, itemId) => void chooseItem(key, itemId)}
           onUnitChosen={(key, unit) => void unitChosen(key, unit)}
           onUnitsNeeded={(key) => void loadUnits(key)}
@@ -1723,6 +1773,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           canView={canViewLateCharges}
           canAdd={canAddLateCharge}
           canPost={canPostLateCharges}
+          lateChargesBlockedReason={document.affectsCost === false ? NO_COST_LATE_CHARGES_TEXT : null}
           onPosted={() => void refreshQuietly()}
         />
       )}
@@ -1746,6 +1797,17 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       {/* What this invoice did to the cost of goods already received (goods receipts, rule 10). */}
       {kind.code === 'PINV' && document && (document.costAdjustments?.length ?? 0) > 0 && (
         <InvoiceReceiptCostCard adjustments={document.costAdjustments ?? []} currencyCode={baseCode} />
+      )}
+      {/* (79) Posted without changing item costs: the card says why there is nothing to show. */}
+      {kind.code === 'PINV' && document && status === 'Posted' && document.affectsCost === false && (document.costAdjustments?.length ?? 0) === 0 && (
+        <Paper radius="lg" p="md" withBorder data-receipt-cost-card data-no-cost-invoice>
+          <Title order={5} mb={4}>
+            Cost of received goods
+          </Title>
+          <Text size="sm" c="dimmed">
+            {NO_COST_INVOICE_TEXT}
+          </Text>
+        </Paper>
       )}
 
       <DocumentAttachmentsCard
@@ -1866,7 +1928,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         <AddContainerModal
           opened
           onClose={() => setAddContainerOpen(false)}
-          order={{ id: document.id, documentNumber: document.documentNumber, branchId: document.branchId, warehouseId: document.warehouseId }}
+          order={{
+            id: document.id,
+            documentNumber: document.documentNumber,
+            branchId: document.branchId,
+            warehouseId: document.warehouseId,
+            supplierId: document.supplierId,
+            supplierCode: document.supplierCode,
+            supplierName: document.supplierName,
+          }}
           canOverCapacity={canOverCapacity}
           onSaved={(container, open) => {
             setAddContainerOpen(false)
@@ -1878,7 +1948,15 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
 
       {kind.code === 'PO' && document && autoPlanOpen && (
         <AutoPlanModal
-          order={{ id: document.id, documentNumber: document.documentNumber, branchId: document.branchId, warehouseId: document.warehouseId }}
+          order={{
+            id: document.id,
+            documentNumber: document.documentNumber,
+            branchId: document.branchId,
+            warehouseId: document.warehouseId,
+            supplierId: document.supplierId,
+            supplierCode: document.supplierCode,
+            supplierName: document.supplierName,
+          }}
           canOverCapacity={canOverCapacity}
           canConfirm={canConfirmContainers}
           onClose={() => setAutoPlanOpen(false)}
@@ -1976,8 +2054,6 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
           onClose={() => setReceiveOpen(false)}
         />
       )}
-
-      <CloseOrderModal opened={closeOpen} onClose={() => setCloseOpen(false)} documentLabel={documentLabel} busy={closeBusy} onConfirm={(reason) => void closeOrder(reason)} />
 
       {canImportHere && (
         <ImportInvoiceItemsWizard

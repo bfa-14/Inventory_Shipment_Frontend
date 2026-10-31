@@ -8,7 +8,6 @@ import {
   Grid,
   Group,
   Loader,
-  Modal,
   Paper,
   ScrollArea,
   Select,
@@ -23,6 +22,7 @@ import {
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
+import { notifications } from '@mantine/notifications'
 import {
   IconArrowLeft,
   IconBan,
@@ -35,8 +35,9 @@ import {
   IconTrash,
 } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
+import { fetchAllPages, WHOLE_LIST_PAGE_SIZE } from '../../api/fetchAllPages'
 import { containersApi } from '../../api/logistics/containers'
-import { movementsApi, movementStatusColour, type MovementDto, type SaveMovementRequest } from '../../api/logistics/movements'
+import { movementsApi, movementStatusColour, type MovementDto, type MovementSplitResultDto, type SaveMovementRequest } from '../../api/logistics/movements'
 import { movementTypesApi, SINGLE_PLACE_STAGES, stageExplanation, type MovementTypeLookupDto } from '../../api/masterdata/movementTypes'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
@@ -47,24 +48,30 @@ import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
 import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber, todayDateOnly } from '../../components/format'
-import { DeliveryCancelDrafts, DeliveryCompletePreview } from '../../components/logistics/DeliveryReceipts'
-import { showDeliveryResult } from '../../components/logistics/deliveryNotification'
+import { DeliveryCancelDrafts } from '../../components/logistics/DeliveryReceipts'
 import { MovementContainersCard } from '../../components/logistics/MovementContainersCard'
 import { MovementDocumentsCard } from '../../components/logistics/MovementDocumentsCard'
+import { MovementStatusModal } from '../../components/logistics/MovementStatusModal'
+import { NextStepBulkModal } from '../../components/logistics/NextStepBulkModal'
+import { NextStepModal } from '../../components/logistics/NextStepModal'
 import { fromSaved, type CardContainer } from '../../components/logistics/movementContainers'
 import { StageIcon } from '../../components/logistics/movementStage'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
+import { FROM_LOCKED_HINT, placeOptionGroups } from '../../components/logistics/shipStep'
+import { splitUndoText } from '../../components/logistics/splitUndo'
 import { confirm } from '../../components/ui/confirm'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../navigation'
 import { MOVEMENTS_ROUTE } from './MovementsPage'
+import { useDocumentTypes } from '../../hooks/useDocumentTypes'
 
 /** The stage whose completion brings the containers to the warehouse: a draft goods receipt for each (rule 5). */
 const DELIVERY = 'Delivery'
 
 const CONTAINERS_ROUTE = '/logistics/containers'
+const SHIPMENTS_ROUTE = '/logistics/shipments'
 
 interface FormValues {
   movementTypeId: string | null
@@ -93,8 +100,6 @@ const EMPTY: FormValues = {
   reference: '',
   notes: '',
 }
-
-type Option = { value: string; label: string }
 
 const CHARGE_STATUSES: Record<number, { label: string; colour: string }> = {
   1: { label: 'Draft', colour: 'gray' },
@@ -133,7 +138,10 @@ function keepDetails(saved: CardContainer, before: CardContainer | undefined, ke
   }
 }
 
-/** What happened to the movement, newest first, from the stamps the movement carries. */
+/**
+ * What happened to the movement, newest first: the stamps the movement carries, and (82) its history beyond them - a
+ * split, "Split off into MOV-…: KTG-…" on the original, "Split from MOV-…: KTG-… arrived on its own." on the new one.
+ */
 function auditOf(dto: MovementDto): AuditEntry[] {
   const entries: (AuditEntry | null)[] = [
     { action: 'Created', details: null, userName: dto.createdByName, atUtc: dto.createdAtUtc },
@@ -141,6 +149,7 @@ function auditOf(dto: MovementDto): AuditEntry[] {
     dto.startedAtUtc ? { action: 'Started', details: dto.startDate ? `Start date ${dateLabel(dto.startDate)}` : null, userName: dto.startedByName, atUtc: dto.startedAtUtc } : null,
     dto.completedAtUtc ? { action: 'Completed', details: dto.endDate ? `End date ${dateLabel(dto.endDate)}` : null, userName: dto.completedByName, atUtc: dto.completedAtUtc } : null,
     dto.cancelledAtUtc ? { action: 'Cancelled', details: dto.cancelReason, userName: dto.cancelledByName, atUtc: dto.cancelledAtUtc } : null,
+    ...(dto.history ?? []).map((h) => ({ action: h.action, details: h.details, userName: h.userName, atUtc: h.atUtc })),
   ]
   return entries.filter((e): e is AuditEntry => e !== null).sort((a, b) => b.atUtc.localeCompare(a.atUtc))
 }
@@ -170,6 +179,9 @@ export function MovementPage() {
   const canViewReceipts = hasPermission(PERMISSIONS.goodsReceiptsView)
 
   const [movement, setMovement] = useState<MovementDto | null>(null)
+  /* Whether completing a Delivery drafts goods receipts: the movement says so once saved, the goods receipt type before. */
+  const goodsReceiptType = useDocumentTypes().byCode('GRN')
+  const receiptsAutomatic = movement?.goodsReceiptsAutomatic ?? goodsReceiptType?.autoCreateOnDelivery
   const [loading, setLoading] = useState(!isNew)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [stale, setStale] = useState<string | null>(null)
@@ -187,6 +199,10 @@ export function MovementPage() {
   const [saving, setSaving] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [dateDialog, setDateDialog] = useState<'start' | 'complete' | null>(null)
+  /** (81) "Continue: Next step…" after a Complete: the containers that arrived, on to their next step. */
+  const [continueFor, setContinueFor] = useState<{ id: number; containerRef: string }[] | null>(null)
+  /** (80) Opened from a container ("Next leg…"): where it is. The From is that place, locked: a container leaves from where it is. */
+  const [lockedFrom, setLockedFrom] = useState<{ id: number; name: string } | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [chargeOpen, setChargeOpen] = useState(false)
 
@@ -271,13 +287,40 @@ export function MovementPage() {
     partiesApi.lookup({ activeOnly: false }).then(setCarriers).catch(() => {})
   }, [])
 
-  // /new?containerId=12&containerId=15 - "New movement for this container" on the container page.
+  // (80) ?from=container/12: opened from that container's page - Back returns there, and the dialogs name it.
+  // ?from=containers: opened from a row of the Containers list ("Next leg…" in its "…" menu) - Back returns to the list.
+  // (82) ?from=shipments: opened from a card of the Shipments board - Back returns to the board.
+  const fromParam = searchParams.get('from') ?? ''
+  const fromMatch = /^container\/(\d+)$/.exec(fromParam)
+  const fromContainerId = fromMatch ? Number(fromMatch[1]) : null
+  const fromContainersList = fromContainerId === null && fromParam === 'containers'
+  const fromShipments = fromContainerId === null && fromParam === 'shipments'
+  const fromQuery =
+    fromContainerId !== null ? `?from=container/${fromContainerId}` : fromContainersList ? '?from=containers' : fromShipments ? '?from=shipments' : ''
+  /** Where Back (and a delete) returns: the page the movement was opened from. */
+  const backTo =
+    fromContainerId !== null
+      ? `${CONTAINERS_ROUTE}/${fromContainerId}`
+      : fromContainersList
+        ? CONTAINERS_ROUTE
+        : fromShipments
+          ? SHIPMENTS_ROUTE
+          : MOVEMENTS_ROUTE
+
+  // /new?containerId=12&containerId=15 - "New movement for this container" / "Next leg…" on the container page.
   const preset = searchParams.getAll('containerId').join(',')
   useEffect(() => {
     if (!isNew || !preset) return
     const ids = [...new Set(preset.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))]
     Promise.all(ids.map((cid) => containersApi.get(cid).catch(() => null)))
-      .then((list) =>
+      .then((list) => {
+        // (80) One container: the movement leaves from where it is - its From is filled and locked (the To of its
+        // latest movement, else its port of loading). A stay (customs, a port call, a border) takes it as its To too.
+        const only = list.length === 1 ? list[0] : null
+        if (only && only.placeId != null && only.placeName) {
+          setLockedFrom({ id: only.placeId, name: only.placeName })
+          form.setFieldValue('fromPlaceId', String(only.placeId))
+        }
         setTicked(
           list
             .filter((c) => c !== null)
@@ -298,9 +341,11 @@ export function MovementPage() {
                 place: null,
               }
             }),
-        ),
-      )
+        )
+      })
       .catch(() => {})
+    // form is stable for the life of the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, preset])
 
   // The tab close React Router never sees.
@@ -319,14 +364,17 @@ export function MovementPage() {
   const fromId = values.fromPlaceId === null ? null : Number(values.fromPlaceId)
 
   // A completed or cancelled movement is not asked about places; its containers' orders and suppliers come from the
-  // container list instead.
+  // container list instead - every page of it (script 78: a movement of any number of containers).
   const movementForDetails = readOnly ? movement : null
   useEffect(() => {
     if (!movementForDetails || movementForDetails.containers.length === 0) return
     const controller = new AbortController()
-    containersApi
-      .list({ movementId: movementForDetails.id, pageSize: 200 }, controller.signal)
+    fetchAllPages(
+      (page, pageSize) => containersApi.list({ movementId: movementForDetails.id, page, pageSize }, controller.signal),
+      { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE },
+    )
       .then((result) => {
+        if (controller.signal.aborted) return
         const byId = new Map(result.items.map((c) => [c.id, c]))
         setTicked((current) =>
           current.map((c) => {
@@ -341,24 +389,16 @@ export function MovementPage() {
 
   const type = types.find((t) => String(t.id) === values.movementTypeId) ?? null
   const singlePlace = type !== null && SINGLE_PLACE_STAGES.includes(type.stage)
+  // Loading at the supplier ends at the port of loading: its From is the supplier's, so it is not locked.
+  const fromLocked = lockedFrom !== null && String(lockedFrom.id) === values.fromPlaceId && type?.stage !== 'Origin'
 
   /* ── options ─────────────────────────────────────────────────────────────────────────────── */
 
   const typeOptions = types
     .filter((t) => t.isActive || String(t.id) === values.movementTypeId)
     .map((t) => ({ value: String(t.id), label: `${t.typeCode} - ${t.typeName}` }))
-  const placeOptions = useMemo(() => {
-    // Grouped by kind, so a border post is not mistaken for the sea port of the same town.
-    const chosen = [values.fromPlaceId, values.toPlaceId]
-    const kinds = new Map<string, Option[]>()
-    for (const p of ports) {
-      if (!p.isActive && !chosen.includes(String(p.id))) continue
-      const list = kinds.get(p.kind) ?? []
-      list.push({ value: String(p.id), label: `${p.portCode} - ${portLabel(p)}` })
-      kinds.set(p.kind, list)
-    }
-    return [...kinds].map(([group, items]) => ({ group, items }))
-  }, [ports, values.fromPlaceId, values.toPlaceId])
+  // Grouped Sea / Border / Inland, so a border post is not mistaken for the sea port of the same town.
+  const placeOptions = useMemo(() => placeOptionGroups(ports, [values.fromPlaceId, values.toPlaceId]), [ports, values.fromPlaceId, values.toPlaceId])
   const carrierOptions = carriers
     .filter((c) => c.isActive || String(c.id) === values.carrierPartyId)
     .map((c) => ({ value: String(c.id), label: `${c.partyCode} - ${c.partyName}` }))
@@ -388,6 +428,19 @@ export function MovementPage() {
     setTicked(next)
     if (changed) markDirty()
   }
+
+  // (80) THE START DATE OF A MOVEMENT IN PROGRESS STAYS A FACT, as in its Start dialog: never in the future, never before
+  // the previous leg of one of its containers ended (the server refuses both on Save; the field says it first). The
+  // earliest start is the saved containers'; a container just ticked is checked by the server.
+  const startNotBefore = inProgress ? (movement?.startNotBefore?.slice(0, 10) ?? null) : null
+  const startDateProblem =
+    !inProgress || !values.startDate
+      ? null
+      : values.startDate > todayDateOnly()
+        ? 'The start date cannot be in the future: start the movement on the day it really leaves.'
+        : startNotBefore && values.startDate < startNotBefore
+          ? `The movement cannot start before ${movement?.startNotBeforeMovementNo ?? 'the previous leg'} reached ${movement?.startNotBeforePlaceName ?? 'its From'} on ${dateLabel(startNotBefore)}.`
+          : null
 
   function toRequest(v: FormValues, rowVersion: string | null): SaveMovementRequest {
     return {
@@ -423,7 +476,7 @@ export function MovementPage() {
     const invalid = form.validate().hasErrors
     // Checked here rather than in the form's rules, which cannot see the status of the movement.
     if (inProgress && !values.startDate) form.setFieldError('startDate', 'The start date of a movement in progress is required.')
-    if (invalid || (inProgress && !values.startDate)) {
+    if (invalid || (inProgress && !values.startDate) || startDateProblem !== null) {
       notify.error('Check the highlighted fields.')
       return null
     }
@@ -433,7 +486,8 @@ export function MovementPage() {
       const saved = movementId === null ? await movementsApi.create(payload) : await movementsApi.update(movementId, payload)
       show(saved)
       notify.success(movementId === null ? `Movement ${saved.movementNo} created.` : `${saved.movementNo} saved.`)
-      if (movementId === null) void navigate(`${MOVEMENTS_ROUTE}/${saved.id}`, { replace: true })
+      // The way back to the container goes along (?from=container/12).
+      if (movementId === null) void navigate(`${MOVEMENTS_ROUTE}/${saved.id}${fromQuery}`, { replace: true })
       return saved
     } catch (err) {
       fail(err, 'The movement could not be saved.')
@@ -443,43 +497,70 @@ export function MovementPage() {
     }
   }
 
-  /** Start / complete: unsaved edits are saved (or given up) first, then the containers that moved are named. */
-  async function changeStatus(kind: 'start' | 'complete', date: string | null) {
-    let current = movement
-    if (!current) return
-    if (dirty.current) {
-      const go = await confirm({ title: 'Unsaved changes', message: 'Save your changes first?', confirmLabel: 'Save and continue' })
-      if (!go) return
-      current = await save()
-      if (!current) return
+  /**
+   * Started or completed in the dialog, which said what moved: the page shows the movement as it is now. (81) A leg
+   * completed (not a Delivery: its goods are received next) offers its containers' next step at once - "Continue: Next
+   * step…" opens the bulk dialog for them, or the container's own dialog when it carries one.
+   */
+  function statusDone(result: MovementDto) {
+    const completed = dateDialog === 'complete'
+    show(result, true)
+    setDateDialog(null)
+    if (!completed) return
+    offerContinue(result)
+  }
+
+  /**
+   * (82) Only some containers arrived: they are completed on their own movement, the others stay here, in progress. The
+   * page reads this movement again (without the page-wide loader, the notifications stay readable) and offers the next
+   * step of the ones that arrived, as after any arrival.
+   */
+  function splitDone(result: MovementSplitResultDto | null) {
+    setDateDialog(null)
+    // Read again whatever came back - null: no answer, the split may have happened all the same.
+    if (movementId !== null) {
+      movementsApi
+        .get(movementId)
+        .then((dto) => show(dto, true))
+        .catch(() => void load())
     }
-    const before = new Map(current.containers.map((c) => [c.containerId, c.containerStatusName]))
-    setBusyAction(kind)
-    try {
-      const result =
-        kind === 'start'
-          ? await movementsApi.start(current.id, date, current.rowVersion)
-          : await movementsApi.complete(current.id, date, current.rowVersion)
-      show(result, true)
-      setDateDialog(null)
-      notify.success(kind === 'start' ? `${result.movementNo} started.` : `${result.movementNo} completed.`)
-      const changes = result.containers
-        .filter((c) => before.has(c.containerId) && before.get(c.containerId) !== c.containerStatusName)
-        .map((c) => `${c.containerRef}: ${before.get(c.containerId)} -> ${c.containerStatusName}`)
-      if (changes.length > 0) notify.info(changes.join('; '))
-      // A Delivery: the drafts created, linked, and the containers that got none, with the reason (rule 5).
-      if (kind === 'complete' && (result.goodsReceipts?.length || result.warnings?.length)) {
-        showDeliveryResult(result.goodsReceipts, result.warnings, {
-          canViewReceipts,
-          navigate: (to) => void navigate(to),
-        })
-        void refreshGoodsReceiptsWaiting()
-      }
-    } catch (err) {
-      fail(err, kind === 'start' ? 'The movement could not be started.' : 'The movement could not be completed.')
-    } finally {
-      setBusyAction(null)
-    }
+    if (result?.ok && result.movement) offerContinue(result.movement)
+  }
+
+  /** A leg completed (not a Delivery: its goods are received next): "Continue: Next step…" for its containers. */
+  function offerContinue(result: MovementDto) {
+    if (result.status !== 3 || result.stage === DELIVERY || !canManage || result.containers.length === 0) return
+    const arrived = result.containers.map((c) => ({ id: c.containerId, containerRef: c.containerRef }))
+    const id = `continue-${result.id}-${Date.now()}`
+    notifications.show({
+      id,
+      color: 'blue',
+      withBorder: true,
+      autoClose: 15_000,
+      message: (
+        <Text fz="sm" data-continue-next-step>
+          {arrived.length === 1 ? `${arrived[0].containerRef} is at ${result.toName}.` : `${formatNumber(arrived.length)} containers are at ${result.toName}.`}{' '}
+          <Anchor
+            component="button"
+            type="button"
+            fz="sm"
+            fw={600}
+            onClick={() => {
+              notifications.hide(id)
+              setContinueFor(arrived)
+            }}
+          >
+            Continue: Next step…
+          </Anchor>
+        </Text>
+      ),
+    })
+  }
+
+  /** Back from the containers' next step: the movement as it is now (a Then leg does not change it, a new leg neither). */
+  function continueDone() {
+    setContinueFor(null)
+    void load()
   }
 
   async function cancelMovement(reason: string) {
@@ -490,7 +571,26 @@ export function MovementPage() {
       const result = await movementsApi.cancel(movement.id, reason, movement.rowVersion)
       show(result, true)
       setCancelOpen(false)
-      notify.success(`${result.movementNo} cancelled.`)
+      // (82) A SPLIT-OFF MOVEMENT: the split is undone. The server says where its containers went (that movement's status
+      // as it is now, not as the dialog read it), with a link to that movement that keeps the page's way back.
+      const undone = result.splitUndone
+      if (undone) {
+        notifications.show({
+          color: 'green',
+          withBorder: true,
+          autoClose: 15_000,
+          message: (
+            <Stack gap={2} data-cancel-split-undone>
+              <Text fz="sm">{undone.message}</Text>
+              <Anchor component="button" type="button" fz="xs" fw={600} onClick={() => void navigate(`${MOVEMENTS_ROUTE}/${undone.movementId}${fromQuery}`)}>
+                Open {undone.movementNo}
+              </Anchor>
+            </Stack>
+          ),
+        })
+      } else {
+        notify.success(`${result.movementNo} cancelled.`)
+      }
       // Its automatic draft goods receipts went with it: the menu count follows.
       if (deliveredBefore) void refreshGoodsReceiptsWaiting()
     } catch (err) {
@@ -513,7 +613,7 @@ export function MovementPage() {
       await movementsApi.remove(movement.id)
       dirty.current = false
       notify.success('Movement deleted.')
-      void navigate(MOVEMENTS_ROUTE)
+      void navigate(backTo)
     } catch (err) {
       fail(err, 'The movement could not be deleted.')
     }
@@ -525,7 +625,9 @@ export function MovementPage() {
       if (!go) return
     }
     dirty.current = false
-    void navigate(MOVEMENTS_ROUTE)
+    // (80) Opened from a container (its page or its row on the Containers list): Back returns there, not to the
+    // Movements list.
+    void navigate(backTo)
   }
 
   /* ── fields: an input on a form, text on a record ────────────────────────────────────────── */
@@ -545,7 +647,7 @@ export function MovementPage() {
         clearable={!required}
         value={values[key]}
         onChange={(next) => form.setFieldValue(key, next ? String(next).slice(0, 10) : null)}
-        error={form.errors[key]}
+        error={form.errors[key] ?? (key === 'startDate' ? startDateProblem : null)}
       />
     )
   }
@@ -572,22 +674,43 @@ export function MovementPage() {
   }
 
   const saved = movement !== null
+  /** The container the page was opened from, as the Start / Complete dialog names it. */
+  const fromContainerRef =
+    fromContainerId === null
+      ? null
+      : (movement?.containers.find((c) => c.containerId === fromContainerId)?.containerRef ??
+        ticked.find((c) => c.containerId === fromContainerId)?.containerRef ??
+        null)
+  const fromContainer = fromContainerId !== null && fromContainerRef ? { id: fromContainerId, containerRef: fromContainerRef } : null
   // Start and Complete act on the saved movement: never with changes on the page, never without a saved container.
   const statusBlocked = unsaved
     ? 'Save your changes first.'
     : (movement?.containers.length ?? 0) === 0
       ? 'Tick at least one container, then save.'
       : null
+  // (83) Why its Cancel would be refused now, in the server's words (a later leg of one of its containers, a container
+  // offloaded): null when it can be cancelled.
+  const cancelBlocked = movement && !movement.canCancel ? (movement.cancelBlockedReason ?? 'This movement cannot be cancelled.') : null
   const actions: DocumentAction[] = [
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && canManage && movement.canDelete },
-    { key: 'cancel', label: 'Cancel', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.canCancel },
-    { key: 'complete', label: 'Complete', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', loading: busyAction === 'complete', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
-    { key: 'start', label: 'Start', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', loading: busyAction === 'start', visible: saved && canManage && movement.canStart, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    // Cancel, Complete and Start open a dialog (a reason, a date): their labels end with the ellipsis.
+    // (83) A movement its Cancel would refuse keeps "Cancel…", disabled with the reason, instead of a dialog refused after
+    // the reason is typed; only a cancelled movement has none. On a phone it then goes into the menu, its reason under
+    // its label, even on a completed movement where it is the last action.
+    { key: 'cancel', label: 'Cancel…', icon: <IconBan size={16} />, onClick: () => setCancelOpen(true), variant: 'default', colour: 'red', visible: saved && canManage && movement.status !== 4, disabled: cancelBlocked !== null, disabledReason: cancelBlocked ?? undefined, menuWhenDisabled: true },
+    { key: 'complete', label: 'Complete…', icon: <IconCheck size={16} />, onClick: () => setDateDialog('complete'), variant: 'light', colour: 'green', visible: saved && canManage && movement.canComplete, disabled: statusBlocked !== null, disabledReason: statusBlocked ?? undefined },
+    // (80) A planned movement that cannot start yet says why before the click: the refusal Start would give.
+    { key: 'start', label: 'Start…', icon: <IconPlayerPlay size={16} />, onClick: () => setDateDialog('start'), variant: 'light', visible: saved && canManage && movement.canStart, disabled: (statusBlocked ?? movement?.startBlockedReason ?? null) !== null, disabledReason: statusBlocked ?? movement?.startBlockedReason ?? undefined },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly, disabled: ticked.length === 0, disabledReason: ticked.length === 0 ? 'Tick at least one container.' : undefined },
   ]
 
   const chargesTotal = (movement?.charges ?? []).filter((c) => c.status === 2).reduce((sum, c) => sum + c.amountBase, 0)
+  // (82) A split-off movement cancelled is empty: its history says where its containers went ("Split undone: KTG-… back on MOV-…").
+  const splitUndoneNote =
+    movement?.status === 4 ? (movement.history?.find((h) => h.action === 'Split undone' && h.details?.startsWith('Split undone:'))?.details ?? null) : null
+  // (82) A split-off movement not cancelled yet: what cancelling it does, said first in its Cancel dialog.
+  const splitUndo = movement ? splitUndoText(movement) : null
 
   const fromPort = ports.find((p) => String(p.id) === values.fromPlaceId)
   const fromName = fromPort ? portLabel(fromPort) : ''
@@ -601,7 +724,15 @@ export function MovementPage() {
             ? `${movement.typeName} · ${movement.fromName}${movement.toPlaceId === movement.fromPlaceId ? '' : ` → ${movement.toName}`}`
             : 'The number is assigned when the movement is first saved.'
         }
-        breadcrumbs={[{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]}
+        breadcrumbs={
+          fromContainerId !== null
+            ? [{ label: fromContainerRef ?? 'Container', to: `${CONTAINERS_ROUTE}/${fromContainerId}` }, { label: movement?.movementNo ?? 'New movement' }]
+            : fromContainersList
+              ? [{ label: 'Containers', to: CONTAINERS_ROUTE }, { label: movement?.movementNo ?? 'New movement' }]
+              : fromShipments
+                ? [{ label: 'Shipments', to: SHIPMENTS_ROUTE }, { label: movement?.movementNo ?? 'New movement' }]
+                : [{ label: 'Movements', to: MOVEMENTS_ROUTE }, { label: movement?.movementNo ?? 'New' }]
+        }
         actions={
           movement ? (
             <Group gap="xs">
@@ -630,6 +761,12 @@ export function MovementPage() {
       {movement?.status === 4 ? (
         <Alert color="red" mb="md">
           Cancelled by {movement.cancelledByName ?? '—'}: {movement.cancelReason ?? ''}
+          {/* (82) A split-off movement cancelled is empty: its containers went back onto the movement they came from. */}
+          {splitUndoneNote ? (
+            <Text fz="sm" mt={4} data-split-undone-note>
+              {splitUndoneNote}
+            </Text>
+          ) : null}
         </Alert>
       ) : null}
 
@@ -654,9 +791,11 @@ export function MovementPage() {
                     leftSection={type ? <StageIcon stage={type.stage} /> : null}
                   />
                 )}
-                <ViewField label="Stage" value={type ? `${type.stage} - ${stageExplanation(type.stage)}` : null} />
+                <ViewField label="Stage" value={type ? `${type.stage} - ${stageExplanation(type.stage, receiptsAutomatic)}` : null} />
                 {readOnly ? (
                   <ViewField label="From" value={placeLabel(values.fromPlaceId)} />
+                ) : fromLocked ? (
+                  <ViewField label="From" value={placeLabel(values.fromPlaceId) ?? lockedFrom?.name ?? null} hint={FROM_LOCKED_HINT} />
                 ) : (
                   <Select label="From" withAsterisk data={placeOptions} searchable nothingFoundMessage="No place matches" value={values.fromPlaceId} onChange={pickFrom} error={form.errors.fromPlaceId} />
                 )}
@@ -678,6 +817,17 @@ export function MovementPage() {
                 {inProgress || movement?.startDate ? dateField('startDate', 'Start date', inProgress) : null}
                 {dateField('eta', 'ETA')}
                 {movement?.endDate ? <ViewField label="End date" value={dateLabel(movement.endDate)} /> : null}
+                {/* (82) Only part of that movement arrived: these containers came on with a movement of their own. */}
+                {movement?.splitFromMovementId && movement.splitFromMovementNo ? (
+                  <div data-split-from>
+                    <Text fz="sm" fw={500} mb={2}>
+                      Split from
+                    </Text>
+                    <Anchor component={Link} to={`${MOVEMENTS_ROUTE}/${movement.splitFromMovementId}${fromQuery}`} fz="sm">
+                      {movement.splitFromMovementNo}
+                    </Anchor>
+                  </div>
+                ) : null}
                 {readOnly ? (
                   <ViewField label="Carrier" value={carrierOptions.find((o) => o.value === values.carrierPartyId)?.label ?? movement?.carrierName ?? null} />
                 ) : (
@@ -753,7 +903,7 @@ export function MovementPage() {
                   <StageIcon stage={type.stage} size={20} />
                   <Title order={5}>{type.stage} stage</Title>
                 </Group>
-                <Text fz="sm">{stageExplanation(type.stage)}</Text>
+                <Text fz="sm">{stageExplanation(type.stage, receiptsAutomatic)}</Text>
                 <Text fz="xs" c="dimmed" mt={4}>
                   Starting and completing the movement moves every container on it accordingly.
                 </Text>
@@ -769,13 +919,30 @@ export function MovementPage() {
       </div>
 
       {dateDialog && movement ? (
-        <StatusDateModal
+        <MovementStatusModal
           kind={dateDialog}
+          movementId={movement.id}
           movement={movement}
-          busy={busyAction === dateDialog}
+          container={fromContainer}
           onClose={() => setDateDialog(null)}
-          onConfirm={(date) => void changeStatus(dateDialog, date)}
+          onDone={statusDone}
+          // (82) "Only some containers arrived": the ticked ones get their own movement, the others stay on this one.
+          allowSplit={canManage}
+          onSplitDone={splitDone}
+          // its "Open MOV-…" links keep the page's way back
+          returnQuery={fromQuery}
         />
+      ) : null}
+
+      {continueFor && continueFor.length === 1 ? (
+        <NextStepModal
+          containerId={continueFor[0].id}
+          containerRef={continueFor[0].containerRef}
+          onClose={() => setContinueFor(null)}
+          onDone={continueDone}
+        />
+      ) : continueFor ? (
+        <NextStepBulkModal containers={continueFor} onClose={() => setContinueFor(null)} onFinished={continueDone} />
       ) : null}
 
       <CancelReasonModal
@@ -787,6 +954,12 @@ export function MovementPage() {
         confirmLabel="Cancel movement"
         description="The movement is kept as a cancelled record and can no longer be started or changed. It cannot be undone."
       >
+        {/* (82) A split-off movement: cancelling it undoes the split - said first, with where its containers go. */}
+        {cancelOpen && splitUndo ? (
+          <Alert color="orange" py={6} data-cancel-split-undo>
+            {splitUndo}
+          </Alert>
+        ) : null}
         {cancelOpen && movement && movement.status === 3 && movement.stage === DELIVERY ? (
           <DeliveryCancelDrafts movement={movement} canViewReceipts={canViewReceipts} />
         ) : null}
@@ -874,73 +1047,6 @@ function ChargesTable({ movement }: { movement: MovementDto }) {
   )
 }
 
-/**
- * The date a movement started or ended - today unless the reader says otherwise. Completing a movement of the Delivery
- * stage also says what happens to each container's goods: a draft goods receipt (rule 5).
- */
-function StatusDateModal({
-  kind,
-  movement,
-  busy,
-  onClose,
-  onConfirm,
-}: {
-  kind: 'start' | 'complete'
-  movement: MovementDto
-  busy: boolean
-  onClose: () => void
-  onConfirm: (date: string) => void
-}) {
-  const [date, setDate] = useState<string | null>(todayDateOnly())
-  const starting = kind === 'start'
-  const delivery = !starting && movement.stage === DELIVERY
-
-  return (
-    <Modal
-      opened
-      onClose={onClose}
-      title={`${starting ? 'Start' : 'Complete'} ${movement.movementNo}`}
-      size={delivery ? 'lg' : 'md'}
-      closeOnClickOutside={!busy}
-      withCloseButton={!busy}
-    >
-      <Stack>
-        {delivery ? (
-          <DeliveryCompletePreview movement={movement} />
-        ) : (
-          <Text fz="sm">
-            {starting
-              ? 'The containers on the movement set off: their status, dates and location follow the stage of the movement type.'
-              : 'The containers arrive: their status, dates and location follow the stage of the movement type.'}
-          </Text>
-        )}
-        <DateInput
-          label={starting ? 'Start date' : 'End date'}
-          withAsterisk
-          valueFormat="DD/MM/YYYY"
-          value={date}
-          onChange={(next) => setDate(next ? String(next).slice(0, 10) : null)}
-          data-autofocus
-        />
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            color={starting ? undefined : 'green'}
-            leftSection={starting ? <IconPlayerPlay size={16} /> : <IconCheck size={16} />}
-            disabled={!date}
-            loading={busy}
-            onClick={() => date && onConfirm(date)}
-          >
-            {starting ? 'Start movement' : 'Complete movement'}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  )
-}
-
 /** The two ways into the card's containers: both list what is at the From, so both wait for one. */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -953,8 +1059,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-/** A value on a record: label above, text below - never a disabled input. */
-function ViewField({ label, value, dimmed }: { label: string; value: string | null; dimmed?: boolean }) {
+/** A value on a record: label above, text below - never a disabled input. A hint says why it cannot change. */
+function ViewField({ label, value, dimmed, hint }: { label: string; value: string | null; dimmed?: boolean; hint?: string }) {
   return (
     <div>
       <Text fz="sm" fw={500} mb={2}>
@@ -963,6 +1069,11 @@ function ViewField({ label, value, dimmed }: { label: string; value: string | nu
       <Text fz="sm" c={dimmed || !value ? 'dimmed' : undefined}>
         {value ?? '—'}
       </Text>
+      {hint ? (
+        <Text fz="xs" c="dimmed" mt={2} data-from-locked>
+          {hint}
+        </Text>
+      ) : null}
     </div>
   )
 }

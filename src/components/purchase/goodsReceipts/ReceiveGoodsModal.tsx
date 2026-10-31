@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import {
   Alert,
@@ -24,15 +24,18 @@ import { warehousesApi } from '../../../api/masterdata/warehouses'
 import { goodsReceiptsApi, type GoodsReceiptCreatedDto, type ReceivableLineDto } from '../../../api/purchase/goodsReceipts'
 import type { WarehouseLookupDto } from '../../../api/types'
 import { useAuth } from '../../../auth/useAuth'
+import { noAccessSentence } from '../../../auth/warehouseAccess'
 import { refreshGoodsReceiptsWaiting } from '../../../hooks/useGoodsReceiptsWaiting'
 import { PERMISSIONS } from '../../../navigation'
 import { routes } from '../../../routes'
 import { fromIsoDate, isoDate } from '../../documents/documentKind'
 import { formatNumber, numberInputValue } from '../../format'
 import { notify } from '../../ui/notify'
-import { CONTAINERS_HINT, ORDER_PRICE_HINT, warehouseChoices } from './goodsReceiptModel'
+import { useDocumentTypes } from '../../../hooks/useDocumentTypes'
+import { CONTAINERS_HINT, orderPriceHint, warehouseChoices } from './goodsReceiptModel'
+import { notYoursNote } from '../../documents/lineWarehouses'
 
-/** What is being received: a posted or closed purchase order, or a posted purchase invoice. */
+/** What is being received: an approved purchase order, or a posted purchase invoice. */
 export interface ReceiveGoodsSource {
   kind: 'order' | 'invoice'
   id: number
@@ -85,6 +88,28 @@ interface RowState {
 }
 
 const keyOf = (line: ReceivableLineDto) => `${line.poLineId ?? ''}:${line.invoiceLineId ?? ''}:${line.lineNumber}`
+
+/**
+ * (92) A ROW WHOSE OWN WAREHOUSE IS NOT THE READER'S starts in the reader's only usable warehouse when they have exactly
+ * one, else empty ("choose the warehouse…"): the receipt would be refused there (W9). Idempotent, so it runs both when
+ * the lines arrive and when the warehouses do, whichever comes last; for an unrestricted reader it changes nothing.
+ */
+function startInYours(rows: Record<string, RowState>, warehouses: WarehouseLookupDto[] | null): Record<string, RowState> {
+  if (warehouses === null) return rows
+  const notYours = new Set(warehouses.filter((w) => w.canUse === false).map((w) => w.id))
+  if (notYours.size === 0) return rows
+  const usable = warehouses.filter((w) => w.isActive && w.childCount === 0 && !w.isTransit && w.canUse !== false)
+  const only = usable.length === 1 ? String(usable[0].id) : null
+  let changed = false
+  const next = Object.fromEntries(
+    Object.entries(rows).map(([key, row]) => {
+      if (row.warehouseId === null || !notYours.has(Number(row.warehouseId))) return [key, row]
+      changed = true
+      return [key, { ...row, warehouseId: only }]
+    }),
+  )
+  return changed ? next : rows
+}
 
 /**
  * "Receive goods - {document no.}": the goods of a purchase order or of a posted purchase invoice that arrived WITHOUT a
@@ -141,6 +166,7 @@ function ReceiveGoodsBody({
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
   const canPost = hasPermission(PERMISSIONS.goodsReceiptsPost)
+  const invoiceType = useDocumentTypes().byCode('PINV')
   const phone = useMediaQuery('(max-width: 48em)')
 
   const [lines, setLines] = useState<ReceivableLineDto[] | null>(null)
@@ -157,6 +183,8 @@ function ReceiveGoodsBody({
   const [deliveryNote, setDeliveryNote] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({})
+  /** The warehouse lookup once it is in: the lines may arrive before or after it (startInYours runs on both). */
+  const warehousesRef = useRef<WarehouseLookupDto[] | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -168,19 +196,19 @@ function ReceiveGoodsBody({
         setShipped(result.documents.some((d) => d.shippedInContainers))
         setBlocked(source.kind === 'order' ? orderBlockedReason(result.documents[0]) : null)
         // Receive now starts where the server says: the rest, or 0 where the goods travel in containers (rules 14, 15).
-        setRows(
-          Object.fromEntries(
-            result.lines.map((line) => [
-              keyOf(line),
-              {
-                receiveNow: Math.max(0, line.defaultReceiveBase),
-                closeShort: false,
-                reason: '',
-                warehouseId: line.warehouseId === null ? null : String(line.warehouseId),
-              },
-            ]),
-          ),
+        // (92) A line whose warehouse is not the reader's starts in their only one, else empty (startInYours).
+        const seeded: Record<string, RowState> = Object.fromEntries(
+          result.lines.map((line) => [
+            keyOf(line),
+            {
+              receiveNow: Math.max(0, line.defaultReceiveBase),
+              closeShort: false,
+              reason: '',
+              warehouseId: line.warehouseId === null ? null : String(line.warehouseId),
+            },
+          ]),
         )
+        setRows(startInYours(seeded, warehousesRef.current))
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
@@ -192,7 +220,11 @@ function ReceiveGoodsBody({
   useEffect(() => {
     warehousesApi
       .lookup(true)
-      .then(setWarehouses)
+      .then((list) => {
+        warehousesRef.current = list
+        setWarehouses(list)
+        setRows((current) => startInYours(current, list))
+      })
       .catch(() => {
         /* the warehouse cells then offer only the lines' own warehouses; the server still checks */
       })
@@ -203,8 +235,14 @@ function ReceiveGoodsBody({
     [lines],
   )
   /* Leaves of every branch, the document's branch first (scripts 70, 72): a warehouse with warehouses under it holds no
-     stock. A line's own warehouse stays listed, marked, when it is not one any more (an order saved before). */
-  const warehouseData = useMemo(() => warehouseChoices(warehouses, null, keep, documentBranchId), [warehouses, keep, documentBranchId])
+     stock. A line's own warehouse stays listed, marked, when it is not one any more (an order saved before). (92) Only
+     the warehouses the reader may use; a line's own one they may not use stays listed, marked "- not one of your
+     warehouses". */
+  const warehouseData = useMemo(
+    () => warehouseChoices(warehouses, null, keep, documentBranchId, true),
+    [warehouses, keep, documentBranchId],
+  )
+
 
   const quantityTitle = source.kind === 'order' ? 'Ordered' : 'Invoiced'
 
@@ -244,6 +282,11 @@ function ReceiveGoodsBody({
       const label = `Line ${index + 1} (${line.itemCode})`
       if (row.receiveNow > 0 || row.closeShort) any = true
       if (row.receiveNow > 0 && !row.warehouseId) problems[keyOf(line)] = `${label}: choose the warehouse the goods are received into.`
+      // (92) A warehouse the reader may not use (a line's own one, kept and marked): said before the server refuses it
+      // with the same words (W8).
+      const chosenWarehouse = row.warehouseId === null ? undefined : warehouses.find((w) => String(w.id) === row.warehouseId)
+      if ((row.receiveNow > 0 || row.closeShort) && chosenWarehouse?.canUse === false)
+        problems[keyOf(line)] = `${label}: ${noAccessSentence(chosenWarehouse.warehouseCode)}`
       if (row.closeShort && !row.reason.trim()) problems[keyOf(line)] = `${label}: give the reason nothing more will come.`
     })
     setLineErrors(problems)
@@ -402,7 +445,7 @@ function ReceiveGoodsBody({
         size="xs"
         nothingFoundMessage="No warehouse matches"
         disabled={busy}
-        error={lineErrors[key] && !row.warehouseId ? true : undefined}
+        error={notYoursNote(warehouseData, row.warehouseId) ?? (lineErrors[key] && !row.warehouseId ? true : undefined)}
         comboboxProps={{ withinPortal: true }}
       />
     )
@@ -588,7 +631,7 @@ function ReceiveGoodsBody({
           {CONTAINERS_HINT}
         </Text>
         <Text size="sm" c="dimmed">
-          {ORDER_PRICE_HINT}
+          {orderPriceHint(invoiceType?.affectsItemCost)}
         </Text>
       </Stack>
 

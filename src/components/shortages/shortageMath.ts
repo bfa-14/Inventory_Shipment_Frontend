@@ -1,12 +1,12 @@
-import type { ShortageDocumentLineDto, ShortageLiveRowDto } from '../../api/inventory/shortages'
+import type { LeadTimeSource, ShortageDocumentLineDto, ShortageLiveRowDto } from '../../api/inventory/shortages'
 
 /**
  * One line of a shortage plan while it is on the page.
  *
- * THREE INPUTS FROM THE SERVER, THREE FROM THE PLANNER, EVERYTHING ELSE DERIVED. Current inventory,
- * transit, outstanding order and the computed monthly sales are the server's figures and are never
- * edited here; the planner types a manual monthly sales figure, a required quantity and a PC per
- * container. {@link derive} turns the six (and the header's lead time) into every other cell, with
+ * FIGURES FROM THE SERVER, THREE INPUTS FROM THE PLANNER, EVERYTHING ELSE DERIVED. Current inventory,
+ * transit, transfers in (90), outstanding order and the computed monthly sales are the server's figures and
+ * are never edited here; the planner types a manual monthly sales figure, a required quantity and a PC per
+ * container. {@link derive} turns them (and the header's lead time) into every other cell, with
  * the same formulas the database uses — so the grid answers as it is typed, and the API's values
  * replace the page's on the next save.
  */
@@ -19,6 +19,8 @@ export interface ShortageLine {
   itemName: string
   currentInventoryBase: number
   transitBase: number
+  /** (90) On the way to the plan's warehouse by transfer orders: counted like stock in transit. */
+  transfersInBase: number
   outstandingOrderBase: number
   /** Computed from the sales history; shown greyed when there is no override. */
   expectedMonthlySalesBase: number
@@ -35,6 +37,15 @@ export interface ShortageLine {
   maxQuantity: number | null
   lastCost: number | null
   notes: string
+  /**
+   * (98) The item's own lead time from the server - its purchase history, else Item Definition's - or null when the item
+   * has neither: the line then follows the plan's header (and a change of the header shows at once).
+   */
+  leadTimeAuto: number | null
+  /** (98) Where leadTimeAuto comes from: History or Item (null: the plan's). */
+  leadTimeAutoSource: LeadTimeSource | null
+  /** (98) The lead time typed on the line; it wins. */
+  leadTimeManual: number | null
   /** A message about the row: the server's "Line N: …". */
   error?: string
 }
@@ -53,6 +64,21 @@ export interface ShortageDerived {
   requiredBase: number
   /** Null without a PC per container. */
   containerRequirement: number | null
+  /** (98) The lead time this line is computed with: typed, else the item's, else the plan's. */
+  leadTimeMonths: number
+}
+
+/** (98) A line's lead time: typed on it, else its item's (history or Item Definition), else the plan's header. */
+export function lineLeadTime(line: Partial<Pick<ShortageLine, 'leadTimeManual' | 'leadTimeAuto'>>, planLeadTime: number): number {
+  return line.leadTimeManual ?? line.leadTimeAuto ?? planLeadTime
+}
+
+/** (98) The words under a line's lead time. */
+export function leadTimeSourceText(line: Pick<ShortageLine, 'leadTimeManual' | 'leadTimeAutoSource'>): string {
+  if (line.leadTimeManual !== null) return 'typed'
+  if (line.leadTimeAutoSource === 'History') return 'from purchase history'
+  if (line.leadTimeAutoSource === 'Item') return 'from Item Definition'
+  return "the plan's"
 }
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
@@ -60,18 +86,21 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
 /**
  * The rule, per line, in base units:
  *
- *   Stock + Transit       = Current Inventory + Transit
- *   Total Expected Stock  = Current Inventory + Transit + Outstanding Order
- *   Expected Requirement  = Expected Monthly Sales × Lead Time (Month)
+ *   Stock + Transit       = Current Inventory + Transit + Transfers in (90: goods on the way from another warehouse)
+ *   Total Expected Stock  = Current Inventory + Transit + Transfers in + Outstanding Order
+ *   Expected Requirement  = Expected Monthly Sales × the line's Lead Time (Month) (98: typed, the item's, the plan's)
  *   Shortage              = max(0, Requirement − Total Expected Stock), rounded UP to a whole unit
  *   Coverage (months)     = Total Expected Stock ÷ Expected Monthly Sales
  *   Container Requirement = Required Qty × packing ÷ PC per Container
  */
 export function derive(
-  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'>,
-  leadTimeMonths: number,
+  line: Pick<ShortageLine, 'currentInventoryBase' | 'transitBase' | 'transfersInBase' | 'outstandingOrderBase' | 'expectedMonthlySalesBase' | 'expectedMonthlySalesManual' | 'purchasePackingFormula' | 'requiredQty' | 'pcPerContainer'> &
+    Partial<Pick<ShortageLine, 'leadTimeManual' | 'leadTimeAuto'>>,
+  planLeadTimeMonths: number,
 ): ShortageDerived {
-  const stockPlusTransitBase = line.currentInventoryBase + line.transitBase
+  const leadTimeMonths = lineLeadTime(line, planLeadTimeMonths)
+  // A plan saved before transfers has 0 transfers in: its figures stay what they were.
+  const stockPlusTransitBase = line.currentInventoryBase + line.transitBase + line.transfersInBase
   const totalExpectedStockBase = stockPlusTransitBase + line.outstandingOrderBase
   const effectiveMonthlySales = line.expectedMonthlySalesManual ?? line.expectedMonthlySalesBase
   const requirement = effectiveMonthlySales * (leadTimeMonths > 0 ? leadTimeMonths : 0)
@@ -91,6 +120,7 @@ export function derive(
     suggestedRequiredQty: shortageBase > 0 ? Math.ceil(shortageBase / packing) : 0,
     requiredBase,
     containerRequirement: line.pcPerContainer !== null && line.pcPerContainer > 0 ? round2(requiredBase / line.pcPerContainer) : null,
+    leadTimeMonths,
   }
 }
 
@@ -142,6 +172,7 @@ export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
     itemName: dto.itemName,
     currentInventoryBase: dto.currentInventoryBase,
     transitBase: dto.transitBase,
+    transfersInBase: dto.transfersInBase ?? 0,
     outstandingOrderBase: dto.outstandingOrderBase,
     expectedMonthlySalesBase: dto.expectedMonthlySalesBase,
     expectedMonthlySalesManual: dto.expectedMonthlySalesManual,
@@ -154,6 +185,10 @@ export function lineFromDto(dto: ShortageDocumentLineDto): ShortageLine {
     maxQuantity: dto.maxQuantity,
     lastCost: dto.lastCost,
     notes: dto.notes ?? '',
+    // (98) A typed lead time is kept apart; a worked-out one of the item's own (not the plan's) is the line's default.
+    leadTimeManual: dto.leadTimeManual ?? null,
+    leadTimeAuto: dto.leadTimeSource === 'History' || dto.leadTimeSource === 'Item' ? dto.leadTimeMonths : null,
+    leadTimeAutoSource: dto.leadTimeSource === 'History' || dto.leadTimeSource === 'Item' ? dto.leadTimeSource : null,
   }
   line.requiredManual = dto.requiredQty !== derive(line, dto.leadTimeMonths).suggestedRequiredQty
   return line
@@ -169,6 +204,7 @@ export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
     itemName: row.itemName,
     currentInventoryBase: row.currentInventoryBase,
     transitBase: row.transitBase,
+    transfersInBase: row.transfersInBase ?? 0,
     outstandingOrderBase: row.outstandingOrderBase,
     expectedMonthlySalesBase: row.expectedMonthlySalesBase,
     expectedMonthlySalesManual: null,
@@ -181,8 +217,17 @@ export function lineFromLiveRow(row: ShortageLiveRowDto): ShortageLine {
     maxQuantity: row.maxQuantity,
     lastCost: row.lastCost,
     notes: '',
+    leadTimeManual: null,
+    leadTimeAuto: row.leadTimeSource === 'History' || row.leadTimeSource === 'Item' ? row.leadTimeMonths : null,
+    leadTimeAutoSource: row.leadTimeSource === 'History' || row.leadTimeSource === 'Item' ? row.leadTimeSource : null,
   }
 }
+
+/** (90) The "Transfers in" column's tooltip, on the plan, in Load items and on paper. */
+export const TRANSFERS_IN_HINT = 'Goods on the way to this warehouse from other warehouses (transfer orders), not received yet.'
+
+/** (90) The "Stock + Transit" header's tooltip: the column has counted the transfers in since script 90. */
+export const STOCK_PLUS_TRANSIT_HINT = 'Stock + Transit + Transfers in'
 
 /** Draft grey, Posted green. */
 export const SHORTAGE_STATUS_COLOURS: Record<string, string> = { Draft: 'gray', Posted: 'green' }

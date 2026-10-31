@@ -52,6 +52,20 @@ export interface DocumentTypeDto {
    * only, and the server refuses any other item (62000, "Line 2: … is not a BIVAC item.").
    */
   bivacItemsOnly: boolean
+  /**
+   * (79) What the type does, each on one type only (pages/configuration/documentTypeEffects.ts). PINV: the invoice's
+   * price becomes the cost of the goods received against it (true on the other types).
+   */
+  affectsItemCost: boolean
+  /** (79) PINV: posting an invoice also receives its goods with a goods receipt (false on the other types). */
+  affectsOnHand: boolean
+  /** (79) GRN: completing a Delivery movement drafts a goods receipt per container (true on the other types). */
+  autoCreateOnDelivery: boolean
+  /**
+   * (90) TRO: a transfer order is sent for approval and released when an approver approves it (false on the other
+   * types). Missing from an older API, which means false.
+   */
+  needsApproval?: boolean
   isActive: boolean
   updatedAtUtc: string | null
   /** Base64 ROWVERSION; sent back on update so concurrent edits are detected. */
@@ -69,6 +83,12 @@ export interface UpdateDocumentTypeRequest {
   priceEditable: boolean
   numberPerBranch: boolean
   yearInNumber: boolean
+  /** (79) Sent only for the type they belong to (PINV, PINV, GRN); left out, the stored value stays. */
+  affectsItemCost?: boolean
+  affectsOnHand?: boolean
+  autoCreateOnDelivery?: boolean
+  /** (90) Sent only for TRO, like the switches of 79; the server refuses it on another type (62000). */
+  needsApproval?: boolean
   isActive: boolean
   rowVersion: string | null
 }
@@ -119,7 +139,8 @@ export interface StockDocumentListDto {
   totalItems: number
   /** Base units, so a Box of 12 counts as 12 — the measure the ledger uses. */
   totalQuantity: number
-  totalCost: number
+  /** (94) Null without View item costs (inventory.costs.view). */
+  totalCost: number | null
   postedAtUtc: string | null
   postedByName: string | null
   createdAtUtc: string
@@ -147,8 +168,9 @@ export interface StockDocumentLineDto {
   quantity: number
   /** quantity x packingFormula: what actually moves in the ledger. */
   quantityBase: number
-  unitCost: number
-  lineTotal: number
+  /** (94) Null, with lineTotal, without View item costs (inventory.costs.view). */
+  unitCost: number | null
+  lineTotal: number | null
   notes: string | null
   /** Stock in this item and warehouse right now, so an Out can be warned about before it is posted. */
   onHandBase: number
@@ -196,7 +218,8 @@ export interface StockDocumentDto {
   status: StockDocumentStatus
   totalItems: number
   totalQuantity: number
-  totalCost: number
+  /** (94) Null without View item costs (inventory.costs.view). */
+  totalCost: number | null
   postedAtUtc: string | null
   postedByName: string | null
   cancelledAtUtc: string | null
@@ -215,6 +238,11 @@ export interface StockDocumentDto {
   canPost: boolean
   canCancel: boolean
   canDelete: boolean
+  /**
+   * (92) Why the reader may not post, cancel or delete this document: the server's sentence ("You have no access to
+   * warehouse LKS-01: ask an administrator."), null when they may. Missing from an older API: then nothing is refused.
+   */
+  warehouseAccessRefusal?: string | null
   lines: StockDocumentLineDto[]
   files: StockDocumentFileDto[]
   audit: StockDocumentAuditDto[]
@@ -222,12 +250,21 @@ export interface StockDocumentDto {
 
 export interface SaveStockDocumentLine {
   lineNo: number
+  /**
+   * (94) The line's id as it was read (null on a new row): lets the server keep a saved line's cost for a reader who may
+   * not see item costs. The lines are still a full replace.
+   */
+  id?: number | null
   itemId: number
   itemUnitId: number
   warehouseId: number
   expiryDate?: string | null
   quantity: number
-  /** Per unit. Ignored on an Out, which takes the current average cost. */
+  /**
+   * Per unit. Null on an In: the item's last cost, else its average (script 94). For a reader without View item costs
+   * the server drops whatever is sent, and a saved line (its id, the same item and unit) keeps the cost it has. Ignored
+   * on an Out, which takes the current average cost.
+   */
   unitCost?: number | null
   notes?: string | null
 }

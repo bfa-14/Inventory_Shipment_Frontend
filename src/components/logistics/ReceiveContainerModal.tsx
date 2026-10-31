@@ -14,6 +14,7 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
@@ -29,7 +30,8 @@ import type { WarehouseLookupDto } from '../../api/types'
 import { refreshGoodsReceiptsWaiting } from '../../hooks/useGoodsReceiptsWaiting'
 import { dateLabel, fromIsoDate, isoDate } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'
-import { DRAFT_HINT, notDispatchedText, ORDER_PRICE_HINT } from '../purchase/goodsReceipts/goodsReceiptModel'
+import { useDocumentTypes } from '../../hooks/useDocumentTypes'
+import { DRAFT_HINT, notDispatchedText, orderPriceHint } from '../purchase/goodsReceipts/goodsReceiptModel'
 import { notify } from '../ui/notify'
 
 interface ReceiveContainerModalProps {
@@ -41,6 +43,13 @@ interface ReceiveContainerModalProps {
   warehouses: WarehouseLookupDto[]
   /** purchase.goodsreceipts.post: "Create and post" is offered. */
   canPost: boolean
+  /**
+   * (92) The branch has warehouses, but none the reader may use: the database's sentence ("You have no access to
+   * warehouses LUB-01 and LUB-02: ask an administrator."), said at the top and as the Receive into's reason. "Create
+   * draft" still works with no warehouse named (A7): the draft takes the container's own, as it always has, and someone
+   * who may use it posts it; "Create and post" waits with the sentence.
+   */
+  accessRefusal?: string | null
   /** Once the receipt exists (posted or not); the host opens it. */
   onCreated: (created: GoodsReceiptCreatedDto) => void
 }
@@ -50,6 +59,10 @@ interface Received {
   reasonCode: VarianceReasonCode | null
   note: string
 }
+
+/** (92) Under the alert when none of the branch's warehouses is the reader's: what "Create draft" does then (A7). */
+const DRAFT_WITHOUT_WAREHOUSE_HINT =
+  "Create draft names no warehouse: the draft takes the container's own, and someone who may use it posts the receipt."
 
 const REASON_OPTIONS = VARIANCE_REASONS.map((r) => ({ value: r.value, label: r.label }))
 
@@ -68,10 +81,11 @@ const REASON_OPTIONS = VARIANCE_REASONS.map((r) => ({ value: r.value, label: r.l
  * every rule again and its refusal is shown as it comes; a draft whose posting was refused stays, and the message says
  * why.
  */
-export function ReceiveContainerModal({ opened, onClose, container, warehouses, canPost, onCreated }: ReceiveContainerModalProps) {
+export function ReceiveContainerModal({ opened, onClose, container, warehouses, canPost, accessRefusal = null, onCreated }: ReceiveContainerModalProps) {
   const fullScreen = useMediaQuery('(max-width: 768px)')
   const phone = useMediaQuery('(max-width: 48em)')
   const [received, setReceived] = useState<Record<number, Received>>({})
+  const invoiceType = useDocumentTypes().byCode('PINV')
   const ownWarehouse = warehouses.some((w) => w.id === container.warehouseId) ? container.warehouseId : null
   const [warehouseId, setWarehouseId] = useState<string | null>(ownWarehouse === null ? null : String(ownWarehouse))
   const [documentDate, setDocumentDate] = useState<string | null>(isoDate(new Date()))
@@ -94,11 +108,16 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
     else if (differs(line) && !value.reasonCode)
       lineProblems[line.id] = `${label}: choose a reason when the received quantity differs from the loaded quantity.`
   }
-  const problems = [
-    ...(!warehouseId ? ['Choose the warehouse the goods are received into.'] : []),
+  /* (92) None of the branch's warehouses is the reader's: a draft is still made with no warehouse named (the server
+     gives it the container's own, A7); only posting it needs one of theirs. */
+  const draftWithoutWarehouse = accessRefusal !== null && !warehouseId
+  const problemsFor = (post: boolean) => [
+    ...(!warehouseId && (post || !draftWithoutWarehouse) ? [accessRefusal ?? 'Choose the warehouse the goods are received into.'] : []),
     ...(!documentDate ? ['Choose the date received.'] : []),
     ...Object.values(lineProblems),
   ]
+  const [askedPost, setAskedPost] = useState(false)
+  const problems = problemsFor(askedPost)
 
   const totals = lines.reduce(
     (sum, line) => {
@@ -115,14 +134,15 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
 
   async function create(post: boolean) {
     setTouched(true)
-    if (problems.length > 0) return
+    setAskedPost(post)
+    if (problemsFor(post).length > 0) return
     setBusy(true)
     setError(null)
     try {
       const created = await goodsReceiptsApi.fromContainer({
         containerId: container.id,
         documentDate,
-        warehouseId: Number(warehouseId),
+        warehouseId: warehouseId ? Number(warehouseId) : null,
         lines: lines.map((line) => {
           const value = valueOf(line)
           const same = !differs(line)
@@ -235,6 +255,16 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
     >
       <Stack>
         {container.status === 2 ? <Alert color="orange">{notDispatchedText(container.containerRef)}</Alert> : null}
+        {accessRefusal ? (
+          <Alert color="orange" data-receive-no-access>
+            {accessRefusal}
+          </Alert>
+        ) : null}
+        {draftWithoutWarehouse ? (
+          <Text size="sm" c="dimmed" data-receive-draft-own-warehouse>
+            {DRAFT_WITHOUT_WAREHOUSE_HINT}
+          </Text>
+        ) : null}
 
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <Select
@@ -248,10 +278,10 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
               setWarehouseId(next)
             }}
             searchable
-            nothingFoundMessage={`No active warehouse of ${container.branchCode} matches`}
+            nothingFoundMessage={accessRefusal ?? `No active warehouse of ${container.branchCode} matches`}
             description={`A warehouse of ${container.branchCode} - ${container.branchName}`}
             inputWrapperOrder={['label', 'input', 'description', 'error']}
-            error={touched && !warehouseId ? 'Choose the warehouse the goods are received into.' : undefined}
+            error={touched && !warehouseId && (askedPost || !draftWithoutWarehouse) ? (accessRefusal ?? 'Choose the warehouse the goods are received into.') : undefined}
             disabled={busy}
           />
           <DateInput
@@ -363,7 +393,7 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
             {DRAFT_HINT}
           </Text>
           <Text size="sm" c="dimmed">
-            {ORDER_PRICE_HINT}
+            {orderPriceHint(invoiceType?.affectsItemCost)}
           </Text>
         </Stack>
 
@@ -378,9 +408,19 @@ export function ReceiveContainerModal({ opened, onClose, container, warehouses, 
             Create draft
           </Button>
           {canPost ? (
-            <Button color="green" onClick={() => void create(true)} loading={busy} disabled={lines.length === 0}>
-              Create and post
-            </Button>
+            <Tooltip label={accessRefusal ?? ''} disabled={!draftWithoutWarehouse} multiline w={280} withArrow>
+              <span>
+                <Button
+                  color="green"
+                  onClick={() => void create(true)}
+                  loading={busy}
+                  disabled={lines.length === 0 || draftWithoutWarehouse}
+                  data-receive-post-blocked={draftWithoutWarehouse ? '' : undefined}
+                >
+                  Create and post
+                </Button>
+              </span>
+            </Tooltip>
           ) : null}
         </Group>
       </Stack>

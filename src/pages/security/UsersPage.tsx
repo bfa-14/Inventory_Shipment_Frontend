@@ -14,7 +14,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { IconKey, IconPlus, IconSearch, IconUserCog } from '@tabler/icons-react'
+import { IconAlertTriangle, IconBuildingWarehouse, IconKey, IconPlus, IconSearch, IconUserCog } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { rolesApi } from '../../api/roles'
 import type { RoleDto, UserDto } from '../../api/types'
@@ -31,13 +31,30 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { RowActions } from '../../components/ui/RowActions'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { PERMISSIONS } from '../../navigation'
+import { UserWarehousesModal } from './UserWarehousesModal'
 
 type Dialog =
   | { kind: 'create' }
   | { kind: 'edit'; user: UserDto }
   | { kind: 'roles'; user: UserDto }
   | { kind: 'password'; user: UserDto }
+  | { kind: 'warehouses'; user: UserDto }
   | null
+
+/**
+ * (92) What the Warehouses column says of a user: "All" (every warehouse, the default), "All (administrator)" (a system
+ * administrator uses every warehouse whatever is stored), the ticked codes, or "None" (moves stock nowhere). A user
+ * the API sends without the fields (an older API) has All warehouses.
+ */
+function warehousesText(u: UserDto): string {
+  if (u.isSystemAdministrator) return 'All (administrator)'
+  if (u.allWarehouses !== false) return 'All'
+  const codes = (u.warehouses ?? []).map((w) => w.code)
+  return codes.length === 0 ? 'None' : codes.join(', ')
+}
+
+/** Badges shown in the Warehouses cell before "+{n}". */
+const WAREHOUSE_BADGES = 3
 
 const PASSWORD_HINT = 'At least 8 characters with upper and lower case, a digit and a symbol.'
 
@@ -55,6 +72,7 @@ const GRID_COLUMNS: GridColumnMeta<UserDto>[] = [
   { accessor: 'fullName' },
   { accessor: 'email' },
   { accessor: 'roles', text: (u) => u.roles.join(', ') },
+  { accessor: 'warehouses', value: warehousesText, text: warehousesText },
   { accessor: 'isActive', kind: 'boolean', text: (u) => (u.isActive ? 'Active' : 'Inactive') },
   { accessor: 'lastLoginAtUtc', kind: 'date', text: (u) => formatDateTime(u.lastLoginAtUtc) },
 ]
@@ -184,6 +202,48 @@ export function UsersPage() {
         ),
     },
     {
+      accessor: 'warehouses',
+      title: 'Warehouses',
+      // (92) Where the user may move stock: "All" dimmed (every user until restricted), the ticked codes as badges,
+      // an orange "None" for a user who moves stock nowhere. The cell wraps on a phone.
+      render: (u) => {
+        const text = warehousesText(u)
+        if (u.isSystemAdministrator || u.allWarehouses !== false) {
+          return (
+            <Text c="dimmed" fz="sm">
+              {text}
+            </Text>
+          )
+        }
+        const ticked = u.warehouses ?? []
+        if (ticked.length === 0) {
+          // Orange by its icon, the word in the text colour: orange text on white is too faint to read (WCAG AA).
+          return (
+            <Group gap={4} wrap="nowrap" title="Moves stock nowhere" data-user-warehouses-none-cell>
+              <IconAlertTriangle size={14} color="var(--mantine-color-orange-8)" aria-hidden />
+              <Text fz="sm" fw={500}>
+                None
+              </Text>
+            </Group>
+          )
+        }
+        return (
+          <Group gap={4} wrap="wrap" title={text}>
+            {ticked.slice(0, WAREHOUSE_BADGES).map((w) => (
+              <Badge key={w.id} variant="light" color="teal" size="sm" style={{ textTransform: 'none' }}>
+                {w.code}
+              </Badge>
+            ))}
+            {ticked.length > WAREHOUSE_BADGES ? (
+              <Text span fz="xs" c="dimmed">
+                +{ticked.length - WAREHOUSE_BADGES}
+              </Text>
+            ) : null}
+          </Group>
+        )
+      },
+    },
+    {
       accessor: 'isActive',
       title: 'Status',
       width: 150,
@@ -225,6 +285,17 @@ export function UsersPage() {
                   onClick={() => setDialog({ kind: 'roles', user })}
                 >
                   <IconUserCog size={17} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Warehouses" withArrow position="top">
+                <ActionIcon
+                  variant="subtle"
+                  color="teal"
+                  aria-label={`Warehouses of ${user.username}`}
+                  onClick={() => setDialog({ kind: 'warehouses', user })}
+                  data-user-warehouses-action={user.username}
+                >
+                  <IconBuildingWarehouse size={17} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Reset password" withArrow position="top">
@@ -310,6 +381,14 @@ export function UsersPage() {
           roles={roles}
           onClose={() => setDialog(null)}
           onDone={() => void afterChange('Roles updated.')}
+        />
+      ) : null}
+
+      {dialog?.kind === 'warehouses' ? (
+        <UserWarehousesModal
+          user={dialog.user}
+          onClose={() => setDialog(null)}
+          onSaved={() => void afterChange(`Warehouses of ${dialog.user.username} saved.`)}
         />
       ) : null}
 

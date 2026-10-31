@@ -25,6 +25,7 @@ import { goodsReceiptsApi, type ReceivableContainerDto, type ReceivableDocumentD
 import type { PartyLookupDto } from '../../../api/types'
 import { useAuth } from '../../../auth/useAuth'
 import { refreshGoodsReceiptsWaiting } from '../../../hooks/useGoodsReceiptsWaiting'
+import { useSeesItemCosts } from '../../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../../navigation'
 import { routes } from '../../../routes'
 import { dateLabel } from '../../documents/documentKind'
@@ -47,7 +48,7 @@ type Step = 'choose' | 'order' | 'container' | 'manual'
 /**
  * "+ New" on Purchase › Goods Receipts: where the goods come from (rule 16).
  *
- * - "From a purchase order…": the supplier, then its posted or closed orders with something to receive; the order
+ * - "From a purchase order…": the supplier, then its approved orders with something to receive; the order
  *   picked opens the shared "Receive goods" dialog (the lines behave as on the order page, 0 on an order in containers).
  * - "From a container…": a confirmed container with no goods receipt yet (the server's list, `receivable-containers`:
  *   status 2-5, no draft or posted receipt, delivered ones first); its draft is created at once and opened.
@@ -64,6 +65,8 @@ export function NewGoodsReceiptModal({ opened, onClose, onPickOrder }: NewGoodsR
 
 function ChooserBody({ onClose, onPickOrder }: Omit<NewGoodsReceiptModalProps, 'opened'>) {
   const [step, setStep] = useState<Step>('choose')
+  // (94) A reader without View item costs types no cost on a receipt without an order: the server prices its lines.
+  const seesCosts = useSeesItemCosts()
   const [suppliers, setSuppliers] = useState<PartyLookupDto[] | null>(null)
 
   useEffect(() => {
@@ -106,7 +109,11 @@ function ChooserBody({ onClose, onPickOrder }: Omit<NewGoodsReceiptModalProps, '
       <Choice
         icon={<IconBox size={22} />}
         title="Without an order"
-        text="Goods of a supplier with no purchase order, at a typed cost."
+        text={
+          seesCosts
+            ? 'Goods of a supplier with no purchase order, at a typed cost.'
+            : "Goods of a supplier with no purchase order, at the item's last cost (its average when it has none)."
+        }
         onClick={() => setStep('manual')}
       />
       <Group justify="flex-end">
@@ -173,7 +180,7 @@ function FromOrderStep({
     return () => controller.abort()
   }, [supplierId])
 
-  /** The supplier's posted or closed orders with something to receive, as the server totals them. */
+  /** The supplier's approved orders with something to receive, as the server totals them. */
   const orders = useMemo(() => (loaded ?? []).filter((o) => o.toReceiveBase > 0), [loaded])
 
   const supplier = suppliers?.find((s) => String(s.id) === supplierId)
@@ -204,7 +211,7 @@ function FromOrderStep({
 
       {loaded !== null && orders.length === 0 && (
         <Text size="sm" c="dimmed" ta="center" py="md">
-          {supplier ? `${supplier.partyCode} has` : 'This supplier has'} no posted or closed order with goods to receive.
+          {supplier ? `${supplier.partyCode} has` : 'This supplier has'} no approved order with goods to receive.
         </Text>
       )}
 
@@ -265,10 +272,12 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
   const [search, setSearch] = useState('')
   const [debounced] = useDebouncedValue(search, 350)
   /** The answer, with the search it is for: while a newer search runs, the loader shows instead of stale rows. */
-  const [result, setResult] = useState<{ term: string; rows: ReceivableContainerDto[] | null; error: string | null } | null>(null)
+  const [result, setResult] = useState<{ term: string; rows: ReceivableContainerDto[] | null; total: number; error: string | null } | null>(null)
   const current = result !== null && result.term === debounced ? result : null
   const containers = current?.rows ?? null
   const error = current?.error ?? null
+  /** How many match: the server lists at most 200 of them (script 78 says so instead of cutting silently). */
+  const matching = current?.total ?? 0
   const [creating, setCreating] = useState<number | null>(null)
 
   useEffect(() => {
@@ -276,13 +285,14 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
     const term = debounced
     void (async () => {
       try {
-        // The server's list: status 2-5 and no draft or posted receipt (a draft that exists is opened, not created again).
+        // The server's list: status 2-5, no draft or posted receipt (a draft that exists is opened, not created again) and
+        // (script 95) delivered - a container that travels with movements is received once its Delivery is completed.
         const rows = await goodsReceiptsApi.receivableContainers({ search: term.trim() || undefined }, controller.signal)
         if (controller.signal.aborted) return
-        setResult({ term, rows: rows.filter((c) => c.canReceive), error: null })
+        setResult({ term, rows: rows.filter((c) => c.canReceive), total: rows[0]?.totalCount ?? rows.length, error: null })
       } catch (err) {
         if (controller.signal.aborted) return
-        setResult({ term, rows: null, error: err instanceof ApiError ? err.message : 'The containers could not be loaded.' })
+        setResult({ term, rows: null, total: 0, error: err instanceof ApiError ? err.message : 'The containers could not be loaded.' })
       }
     })()
     return () => controller.abort()
@@ -337,6 +347,13 @@ function FromContainerStep({ onBack, onClose }: { onBack(): void; onClose(): voi
           No confirmed container is waiting for a goods receipt{debounced.trim() ? ' with this search' : ''}.
         </Text>
       )}
+
+      {containers !== null && matching > containers.length ? (
+        <Text size="sm" c="dimmed" data-receivable-more>
+          Showing {formatNumber(containers.length)} of {formatNumber(matching)} containers, the delivered ones first: type a ref, a
+          container no. or an order to narrow the list.
+        </Text>
+      ) : null}
 
       {containers !== null && containers.length > 0 && (
         <Table.ScrollContainer minWidth={720}>

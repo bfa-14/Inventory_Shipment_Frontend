@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useDebouncedValue } from '@mantine/hooks'
-import { IconArrowRight, IconFileSpreadsheet, IconFilterOff, IconPlus, IconSearch } from '@tabler/icons-react'
+import { IconArrowRight, IconCheck, IconFileSpreadsheet, IconFilterOff, IconPlayerPlay, IconPlus, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { containersApi } from '../../api/logistics/containers'
@@ -21,6 +21,8 @@ import { useAuth } from '../../auth/useAuth'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber } from '../../components/format'
 import { StageIcon } from '../../components/logistics/movementStage'
+import { MovementStatusModal, type MovementStatusKind } from '../../components/logistics/MovementStatusModal'
+import { RowActions } from '../../components/ui/RowActions'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { FilterBar } from '../../components/ui/FilterBar'
@@ -88,6 +90,10 @@ function toQuery(filters: Filters): MovementQuery {
 /**
  * Every leg of every route: which containers travel, from where to where, when, with whom and at
  * what cost. A red "Late" badge flags a planned or running leg whose ETA is behind us.
+ *
+ * START AND COMPLETE ON THE ROW (script 80): "Start…" on a planned movement, "Complete…" on one in progress - the same
+ * dialog and rules as the movement page (no date in the future, not before the previous leg ended, the Delivery's draft
+ * goods receipts). A planned movement that cannot start yet has its Start disabled with the reason the server gives.
  */
 export function MovementsPage() {
   const navigate = useNavigate()
@@ -100,6 +106,7 @@ export function MovementsPage() {
   const [containerOptions, setContainerOptions] = useState<Option[]>([])
   const [pickedContainer, setPickedContainer] = useState<Option | null>(null)
   const [debouncedContainerSearch] = useDebouncedValue(containerSearch, 300)
+  const [statusFor, setStatusFor] = useState<{ kind: MovementStatusKind; row: MovementListDto } | null>(null)
 
   const grid = useGridQuery<Filters, MovementListDto, AllRows<MovementListDto>>({
     initialFilters: NO_FILTERS,
@@ -283,6 +290,37 @@ export function MovementsPage() {
         </Group>
       ),
     },
+    {
+      accessor: 'actions',
+      title: 'Actions',
+      width: 90,
+      textAlign: 'right',
+      render: (row) => (
+        <RowActions
+          label={row.movementNo}
+          custom={[
+            {
+              icon: <IconPlayerPlay size={17} />,
+              tooltip: 'Start…',
+              color: 'blue',
+              visible: canManage && row.canStart,
+              disabled: !!row.startBlockedReason || row.containerCount === 0,
+              disabledReason: row.startBlockedReason ?? (row.containerCount === 0 ? 'Tick at least one container before starting.' : undefined),
+              onClick: () => setStatusFor({ kind: 'start', row }),
+            },
+            {
+              icon: <IconCheck size={17} />,
+              tooltip: 'Complete…',
+              color: 'green',
+              visible: canManage && row.canComplete,
+              disabled: row.containerCount === 0,
+              disabledReason: row.containerCount === 0 ? 'The movement has no containers.' : undefined,
+              onClick: () => setStatusFor({ kind: 'complete', row }),
+            },
+          ]}
+        />
+      ),
+    },
   ]
 
   return (
@@ -393,8 +431,21 @@ export function MovementsPage() {
           fetching={loading}
           noRecordsText={grid.isDefault ? 'No movements yet.' : 'No movements match these filters.'}
           onRowClick={({ record }) => void navigate(`${MOVEMENTS_ROUTE}/${record.id}`)}
+          pinLastColumn
         />
       </Paper>
+
+      {statusFor ? (
+        <MovementStatusModal
+          kind={statusFor.kind}
+          movementId={statusFor.row.id}
+          onClose={() => setStatusFor(null)}
+          onDone={() => {
+            setStatusFor(null)
+            grid.reload()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

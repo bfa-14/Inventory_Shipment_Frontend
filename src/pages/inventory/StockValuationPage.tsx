@@ -83,8 +83,10 @@ export function StockValuationPage() {
   })
 
   useEffect(() => {
-    // Inactive warehouses are offered too: stock sitting in one still has to be valued.
-    warehousesApi.lookup(false).then(setWarehouses).catch(() => {})
+    // Inactive warehouses are offered too: stock sitting in one still has to be valued. So are the On the way
+    // warehouses (90), the only picker that lists them: "OTW-BR-002 - On the way to BR-002 (transfers)" is what a
+    // transfer has dispatched to that branch and it has not received yet.
+    warehousesApi.lookup(false, undefined, undefined, true).then(setWarehouses).catch(() => {})
   }, [])
 
   async function exportToExcel() {

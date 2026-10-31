@@ -28,13 +28,22 @@ export interface ShortageFigures {
   currentInventoryBase: number
   /** Marked as shipped on open purchase orders for the warehouse, not yet received. */
   transitBase: number
+  /**
+   * (90) Goods on the way to the warehouse (its tree) from other warehouses: dispatched by transfer orders, not received
+   * or written off yet. Part of Stock + Transit and of every figure after it. 0 on a plan saved before transfers;
+   * missing from an older API, which means 0.
+   */
+  transfersInBase?: number
   /** Still to receive on open purchase orders, EXCLUDING what is already in transit. */
   outstandingOrderBase: number
   stockPlusTransitBase: number
   totalExpectedStockBase: number
   /** Sales of the last "months of history" ÷ months. The computed value, never the override. */
   expectedMonthlySalesBase: number
+  /** (98) The line's own lead time: typed on it, else the item's purchase history, the item's, the plan's. */
   leadTimeMonths: number
+  /** (98) Manual | History | Item | Plan (null on a line saved before script 98). */
+  leadTimeSource: LeadTimeSource | null
   expectedRequirementBase: number
   shortageBase: number
   /** Null when nothing sells: a coverage in months has no meaning then. */
@@ -57,16 +66,24 @@ export interface ShortageLiveRowDto extends ShortageFigures {
   suggestedRequiredQty: number
   averageCost: number | null
   leadTimeDays: number | null
+  /** (98) What the item's purchase history says (order approval to goods receipt, last 12 months), and its receipts. */
+  leadTimeHistoryMonths: number | null
+  leadTimeReceipts: number | null
   /** The default supplier, else the last one the item was bought from. */
   supplierId: number | null
   supplierName: string | null
   supplierIsDefault: boolean
 }
 
+/** (98) Where a shortage line's lead time comes from. */
+export type LeadTimeSource = 'Manual' | 'History' | 'Item' | 'Plan'
+
 export interface ShortageDocumentLineDto extends ShortageFigures {
   id: number
   lineNo: number
   expectedMonthlySalesManual: number | null
+  /** (98) The lead time typed on the line; null when it is worked out. */
+  leadTimeManual: number | null
   effectiveMonthlySales: number
   /** Purchase units. */
   requiredQty: number
@@ -79,7 +96,10 @@ export interface ShortagePurchaseOrderDto {
   documentNumber: string | null
   documentDate: string
   status: PurchaseDocumentStatus
-  totalAmount: number
+  /** An approved order (script 77): 0 Saved, 1 Partially posted, 2 Posted. */
+  invoicingStatus?: number | null
+  /** (94) Null for a reader who may see neither purchase orders nor item costs: the order is priced at the last cost. */
+  totalAmount: number | null
   currencyCode: string
   createdAtUtc: string
 }
@@ -185,6 +205,8 @@ export interface SaveShortageDocumentLine {
   /** Null = the item's own PC per container. */
   pcPerContainer: number | null
   notes: string | null
+  /** (98) The lead time typed on the line, in months. Null = worked out (history, the item's, the plan's). */
+  leadTimeMonths?: number | null
 }
 
 export interface SaveShortageDocumentRequest {

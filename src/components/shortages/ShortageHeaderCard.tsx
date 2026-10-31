@@ -211,7 +211,7 @@ export function ShortageHeaderCard({
           ) : (
             <NumberInput
               label="Months of history"
-              description={`Expected Monthly Sales = sales of the last ${months} month${months === 1 ? '' : 's'} ÷ ${months}`}
+              description={`Expected Monthly Sales = the busiest month of the last ${months} month${months === 1 ? '' : 's'}`}
               value={value.monthsOfHistory ?? ''}
               min={1}
               max={36}

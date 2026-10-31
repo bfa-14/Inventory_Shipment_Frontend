@@ -36,6 +36,7 @@ import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 
 interface Filters {
   search: string
@@ -70,7 +71,7 @@ const GRID_COLUMNS: GridColumnMeta<StockDocumentListDto>[] = [
   { accessor: 'referenceNo', text: (r) => r.referenceNo ?? '' },
   { accessor: 'totalItems', kind: 'number' },
   { accessor: 'totalQuantity', kind: 'number', summary: 'sum', text: (r) => formatNumber(r.totalQuantity) },
-  { accessor: 'totalCost', kind: 'number', summary: 'sum', text: (r) => money(r.totalCost, r.currencyCode) },
+  { accessor: 'totalCost', kind: 'number', summary: 'sum', text: (r) => (r.totalCost === null ? '—' : money(r.totalCost, r.currencyCode)) },
   { accessor: 'status', kind: 'list' },
 ]
 
@@ -92,6 +93,9 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
   const canPost = hasPermission(kind.permissions.post)
   const canCancel = hasPermission(kind.permissions.cancel)
   const canDelete = hasPermission(kind.permissions.delete)
+  /* (94) Total Cost is an item cost: without View item costs the column is not drawn (the server sends it null), so it
+     can be neither sorted, filtered nor exported. Its meta in GRID_COLUMNS is inert without the column. */
+  const seesCosts = useSeesItemCosts()
 
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
@@ -321,13 +325,18 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
       textAlign: 'right',
       render: (row) => formatNumber(row.totalQuantity),
     },
-    {
-      accessor: 'totalCost',
-      title: 'Total Cost',
-      width: 140,
-      textAlign: 'right',
-      render: (row) => money(row.totalCost, row.currencyCode),
-    },
+    ...(seesCosts
+      ? [
+          {
+            accessor: 'totalCost',
+            title: 'Total Cost',
+            width: 140,
+            textAlign: 'right',
+            // (94) a figure the server stripped (a token older than the grant) is blank, never a measured-looking 0.00
+            render: (row: StockDocumentListDto) => (row.totalCost === null ? '—' : money(row.totalCost, row.currencyCode)),
+          } satisfies DataTableColumn<StockDocumentListDto>,
+        ]
+      : []),
     {
       accessor: 'status',
       title: 'Status',

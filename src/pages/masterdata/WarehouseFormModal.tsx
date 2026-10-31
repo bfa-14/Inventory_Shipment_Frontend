@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Anchor, Checkbox, Group, Select, Switch, Textarea, TextInput } from '@mantine/core'
+import { Alert, Anchor, Checkbox, Group, Select, SimpleGrid, Switch, Text, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { ApiError } from '../../api/http'
 import { branchesApi } from '../../api/masterdata/branches'
@@ -9,6 +9,7 @@ import { branchLabel } from '../../components/format'
 import { confirm } from '../../components/ui/confirm'
 import { FormModal } from '../../components/ui/FormModal'
 import { useSettingBool } from '../../settings/useSetting'
+import { transitHint } from './transitWarehouse'
 
 interface WarehouseFormModalProps {
   mode: 'create' | 'edit'
@@ -62,7 +63,20 @@ function eligibleParents(warehouses: WarehouseLookupDto[], selfId: number | unde
   return warehouses.filter((warehouse) => !banned.has(warehouse.id))
 }
 
+/**
+ * Why a warehouse cannot be a parent, after its name: used in transactions (script 71), or - when stock levels per
+ * warehouse are all it holds (script 91) - its levels, which like stock are kept only at the bottom of the tree.
+ */
+function usedLabel(w: WarehouseLookupDto): string {
+  if (!w.isUsed) return ''
+  if (w.isUsedInTransactions === false && w.hasStockLevels === true) return ' - has stock levels, cannot be a parent'
+  return ' - used in transactions, cannot be a parent'
+}
+
 export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: WarehouseFormModalProps) {
+  /* (90) AN ON THE WAY WAREHOUSE: only its name and address change. Everything else is shown as text and sent back as
+     it is stored - the server refuses any other change to it (52009) - so the form cannot offer one. */
+  const transit = mode === 'edit' && warehouse?.isTransit === true
   const [rowVersion, setRowVersion] = useState(warehouse?.rowVersion ?? null)
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
@@ -119,6 +133,12 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       .then(setWarehouses)
       .catch(() => {})
   }, [])
+
+  const outOfStockOptions = [
+    { value: 'global', label: `Use the global setting (currently ${globalOutOfStock.value ? 'allowed' : 'not allowed'})` },
+    { value: 'allow', label: 'Allow' },
+    { value: 'deny', label: 'Do not allow' },
+  ]
 
   function buildPayload(values: FormValues, replaceMainWarehouse: boolean): SaveWarehouseRequest {
     return {
@@ -240,93 +260,135 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
       onClose={onClose}
       onSubmit={() => form.onSubmit((values) => void save(values, false))()}
     >
-      <Group grow align="flex-start">
-        <TextInput
-          label="Warehouse Code"
-          placeholder="WH-002"
-          withAsterisk
-          maxLength={MAX_CODE}
-          {...form.getInputProps('warehouseCode')}
-        />
-        <TextInput
-          label="Warehouse Name"
-          placeholder="Kolwezi Depot"
-          withAsterisk
-          maxLength={MAX_NAME}
-          {...form.getInputProps('warehouseName')}
-        />
-      </Group>
+      {transit ? (
+        <>
+          <Group grow align="flex-start">
+            <ReadOnlyField label="Warehouse Code" value={form.values.warehouseCode} />
+            <TextInput
+              label="Warehouse Name"
+              placeholder="Kolwezi Depot"
+              withAsterisk
+              maxLength={MAX_NAME}
+              {...form.getInputProps('warehouseName')}
+            />
+          </Group>
 
-      <Select
-        label="Branch / Site"
-        placeholder="Select branch / site"
-        withAsterisk
-        searchable
-        nothingFoundMessage="No branch found"
-        data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
-        {...form.getInputProps('branchId')}
-      />
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+            <ReadOnlyField label="Branch / Site" value={warehouse ? `${warehouse.branchCode} - ${warehouse.branchName}` : ''} />
+            <ReadOnlyField label="Parent Warehouse" value="None - a top-level warehouse" />
+            <ReadOnlyField
+              label="Out-of-stock sales"
+              value={outOfStockOptions.find((o) => o.value === form.values.outOfStock)?.label ?? ''}
+            />
+            <ReadOnlyField label="Is Main Warehouse" value={form.values.isMainWarehouse ? 'Yes' : 'No'} />
+            <ReadOnlyField label="Status" value={form.values.isActive ? 'Active' : 'Inactive'} />
+          </SimpleGrid>
+          {warehouse ? (
+            <Text fz="xs" c="dimmed">
+              {transitHint(warehouse)}
+            </Text>
+          ) : null}
 
-      <Select
-        label="Parent Warehouse"
-        placeholder="None - a top-level warehouse"
-        description="Leave empty for a top-level warehouse. A parent groups the warehouses under it; stock is held by the ones with nothing beneath them."
-        searchable
-        clearable
-        nothingFoundMessage="No warehouse found"
-        /* Itself and its own descendants are left out: a warehouse cannot move inside itself, and
-           offering the choice only to refuse it afterwards is a worse way to learn that.
-           A WAREHOUSE ALREADY USED IN TRANSACTIONS is shown but disabled: as a parent it would hold
-           stock no document can reach (script 71). The current parent stays selectable. */
-        data={eligibleParents(warehouses, warehouse?.id).map((w) => ({
-          value: String(w.id),
-          label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}${w.isUsed ? ' - used in transactions, cannot be a parent' : ''}`,
-          disabled: w.isUsed && w.id !== warehouse?.parentId,
-        }))}
-        {...form.getInputProps('parentId')}
-      />
+          <Textarea
+            label="Address"
+            placeholder="Street, city, country"
+            autosize
+            minRows={3}
+            maxLength={MAX_ADDRESS}
+            {...form.getInputProps('address')}
+          />
+        </>
+      ) : (
+        <>
+          <Group grow align="flex-start">
+            <TextInput
+              label="Warehouse Code"
+              placeholder="WH-002"
+              withAsterisk
+              maxLength={MAX_CODE}
+              {...form.getInputProps('warehouseCode')}
+            />
+            <TextInput
+              label="Warehouse Name"
+              placeholder="Kolwezi Depot"
+              withAsterisk
+              maxLength={MAX_NAME}
+              {...form.getInputProps('warehouseName')}
+            />
+          </Group>
 
-      <Textarea
-        label="Address"
-        placeholder="Street, city, country"
-        autosize
-        minRows={3}
-        maxLength={MAX_ADDRESS}
-        {...form.getInputProps('address')}
-      />
+          <Select
+            label="Branch / Site"
+            placeholder="Select branch / site"
+            withAsterisk
+            searchable
+            nothingFoundMessage="No branch found"
+            data={branches.map((b) => ({ value: String(b.id), label: branchLabel(b) }))}
+            {...form.getInputProps('branchId')}
+          />
 
-      <Select
-        label="Out-of-stock sales"
-        description="Whether a sales invoice may sell more than this warehouse holds (its stock then goes negative, after a warning)."
-        allowDeselect={false}
-        data={[
-          { value: 'global', label: `Use the global setting (currently ${globalOutOfStock.value ? 'allowed' : 'not allowed'})` },
-          { value: 'allow', label: 'Allow' },
-          { value: 'deny', label: 'Do not allow' },
-        ]}
-        {...form.getInputProps('outOfStock')}
-      />
+          <Select
+            label="Parent Warehouse"
+            placeholder="None - a top-level warehouse"
+            description="Leave empty for a top-level warehouse. A parent groups the warehouses under it; stock is held by the ones with nothing beneath them."
+            searchable
+            clearable
+            nothingFoundMessage="No warehouse found"
+            /* Itself and its own descendants are left out: a warehouse cannot move inside itself, and
+               offering the choice only to refuse it afterwards is a worse way to learn that.
+               A WAREHOUSE ALREADY USED IN TRANSACTIONS is shown but disabled: as a parent it would hold
+               stock no document can reach (script 71). The current parent stays selectable. */
+            data={eligibleParents(
+              // (90) An On the way warehouse never holds other warehouses (the lookup leaves them out too).
+              warehouses.filter((w) => !w.isTransit),
+              warehouse?.id,
+            ).map((w) => ({
+              value: String(w.id),
+              label: `${w.warehouseCode} - ${w.warehouseName}${w.isActive ? '' : ' (inactive)'}${usedLabel(w)}`,
+              disabled: w.isUsed && w.id !== warehouse?.parentId,
+            }))}
+            {...form.getInputProps('parentId')}
+          />
 
-      <Group grow align="flex-start">
-        <Checkbox
-          label="Yes, this is the main warehouse"
-          description="Is Main Warehouse"
-          {...form.getInputProps('isMainWarehouse', { type: 'checkbox' })}
-          onChange={(event) => {
-            const checked = event.currentTarget.checked
-            form.setFieldValue('isMainWarehouse', checked)
-            // The API refuses an inactive main warehouse, so keep the pair valid here.
-            if (checked) form.setFieldValue('isActive', true)
-          }}
-        />
+          <Textarea
+            label="Address"
+            placeholder="Street, city, country"
+            autosize
+            minRows={3}
+            maxLength={MAX_ADDRESS}
+            {...form.getInputProps('address')}
+          />
 
-        <Switch
-          label="Active"
-          description={form.values.isMainWarehouse ? 'The main warehouse is always active.' : undefined}
-          disabled={form.values.isMainWarehouse}
-          {...form.getInputProps('isActive', { type: 'checkbox' })}
-        />
-      </Group>
+          <Select
+            label="Out-of-stock sales"
+            description="Whether a sales invoice may sell more than this warehouse holds (its stock then goes negative, after a warning)."
+            allowDeselect={false}
+            data={outOfStockOptions}
+            {...form.getInputProps('outOfStock')}
+          />
+
+          <Group grow align="flex-start">
+            <Checkbox
+              label="Yes, this is the main warehouse"
+              description="Is Main Warehouse"
+              {...form.getInputProps('isMainWarehouse', { type: 'checkbox' })}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked
+                form.setFieldValue('isMainWarehouse', checked)
+                // The API refuses an inactive main warehouse, so keep the pair valid here.
+                if (checked) form.setFieldValue('isActive', true)
+              }}
+            />
+
+            <Switch
+              label="Active"
+              description={form.values.isMainWarehouse ? 'The main warehouse is always active.' : undefined}
+              disabled={form.values.isMainWarehouse}
+              {...form.getInputProps('isActive', { type: 'checkbox' })}
+            />
+          </Group>
+        </>
+      )}
 
       {formError ? (
         <Alert color="red">
@@ -343,5 +405,19 @@ export function WarehouseFormModal({ mode, warehouse, onClose, onSaved }: Wareho
         </Alert>
       ) : null}
     </FormModal>
+  )
+}
+
+/** A value the form shows but does not edit: an On the way warehouse's (90). Text, not a greyed input. */
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <Text fz="sm" fw={500}>
+        {label}
+      </Text>
+      <Text fz="sm" c="dimmed">
+        {value || '—'}
+      </Text>
+    </div>
   )
 }

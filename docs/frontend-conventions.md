@@ -143,6 +143,14 @@ panel's top margin), so a full-size card looks exactly as approved. The switch d
 shown the card carries `.login-card--env-switch`: its 1034:772 height becomes a minimum, and on screens of about
 900–1130px, where the scaled-down card would cut the footer off, it grows instead.
 
+## The menu's groups and their order
+
+`src/navigation.ts`, in the owner's order: Home and Dashboard on top, then **Reports** (Shortages, Stock Valuation,
+Sales Profit, Container Report, Customer Statement, Out-of-Stock Sales), **Logistics**, **Purchase**, **Inventory**, **Sales** and
+**Configurations** (the former Backoffice and Configuration groups: Master Data, Users & Permissions, Document Types,
+Charge Types, Container Types, Settings). A page moved to another group keeps its address and its permission; its
+breadcrumb, the menu search and the Spotlight follow the menu by themselves.
+
 ## Finding a page: the menu search and the Spotlight
 
 There are two ways to reach a screen by typing, and **both read `src/navigation.ts` through
@@ -156,7 +164,7 @@ page to `navigation.ts` adds it to both; nothing else is needed.
 
 | The query names… | What stays |
 |---|---|
-| a section (`title` **or** `breadcrumb` — "backoffice", "setup") | that section, whole |
+| a section (`title` **or** `breadcrumb` — "configurations", "reports") | that section, whole |
 | a group ("master data") | the group and **every** child, because the group is what was asked for |
 | anything else | only the items whose label matches, inside the groups that hold them |
 
@@ -170,7 +178,7 @@ replaced by a search `ActionIcon`: it expands the sidebar and puts the cursor in
 **The Spotlight** (`AppSpotlight`, rendered once by `AppShell`) is the header's "Search anything..." box and
 **Ctrl+K / Cmd+K**. It lists every page the user may open — `navLeaves(visibleNavigation(hasPermission,
 false))`, so items with no route and the modules that are not built yet are absent by construction. Each
-action carries the page's label, its place in the menu as the description ("Setup › Master Data" — Spotlight's
+action carries the page's label, its place in the menu as the description ("Configurations › Master Data" — Spotlight's
 own filter matches it, so "setup" finds every back-office page), and its `NavIcon`; sub-items borrow their
 group's icon. The header box is `readOnly` and opens the palette on click, Enter or Space — it looks like a
 field, so it has to answer like one. `tagsToIgnore={[]}` overrides Mantine's default of standing the
@@ -183,7 +191,9 @@ modifier in the hint is read from the reader's own platform.
 | Component | Purpose |
 |---|---|
 | `notify.success / error / info(message)` | Toasts. Green / red / blue, auto-close 4 s. |
-| `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. |
+| `confirm({ title, message, confirmLabel, cancelLabel, danger }): Promise<boolean>` | Confirmation dialog. `danger` gives a red confirm button. Its close button is named "Close". |
+| `confirmAction({ ...confirm options, run, describeError }): Promise<T \| null>` | A confirmation that DOES the action (script 90): the cursor on the confirm button (Enter confirms; on the close button for a `danger` one), the dialog open and its button loading while `run` works (nothing closes it then), a refusal shown red in the dialog as `describeError` words it, the action's answer back (null for no). The transfer order's Release, Send for approval…, Approve, Withdraw, Create return… and Delete. |
+| `useCalendarEscape()` | `{ calendarOpen, calendar(name) }`: a dialog with date fields passes `closeOnEscape={!calendarOpen}` and each `DateInput` `popoverProps={calendar('…')}`, so Escape closes an open calendar, not the dialog and what was typed in it (Mantine closes every modal on Escape, and a `DateInput` does not stop it). The transfer dialogs and `CancelReasonModal`'s date. |
 | `DataTable` | `mantine-datatable` wired for **server-side** paging + sorting, and for row selection. Props: `records`, `columns`, `totalRecords`, `page`, `recordsPerPage`, `onPageChange`, `onRecordsPerPageChange`, `sortStatus`, `onSortStatusChange`, `fetching`, `noRecordsText`, `filters`, `onRowClick`, `onRowActivate`, `pinLastColumn` (keeps the actions column in view on a grid wider than the screen), `storeKey` (turns on draggable widths and the header's right-click column chooser, and names where they are remembered), `summaryRecords` (the filtered rows the footer totals — see **The summary row**). Footer reads "Showing {from} to {to} of {total} entries"; page sizes come from `PAGE_SIZE_OPTIONS`. See **The selected row** and **Column chooser and column widths**. |
 | `columnFilter({ label, value, onApply, options?, withText?, single?, placeholder? })` | The `filter` + `filtering` props for one column - spread into its definition to give it a header funnel. See **Column filters**. |
 | `useGridFilters(columnText, onChange?)` | Filter state for a grid that holds all its rows: `apply(rows)`, `options(rows, accessor)`, `bind(accessor)`, `clearAll()`, `activeCount`. |
@@ -194,7 +204,8 @@ modifier in the hint is read from the reader's own platform.
 | `FilterBar` + `FilterBar.Col` | Bordered `Paper` with a responsive `Grid` for filter controls. **No Apply/Filter button** — see **Filtering**. |
 | `RowActions({ label, edit, toggleStatus, custom, remove })` | Subtle `ActionIcon`s with tooltips. Each action takes `visible`, `disabled`, `disabledReason`, `onClick`. `custom` adds page-specific icons (`{ icon, tooltip, color }`) between the standard ones and Delete, through the same tooltip/disabled wrapper. |
 | `MoreActionsMenu({ actions })` | The "More Actions" dropdown. |
-| `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. Opens with the cursor in the first field and gives the focus back on close — see **Modals and the keyboard**. |
+| `FormModal` | Modal with a form, `size="lg"`, Cancel / Save footer; refuses to close on a backdrop click while saving. Opens with the cursor in the first field and gives the focus back on close — see **Modals and the keyboard**. Optional, all off by default (script 90): `closeOnEscape` (default `true`; an outer dialog passes `false` while an inner one is open), `fullScreen` (a phone: not centred then), `saveDisabledReason` (while `saveDisabled`: the Save button's tooltip, a dimmed line above the footer below 48em). A submit bubbling up from a dialog opened on top of it is ignored. |
+| `SearchSelect({ load, value, onChange, selected?, resolve? })` / `SearchMultiSelect({ load, value, onChange, selected })` | A dropdown that **searches the server as it is typed** (debounced, abandoned requests aborted), for the lists without a ceiling: orders, invoices, containers, movements, parties. `load(search, signal)` answers the first matches (a stable function: module level or `useCallback`; the shared ones are in `components/purchase/documentSearch.ts`); `selected` keeps a known option (a default, a preset) in the list; `resolve(value)` finds the label of a value kept from the last visit. See **Lists of any length**. |
 
 ## Modals and the keyboard
 
@@ -215,6 +226,19 @@ no page may re-implement it:
 - **Enter submits.** The body is a real `<form>` with a real `type="submit"` button, so Enter in any
   single-line field — including the last — submits it. Nothing else is needed; a `Textarea` keeps Enter for
   its own newline, which is right.
+- **Only the dialog's own form submits it.** A dialog opened on top of another lives in a portal, but its submit
+  still bubbles up the React tree to the dialog under it, which would then post too. `FormModal` ignores a submit
+  whose target is not its own form (`event.target !== event.currentTarget`), as Item Definition already did. No
+  dialog held another form before script 90, so none of them changed.
+
+Three options, all off by default (script 90, the transfer order's large dialogs that post, and the dialogs opened on
+top of them); left out, a dialog is exactly what it was:
+
+| Prop | What it does |
+|---|---|
+| `closeOnEscape` (default `true`) | `false` keeps Escape from closing the dialog (it never closes while saving). Mantine 9.5 closes EVERY open modal on one Escape, so an outer dialog passes `false` while an inner one is open: Escape then closes the inner one only. |
+| `fullScreen` | The whole screen, not centred: the Dispatch, Receive and Dispatch and receive dialogs pass it below 48em. |
+| `saveDisabledReason` | Why Save is disabled, while `saveDisabled` is true: the button's tooltip on a wide screen and, below 48em (a phone shows no tooltip), a dimmed line above the footer - the rule of `DocumentActionBar`. Enter does not submit through it. |
 
 A form modal that does not use `FormModal` gets none of this, which is the reason not to write one.
 
@@ -358,6 +382,10 @@ Conventions:
 - The last visible column cannot be unticked: a grid of no columns is a blank rectangle with a
   paging footer under it.
 - A column can start hidden with `defaultToggle: false` on its definition.
+- A title may be a node - a caption inside a `Tooltip` that explains it (script 90: Sales Profit's "COGS adjustments
+  (USD)"). The chooser, the filter dialog, the footer menu and the CSV header then name the column by the text inside
+  the node (`captionOf` in `DataTable.tsx`; the tooltip's label is a prop, never part of the name), and only a node
+  without text falls back to the accessor in words.
 
 A reader can hide a column whose funnel is set, which would otherwise leave a filter narrowing the
 rows with nothing on screen saying so. The "N column filters in effect" strip above the table is what
@@ -593,7 +621,7 @@ for the life of the draft. The wizard resets itself by remounting on `opened`.
 
 ## Document type configuration
 
-`Configuration › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
+`Configurations › Document Types` (`src/pages/configuration/DocumentTypesPage.tsx`, permission
 `inventory.documenttypes.manage`) edits the document kinds: name, prefix, number length, number on
 post, number per branch, **year in number** (a checkbox: `SHR-2026-000001`, one sequence per year), requires reason, default pricing (Cost / PriceList / None), price editable, active.
 Code, family, stock direction and **BIVAC items only** are read-only — the procedures branch on them (see
@@ -606,6 +634,62 @@ not editable = the read-only average (Inventory Out), `PriceList` = the list pri
 override permission (sales). The pages no longer hard-code `INV_IN` / `INV_OUT` cost rules; `documentKind.ts`
 keeps the direction only (the fallback while the configuration loads). Document numbers run per branch
 (`IN-KLW-000012`): the number column is 190 px and never truncates.
+
+**What a type does** (script 79; the fourth switch came with script 90). Switches each meaningful on ONE type,
+described in one place, `pages/configuration/documentTypeEffects.ts` (`EFFECT_TEXT`, `stockText`, `stockSentence`,
+`effectsText`):
+
+| Type | Field | Default | The form's switch |
+|---|---|---|---|
+| PINV | `affectsItemCost` | true | "Affects item cost": the invoice's price becomes the cost of the goods received against it |
+| PINV | `affectsOnHand` | false | "Affects on-hand (receive the goods when posted)": posting also receives its goods with a goods receipt |
+| GRN | `autoCreateOnDelivery` | true | "Create goods receipts when a Delivery is completed" |
+| TRO | `needsApproval` | false | "Needs approval before release": a transfer order is sent for approval and released when an approver approves it (script 90; see **Inventory transfers**) |
+
+- The form shows a switch, with its one-line description, only on its own type, under "What it does", and SENDS it only
+  for that type (`undefined` otherwise): the request fields are nullable, so an older form never turns one off, and the
+  server refuses one sent for another type (62000). Under the invoice's two: "Each invoice keeps the values it was
+  posted with…".
+- The list has one **What it does** column ("Item cost: yes · Receives on posting: no", "On Delivery: automatic" /
+  "by hand", "Approval: yes" / "no", a dimmed "-" elsewhere) with its grid text, so it filters and exports like the
+  others.
+- The **Stock** column says what really happens: for PINV "None (goods receipts)" or "In, through a goods receipt at
+  posting" (green); the stored `stockDirection` is never changed (old invoices read it). The transfer types are stored
+  with direction 0 (a dispatch and a receipt each write two legs, which one direction cannot say), and read TRO "None (an
+  order)", TRD "Out of the source, onto On the way", TRR "From On the way into the destination" (blue). The form's
+  read-only line says the same in a sentence (`stockSentence`: "No stock effect: an order. Its dispatches (TRD) and
+  receipts (TRR) move the goods.", "Takes the goods out of the source warehouse, onto the On the way warehouse of the
+  destination branch.", "Takes the goods from On the way into the destination warehouse.").
+- Turning the TRO switch never changes an order already waiting or released: orders waiting stay waiting (an approver
+  approves them, or the requester withdraws and releases).
+- TRD and TRR are numbered when they are posted: the form does not lock their "Number assigned on posting" switch
+  (the list's "Number on post"), and turning it off is refused by the server, shown as it comes ("A transfer dispatch
+  or receipt is numbered when it is posted: Number on post stays on."). On TRO the switch on numbers an order at
+  Release (or Approve) instead of its first save: the order page then reads "Assigned on release" (`numberOnPost` on
+  the order).
+- Where the switches show elsewhere, a missing field (an older API) means today's behaviour:
+  - the invoice: `document.affectsCost === false` -> the "Cost of received goods" card says why it is empty
+    (`NO_COST_INVOICE_TEXT`) and the posted invoice's Charges card offers no late charge
+    (`lateChargesBlockedReason`, the server's 67013 in other words); the post confirmation shows the server's preview
+    sentence as it comes, never the "invoice price equals the cost" wording;
+  - `document.receiveOnPost === true` (not shipped in containers, something to receive) -> the post confirmation SAYS
+    "Its goods are received at once into {warehouse}: …" (`receiveOnPostText`) instead of the "Receive the goods now"
+    tick; no goods receipt right is needed, the receipt is the type's rule;
+  - after posting, A RECEIPT WAS TRIED when the tick was on OR the answer carries a goods receipt or a `receiveWarning`:
+    the page then names the receipt, or shows the warning ("Invoice posted; the goods receipt was not: {reason}. Use
+    Receive goods…") - never only "posted". `postResult.receivedByDocumentType` is true only when the type's receipt was
+    made or refused (false for goods in containers or nothing left to receive);
+  - bulk posts and imports that post: a `BulkActionItemResult` can be ok with a `warning` (orange badge, the warning in
+    orange in `BulkResultsModal`) and a `message` saying what was done besides ("Goods received: GRN-…"); an
+    `ImportCreateDocument` carries `goodsReceiptNumber` / `warning`, shown under its status, plus a warning
+    notification;
+  - the invoice list's goods receipts banner says "Posting a supplier invoice receives its goods with a goods receipt…"
+    when the PINV type's `affectsOnHand` is on, the "no longer adds stock" sentence otherwise;
+  - the movement: `goodsReceiptsAutomatic === false` -> the Complete dialog of a Delivery shows
+    `DELIVERY_BY_HAND_TEXT` instead of the per-container preview, the answer's `goodsReceiptsMessage` is shown as an
+    info notification, and the Cancel dialog says the movement created no draft when it has none.
+- A saved setting is kept: since script 89 the seed values are applied only to a type nobody has saved (before, five
+  seeds reset Price / cost editable, Number per branch and the pricing of twelve types at every start).
 
 ## The warehouse is a line's, not the document's
 
@@ -625,17 +709,20 @@ too, script 72). The header's branch numbers the document, it does not limit its
 warehouses under it is a group, not a place that holds stock, and the database refuses it on save and at
 posting. One helper for every document line, `components/documents/lineWarehouses.ts`:
 
-- `lineWarehouseOptions(warehouses, headerBranchId, keepIds)`: the leaves of every branch, the header
-  branch's first, the others with their branch named. A warehouse a line already holds stays listed even
+- `lineWarehouseOptions(warehouses, headerBranchId, keepIds, usableOnly = false)`: the leaves of every branch, the
+  header branch's first, the others with their branch named. A warehouse a line already holds stays listed even
   when it is no longer allowed, marked "- has warehouses under it, choose one of those", so an older line
-  still shows where it is.
-- `defaultLineWarehouseId(warehouses, branchId)`: the branch's main warehouse when it is a leaf, else its
-  first leaf - the seed of new rows.
+  still shows where it is. `usableOnly` (script 92) offers only the leaves the reader may use (`canUse` of the
+  lookup) and marks a kept one they may not use "- not one of your warehouses" (the parent's mark wins); see
+  **Warehouse access per user**.
+- `defaultLineWarehouseId(warehouses, branchId, usableOnly = false)`: the branch's main warehouse when it is a leaf,
+  else its first leaf - the seed of new rows. With `usableOnly`, among the reader's own; none in the branch, the
+  reader's first usable leaf of any branch.
 - Changing the branch leaves the lines alone; only the seed of NEW rows goes back to the new branch's.
 
 Goods receipts keep their own grouped pickers (`warehouseChoices` in `goodsReceiptModel.ts`, one group per
-branch, the receipt's or document's branch first) with the same rule: leaves only, a kept parent marked the
-same way. A container's receipt offers the leaves of the container's branch only; an order's, an invoice's or
+branch, the receipt's or document's branch first; its last parameter `usableOnly` as above) with the same rule:
+leaves only, a kept parent marked the same way. A container's receipt offers the leaves of the container's branch only; an order's, an invoice's or
 a receipt without an order, the leaves of every branch. On a receipt without an order a branch change sets
 "Receive into" (where new lines start) to the new branch's default and leaves the lines alone. The container
 form's "Warehouse (offloading destination)" offers the branch's leaves; a draft goods receipt takes it as
@@ -649,6 +736,509 @@ be a parent"; the current parent stays selectable.
 The import creates ONE document however many warehouses the file names — or, on Sales Invoice and
 Inventory In when the reader asks for it, one document per warehouse; see below. Each row keeps the
 warehouse the file gave it.
+
+## Inventory transfers: the warehouses are the document's
+
+**Inventory › Transfer Orders** (script 90; `/inventory/transfers`, `/new`, `/:id`, and the dispatch note
+`/:id/dispatches/:postingId/print` outside the shell; permissions `inventory.transfers.view / create / delete / release /
+approve / dispatch / receive / close / cancel / reverse`) moves stock from one warehouse to another of any branch without
+changing its cost. A **dispatch** (TRD, numbered by the source branch) takes the pieces out of From onto the hidden **On
+the way** warehouse of the destination branch; a **transfer receipt** (TRR, numbered by the destination branch) takes them
+from there into To. The client is `src/api/inventory/transfers.ts`; the pieces are in `src/components/transfers/`
+(`transferStatus.ts`, `transferAbilities.ts`, the header, lines and postings cards, the approval notice, the Dispatch and
+Receive dialogs).
+
+- **The exception to "the warehouse is a line's".** From and To are on the HEADER, and every line leaves From and goes
+  to To ("The warehouses are the order's: every line leaves From and goes to To."). A transfer is one journey between
+  two places - one truck, one dispatch note, one receipt at the other end - and a warehouse per line would make one
+  order of several journeys. From and To are leaves of any branch, grouped by branch with the order's first, never an On
+  the way warehouse, never the same one; a held warehouse no longer allowed stays shown and marked as
+  `lineWarehouses.ts` does. The number is given at the first save, by From's branch then.
+- **Stored and shown statuses** (`transferStatus.ts`). Stored: Draft, Waiting for approval, Released, Cancelled. A
+  released order SHOWS, the first that applies, Released, Partly dispatched, Dispatched, Partly received, Closed
+  ("Nothing more will be sent"), Received: the server's `displayStatus`, from its counters, as purchase orders show Saved
+  / Partially posted / Posted. Colours: Draft gray, Waiting for approval yellow, Released blue, Partly dispatched
+  orange, Dispatched indigo, Partly received orange, Received green, Closed teal, Cancelled red; a reversed dispatch or
+  receipt orange. Beside the status a red filled "Late" badge, and an orange "{n} lost" badge once goods were written
+  off.
+- **Ordered in the unit, every counter in pcs.** Ordered is typed in the line's unit ("= 24 pcs" dimmed when it is not
+  the base unit); Dispatched, Received, To dispatch, Not sent and Lost are pcs. **On the way is never a column of the
+  lines grid**: it belongs to a dispatch, so it is on the totals row (Ordered, Dispatched, Received, On the way, Not
+  sent, Lost) and on each dispatch of the "Dispatches and receipts" card.
+- **Where the item stands, beside each line**: "Available at {From code}" (on hand less what other released orders
+  still take from From, never below 0; red when below the line's To dispatch; a draft asks `/availability` again when an
+  item, From or To changes) and "Stock at {To code}" (on hand only: `incomingToBase` is read, not drawn). Information
+  only: nothing is reserved.
+- **The list** (`TransferOrdersPage`): Number, Date, From and To (code - name, the branch dimmed below), Status (the
+  badges above), Items, Ordered (pcs), Dispatched and Received (a progress bar each, "40 of 84 pcs …" on hover), On
+  the way, Expected arrival (red and bold when late to dispatch), Reference, Created by; the FilterBar's Search
+  ("Number, reference, warehouse or item"), Branch, From and To (active leaves only), Status (each shown status, then
+  "Open"), date range, "On the way only", "Late only" and, for approvers only, "Waiting for approval"; the line under
+  the grid "Orders: n · On the way: n pcs · Late orders: n". A phone shows one card per order ("40 / 84 dispatched ·
+  10 on the way"). "No transfer orders yet." is a card with the New button when there is no order at all; an empty grid
+  always reads "No transfer order matches these filters.". The menu's count opens the plain list: the approver ticks
+  "Waiting for approval" there.
+- **The notices above the header** (`TransferApprovalNotice`), each in the colour of what it is: yellow "Waiting for
+  approval since {date} (sent by {name})."; red "Rejected by {name} on {date}: {reason}" on the draft until it is sent
+  again; gray "This order needs approval before release: Send for approval… tells the approvers." on a draft for a
+  reader who may not approve; teal "Nothing more will be sent (on {date} by {name}): {reason}. {n} pcs not sent."; red
+  "Cancelled on {date} by {name}: {reason}". Their dates show the time too (`stamp()`, as the purchase order's
+  rejection notice); the server's sentences carry the date only. A new order reads whether approval is needed from the
+  TRO type (`useDocumentTypes`), a saved one from its own `needsApproval`.
+- **The dialogs post directly.** There are no draft dispatches or receipts: Dispatch…, Receive… and Dispatch and
+  receive… post what they show, each in one transaction (Dispatch and receive needs both rights, and posts both or
+  neither). They are xl, full screen below 48em, and their disabled button says why (`FormModal`'s `fullScreen` and
+  `saveDisabledReason`). They open with the cursor on the first quantity ("Dispatch now", "Received now"; a date field
+  focused first opened its calendar over the lines), their tables fit the xl dialog at 1440 (no row scrolls sideways),
+  and Escape on an open calendar closes the calendar only (`useCalendarEscape`; Change ETA… and Reverse…'s date too).
+- **The confirmations do the action** (`confirmAction`): Enter confirms, and a refusal ("…modified by another user…",
+  a line's sentence) stays red in the dialog, as it comes, marked on the page too; Delete keeps the cursor off its button.
+- **The lines grid takes any length** (an import of 200 lines): Item and Unit are `LazySelect`s, a row's tooltips draw
+  no portal, the lines are drawn in steps of 200 (`useShownRows`, "Showing 200 of 250 lines. Show 50 more · Show all";
+  a new line or one with a problem always shows). On a phone a draft's card names each box ("Item", "Unit", "Ordered",
+  "Notes") and says under Available who else takes some ("{n} on hand · {c} promised to other orders"), which a wide
+  screen shows on hover.
+- **The "Dispatches and receipts" card keeps its Actions column in view** (sticky, as `pinLastColumn`) when its twelve
+  columns are wider than the card; on a phone each card is a button (`aria-expanded`) that opens its lines.
+- **Another order's link goes through the unsaved-changes guard**: "Return of …" and "Returns: …" ask "Leave without
+  saving?" when the page holds changes (a return is a draft somebody types into), as Back and Print dispatch note do.
+- **The import has no error file** in its transfer mode: the sales import's file has sales columns and its own right;
+  every row's reason is on screen.
+- **Receipt before dispatch.** Reverse… undoes one whole dispatch or receipt, with a reason and a "Reversal date"; a
+  dispatch whose goods were received or written off waits for that receipt ("TRD-… has goods received by TRR-…: reverse
+  that receipt first."): the row's Reverse… is disabled with the server's `reverseBlockedReason`. Goods turned back
+  before they arrive: reverse their dispatch. Goods sent back after they arrived: Create return… (a new order the
+  other way).
+- **Late** is the server's, in UTC: a dispatch with pieces on the way after its ETA, or a released order with something
+  still to dispatch after its Expected arrival. A red filled "Late" badge and the list's "Late only" switch; never
+  "Overdue".
+- **The approval switch** (Configuration › Document Types, TRO, "Needs approval before release", off by default). On,
+  Release is hidden and "Send for approval…" (for approvers also "Approve & release") takes its place; the order waits,
+  locked, and its approvers - the users holding Approve Transfer Orders - see the menu's count
+  (`useTransfersWaiting`) and the list's "Waiting for approval" switch, and are emailed (those who also hold View
+  Transfer Orders: the email's link opens the order).
+- **One rule per button** (`transferAbilities.ts`): the reader's permission hides, the server's `abilities.{action}`
+  (allowed, reason) disables with its sentence, in `DocumentActionBar`; while the page has unsaved changes the actions
+  that change the order say "Save your changes first.".
+- **On the way warehouses** (`isTransit`, one per branch, made and kept by the system). No picker offers them but Stock
+  Valuation's (`warehousesApi.lookup(activeOnly, branchId, includeId, includeTransit = true)`: "OTW-BR-002 - On the way
+  to BR-002 (transfers)"). The Warehouses page shows them with an "On the way" badge and offers neither Deactivate nor
+  Delete; their form edits Name and Address, the rest is text with "Managed by transfers: the On the way warehouse of
+  {branch}." (`pages/masterdata/transitWarehouse.ts`); the Parent picker never lists them.
+- **The barcode's unit, on this page only.** `QuickItemSearch` passes `onPick(item, term)` the text scanned; the
+  transfer page takes the unit whose barcode it is, else the base unit, and a second scan of the same item and unit adds
+  1. Every other page ignores `term`.
+- **Values only with the permission.** The value figures arrive null without View item costs (`inventory.costs.view`,
+  script 94; View Stock Valuation before it): the order's `onTheWayValueBase`, a posting's `valueBase` / `lostValueBase`
+  and a line's `unitCostBase` / `lossUnitCostBase` come as null, never 0. The page decides by the permission
+  (`PERMISSIONS.costsView`): without it the Value column is left out; with it a figure the server has not got shows
+  "—", never a 0 that is not one. The order's `onTheWayValueBase` is not drawn at all (the totals row holds pcs only);
+  a posting's value is, with the permission. The dispatch note never shows a cost. See **Item costs**.
+- **`CancelReasonModal`'s `withDate.label`** names the date field when it is not a cancellation's: Reverse… passes
+  `{ minDate: the posting date, label: 'Reversal date' }`; the sales cancel of script 84 keeps "Cancellation date".
+- **The Email log links by category.** `TransferApproval`, `TransferApproved` and `TransferRejected` ("Transfer approval
+  request", "Transfer approved", "Transfer rejected") are about a transfer order: their Document cell reads "Transfer
+  order #{id}" and opens it (`isTransferCategory`, `api/emails.ts`), as text for a reader without
+  `inventory.transfers.view`. Every other category keeps its purchase-order link, "Order #{id}". The column filters and
+  exports those same words (a text column now): the bare number was one value for two documents.
+- **The dispatch note** (`TransferDispatchPrintPage`, "Print dispatch note" on a dispatch's row): like the goods
+  receipt's count sheet, outside the shell, A4 portrait, the browser's print dialog at once: "Dispatch note {TRD}", the
+  transfer order, From → To, the dates, "Waybill / truck", the lines in pcs, the total, and three signature boxes
+  ("Dispatched by", "Driver", "Received by"). A reversed dispatch's note says "REVERSED" in its top right corner. It
+  opens in the same tab, after the unsaved-changes question, as the count sheet does.
+- **`FormModal`'s options** (`closeOnEscape`, `fullScreen`, `saveDisabledReason`, and the nested form's submit ignored)
+  came with these dialogs: see **Modals and the keyboard**.
+- **Around them.** The item statement opens a TRD or TRR row, and its TRO, on the order (`transferOrderId`; the
+  counterparty reads "LKS-01 → LUB-01"; a transfer's reversal row reads "Reversed", every other family's still
+  "Cancelled"). Shortages count what is on the way to a warehouse as **Transfers in** (see
+  **Shortage plans**). The Dashboard's Inventory value of one branch says, on hover, that it includes goods on the way
+  to that branch's warehouses (its "Stock value by warehouse" chart shows an On the way slice). Inventory In / Out show
+  a gray hint under the reason "Transfer In" / "Transfer Out" (TRF_IN / TRF_OUT): "Moving stock between your own
+  warehouses? Inventory › Transfer Orders moves it without changing its cost and follows it on the way." Sales Profit's
+  COGS adjustments header says, on hover, that adjustments stay in the branch that received the goods.
+
+## Stock levels per warehouse and Fill to Max (script 91)
+
+**Inventory › Stock Levels** (`/inventory/stock-levels`, `pages/inventory/StockLevelsPage.tsx`; permissions
+`inventory.stocklevels.view` to read, `inventory.stocklevels.edit` to set, remove and import) and Item Definition's
+**"Stock levels per warehouse"** card (`pages/inventory/ItemStockLevelsCard.tsx`). The client is
+`src/api/inventory/stockLevels.ts`; the Fill, drawer and create-from-levels calls are `transferLevelsApi` at the end of
+`src/api/inventory/transfers.ts`; the shared pieces are in `src/components/stockLevels/` (`stockLevelStatus.ts`,
+`StockLevelBadge`, `StockLevelFormModal`, `StockLevelHistoryModal`, `ImportStockLevelsWizard`,
+`CreateTransferFromLevelsModal`, `levelWarehouses.ts`).
+
+- **Two Min / Max, never read as one.** Item Definition's Minimum / Maximum Quantity are the COMPANY's: the Dashboard's
+  "Items below their minimum", the page's view "Company (Item Definition)". A **stock level** is one item's Min (required,
+  pcs, 0 or more) and Max (optional, not below Min) in ONE warehouse at the bottom of the tree, never On the way. The
+  Inventory Parameters card says so under the Min / Max row, in both modes ("Minimum and Maximum Quantity are for the whole
+  company: …"), and the levels card keeps the company figures in view ("Company: Minimum Quantity 50 · Maximum Quantity
+  80. The warehouses' Min add up to 95 pcs, above the company Maximum Quantity (80)." in orange when they do).
+- **One formula, the server's** (`inventory.fn_StockLevelState`, read for one pair through `fn_StockPosition` and for
+  many pairs at once through `fn_TransferPositions`): **Projected = On hand + On the way in + To come in − To go
+  out**, released transfer orders only (drafts, orders waiting for approval and purchases are not counted). The five
+  statuses, the first that applies, in `stockLevelStatus.ts`: No level (gray), **Below Min** (red, Projected < Min),
+  **Below Min, covered** (orange, On hand < Min ≤ Projected; its tooltip says why it is not red), **Above Max** (blue),
+  **OK** (green). The page never works a status out itself; the column tooltips (`LEVEL_COLUMN_HINTS`) say what each
+  figure is, and Projected is bold red when Below Min.
+- **A card that saves on its own, in view mode too.** The levels card sits in the item's `<form>` but is not part of it:
+  plain buttons, dialogs in portals (`FormModal`), and the page's submit guard ignores a submit that is not its own - so
+  saving a level never saves the item, and the card works without Edit Item. A new item reads "Save the item first to set
+  its stock levels per warehouse." Its rows are the item's every level, inactive warehouses included
+  (`stockLevelsApi.forItem`), read again after every change; the pencil is disabled on an inactive warehouse with the
+  server's sentence ("Warehouse {code} is inactive: activate it to change its levels."), the trash is not (a level may be
+  removed there).
+- **`StockLevelFormModal` is the one dialog for a level**: "Set levels…" on the card, "Add levels…" (item first), "Set
+  level…" / "Add level…" on a row (one read-only warehouse; the cursor starts in Min). It sends the RowVersion of every
+  level it replaces, says before the click which one it replaces ("LUB-01 already has Min 10 / Max 40: it is replaced."),
+  and after a 404 / 409 shows the server's sentence and reads the levels again. A warehouse sent without a RowVersion is a
+  NEW level: when another user set one there meanwhile the server answers 409 "… was added by another user. Reload and
+  try again." instead of overwriting it. Min and Max are at most 1,000,000,000 pcs ("Min and Max can be at most
+  1,000,000,000 pcs.", in the dialog before the click, and the server's rule). Every change is in the level's history
+  (`StockLevelHistoryModal`: When / By / What / Min "10 → 20" / Max / From "Item Definition", "Stock Levels", "Import
+  ({file})").
+- **Two views, one page.** A `SegmentedControl` "Per warehouse" | "Company (Item Definition)" (the whole row below 48em),
+  each view its own grid on the grid engine of Stock Valuation, its filters kept when the reader switches. The address
+  (`view, status, branchId, warehouseId, itemId`) is read ONCE when the page opens: links preset it through
+  `routes.stockLevelsLink(...)`. The Dashboard's "Items below their minimum" opens the company view on the Dashboard's
+  branch with status Below Min (Item Definition without View Stock Levels); its new line "Warehouse levels below Min"
+  (`stockAlerts.belowWarehouseMin`, null without the permission) opens Per warehouse, Below Min, same branch. The company
+  view's "3 warehouses" opens Per warehouse with an "Item: {code}" chip.
+- **Ticks lead to one transfer order.** With Create Transfer Orders, rows with a level can be ticked; "Create transfer
+  order…" is disabled with "Tick rows of one warehouse: a transfer order goes to one warehouse." when the destinations
+  differ (the reason under the button on a phone). `CreateTransferFromLevelsModal` asks From, the order date and the
+  expected arrival, and the server makes ONE draft, each item filled in its base unit to its Max (else Min), capped at
+  what From has; nothing to transfer: no draft, the sentence in the dialog. The new order opens; the server's message is
+  green and each of Fill to Max's warnings orange, as after a Fill ("Other draft or waiting transfer orders to {To} hold
+  some of these items too (…)" - a second click for the same shortage is told about the first draft).
+- **The transfer order page: Min, Max and Projected at {To}** (`TransferLinesGrid`, `components/transfers/transferLevels.ts`).
+  While the order still moves something (a draft, an order waiting for approval, a released one not yet Received or
+  Closed: `showsLevels`) the grid has three more columns after "Stock at {To}": To's **Min** and **Max** ("—" without a
+  level; tooltip "{To}'s Min / Max for the item (Stock levels per warehouse).") and **Projected at {To}** AFTER this order
+  (tooltip "What {To} will have once this order and the other released transfer orders have arrived: on hand + coming in
+  − going out."). A saved order's figures are the server's (`usp_TransferOrder_Get`, the item's on each of its lines); a
+  draft being typed reads where To and From stand WITHOUT it (`/availability`) and adds what its form's lines of the item
+  order, in pcs (`withLevelsAfter`), so a quantity typed moves Projected at once. Read, the fifteen columns still fit a
+  1440 screen (the widths are hints, headers wrap, and a long item code may break after a hyphen, as in 90: kept on one
+  line, a 15-character code made a released order scroll sideways) and **Item Name keeps its 130 px** (script 90's rule:
+  never squeezed to a word a line - the figure columns and Notes give up their room first, and Min, Max and Projected
+  pad 6 px a side, which gives back what a released order's tick column takes). Should long warehouse codes in the
+  headers still need more, the table scrolls sideways a little rather than squeeze Item Name; the draft's form
+  scrolls inside its card, as before. On a phone the card says "Min 20 · Max 60 · Projected 60 at LUB-01" and the reasons as dimmed lines.
+- **Fill to Max… and Add items below Min…** (`TransferLinesToolbar` in the Lines card's title row, a draft and Create
+  Transfer Orders; stacked full width on a phone). The server's rule only, shown before it is applied: a preview
+  (`fillToMaxPreview`, nothing written), then the apply with the order's RowVersion (`fillToMax`), which works it out
+  again. Per ITEM: the item's FIRST line is SET (never added to), its other lines count but never change, nothing is
+  deleted, a second run changes nothing; Add items below Min makes a new line per item at the end, in the unit chosen
+  (base by default). Both only on a saved draft: "Save your changes first." while the page is dirty, else the server's
+  `abilities.fillToMax` / `abilities.addBelowMin` reason (tooltip; a dimmed line under the buttons on a phone).
+  `FillToMaxModal` ("Fill to Max - {No} ({From} → {To})", xl, full screen below 48em, one card per line there) lays out
+  the server's plan - Now, Fill to (bold when it changes), Projected "18 → 60", Min, Max, Available at {From}, the
+  result in the server's outcome words ("capped: {From} has {n} pcs available"), purchases still to come dimmed under a
+  row - then "If you apply it: {message}" and the warnings (orange); its table fits the xl dialog at 1440, and the cursor
+  is on "Fill {n} lines" (nothing to type: Enter applies; disabled "Every quantity is already at its fill."). The drawer
+  `AddBelowMinDrawer` (`belowMin`; right side, `min(1100px, 100%)`, full screen below 48em, one card per item there;
+  remounted on open) lists To's levels with the server's proposal per unit ("2 BOX = 24 pcs") and pre-ticks the items
+  below Min that are not on the order and whose base unit fills; an item on the order, or a unit that does not fill,
+  cannot be ticked. After either apply the answer's order replaces the page's, its message is green and each warning
+  orange; a 409 CONCURRENCY says "Someone else changed this transfer order. Reload the page." and the page reads the
+  order again. The Activity trail reads "Fill to Max" and "Items below Min added".
+- **Red means "after this order".** On the transfer grid a line is red while the destination's Projected AFTER this
+  order is still below its Min (`isBelowMin`): the row tinted (`var(--mantine-color-red-light)`), Projected bold red,
+  "Still below {To}'s Min of {min} with this order." on hover - so a filled line stops being red and a capped one stays
+  red. The source going below its own Min with this order is orange under "Available at {From}" ("{From} keeps {after}
+  pcs after this order; its own Min is {min}."); **red wins**: a cell red for another reason (below what the line still
+  has to dispatch) stays red and both reasons are joined in the tooltip and the phone line.
+- **The import** (`ImportStockLevelsWizard`, the steps of the charges' import): .xlsx up to 5 MB, 20,000 rows. Step 2
+  shows every row with its Status - **Valid**, **Warning** (imported: an inactive item, Remove with a Min typed),
+  **Error** (skipped, the file's text in red), **Unchanged** (skipped) - and its Action ("Set", "Remove", "No change"),
+  the level it has now ("Min 10 / Max 40"), long files 200 rows at a time. "Continue with {n} changes" is disabled with
+  "Nothing to import: every row is unchanged or has an error." Step 3 saves every change in ONE transaction, judged again
+  by the server, which answers the sentence shown. **The export round trip**: "Export to Excel" (Per warehouse only)
+  writes the five import columns first and greys the others; the import ignores the others, so an export imported back
+  unchanged is "Nothing was imported: every row is unchanged or has an error."
+- **Warehouses.** A warehouse with levels cannot become a parent: the Parent picker says "- has stock levels, cannot be a
+  parent" when the levels are all it holds (`hasStockLevels`, `isUsedInTransactions` of the lookup), else the old "- used
+  in transactions, …"; deleting a warehouse or an item takes its levels ("Its stock levels go with it.", "Its units, image,
+  documents and stock levels per warehouse go with it.").
+- **What the page is for stays in view at 1440** (the browser tests found Status, Projected, Min and Max off screen). A
+  header of the grid engine is its caption plus about 90 px of sort, funnel and resize controls and never wraps, so:
+  - **Per warehouse** shows Item Code (the item's name under it), Warehouse (code, then name and branch dimmed), On
+    hand, Projected, Min, Max, To reach Max and Status; **Item, On the way in, To come in, To go out and Updated start
+    hidden** (`defaultToggle: false`; the column chooser - right-click a header - shows them, with their tooltips);
+  - the **company view** shows Item Code (the name under it), On hand, Minimum / Maximum Quantity, Missing, Status and
+    Warehouse levels; Item, Family and Brand start hidden;
+  - the figures, the warehouse and the company status have **no column funnel** (`filterable: false`): the filter bar
+    narrows by warehouse, status, family and brand, and a figure is sorted rather than filtered;
+  - the item card's table **fits the card** (about 730 px in the main column): narrow paddings, the warehouse's name
+    wrapping under its code, and "Updated" read under the status badge in a "Status · Updated" column; on a narrower
+    screen it scrolls with the pencil, trash and clock pinned to its right edge (`position: sticky`).
+  - **A status badge never loses its label** (`StockLevelBadge`, the import's Status and Outcome): its label does not
+    hide its overflow and the badge does not shrink, so a narrow column grows instead of reading "Be…" or "Unch…".
+- **Phones.** The page and the card show one card per row ("TVS-APACHE-160 · LUB-01", "On hand 12 · Projected 18 · Min
+  20 / Max 60", the badge on a line of its own - beside the figures it was squeezed to "Be…" - then "inactive item" /
+  "inactive warehouse" badges when they apply, and the "…" menu or the actions). A phone shows no tooltip, so the card's
+  disabled pencil says why under the figures ("Warehouse {code} is inactive: activate it to change its levels.") to a
+  reader who may edit; a reader sees "inactive".
+- **Details the browser tests settled.** The card shows a skeleton instead of the company line, and no "Set levels…",
+  until the item itself has been read (it said "Minimum Quantity 0" and titled its dialog "Stock levels - "). The
+  company view's "3 warehouses" opens Per warehouse in the company view's scope - its branch, and an inactive item's
+  levels too - so the list holds the warehouses the link counted. Escape on the import's "Discard this import?" answers
+  it once (a guard: Mantine sends the key to the wizard too, which asked again). "New transfer order to {To}" follows
+  `useCalendarEscape()` (Escape closes an open calendar, not the dialog). The disabled "Create transfer order…" is
+  `aria-disabled`, ignores the click and shows its reason on keyboard focus too. The drawer's loading state is derived
+  from the filters its answer is for (a search typed and erased before it was sent left it dimmed for good), and Enter in
+  its search applies it at once. The container charges import (`ImportContainerChargesWizard`) has the same Escape guard
+  on its "Discard this import?".
+
+## Warehouse access per user (script 92)
+
+A user has **All warehouses** (every user before script 92, and every new user) or **Only these warehouses**, ticked
+on Users & Permissions › Users › Warehouses (`pages/security/UserWarehousesModal.tsx`). A ticked parent gives every
+warehouse under it, also those added later; a system administrator uses every warehouse whatever is stored; an On the
+way warehouse is nobody's and is never ticked. It changes nothing for anybody until an administrator restricts
+someone. The rules, in short (W1-W17 of the specification):
+
+- **It limits moving stock, never viewing.** Posting, cancelling, reversing, receiving, dispatching, setting a stock
+  level, naming a warehouse on a draft, deleting a draft that holds another's warehouse. Every list, page, print,
+  export, the item card, Stock Valuation, Shortages, Stock Levels and the Dashboard stay the same for everyone:
+  **never hide a list, never filter a report** - viewing is not limited. Purchase orders and supplier invoices are not
+  limited either (an invoice moves no stock); an invoice whose posting receives its goods is posted and its goods
+  receipt refused, in the existing warning.
+- **One sentence, the database's**: "You have no access to warehouse LKS-01: ask an administrator." ("warehouses
+  LKS-01 and LUB-01", more than three "… and 2 more"), 403 with code `WAREHOUSE_ACCESS`, shown as it comes.
+  `joinWarehouseCodes`, `noAccessSentence` and `noAccessSentenceFor` (`auth/warehouseAccess.ts`) repeat its wording
+  where a page disables a button before the click; the server repeats it if the click comes anyway. A change takes
+  effect at once (no sign-out); each change is in the user's history.
+- **"Restricted" is read from the lookup, never from the session.** `GET api/masterdata/warehouses/lookup` answers
+  `canUse` for the reader on every row, worked out per request (missing = true, false on an On the way warehouse):
+  `isWarehouseRestricted(warehouses)` and `canUseWarehouse(w)` read it. The token and `me` carry nothing about
+  warehouses, so a page that loaded the lookup is right at once after an administrator's change.
+- **`usableOnly` on the pickers** (`lineWarehouseOptions`, `defaultLineWarehouseId`, `warehouseChoices`,
+  `transferWarehouseChoices`, `levelWarehouseChoices`; default `false`, so a caller that passes nothing is unchanged).
+  Passed by Inventory In / Out / BIVAC Out, sales invoices and returns, purchase RETURNS only (PO and PINV keep every
+  leaf), Import Sales' default warehouse, the goods receipt ("Receive into" and its lines), Receive goods…, a
+  container's Receive goods… (the container page filters its list), the transfer order's **From**, the stock level
+  dialog's Warehouses and Create transfer order…'s From. **A kept warehouse the reader may not use is marked "- not
+  one of your warehouses"**, so a draft an administrator prepared still shows where its lines are; a line's cell
+  (190 px) cuts that label, so the select also says "Not one of your warehouses" under it (`notYoursNote(options,
+  id)`, the document line grids, the goods receipt's lines and "Receive into", Receive goods…, the transfer's From).
+  In Receive goods… a line whose own warehouse is not the reader's starts in their only usable warehouse when there is
+  exactly one, else empty; choosing it again is refused in the dialog with the sentence, before any call. A container
+  whose branch has warehouses but none the reader may use says so at the top of its Receive goods… dialog, in the
+  database's words ("You have no access to warehouses LUB-01 and LUB-02: ask an administrator.",
+  `noAccessSentenceFor`), and as the empty "Receive into" list's message; never an empty list that says nothing.
+  "Create draft" still works then, with no warehouse named (the server gives the draft the container's own, A7): the
+  dialog says so, and "Create and post" waits with the sentence. Its draft goods receipt says the same at the top of
+  the page, and Post waits with it while no warehouse is chosen. A restricted reader with no warehouse to move stock
+  in at all ("Only these warehouses" with none ticked, or only inactive ones) gets an orange Alert on a document they
+  may edit (Inventory In / Out / BIVAC Out, sales, purchase returns, goods receipts): "You have no warehouse to move
+  stock in: ask an administrator." (`NO_USABLE_WAREHOUSE`, `hasNoUsableWarehouse`), rather than an empty picker alone.
+- **A new document starts where the reader may move stock** (`defaultBranchIdFor`): the page's default branch (the
+  main one) when it holds one of the reader's warehouses, else the branch of their first one (their main warehouse
+  first), new lines in their usable leaf of that branch (main first). Once, when the branches and the warehouses are
+  in, and only while the reader has changed nothing. Unrestricted readers: the main branch, as before.
+- **Save & Post is disabled by the CURRENT lines** (`postAccessBlockedReason`): while a line (or the goods receipt's
+  "Receive into") is in a warehouse the reader may not use. The reason is the document's `warehouseAccessRefusal` (the
+  server's sentence) while the warehouses that block are exactly the stored draft's, else "Some lines are in a
+  warehouse that is not one of yours (marked - not one of your warehouses): change them, or ask an administrator."
+  Moving the line to one of the reader's warehouses enables it at once. Save Draft stays, and the server judges it
+  LINE BY LINE (A8): in a warehouse the reader may not use, a stored line may stay exactly as it is or move to one of
+  theirs (a line of the same item there; once moved it is theirs to change); a line added there, one whose item, unit,
+  quantity or expiry changed there (on a goods receipt also its counted pieces, its source line and "Nothing more will
+  come"), or one dropped without being moved is refused with the sentence naming that warehouse. Prices and notes are
+  not compared: they move no stock. While Save & Post is refused that way, Save Draft (Save on a goods receipt) is the
+  filled action: on a phone it is the big button, Save & Post going into the "⋮" menu with its sentence, never Cancel
+  or Back.
+- **Cancel (posted) and Delete (draft) take `warehouseAccessRefusal`** of the stored document (Inventory In / Out /
+  BIVAC Out, sales, purchase returns, goods receipts; and the Cancel of a supplier invoice posted before goods
+  receipts, which takes its own stock back out - the server sends the refusal on that invoice only): disabled with it,
+  `menuWhenDisabled: true`. On a phone a disabled action marked `menuWhenDisabled` goes into the "⋮" menu with its
+  reason, the filled Save & Post included (`DocumentActionBar`). The lists' bulk actions and row actions (Post, Cancel
+  document, Delete) are not pre-judged: the server answers per document with the sentence (a row's refusal in the
+  error notification). Only the goods receipt has a Delete on its page; the other documents are deleted from their
+  list.
+- **The supplier invoice's post confirmation** (`askInvoicePost(invoice, canReceiveNow, usable)`): "Receive the goods
+  now" can be ticked only when every line it would receive is in one of the reader's warehouses; otherwise it stays,
+  disabled and unticked, with the database's sentence under it (a rule that blocks disables, it does not hide); when
+  the type receives on posting and one is not, an orange Alert (orange text alone is too faint on white): "You may not
+  use {codes}: the invoice will be posted, but its goods receipt will be refused. Someone who may use {codes} receives
+  them with Receive goods…"
+- **Transfers: the From / To asymmetry** (A9). The order is the source's document: its From offers the reader's
+  warehouses only (a held one kept, marked), its To every leaf of every branch. Every button keeps reading the
+  server's `abilities` (the access rule is in the procedures' Blocks: the From for what the source does, Fill to Max
+  and Add items below Min included; the To for receiving; both for Dispatch and receive; either for the expected
+  arrival, reference and notes; neither for approving a request).
+- **The Transfer Orders list and the menu count.** A restricted reader gets a "Warehouses" filter - "From or to my
+  warehouses" (default) / "From my warehouses" / "To my warehouses" / "All warehouses" (`mine=any|from|to`, nothing
+  sent for All). `mine` is always sent, without waiting for the lookup: the server ignores it for a reader with every
+  warehouse, so a restricted reader's first page is already their own and nobody's first page waits. It is a filter
+  like the others: emptied by it alone, the list says "No transfer order from or to your warehouses. Choose All
+  warehouses under Warehouses to see every order." ("from" / "to" per choice), never "No transfer orders yet." The
+  menu's count (`useTransfersWaiting`) is asked for a reader holding Approve Transfer Orders OR Receive Transfers and
+  adds `toReceive` (the orders on the way to the reader's own warehouses; 0 for an unrestricted reader) to
+  `waitingForApproval`; the order page refreshes it after every dispatch, receipt, reversal, "Nothing more will be
+  sent" and cancel. The From picker keeps only the order's own From (a To the reader may not use is never offered as a
+  From).
+- **Stock levels.** Every row stays visible. On a warehouse whose `canUse` is false, Stock Levels' "Set level…" / "Add
+  level…" and "Remove level" (the row's "…" menu, the sentence under the entry's label) and the item card's pencil and
+  trash (the sentence as their tooltip; a phone has none, so a dimmed line under the figures says it) are disabled
+  with "You have no access to warehouse {code}: ask an administrator." The item card reads the lookup only for a
+  reader who may edit levels. The levels dialog offers the reader's warehouses only; the import's Error rows show the
+  server's sentence.
+- **The Users page.** A "Warehouses" column after Roles: "All" / "All (administrator)" dimmed, up to three teal badges
+  of codes then "+{n}" (wrapping in the cell), "None" with an orange warning icon (orange text alone fails the
+  contrast rule); a teal warehouse icon in the row's actions (with `security.users.edit`, as Roles) opens "Warehouses
+  of {username}": the All warehouses switch, a search and the tree of ticks by branch (indented, "(inactive)", a
+  parent "(and the warehouses under it)", the rows under a ticked parent ticked and disabled "through {code}"), "{n}
+  ticked: {name} may use {m} warehouses.", the orange "No warehouse ticked" warning, the blue system administrator
+  alert, and the collapsible History. No row version: the last save wins and the history shows both. The cursor starts
+  on the switch once the dialog's two answers are in (the form mounts on a Loader); Enter in the search saves, as in
+  every dialog (the tree narrows as it is typed). Each branch is a `role="group"` named by its title; a warehouse
+  under a parent of another branch starts its own branch's tree, not indented under a warehouse it is not drawn under.
+  Saved: "Warehouses of {username} saved.", the dialog closes and the list reloads; a refusal stays in the dialog as
+  it comes.
+- **Moving a warehouse** to another parent (Master Data › Warehouses) changes who may use it, a ticked parent giving
+  its whole tree. When it changes restricted users' warehouses, the server refuses an editor who is restricted or
+  lacks `security.users.edit` (403, "Moving LKS-01 to another parent changes the warehouses 2 users may use (Users &
+  Permissions › Users › Warehouses): ask an administrator."); the Warehouses form shows it as it comes, nothing is
+  judged there before the click.
+
+## Batch, serial and expiry on transfers (script 93)
+
+A transfer dispatch asks, for the lines of a **tracked item**, which pieces leave: one **serial no.** per piece (a TVS
+chassis no.), **batch** rows (batch no., expiry, pcs) or **expiry** rows (expiry, pcs); its receipt says, row by row,
+what arrived. The word is **tracking** everywhere (JSON `tracking`, `trackingKind`, `trackingMode`; the generic pieces
+in `src/components/tracking/`), never "details": that word is the header's "Save details". The client is
+`transferTrackingApi` at the end of `src/api/inventory/transfers.ts` (plus the optional (93) fields on the order's line,
+the posting line, the list row and the requests); the transfer glue is `components/transfers/transferTracking.ts`.
+
+- **The item says it, Item Definition sets it** (Inventory Parameters, the row after the Min / Max hint, before BIVAC /
+  Active; `inventory.items.edit`): **Tracking** None / Batch numbers / Serial numbers ("Asked when goods are dispatched
+  on a transfer order."), **Serial no. length** (Serial only; empty = any length, 1-50; emptied when Tracking leaves
+  Serial) and **Requires expiry date**; under the row, dimmed, where they are asked: "Batch, serial and expiry details are
+  asked on transfer dispatches (Inventory › Transfer Orders). Goods receipts, sales and Inventory In / Out do not ask for
+  them." View mode: "Tracking: Serial numbers (17 characters) · expiry date required". Serial no. length is never
+  clamped (`clampBehavior="none"`): 60 typed is refused on Save with "Serial no. length must be between 1 and 50, or
+  empty for any length.", never saved as 50 without a word. The page always sends the three
+  fields (the API leaves the tracking alone when an older client sends none); the server's plain refusals ("Serial no.
+  length applies to serial-numbered items only.") come in the form's red Alert, like the Link's.
+- **Three kinds, derived, never stored on the item** (`trackingKindOf`, the database's K(i)): Serial (Serial numbers),
+  Batch (Batch numbers), Expiry (None + Requires expiry). Their words are `KIND_TEXT` (`trackingNumbers.ts`): buttons
+  "Serial nos.…", "Batches…", "Expiry dates…"; counts "1 serial no." / "20 serial nos.", "2 batches", "1 expiry date";
+  `TrackingBadge` "Serial nos." grape, "Batches" cyan, "Expiry dates" yellow, "+ expiry" when the item also requires the
+  date; a badge is never cut (`minWidth: max-content`: it widens its column a little rather than end in "…"). The
+  badge stands in Item Definition's header after BIVAC and under a transfer line's Item Name (xs, light, `compact`: 4
+  px side padding and no letter-spacing, so "Serial nos. + expiry" fits Item Name's 130 px; under the Item Code it was
+  cut, as a released order at 1440 narrows that column to about 85 px (91); tooltip "Dispatch… asks for the serial
+  numbers of these pieces."; the kind comes from the order's Get, and from the item's own answer as soon as an item is
+  chosen on a line, so a line changed to another item never keeps the old one's badge). Item Definition's sticky header
+  keeps one line (the code cut with an ellipsis, 87's rule) except for a tracked item, whose badges may go under the
+  code (`PageHeader`'s `wrapTitleExtra`).
+- **One dialog for dispatch and receipt, `TrackingModal`** (`mode: 'dispatch' | 'receive'`, `kind`, `withExpiry`,
+  `serialLength`, `otherLineSerials`, `known`; FormModal xl, full screen below 48em; Cancel drops every change since it
+  opened, Done keeps them). **Rendered as a SIBLING of the dialog that opens it, never in its children**: the outer
+  dialog passes `closeOnEscape={!calendarOpen && trackingFor === null && !confirmOpen}` (90's calendar rule kept), so
+  Escape closes the inner one alone, and the inner form never submits the outer one (Done and Enter there post
+  nothing). It names no transfer: the caller gives the title ("Serial numbers - line 1: TEST93-S"), the pieces and the
+  Check, so a goods receipt can reuse it. Its own expiry fields follow 90's calendar rule (`useCalendarEscape`, each
+  `DateInput` with `popoverProps={calendar(name)}`, the dialog `closeOnEscape={!calendarOpen}`): Escape on an open
+  calendar closes the calendar, never the dialog and the serials scanned in it.
+- **The scan box consumes its Enter** (`preventDefault`: a scanner ends every code with one) and splits what it got on
+  TAB, CR and LF: one number is added, several are refused ("Scan one number at a time, or use Paste list…"). The local
+  refusals under it say only what the list itself shows: "{x} is already in the list.", "{x} is already on line {m}."
+  (the same item's other lines), "{q} serial numbers are already typed: remove one, or raise Dispatch now.", "A serial
+  no. has no spaces.", "{x} has {len} characters; this item's have {L}." The counter "{c} / {q}" is red until equal.
+  The refusals (and the receipt's "Scanning: …" line) are live regions, said by a screen reader as they appear; a
+  refusal goes with the next change of the list (it said nothing about the list as it is then).
+  **The cursor goes back to the scan box** after every button of a serial list (Paste list's Add and Close, Known's
+  "Add the ticked" and Close, Apply, a row's trash icon, Tick all, Untick all, "Mark the {n} not ticked as lost") and
+  after a Check that keeps the dialog open - there once the Check's disabled fieldset is enabled again (an effect on
+  the end of the Check: a frame-timed focus raced the re-render and was sometimes lost): a scanner's next code and its
+  closing Enter land there, never on the button that had the focus.
+  The newest serial is listed first (so the one just scanned is on screen); long lists are drawn 200 at a time, a row a
+  Check names always shows.
+- **Paste list…** reads the shapes of `parsePastedSerials` / `parsePastedRows` (unit-tested: `npm test`,
+  `scripts/tests/`): serials one per line or joined by commas, semicolons or spaces, each followed by its date when the
+  item requires one; batch rows `batch | expiry | pcs` (or `batch | pcs`) and expiry rows `expiry | pcs`, cells by tabs
+  (Excel), semicolons or commas - never spaces, which a batch no. may hold. A row without a readable whole number of
+  pcs, or with a date that is not one, is unread and named ("Line {k} could not be read: '{text}'."); a token shaped
+  like a date is never taken for a serial. A batch (or a date) already listed gets the pasted pcs added; the untouched
+  row the dialog opens with is replaced. "Copy list" in the viewer gives the same shapes back.
+- **Check on Done, errors keep it open, warnings need a second click.** Done sends the WHOLE dispatch as it would be
+  posted, this line's rows as typed now, to `POST …/dispatch/check-tracking?forLineId=` (no lock, nothing written): this
+  line's errors (and the dispatch's own, and a serial twice on two lines, which names each line's row) in red at the
+  top with the named rows outlined, the dialog open; warnings in orange and the button becomes "Keep these numbers".
+  The count errors alone (the rows do not add up to the pieces yet, the database's Seq 12 / 24) are said in red but let
+  the second click keep what is typed - the dialog says so under them ("Keep these numbers closes the dialog with what
+  is typed: nothing is posted until the line is complete.") - the line's state stays red and Dispatch stays disabled,
+  so nothing half done is posted and nothing scanned is lost (a decision against the spec's "errors keep it open": 19
+  chassis nos. scanned of 20 must survive closing the dialog). A Check that fails says why and lets the second click
+  keep the rows (the posting checks them again). Done with no row closes without asking. **While the Check runs,
+  nothing in the dialog can be typed** (its rows and buttons sit in a disabled `fieldset`): what Done keeps is what was
+  checked. A cell tidied on blur (capitals, trimmed) changes the row only when the tidying changes it, so leaving a cell
+  never turns "Keep these numbers" back into "Done".
+- **The Dispatch dialog** (and Dispatch and receive): a column "Batch / serial" when a line is tracked (on a phone,
+  under "Dispatch now"): the button and the line's state, "18 / 20 serial nos.", "45 / 60 pcs in 2 batches", "30 / 30
+  pcs in 2 dates" - green with a check when complete, red when not, "—" when nothing leaves; the button is then
+  disabled with its reason, "Type the pieces that leave in Dispatch now first." (a tooltip; on a phone the line under
+  it), and each line's button names its line for a screen reader ("Serial nos.… line 1, TEST93-S"). Dispatch is
+  disabled while a leaving tracked line is incomplete, with the database's own Seq 12 / 24 sentence
+  (`incompleteSentence`, plain numbers as the database writes them). Changing "Dispatch now" keeps the rows. The last Check's warnings stay listed
+  in orange above the footer; a refusal at posting shows in the red Alert as it comes, nothing lost. Closing with rows
+  typed asks "Discard the serial numbers, batches and expiry dates typed in this dialog?" (Discard / Keep editing);
+  Escape on that question answers it (Keep editing) and only it - the same key press reaches the Dispatch dialog's own
+  Escape listener after the question's, and a ref keeps it from asking again until that key press is over.
+  With a tracked line the dialog is 62rem instead of xl and its table 920 px (90's 720 plus the 200 px column), inside
+  the 960 px body at 1440: no row scrolls sideways. The cursor still starts on the first "Dispatch now" (90's rule).
+- **The typed rows survive a reload** in `sessionStorage` under `trf-tracking:{orderId}:{rowVersion}` (wrapped in try /
+  catch; written at every change, the rows being typed in an open dialog included; keys of an older row version of the
+  order dropped; cleared after the post or Discard; `components/transfers/transferTrackingStore.ts`, unit-tested).
+  Opening the dialog again offers "Restore the {n} rows typed earlier?" (Restore / Start again); until it is answered
+  the lines' "Serial nos.…" / "Batches…" / "Expiry dates…" are disabled with "Answer Restore or Start again first.", so
+  typing never throws the offered rows away unasked. A row's `key` is never stored: every row read back gets a fresh
+  one, so a restored row never shares its key with one added after the reload. Per viewer, never server state (there
+  are no draft postings).
+- **Receipts follow their dispatch line** (its `trackingKind`, kept at dispatch), whatever the item says now. The Receive
+  dialog reads the rows still on the way of each dispatch with tracked lines when it opens (`onTheWayOnly`); everything
+  on the way has arrived until the dialog says otherwise. A tracked line's "Received now" is read only (the rows' sum),
+  its state "18 arrived · 1 lost · 1 still coming" (zero parts left out), 90's Still coming / Nothing more will arrive
+  is not shown on it, and "Why?" (and Note for Other) are asked when its rows hold lost pieces. It sends one `tracking`
+  entry per row arrived or lost; a row still coming is left out. The cursor starts on the first untracked line's
+  "Received now" (90's rule); when every line is tracked, on the first line's "Serial nos.…" / "Batches…" / "Expiry
+  dates…" button, which looks disabled while the rows are read (`data-disabled`, so it can still take the focus; a
+  click does nothing until they are). Each of those buttons names its dispatch line for a screen reader ("Serial nos.…
+  TRD-BR-003-000021 line 1, TEST93-S"). The dialog is 62rem with a tracked line; its table keeps 90's 720 px. **A receipt
+  refused because someone else changed the order** reloads it; the dialog then reads the rows on the way again (only
+  then: a new row version, not a new copy of the same order) and Receive waits for them: what the reader said of each
+  row still on the way is kept (`mergeReceiptTracking`: received, the rest, the scan session), the rows no longer on
+  the way drop out, and when they differ an orange Alert says "The order was changed by someone else: the serial
+  numbers, batches and expiry dates on the way were read again."
+- **The scan session on receipt**: the serials on the way, all ticked; the FIRST scan unticks every serial not scanned
+  yet and says "Scanning: only the serial numbers you scan are ticked.", each scan then ticks one ("{x} is not on the way
+  on this line." otherwise). The session is kept when the dialog is opened again. Tick all / Untick all; each unticked
+  serial is Still coming (default) or Lost; "Mark the {n} not ticked as lost". Batches and expiry dates: Received now
+  starts at the row's on the way and may be lowered ("Max {w}" red above it and Done disabled above), the rest "Still
+  coming | Lost".
+- **Rows are read per posting, when shown** (never in the order's Get: 10,000 serials would make every answer heavy).
+  "Dispatches and receipts": a posting's summary adds " · 20 serial nos."; an expanded line with `trackingCount > 0` has
+  the link "20 serial nos." / "2 batches" / "1 expiry date" opening `TrackingView` (a 520 px Popover, the whole screen
+  below 48em, whose close button is named "Close"): # / number / Expiry / Pcs / State - On the way blue, Received green, Written off red, Partly received
+  orange, Reversed gray - with the server's `stateText` dimmed, "Find a number" past 10 rows, "Copy list" ("Copied {n}
+  rows."); the Popover traps the focus (Tab reaches "Find a number" and "Copy list", Escape returns to the link). The
+  dispatch note lists, under each line, its serial nos. in four columns, or "B2410-07 · exp. 31/03/2027 · 40 pcs", read
+  before it prints; when they cannot be read, Print is disabled with the reason ("… Try again.", and a "Try again"
+  button), and the paper itself says under each tracked line "The serial nos. could not be read: print the note
+  again." (a browser's own Print still prints the page).
+- **Found from the list**: the Transfer Orders list's "Batch or serial no." (placeholder "At least 3 characters";
+  trimmed, in capitals and sent as `trackingNo` from 3 characters, debounced; shorter text asks nothing) finds the
+  orders whose postings hold a number CONTAINING it; each row says what happened to it (`matchedTracking`, dimmed under
+  its number; the last line of a phone card). Item › Stock Movement shows a transfer row's expiry dimmed under its
+  number ("Expiry 31/03/2027"), transfer rows only, no new column.
+- **Numbers are shown in capitals** (`normalizeTrackingNo`, the database's rule: tab, CR, LF, no-break space, BOM and
+  spaces cut at both ends only, then capitals); the cells normalise on blur, the server normalises again.
+- **Never a claim that a serial "is" somewhere.** Only transfers record serials (goods receipts, sales and Inventory In /
+  Out do not), so a screen says "last received into {W}", "Received into {From} by {TRR} on {date}" (the "Known at
+  {From} ({n})…" suggestions), never "at {W}" or "in stock".
 
 ## Bulk actions
 
@@ -746,20 +1336,22 @@ in **cost mode**:
   The one exception is `/new` turning into `/:id` on the first save, which keeps its instance.
 - **What can be done on an order, and why not: `orderAbilities`** (`src/components/purchase/orderAbilities.ts`).
   It returns `{ visible, blockedBy }` for every order button. A missing permission hides the button. An
-  order that is not approved and open keeps the button visible and disabled, with the reason as its
+  order that is not approved keeps the button visible and disabled, with the reason as its
   tooltip (`OrderActionButton`, or `disabledReason` in the action bar):
   - draft: "Approve the order first: containers / invoices are created from an approved order.";
   - PendingApproval: "This order is waiting for approval.";
-  - closed: "This order is closed.";
   - cancelled: "This order is cancelled.".
+
+  An approved order (Saved, Partially posted or Posted, below) is never closed: each button then follows its figures
+  ("Everything ordered is already invoiced." on a Posted one).
 
   The **Containers card** shows on every saved order to readers with `containers.view`. Its Add Container… /
   Auto-plan containers… buttons need `containers.create`, and Create Invoice from Containers… needs
-  `purchase.invoices.create`. The action bar's Create Purchase Invoice and Close Order read the same
+  `purchase.invoices.create`. The action bar's Create Purchase Invoice reads the same
   object. A new order action, approval ones included, is added there, not decided in its button.
 
   **`receiveGoods`** ("Receive goods…", `purchase.goodsreceipts.create`) has reasons of its own and never
-  `notOpenReason`, because a CLOSED order may still have invoiced goods to receive: draft "Approve the order first:
+  `notOpenReason`, because goods may arrive before or after their invoices, whatever the order shows: draft "Approve the order first:
   goods are received against an approved order.", waiting "This order is waiting for approval.", "This order is
   cancelled.", then the server's `canReceive` / `receiveBlockedReason`, else the lines' figures: "Everything ordered is
   already received.", "Everything still to receive travels in containers: it is received with its containers." (and
@@ -768,8 +1360,10 @@ in **cost mode**:
   A supplier invoice posted since the switch moves no stock: it becomes payable and sets the cost of what was received
   against it. The page says so in every text that names posting, from `purchaseKind.ts`:
   - **Posting wording.** Order: "Confirm this purchase order? The number is assigned and the ordered quantities count
-    as incoming stock until they are received or the order is closed.", banner "The order is open: its quantities
-    count as incoming stock, and goods can be received and invoiced against it.". Invoice:
+    as incoming stock until they are received.", banner "{Saved | Partially posted | Posted} — PO-…": "Confirmed by
+    {user} on {date}." + what its posted invoices cover ("No supplier invoice is posted against it yet." / "Posted
+    invoices cover 60 of 100 pcs." / "Posted invoices cover everything ordered (100 pcs).") + "Its quantities count
+    as incoming stock until they are received, and goods can be received and invoiced against it.". Invoice:
     `PURCHASE_INVOICE.postConfirm` "Post this purchase invoice? The number is assigned and the amount becomes payable
     to the supplier. The stock does not change: goods enter with goods receipts.", banner "Posted by {user} on {date}."
     + `invoicePostedBanner` "Received so far: {r} of {q} pcs.". Return: unchanged, "…Stock will be removed from
@@ -813,7 +1407,7 @@ in **cost mode**:
     reason, or "Nothing more will come"). Never show `receivedQuantityBase` under the word "Received" on an order.
     On an invoice line, Received is the line's `receivedQuantityBase` (the receipt pieces matched to it). An order is
     done when Invoiced ≥ ordered and Received + Short ≥ ordered. `PurchaseLinesGrid receipts="order"` shows the three
-    on a posted or closed order, `receipts="invoice"` shows Received on a posted invoice; the order's progress card
+    on an approved order, `receipts="invoice"` shows Received on a posted invoice; the order's progress card
     adds Received ("66 / 150 pcs (+4 short)"). The other figures of a line (`toReceiveBase`, `inContainersBase`,
     `inDraftReceiptsBase`, `outstandingBase`) are the server's: never recompute them.
   - **"Cost of received goods"** (`InvoiceReceiptCostCard`): the invoice's `costAdjustments`, with the sentence "Cost of
@@ -830,7 +1424,9 @@ in **cost mode**:
   supplier and branch are fixed, and Add Item / Import are hidden because the lines are the source's.
 - **Lines** (`PurchaseLinesGrid`, helpers in `purchaseLines.ts`): Quick Item Search and "+ Add Item" give a
   line its **purchase unit** (else the base unit), quantity 1 and a **Unit Cost = last cost × packing formula
-  × exchange rate** (blank when the item was never bought — the server then writes 0). The cost column
+  × exchange rate** (blank when the item was never bought, or for a reader without View item costs, whose item read has
+  no last cost: the page sends null and the server prices the line the same way, last cost × packing × rate - 0 when the
+  item has no last cost). The cost column
   follows the type configuration (`pricingOf`, Cost mode: editable unless the owner turned it off). On a
   line with a source, the Qty box is capped at what remains on the source line and says **"Remaining: n"**
   under it; a larger quantity turns the row red before the server's SOURCE_INVALID does, and that message
@@ -840,26 +1436,37 @@ in **cost mode**:
   `purchaseDocumentsApi.importCreate`.
 - **Summary** (`SalesTotals` reused): subtotal, discount, grand total in the document currency and the
   "≈ … USD" line at the document rate. **Linked Documents** (`LinkedDocumentsCard`): the source and every
-  document created from this one, each with its status — a cancelled invoice under an order means the
-  order is open again.
-- **Lifecycle**: Draft → Posted → Cancelled, plus **Closed (teal)** for orders: automatically when every line
-  is fully invoiced and received (or settled short), or by hand with "Close Order" (`CloseOrderModal`, reason
-  optional, needs `purchase.orders.post`); goods already invoiced can still be received on a closed order.
-  Confirmations say what posting does per kind — an order is *confirmed* and its quantities count as incoming
+  document created from this one, each with its status (a linked order's from its `invoicingStatus`) — a
+  cancelled invoice under an order brings the order back to Partially posted or Saved.
+- **Lifecycle**: Draft → Posted → Cancelled for invoices and returns. **Orders (script 77)**: Draft → (Waiting for
+  approval) → approved → Cancelled, and an approved order SHOWS how far its POSTED invoices cover it:
+  **Saved** (blue, none yet), **Partially posted** (orange, invoiced < ordered), **Posted** (green, everything
+  ordered). The API keeps the status `'Posted'` for all three (every "is it approved?" test reads it) and sends
+  `invoicingStatus` 0 / 1 / 2 beside it, on the document, the list rows, the linked documents, the shortage plan's
+  orders and the item's orders. Never compare an order's status with 'Saved' or 'PartiallyPosted': show it with
+  `purchaseStatusLabel(status, documentTypeCode, invoicingStatus)` / `purchaseStatusColour(…)` (`purchaseKind.ts`),
+  and test "approved" with `status === 'Posted'` (`isApprovedOrder`). Draft invoices do not count, and purchase
+  returns do not lower it (they never lowered the order's invoiced counters). Goods receipts never change it.
+  **There is no Closed any more**: no Close Order, no closed banner; the orders closed before script 77 were brought
+  back (the pieces given up by a close by hand were settled short, so what they still expect did not change). Pieces
+  that will never come are settled with "Nothing more will come" on a goods receipt. The document page shows the
+  status as a badge in its header, and the Saved / Partially posted / Posted banner above. Confirmations say what posting does per kind — an order is *confirmed* and its quantities count as incoming
   until they are received; an invoice becomes payable and moves no stock (goods enter with goods receipts); a return
   removes stock at the invoice cost. View mode offers Export, **Receive goods…** (approved order, posted invoice;
   needs `purchase.goodsreceipts.create`), **Create Purchase Invoice** (open order, needs
   `purchase.invoices.create`), **Create Purchase Return** (posted invoice, needs `purchase.returns.create`),
-  Close Order, Cancel Document, Back. Posted, closed and cancelled documents are read-only text.
-- **List**: filters (search, branch, supplier, status Draft / Posted / Cancelled / Closed, dates, and the checkbox
+  Cancel Document, Back. Posted and cancelled documents are read-only text.
+- **List**: filters (search, branch, supplier, status - `purchaseStatusFilters(kind)`: orders Draft / Waiting for
+  approval / Saved / Partially posted / Posted / Cancelled, sent as `status` Posted + `invoicingStatus` 0 / 1 / 2 for
+  the three stages; invoices and returns Draft / Posted / Cancelled - dates, and the checkbox
   "To receive" on orders / "Not fully received" on invoices, sent as `toReceive` / `notFullyReceived`), a Source
   column that links to the order / invoice, on orders a **Received** (`receivedPercent`, goods receipts) and an
   **Invoiced** (`invoicedPercent`) progress bar, each a share of the ordered quantity, on invoices a **Received** bar
   (`receivedBase` ÷ `quantityBase`) - the figure and its meaning on hover, the share in the CSV export - bulk Post /
   Delete on ticked drafts, row actions gated by permission and status including "Receive goods…" (orders; disabled
-  "Everything ordered is already received." at 100 % received, or on a closed order received as far as it was
-  invoiced) / Create invoice (disabled "Everything ordered is already invoiced." at 100 % invoiced: since goods
-  receipts such an order stays open until its goods arrive) / Create return. The percentages are rounded, so these are
+  "Everything ordered is already received." at 100 % received) / Create invoice (disabled "Everything ordered is
+  already invoiced." at 100 % invoiced: a Posted order) / Create return. The Status column, its funnel and the CSV
+  show the words (Saved, Partially posted, Waiting for approval), not the API's names. The percentages are rounded, so these are
   hints: the dialogs check the document itself (`CreateInvoiceFromOrderModal` says "Everything ordered is already
   invoiced." or "The rest of this order is already in draft invoices: post or delete them first." and disables
   Create). The invoice list shows the readers who post invoices a blue banner, once (closing it is
@@ -929,6 +1536,16 @@ in **cost mode**:
     Both take the exporter's ref. and the commercial invoice no., copied to every invoice. One invoice opens as
     before; several are listed in `CreatedInvoicesModal` (Open links, "Go to the order's invoices"; `onePerItem`
     false shows Lines instead of Item).
+  - **The two dialogs are built the same way** (script 86): Document Date (`DatePickerInput`, not in the future,
+    today by default), the two references, then a grid of what can still be invoiced, each row ticked with its
+    available quantity in pcs - a `NumberInput` (`max` = available, "Max n" and Create disabled above it) the reader
+    may lower, or untick the row - then the switch and its line. "Create Invoice from Containers…" groups the
+    container lines by container (Item, Order, Loaded, Invoiced, In drafts, Available; `containersApi.invoiceCandidates`);
+    "Create Purchase Invoice" heads its grid with the order (number, supplier, its Saved / Partially posted / Posted
+    badge) and lists the order lines (#, Item, Warehouse, Ordered, Invoiced, In drafts, Available;
+    `purchaseDocumentsApi.invoiceCandidates`, which leaves out the lines with nothing available) and sends the ticked
+    rows as `lines` [{ sourceLineId, quantityBase }] to `create-invoice`. Both draw 200 rows at a time
+    (`useShownRows`).
   - On an invoice of one item with a line, the item select offers only that item (`PurchaseLinesGrid`
     `onlyItemId`) and the quick search refuses another, with `ONE_ITEM_HINT`. Such a draft holding several items
     (made before) shows an orange Alert and **Split by item**, which lists the invoices in the same modal. An
@@ -1171,23 +1788,29 @@ Per line, in **base units** (only Required Qty is in the purchase unit, shown as
 
 | Cell | Formula |
 |---|---|
-| Stock + Transit | Current Inventory + Transit |
-| Total Expected Stock | Current Inventory + Transit + Outstanding Order |
-| Expected Monthly Sales | sales of the last *Months of history* (default 3) in the warehouse ÷ months; **overridable per line** |
+| Stock + Transit | Current Inventory + Transit + Transfers in (the header's tooltip says so) |
+| Total Expected Stock | Current Inventory + Transit + Transfers in + Outstanding Order |
+| Expected Monthly Sales | the **busiest month** of the last *Months of history* (default 3): the history cut into one-month blocks counted back from today, the net sales (sales less returns) of the block that sold the most, in the warehouse and every warehouse under it (script 85; it was the average before); **overridable per line** |
 | Expected Requirement | Expected Monthly Sales × Lead Time (Month) |
 | Shortage Qty | max(0, Requirement − Total Expected Stock), rounded up — red when > 0 |
 | Coverage (months) | Total Expected Stock ÷ Expected Monthly Sales — red when < Lead Time, "—" when nothing sells |
 | Required Qty | typed; defaults to the shortage rounded up to whole purchase units |
 | Container Requirement | Required Qty × packing ÷ PC per Container (the item's *PC per Container*, overridable per line) |
 
-The live figures come from `inventory.fn_Shortage_Live` (last changed by script 65, goods receipts), for the
-plan's warehouse and every warehouse under it:
+The live figures come from `inventory.fn_Shortage_Live` (last changed by script 85, the busiest month; script 65
+brought goods receipts), for the plan's warehouse and every warehouse under it:
 
 - **Transit** = pieces loaded in containers that have left the supplier (In Transit, At Port, Cleared: statuses 3-5)
   and are not received yet, counted on the warehouse of their order line.
+- **Transfers in** (script 90, `fn_Shortage_Live` re-created) = goods on the way to the warehouse (its tree) from
+  other warehouses: dispatched by transfer orders to it, not received or written off yet. A column after Transit on
+  the plan, in Load items and on paper, with the tooltip "Goods on the way to this warehouse from other warehouses
+  (transfer orders), not received yet." (`TRANSFERS_IN_HINT`); `derive()` adds it to Stock + Transit. Transfers OUT
+  are not demand: counting them would buy twice. A plan saved before script 90 has 0 there, so its figures are
+  unchanged.
 - **Outstanding Order** = max(0, what approved orders still bring − Transit). What an order still brings is its
-  lines' **outstanding** (`outstandingBase`, the same number as the item's "On order"): on an open order ordered −
-  received − settled short, on a closed one invoiced − received − settled short, never below 0. Posted
+  lines' **outstanding** (`outstandingBase`, the same number as the item's "On order"): on an approved order ordered −
+  received − settled short, never below 0. Posted
   supplier invoices **without an order** whose goods come with goods receipts add invoiced − received.
 - "Received" here is goods receipts (plus what came in before them), never "invoiced": a posted invoice no longer
   ends what is on the way, its goods receipt does. Pieces settled short (received less with a reason, or "Nothing
@@ -1228,8 +1851,13 @@ utilization (91.88 %, with a bar).
 
 **Create Purchase Order** is disabled on a draft with the tooltip "Post the plan first" (`DocumentAction.disabledReason`)
 and live on a posted plan: confirm → `POST {id}/create-purchase-order` → a notify naming the PO → the PO draft
-opens. The order takes the plan's supplier, branch and warehouse and every line with a Required Qty above zero,
-in the purchase unit; NOTHING_TO_ORDER when there is none. The PO shows a **"Source: Shortage SHR-…" chip**
+opens. The order takes the plan's supplier and branch and every line with a Required Qty above zero, in the
+purchase unit; NOTHING_TO_ORDER when there is none. Each line goes to the plan's warehouse when it is at the bottom
+of the tree. For a plan made for a parent warehouse (script 62) each line goes to the item's default warehouse when it
+is an active warehouse at the bottom of the plan's tree, else to the first of those (the plan's branch first, then by
+code); the order's header takes its first line's warehouse and its Notes say so (script 89; before, the purchase
+validation refused the parent). A tree without an active warehouse at the bottom is refused with the server's
+VALIDATION message, shown as it comes. The PO shows a **"Source: Shortage SHR-…" chip**
 linking back, and the plan's **Purchase orders** card lists every order made from it (number, date, status,
 amount); the audit trail shows Created / Updated / Recalculated / Posted / POCreated.
 
@@ -1344,6 +1972,9 @@ is a document with its own Draft → Posted → Cancelled life rather than an ed
   received so far, and the company's stock decides the stock part (the goods receipts' cost adjustments, cause
   "Landed cost adjustment …"); pieces not received yet simply take the new invoice cost when they arrive. A "Shipped
   in containers" invoice takes no adjustment (67012): its charges are the containers'.
+- On an invoice posted before goods receipts the quantity still in stock is worked out per item on the company's stock
+  (every warehouse) since script 89; it was each line's warehouse. The Split table's Remaining is the line's share of
+  the item's pieces still held, rounded so that the lines add up.
 - Cancelling writes the reversal and rebuilds the item costs.
 
 ## Sales profit
@@ -1362,13 +1993,122 @@ rather than a row of dashes, which would leak the permission as a shrug.
   Branch / Month / All, with summary cards, a totals row and Export to Excel. The **COGS adjustments**
   column appears only for the groupings a landed cost adjustment can be attributed to
   (`showsCogsAdjustments()`): an adjustment knows its item and its date, never its invoice.
-- `/inventory/valuation` (`StockValuationPage`, `inventory.items.view`) is on hand × the item's
+- `/inventory/valuation` (`StockValuationPage`, `inventory.valuation.view` since script 75) is on hand × the item's
   moving average cost, per warehouse or company-wide. The totals come from the API, not from summing
   the page.
 - **Item Definition** shows FOB Purchase Cost, Last Cost (landed), Average Cost and Inventory Value
-  with a tooltip each (they differ by one word), and the Purchasing section carries **Weight (kg)**
-  and **Volume (CBM)** per base unit — a charge allocated by weight or volume is refused for an item
-  that has none.
+  with a tooltip each (they differ by one word) - with View item costs, see **Item costs** - and the Purchasing
+  section carries **Weight (kg)** and **Volume (CBM)** per base unit — a charge allocated by weight or volume is
+  refused for an item that has none.
+
+## Container report (script 95: containers.report.view)
+
+`/logistics/container-report` (`ContainerReportPage`, under **Reports**, "View Container Report") is the purchasing team's
+tracking sheet worked out by the system: one row per container line and per approved order line still to load, with its
+order, PI, invoices, payments, journey, charges and cost. `containerReportApi.report` answers the WHOLE report
+(`paging: 'client'`); the page never pages the server.
+
+- **Grouped by stage from the start**: `useDataGrid({ groupBy: 'stageLabel' })` - the grid engine's new `groupBy` option,
+  the column a fresh grid starts grouped by (the reader may still change or clear it from the Group by menu; it is not
+  remembered). The stage column's `value` is the server's `stageSort` and its `text` the `stageLabel`, so the groups come
+  in the journey's order (pending, newest month first, … offloaded) while they read as words. Each group carries its own
+  totals (`summary: 'sum'` on the figures), the footer the grand total.
+- **Tiles above the grid**, one per stage (containers, lines, pieces, value): a click keeps that stage's rows only (the
+  page filters the rows it hands the engine), a second click shows every stage; Clear Filters clears it too.
+- **The container ref is pinned** (`DataTable` `pinFirstColumn`, the new twin of `pinLastColumn`): fifty columns to the
+  right the reader still sees whose figures they are. Columns follow the sheet's titles in capitals ("CON. REF.", "FOB
+  PRICE", "LEAD TIME (MONTHS)").
+- **Charge columns come from the answer**: one per charge type in `chargeTypes` (the transport ones are summed in TOTAL
+  TRANSPORT AMOUNT), read from `row.charges[typeId]`. Without View Container Charges the server sends `chargesVisible:
+  false` and no charge figures, and the page draws none of those columns; the same for the payment columns and
+  `paymentsVisible` (View Supplier Payments).
+- **Estimates read as estimates**: a FOB, total or cost per unit not final yet is grey italics with "est."; a lead time
+  before the offload says "so far". Calendar dates are shown dd/MM/yyyy from their parts (`dateText`), as the export
+  writes them.
+- **Export to Excel** is the server's (`/export`): the sheet's layout, one frozen header, a title row and a subtotal per
+  stage, the grand total.
+
+## Item costs (script 94: inventory.costs.view)
+
+`inventory.costs.view`, "View item costs" (`PERMISSIONS.costsView`), decides who sees **what an item costs**: its
+average, last and FOB cost and its stock value. It was given once, when script 94 first ran, to every role that saw
+such a cost then; an administrator unticks it on Role Permissions for the storekeepers and sales staff who must not.
+
+**What it covers.** Item Definition (the list's Avg. Cost and Inventory Value, the card's four cost rows), the item's
+Stock Balance (the value tile, column and total) and Stock Movement (Unit Cost), Inventory In / Out / BIVAC Out (the
+lines' Unit Cost and Total Cost, the summary's Total Cost, the list's Total Cost, the import preview's Unit Cost),
+goods receipts (the lines' Unit cost and Value, the typed cost of a line without an order, the summary's "Value at
+cost", the Cost adjustments card's before / after and amounts, the list's Value (USD) and the value in "Received not
+invoiced"), the shortage plan's Last cost, the Dashboard's "Inventory value" pill and "Stock value by warehouse" donut,
+and a transfer order's values.
+
+**The server strips, the page hides.** Without it the API sends every such figure `null` (never 0), its exports leave
+the cost columns out and a list cannot be sorted by one. The page decides **by the permission, never by the data**:
+`useSeesItemCosts()` (`src/hooks/`) is the one test, and without it the column, row, tile or pill is **not drawn** -
+no header, no empty cell, no "—", which would name the hidden figure. A viewer still sees "—" for an item that has no
+cost: the data decides the cell, the permission decides the layout. With it, every screen is exactly what it was.
+
+- **Lists**: the cost column is left out of the column array (`...(seesCosts ? [column] : [])`), so the grid's sort,
+  funnel, footer and CSV never offer it. A `GridColumnMeta` entry without its column is inert: leave it.
+- **Shared pieces take a prop, default on**: `DocumentLinesGrid` `showCosts` (and `costHint`, the tooltip of a cost that
+  cannot be typed), `DocumentSummary` `showCost`, `ImportInvoiceItemsWizard` `hideCosts` and `costNote` (stock mode
+  only), `GoodsReceiptLinesGrid` `showCosts` (absent: the hook). The goods receipt cards read the hook themselves.
+  Colspans and minimum widths follow what is drawn.
+- **What is not a figure stays**: a goods receipt line without the cost columns keeps its cost source ("Order",
+  "Invoice", "Manual") and its "n of m pcs invoiced" in a "Cost source" column of their own (the phone: a row).
+- **A shortage plan's purchase orders** show their Amount to a reader who may see purchase orders or item costs (the
+  server sends it null to anybody else: a plan's order is priced at the item's last cost).
+- **The Dashboard** shows "Items in stock" with the count instead of "Inventory value", by the permission.
+- **Post confirmations name no value** the reader may not see ("84 pcs enter LUB-WH, the item costs are updated…").
+
+**It hides, it never blocks.** Nobody is refused anything for want of it:
+
+- **Inventory In**: no cost column; under the lines "You may not see item costs: each line is saved at the item's last
+  cost (its average when it has none)." and, only when the type's cost may be typed, " A user who may see item costs can
+  change it before the document is posted." The page sends `unitCost: null` and each line's `id`: the server keeps the
+  cost of a saved line (same id, item and unit) - a colleague priced it - and gives any other line the item's last cost
+  when it is not 0, else its average (else 0), per unit of the line. Costs in an import file are not used ("Unit costs
+  in the file are not used: you may not see item costs, so each line is saved at the item's last cost (its average
+  when it has none).").
+- **A goods receipt without an order**: no typed cost; a new line starts without one, the save sends each line's `id`
+  and `costsHidden: true`, and the server keeps a saved line's cost or takes the item's last cost, else its average
+  ("You may not see item costs: each line is saved at the item's last cost (its average when it has none)."). "+ New ›
+  Without an order" then reads "Goods of a supplier with no purchase order, at the item's last cost (its average when
+  it has none)." instead of "…, at a typed cost.".
+
+**A hidden figure is never saved back as a real one.** The permission can change while a page is open (a token
+refreshed after an administrator ticked or unticked it), and a token issued before it was ticked strips what the
+reader may now see. So:
+
+- A line read **without its cost** (`unitCost: null`), proposed from an item read without costs, or imported without a
+  usable cost and not proposed yet is marked `costUnknown` (`EditableLine`): its 0 on the page is a placeholder, sent
+  as `unitCost: null` until a different cost is typed or the proposal arrives. The server keeps a saved line's cost by
+  its id whenever the cost comes null, for a viewer too, and prices any other line.
+- A document or goods receipt the server sent **without its costs** (its `totalCost` / `currentValueBase` is null only
+  then) draws no cost columns even for a reader who now may see them, and a goods receipt's save then sends
+  `costsHidden: true`. When the permission changes, a saved document or receipt with no edits is **read again**.
+- The server, for its part, reads the document and takes its save, its post and its cancel with the token confirmed by
+  the database (`ItemCosts.ConfirmedAsync`): a reader the token says may not see costs is asked once more, so a token
+  older than the grant (every token of the first 15 minutes after script 94 is deployed) neither strips the draft nor
+  drops its costs, and a document posted from a page that showed its costs comes back with them.
+- A list the page draws with its cost column (the page knows the permission) whose rows the server still stripped (the
+  token does not carry it yet) shows "—" in that column, never a measured-looking 0.00 (`StockDocumentsPage`: a null
+  `totalCost` is "—"; `formatNumber(null)` is already "—" elsewhere).
+- **A purchase line** starts without a price (the item read has no last cost) and the server prices it at save, as it
+  always did for a line left empty.
+
+**Not this permission's.** Stock Valuation (`inventory.valuation.view`), purchase orders / invoices / returns (supplier
+prices), landed cost adjustments, containers (their invoices, charges, estimates and landed cost per item), and sales
+costs, margins and Sales Profit (`sales.profit.view`, **Sales profit** above) keep their own permissions.
+
+**A line's cost follows its unit** (every reader). On an Inventory In or Out line the cost is per unit of the line:
+changing the unit scales it by the packing (`DocumentLinesGrid`; a Box of 12 costs twelve pieces), and a new line is
+proposed what the server would store - on an In the item's last cost, else its average (it proposed 0 for an item
+that only ever came in by Inventory In), on an Out the average. An imported line without a cost gets the same proposal
+(per unit of its unit) once the item is read, only while its cost is still the placeholder 0, and its unit list. On an
+In whose type's cost cannot be typed every imported line is proposed the item's cost, never the file's (the server
+prices it), and the wizard says "Unit costs in the file are not used: this document type's cost cannot be typed, so
+each line is saved at the item's last cost (its average when it has none).".
 
 ## Numbers
 
@@ -1410,8 +2150,8 @@ how the date is shown. Mantine's own parser ignored the format (dayjs has no `cu
   `toLocaleString()`, which printed "10/12/2026, 1:35:40 AM" in an en-US browser next to a typed "12/10/2026". The
   print pages use the same helper (`stamp()` is it with "—" when empty).
 - A stored reason ends its sentence: `reasonSentence(reason)` (`format.ts`) gives " Reason: {reason}." with the full
-  stop added when the reason has none, for the banners that go on after it ("Closed by … on …. Reason: Fully invoiced
-  and received. No more invoices will be made from it…").
+  stop added when the reason has none, for the banners that go on after it ("Cancelled by … on …. Reason: Damaged in
+  transit. …").
 
 ## Document pages
 
@@ -1430,10 +2170,10 @@ copied.
 | `QuickItemSearch` | The scanner's way in: type or scan, press Enter, the line appears. |
 | `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
-| `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. |
-| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. |
+| `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. `wrapLabels` (the transfer order's trail) keeps a long label whole and puts the user name under it when there is no room ("Nothing more will be sent" read "Nothing more will be…" on a phone); every other trail keeps its one line. |
+| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. Below 768 px the big button is the action marked `filled`, else the last one shown; `pinnedOnPhone` keeps an action beside it as a button, and `menuWhenDisabled` sends an action into the menu while it is disabled with a reason (a big greyed button says nothing on a phone, which has no tooltip: a completed movement's "Cancel…"), the action before it then taking the big button - also when it is the one marked `filled` or `pinnedOnPhone` (a transfer order marks every action so: its next step, disabled, says why in the menu). With `menuTowardsRoom` the menu opens downwards while the bar is in the upper half of the screen, upwards otherwise, and is never taller than the room it has (it scrolls): a transfer order's ten actions with their reasons, opened upwards from the top of its page, ran off the screen. Opt-in: every other page's menu opens upwards as before. |
 | `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
-| `CancelReasonModal` | Asks why a posted document is being cancelled. |
+| `CancelReasonModal` | Asks why a posted document is being cancelled. `withDate: { minDate?, label? }` also asks the date it counts on (script 84; `label` names the field when it is not a cancellation's, "Reversal date" of a transfer, script 90). |
 
 ### The rules that are easy to get wrong
 
@@ -1460,7 +2200,7 @@ copied.
 
 1. Add a `DocumentKind` for it (title, route, colour, direction, five permission codes, and optionally
    the Reference No. placeholder). Rules about cost, numbering, the reason and which items a line may
-   hold belong to the document **type** (Configuration › Document Types), not to the kind.
+   hold belong to the document **type** (Configurations › Document Types), not to the kind.
 2. Add the permission codes to `src/navigation.ts` and the menu entries.
 3. Add three routes in `src/App.tsx` pointing at `StockDocumentsPage` / `StockDocumentPage` — or at a
    family-specific page that reuses the same components when its header needs more fields.
@@ -1480,7 +2220,7 @@ with "BIVAC Item" ticked** in Item Definition.
 - **The rule belongs to the type, not to the page.** `DocumentTypeDto.bivacItemsOnly`
   (`inventory.DocumentTypes.BivacItemsOnly`) says it. The page reads it through `useDocumentTypes()` and never
   compares the code with `'BIV_OUT'`, so another type given the flag behaves the same with no change here.
-  Configuration › Document Types shows it read-only: a "BIVAC items only" column, and the line "BIVAC items only:
+  Configurations › Document Types shows it read-only: a "BIVAC items only" column, and the line "BIVAC items only:
   Yes: every line must be an item with "BIVAC Item" ticked." in the edit dialog of a type that has it. The
   script that creates the type sets it.
 - **Both pickers are narrowed.**
@@ -1597,7 +2337,444 @@ no documents: the provider's invoice of a late charge goes on the purchase invoi
   portal but its submit still bubbles up the React tree, so the item form's `onSubmit` ignores a submit whose target
   is not itself, and does nothing in view mode. Do the same wherever the panel lands inside a form.
 
-## Checklist for a new page
+## Supplier payments: a purchase invoice split by container (script 73)
+
+A **Purchase Invoice Payment** pays an invoice whose lines are linked to containers (Create Invoice from Containers,
+Link containers) container by container.
+
+- **Rows of an invoice** come with the open documents (`containers` on each invoice): one per container, and one
+  **"Unlinked items"** row (`containerId` null, key `0`) naming the items of its lines in no container. Amounts are in
+  the invoice's currency.
+- **Two rows or more** (`needsSplit` in `paymentModel.ts`): an expand arrow on the invoice row opens a table of the rows
+  (Container Ref., Container No., Items, Container PI Amount, Previously Paid, Outstanding, Allocate Amount, Payment
+  Status: Pending red, Partially Paid orange, Fully Paid green). It opens by itself once the invoice is allocated.
+- **The invoice amount and the rows never disagree:** typing the invoice amount (or ticking it, or "Allocate oldest
+  first") spreads it over the rows in order, each up to what it still owes, "Unlinked items" last; typing or ticking a row
+  makes the invoice amount their sum. **Distribute** re-spreads on demand.
+- **One container and nothing else:** no rows to type; the server records that container itself.
+- The request sends `containers` (every row, 0 where nothing goes) only for an invoice with two rows or more. The
+  server is the authority: posting is refused (73008) until the rows add up, and a row above what it owes is refused
+  (73009). The Paid documents card shows each invoice's split under it.
+
+## Lists of any length (script 78: any number of containers)
+
+The owner: "the system and the purchase orders and invoices must accept any number of containers". So:
+
+- **No preloaded page as a dropdown.** A `Select` filled with "the 200 newest" (or the first 50 parties) hid
+  everything after it, and typing only filtered what was loaded. Orders, invoices, containers, movements and parties
+  are picked with `SearchSelect` / `SearchMultiSelect`: the Containers page PO / PI filters, the movement card's order
+  and supplier filters, New charge's movement and containers, the Container Charges filters, the Forwarder of
+  Auto-plan and Add Container.
+- **A list a bulk action works on is whole.** The order's Containers card, a movement's containers and the movement's
+  candidates read EVERY page with `fetchAllPages(..., { maxRows: Infinity, pageSize: WHOLE_LIST_PAGE_SIZE })`: their
+  procedures take pages of up to 5,000 and work every row out before they page, so one big page is far cheaper than
+  many small ones. "Select every container" and "Tick every container of the list" then reach all of them.
+- **A preset selection is read in one call:** `containersApi.lookup({ ids })` (New charge opened from 2,000 ticked
+  containers), never one GET per container.
+- **A list the server cuts says so:** "From a container…" lists 200 and reads "Showing 200 of N containers…" from the
+  answer's `totalCount`.
+- **The Containers page** still holds at most 5,000 rows (`fetchAllPages`' default) with its "Showing the newest rows
+  only" notice: its filters (order, invoice, status…) narrow on the server, and a grid of tens of thousands of rows in
+  the browser would be slow for every reader to buy little.
+- **A server-searched filter asks the server for what it offers**: `loadPurchaseOrders` sends `status: 'Posted'` (every
+  approved order: Saved, Partially posted, Posted) rather than dropping drafts from a page of the newest orders, which
+  came back empty when the newest were drafts.
+- **A message about many containers names the first 10, then "and N more"**: the notification after a Delivery
+  (`showDeliveryResult`, with "Open Goods Receipts" past 10 drafts) and the server's summary of it.
+- Imports send what they read in one call up to the API's limit and in parts above it (`matchAll` for a movement's
+  container numbers: 10,000 a call).
+- **Long lists are DRAWN in steps of 200** (`useShownRows` + `ShownRowsFooter`: "Showing 200 of 1,049 containers. Show
+  200 more · Show all"): the Auto-plan proposal, the order's Containers card, the movement's list, the invoice's linked
+  containers, "Apply to other containers…" and the purchase document lines. Only the drawing is cut: every row stays loaded, so totals, Save, Post,
+  "Select every container" and the bulk actions take them all. A row with a problem, the one being edited and a line
+  just added always show. (Measured: Propose of 1,049 containers 7.9 s → 2.0 s in the dev build.)
+- **No portal or Select per row of a long grid.** A Mantine `Select` searches the whole page for its option list when it
+  mounts (the list is closed, so it walks every element), and a `Tooltip` mounts its portal while closed (another walk):
+  one of each per row made a 300-line invoice take 16 s to appear in the production build and a 2,205-line one minutes.
+  Rows use `LazySelect` (`components/ui/LazySelect.tsx`: a plain input until focused, then the real Select, open) and
+  tooltips with `{ withinPortal: false, floatingStrategy: 'fixed' }` (`ROW_TOOLTIP` in `PurchaseLinesGrid`). Both
+  invoices now appear in under 7 s (production build, API included).
+
+### The Auto-plan and Add Container defaults
+
+`useContainerOrderDefaults(orderId)` (`components/logistics/containerDefaults.ts`, `GET …/containers/order-defaults/{id}`)
+gives what both dialogs fill in by themselves. Both show "Supplier: SUP-0001 - TVS Motor Company (from the order)"
+read-only (`OrderSupplierLine`: a container's goods come from its order lines, so its supplier is never typed). The
+**Forwarder** starts as the forwarder of the order's most recent container, else the order's supplier, with a hint
+saying which; the **Country of origin** as the supplier's country. Both stay editable and clearable: the picks are
+held as `undefined` until the reader changes them, so the defaults arriving later never overwrite a choice.
+
+## A container's next step (scripts 80 and 81: ship from the container, Next step everywhere)
+
+The owner: "I cannot start the shipment of a specific container in the containers page or any other place; make shipment
+more user friendly and flexible". So every container has **one action whose label is its next step**, worked out by the
+server (`nextStepKind`, `nextStepBlockedReason`, the movement in progress or planned and the proposed next leg, on
+`ContainerShipState`: the list row and the container carry the same columns) and worded in one place,
+`components/logistics/nextStep.ts`. Phase 1 (script 80) gave the button; phase 2 (script 81) gives it one dialog for
+every step, the proposal, many containers at once and the to-do list.
+
+| The container (`nextStepKind`) | The label | What it opens |
+|---|---|---|
+| never moved (`Ship`) | "Start shipment…" | `NextStepModal`: the proposed first leg (Sea freight, port of loading → port of destination) |
+| its next planned movement waits (`StartPlanned`) | "Start Inland transport…" (the type's name) | `NextStepModal`: that movement's start date |
+| a movement in progress carries it (`Complete`) | by the stage of its type: "Arrived at Dar es Salaam…" (Sea, Transit), "Cleared customs at Kasumbalesa…", "Crossed the border at Kasumbalesa…", "Left the port of Beira…", "Loaded at the supplier…", "Delivered to Lubumbashi…" | `NextStepModal`: the date named by the stage, "Then start …" |
+| its last leg is completed (`NextLeg`) | the proposed leg: "Inland transport to Kasumbalesa…", for a stay "Customs clearance at Kasumbalesa…", nothing to propose "Next leg from Dar es Salaam…" | `NextStepModal`: the new leg, filled in |
+| delivered, not received (`Receive` / `OpenReceipt`) | "Receive goods…" / "Open goods receipt (draft)" | the goods receipt dialogs, with their own rules and permissions |
+| received, closed or cancelled (`Done`) | "Next step…", disabled: "Received into Main Warehouse: the journey is over." / "This container is cancelled." (the row's entry reads "Next step: journey over") | - |
+
+- **One hook runs it everywhere**: `useNextStep(onDone, origin)` (`components/logistics/useNextStep.tsx`; `origin` is
+  `'container'` on the container's page, `'containers'` on the list) gives `action(container)` (null when the reader may
+  not take the step: `containers.movements.manage` for a movement, `purchase.goodsreceipts.create` to receive, `.view` to
+  open the draft - the entry is then hidden), `run(container)` and the `dialogs` to render. The container page puts it in
+  the action bar **next to Save** (disabled "Save your changes first." while the form has unsaved edits; once delivered
+  the page's own "Receive goods…" / "Open goods receipt (draft)" are the step); the Containers list puts it **first in the
+  row's "…" menu** as "Next step: {label}", its reason under the label like Close and Cancel, and leaves out the receipt
+  entry that would say the same thing twice.
+- **On a narrow screen (below 75em) the Route card repeats the step** (`ContainerRouteTimeline`'s `step`): the card is
+  the top of the page there and the action bar its bottom, a whole page of scrolling away (6,400 px on a phone). The
+  card's button is the same label, reason and dialog; a disabled one says its reason under the buttons (a phone shows no
+  tooltip). A delivered container's step is its goods receipt: the card then opens with "Open goods receipt (draft)" or
+  "Receive goods…" (green, the page's own rules and permissions), before "Add to a movement…" and "New movement for
+  this container", and the action bar keeps that button beside Save instead of folding it into "More actions".
+- **The order's and the invoice's Containers cards have a row "…" menu (script 82)**, `ContainerRowMenu`: "Next step:
+  {label}" first, then "Open container" (see **Row menus of the order's and the invoice's Containers cards** below). The
+  Tracking board has no row menu: its rows open the container. The Shipments board's cards carry the step themselves.
+- **Start and Complete from the movement side stay one dialog**, `MovementStatusModal`, on the movement page and a row of
+  the Movements list ("Start…" / "Complete…"). Its title and date field follow the same words (`completeWords`): "Arrived
+  at Dar es Salaam - KTG-…", "Clearance date".
+
+### The Next step dialog (one container)
+
+`NextStepModal` reads `GET …/containers/{id}/next-step` when it opens and applies the step with `POST
+…/containers/next-step` (one group of one container). The server takes the movement's own Complete / Start, so a
+Delivery still drafts its goods receipts after the commit, and saves a new leg with the movement procedures, so every
+rule of phase 1 holds. A refusal is shown in the dialog as it comes, and the dialog stays open.
+
+- **A new leg** (title "Inland transport to Kasumbalesa - KTG-2026-0031"): "Now at Dar es Salaam since 12/10/2026 (end
+  of MOV-2026-000046)." / "Not moved yet: leaves from its port of loading Chennai."; the fields are `NextLegFields`
+  (shared with the bulk dialog's "Edit…"): Movement type grouped by stage, the proposal by default, with where it came
+  from under it - "Suggested: the usual next leg from Dar es Salaam (5 earlier legs)", "Suggested from the container's
+  ports", "Suggested from the stages", "Choose the To", and "Choose the type" when the usual type of the next stage is
+  inactive (the container still moves on: the reader picks a type); changing the type proposes the To again (`retypeLeg`); From
+  read-only ("A container leaves from where it is."); To grouped Sea ports / Border posts / Inland places, replaced by "at
+  Kasumbalesa" for a stay; "Start now" / "Plan only"; Start date (today, not after it when starting, not before the end of
+  the previous leg); ETA; Carrier (`SearchSelect`); Vehicle / vessel; Reference; Notes; for a sea leg Voyage, B/L No.,
+  B/L date prefilled from the container and "Copy vessel, voyage, B/L and ETA to the container" (on). Alerts: blue for
+  a draft (confirmed first; a reader without `containers.confirm` can only plan it), yellow without a container number,
+  orange when the container never moved and has typed dates ("The dispatch and arrival dates typed on this container
+  will be replaced by the movements' dates."). Button "Start Inland transport" / "Plan Inland transport", "Start
+  shipment" / "Plan shipment" for the first leg.
+- **A leg in progress** (title "Arrived at Dar es Salaam - KTG-2026-0031"): "MOV-2026-000046 Sea freight: Chennai → Dar es
+  Salaam, started 20/09/2026, ETA 12/10/2026."; the date named by the stage ("Arrival date", "Clearance date", "Crossing
+  date", "Departure date", "Delivery date"), today, not before the start, not in the future; when it carries others,
+  **"Which containers?"** (script 82, see **Only part of a movement arrived** below) - "All 12 containers of MOV-…" with
+  "All 12 containers of MOV-… arrive too: …", or "Only KTG-…: it leaves MOV-… and gets its own movement";
+  **"Then start …"** for the leg the server proposes after it -
+  ticked by default for a stay at the arrival place or the leg after Customs / Border, unticked for a leg that moves, off
+  with a hint when there is no To to propose, absent when the container's next leg is already planned. A Delivery shows `DeliveryCompletePreview` and "Then open the draft goods
+  receipt" instead. Buttons "Record arrival", "Record clearance", "Record crossing", "Record departure", "Record
+  delivery", "Record loading". **The Then leg is a second step on the server**: refused, the arrival stays and the
+  notification says "Arrival recorded; Customs clearance was not started: {reason}. Use Next step…" - and when someone
+  planned the next leg meanwhile, which one: "…the next leg was not started: its next leg MOV-2026-000058 (Customs
+  clearance) is already planned. Start it with Next step…".
+- **No port of loading** (never moved, none on the container: any From fits it): "Not moved yet, and no port of loading:
+  choose where it leaves from.", the From is a field (required) and is sent as `fromPlaceId`.
+- **Every new leg sends `expectedPlaceId`** (the place the dialog was opened at; the bulk dialog sends its group's From):
+  moved since by someone else, the server refuses it ("KTG-… is now at Kasumbalesa: open Next step… again.") instead of
+  making a leg from the new place to the To chosen for the old one.
+- **Not a movement** (a draft goods receipt waits, goods to receive, journey over: the movement page's "Continue: Next
+  step…" can open the dialog on such a container): the dialog says what comes next and offers "Open goods receipt
+  (draft)" / "Open the container", with nothing to submit.
+- **A planned leg**: its start date; "It also carries KTG-…, KTG-… (2 more): they start with it."; the refusal Start
+  would give, in red, with the button off.
+- **The notification is the server's sentence** ("KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026
+  (MOV-2026-000046). Now At Port. Then Customs clearance at Kasumbalesa started on 17/10/2026 (MOV-2026-000047).") with
+  "Open MOV-…" links that carry the way back, then the Delivery's draft goods receipts (`showDeliveryResult`) and the
+  warnings, each on its own.
+
+### Many containers: the bulk dialog
+
+The selection bar's "Next step…" (the Containers list and the order's Containers card: the shared `ContainerSelectionBar`)
+replaces "Start shipment…". It is disabled with "None of the ticked containers can move on: {first reason}."
+(`nextStepRefusal`) when nothing qualifies; one ticked container opens `NextStepModal`, several `NextStepBulkModal`:
+
+- **One preview call** (`POST …/next-step/preview`) groups the ticked containers by step, movement, type, From and To:
+  containers at different places fall into separate groups by themselves. Title "Next step - 300 containers".
+- **The groups table**, one row each: a checkbox (included), the step ("Arrived at Dar es Salaam", "Inland transport to
+  Kasumbalesa") with where the proposal came from, the movement ("MOV-…", "new" for a new leg), From → To, the count
+  (click it for the refs), "Orders / suppliers" for information, and for a new leg "One movement for the group" / "One
+  per container" (the server's default: one for Sea, Port, Origin and transshipment, one per container for road legs),
+  whose hint follows the stage (`onePerContainerHint`: "each truck arrives on its own day" on a road leg, "each container
+  is cleared on its own day" for Customs, "crosses" for Border, "is delivered" for Delivery), and "Edit…" (`NextLegFields` without the date, plus a Truck
+  no. / ETA table per container when one per container). A Complete group where only part of the movement is ticked
+  offers "Complete MOV-… for all its 30 containers" / "Only the 20 ticked (they get their own movement)" (script 82), or,
+  when the ticked cannot arrive alone, says "MOV-… is completed for all its 30 containers: the 10 not ticked arrive too."
+  with the server's reason; it carries "Then start …" when the server proposes a next leg. Under the step, the group's
+  notes: "{n} drafts: confirmed first.", for a new leg "{n}
+  without a container number: the shipment can start without it." (the dialog for one container's yellow alert), "{n}
+  with typed dates: …". A group that cannot go as it stands (date before its earliest, no To, no type) says why in red
+  and holds the button: "Choose the movement type. Use Edit…" (the ellipsis ends the sentence). A group changed with
+  Edit… is worded as changed everywhere, its row and its result ("Border crossing at Kasumbalesa", not "Next leg from
+  Kasumbalesa").
+- **One date at the top** for every step, and "New legs: Start now / Plan only".
+- **"Cannot move on (n)"**, grouped by the server's reason with counts and the first refs. A delivered container is
+  "Delivered: its goods are received next (Receive goods…)", or, when its draft goods receipt already waits, "A draft
+  goods receipt waits: Open goods receipt (draft)" (Receive goods… would refuse it). A missing proposal is never a
+  reason: such containers form a group whose type is chosen with Edit….
+- **"Apply to 285 containers (4 steps)"**: each group runs alone (one refusal never stops the others) and is all or
+  nothing inside. A group going one movement per container is sent in parts of 50 ("Moving on: 150 of 300"), each part
+  all or nothing; a group that is one movement is sent whole, so a movement is never cut in two. A Complete or a Start is
+  never split either: its first part would complete the movement for everyone.
+- **The results** are `BulkResultsModal` (first column "Step"): OK or "Refused" (the API's code, NEXT_STEP_CHANGED,
+  is for the program: it is only the badge's tooltip, in every bulk result), the server's sentence (it
+  names the MOV numbers made), the draft goods receipt note, the warnings. Closing it unticks the containers that moved
+  and keeps the refused ones ticked.
+
+### The Next step column and the movement page
+
+- **The Containers list has a "Next step" column** (the label without "…", a gray reason when the step is blocked) whose
+  funnel (`NextStepFilterPopover`, one value with "(All)") and the advanced filter "Next step" are two ways into the
+  server's `nextStep` parameter: "Start shipment" / "Start planned leg" / "Arrival due" / "Next leg to plan" / "Receive
+  goods". It is the logistics to-do list, so it works on every container, not only the rows loaded; the column's own
+  meta is `filterable: false` so the browser does not filter it a second time. The phase 1 Movement column ("Planned:
+  MOV-…") stays.
+- **After a Complete on the movement page** (not a Delivery: its goods are received next), a notification offers
+  "Continue: Next step…" for its containers: the bulk dialog, or the container's own dialog when it carries one.
+- **"Cancel…" says why before the click (script 83).** The movement's `canCancel` and `cancelBlockedReason` are the
+  server's (`fn_Movement_CancelBlock`: the refusals of the Cancel itself, in its words): a later leg of one of its
+  containers ("MOV-… is not the last leg of KTG-…: cancel MOV-… first."), a container already received or closed
+  ("Container KTG-… is already offloaded: its route can no longer change."). The movement page keeps "Cancel…" on every
+  movement that is not cancelled, disabled with that reason (a tooltip on a wide screen; the dimmed line under its label
+  in a phone's "More actions" menu), so its dialog - the reason, the split-undo sentence, a Delivery's drafts - opens
+  only when the Cancel will go through. A refusal that still comes (someone changed the movement meanwhile) is shown as
+  it comes. The Movements list offers no Cancel: a list row's `canCancel` is the status alone.
+
+### The locked From
+
+**A container leaves from where it is**: the To of its latest movement, else its port of loading (`placeId` /
+`placeName`). Wherever a leg is made for known containers, the From is that place and is **not editable**: a read-only
+field with the hint `FROM_LOCKED_HINT`, "A container leaves from where it is." - in the Next step dialogs (one container,
+and each group of the bulk dialog, where containers at another place fall into a group of their own) and in the movement
+form opened from one container (`/logistics/movements/new?containerId=12&from=container/12`).
+Two exceptions: **Loading at the supplier** ends at the port of loading, so its To is locked instead and its From is
+free; a container with no place at all (never moved, no port of loading) gets a free From. A **stay** (Port, Customs,
+Border) starts with To = From. Every place picker is grouped **Sea ports / Border posts / Inland places**
+(`placeOptionGroups`), so a border post is never taken for the sea port of the same town.
+
+**Back follows the way in**: a movement page opened with `?from=container/12` returns to that container (its Back and
+its breadcrumb), one opened with `?from=containers` (the list's "Next leg…") returns to the Containers list, one opened
+with `?from=shipments` (a card of the Shipments board, script 82) returns to the board, and all keep the parameter when a
+new movement is saved. `useNextStep(onDone, origin)` takes `'container'` (its page, and its row on an order's or an
+invoice's Containers card), `'containers'` or `'shipments'`. Every way into a movement from a container carries
+it: "New movement
+for this container", the MOV-… links of the route card (`ContainerRouteTimeline`'s `returnQuery`, "?from=container/12" by
+default - the board's drawer passes "?from=shipments") and the "Open MOV-…" links in the notification after a Next step
+(`NextStepModal`'s `returnQuery`; the selection bar passes its own, `ContainerSelectionBar`'s `returnQuery` -
+"?from=shipments" on the board), and the movement page's own dialogs keep the page's (`MovementStatusModal`'s
+`returnQuery`: its "Open MOV-…" after a split; the "Open MOV-…" after a split undone). A link without it goes back to the
+Movements list.
+
+**The start date of a movement in progress stays a fact**: the movement page lets it be changed after Start, so its
+field shows the Start dialog's two refusals before the Save - after today, and before `startNotBefore` (which the API
+also gives for a movement in progress) - and the Save refuses both as well (70000 / 70018).
+
+## The Shipments board (script 82: Logistics › Shipments)
+
+The owner: "make shipment more user friendly and flexible". Phase 3 of the container-first design: **every container on
+its way, in one column by stage**, each card with its next step. Route `/logistics/shipments`
+(`pages/logistics/ShipmentsBoardPage.tsx`), first in the Logistics menu (icon `board`), permission
+`containers.shipments.view` (`PERMISSIONS.shipmentsView`); the pieces are in `components/logistics/shipments/`
+(`shipmentBoard.ts` the arithmetic, `ShipmentCard`, `ShipmentColumn`, `ShipmentDrawer`, `ShipmentsList`), the API in
+`api/logistics/shipments.ts` (`GET api/logistics/shipments/board`).
+
+- **The column, the group and their order are the server's** (`phase`, `groupKey`, `groupLabel`, `groupOrder`, decided by
+  `logistics.fn_Container_BoardPhase` from the same movements as the next step), never worked out here:
+  `boardColumns(columns, cards)` only gathers the cards it placed. Columns, left to right, with their titles as the server
+  gives them: "At supplier", "At sea", "At port", "On the road", "At border / customs", "Delivered, to receive", and with
+  "Show received (30 days)" "Received (30 days)". Each header: the title, "22 containers · 1,848 pcs" (`columnFigures`) and
+  "Select all ({n})"; the Received column is read-only ("Read-only: received in the last 30 days.": no boxes, no step).
+- **Groups fold** (the chevron; kept across reloads), each with its own "Select all": a ship "MOV-2026-000046 · MSC Aurora
+  V.123 · Chennai → Dar es Salaam · ETA 20/10/2026 (84)" (one tick takes the whole ship; its movement number a link,
+  `GroupLabel`), a road leg "Dar es Salaam → Kasumbalesa (12)", a place "Dar es Salaam (120)", "No port of loading (2)",
+  a warehouse; the containers followed by typed dates at sea in "Followed by typed dates", after the ships.
+- **A card** (`ShipmentCard`): ref (a button: the drawer from the keyboard), "MSKU1234565 · 40HC", "84 pcs
+  TVS-APACHE-160" / "2 items, 120 pcs" (`itemsText`), the supplier on one line (the whole name on hover), the order on
+  its own line (a link only for the container's own and only order, with `purchase.orders.view`), where it is
+  (`WhereLine`: the leg's "MOV-… · T 123 ABC · ETA 03/10/2026" in red when late, a stay "MOV-… Customs clearance since
+  04/10/2026", "Since 28/09/2026", "Not moved yet", "Followed by typed dates" (`followedByTypedDates`: no leg yet, in
+  the column of the status its typed dates gave it), "Delivered 08/10/2026", "Received …"; nothing on a ship's cards,
+  whose group says it), the badges (`CardBadges`: red "Late" and "Free time over" with the last free day on hover,
+  "Draft", "No container no.", "Cleared" in At border / customs, "GRN draft" linked to the draft with
+  `purchase.goodsreceipts.view`, the GRN number once received), "Planned next: MOV-… Inland transport → Kasumbalesa"
+  (`PlannedNext`) and **"Next step: {label}"** (`NextStepLink`): phase 2's `useNextStep(reload, 'shipments')`, hidden
+  without the right to take it - and without `containers.view`, whose next-step read the dialog needs (then the List
+  shows the step's words, not a link) - dimmed with its reason in words when blocked. Every MOV number of the board -
+  the cards, a ship's group header, the List's Place or leg - is a link only with `containers.movements.view`, carrying
+  `?from=shipments`. Clicking a card (not its box, links or step) opens the drawer.
+- **The drawer** (`ShipmentDrawer`, full screen on a phone): the card's facts, the container's own `ContainerRouteTimeline`
+  (read when it opens: today's route; `canManage` false, its step button in the card's header; its MOV links carry
+  `?from=shipments`, its `returnQuery`, so Back on that movement returns to the board) and "Open container".
+  Taking the step closes the drawer first, so the step's dialog is the only one on screen. Without `containers.view` it
+  says what the card says, offers no step and no page, and says why: "Its route, its next step and its page need the
+  View Containers permission."
+- **Filters on the server** (`useGridQuery`, no Apply): Search ("Ref, container no., B/L, vessel or order no.", typed),
+  Supplier and Purchase order (`SearchSelect`, the order only with its view permission), Branch, Place (grouped Sea ports /
+  Border posts / Inland places), and the switches "Late only", "With a planned leg", "Show received (30 days)"; Clear
+  Filters.
+- **The selection is ids**, ticked on cards, a group or a column, held by the page and **narrowed at every settled answer
+  to the cards still on the board** (in the render that brings it). It is the Containers list's own
+  `ContainerSelectionBar` (Confirm, "Container numbers…", "Next step…", "Add charge…", Delete, Clear): a card is a
+  container row (`api` fills an absent `containerNo` with null for it). After any action the board reads itself again.
+  One ticked container opens its own Next step dialog and two or more the bulk dialog; both read with `containers.view`
+  (the container's step; the movement types the bulk dialog builds new legs from - without them it never finished
+  loading): without it "Next step…" waits (dimmed) with "Next step… needs the View Containers permission."
+- **50 cards a column**, then "Showing 50 of 66 containers. Show 16 more · Show all" (`CARDS_STEP`, `drawColumn`). Only
+  the drawing is cut: every group header is drawn (its "Select all" reaches the whole group), the column's "Select all"
+  every container in it, a group cut short says "{n} more in this group: Show 16 more below." (the button's own count,
+  at most 50), and a folded group draws nothing and uses none of the limit.
+- **"Board" / "List"** (a `SegmentedControl` in the header, the choice kept in `localStorage`
+  `inventory_shipment.shipments.view`, guarded): the List is the same rows and selection in one `DataTable` with an engine
+  (`storeKey` `logistics.shipments`, 50 a page up to 500, every column sorting and filtering in the browser) - Container
+  Ref., Container No., Stage, Place or leg (the group's words, a ship's movement number linked), Next step (the label
+  alone, a link), Badges, Supplier, Order No., Qty - for 300 containers or more; a row opens the same drawer.
+- **Wide (62em and up): the columns side by side**, `flex: 1 0 184px` - six fit at 1440 px with the menu open - each body
+  scrolling on its own (`max(360px, calc(100dvh - 380px))`) so its header stays in view; a seventh column (Received)
+  scrolls sideways **inside the board**, never the page. The body is a plain scrolling `div`, not Mantine's `ScrollArea`,
+  whose content is laid out as a table: long lines did not wrap and were cut at the column's edge.
+- **Below 62em one column at a time**, picked from a row of pill tabs with the counts ("At sea 22") that scrolls inside
+  itself; the page never scrolls sideways (390 px). Each count keeps its whole number (`WHOLE_BADGE` on the tab's badge:
+  squeezed into the tab, a count of 10 or more drew an empty pill). The column then has no inner scroll: the page
+  scrolls.
+- **Refresh**: the "Refresh" button ("Updated HH:mm" beside it), after every action, and a minute after the last answer -
+  looked at every 15 s and when the tab comes back - **only while the tab is visible and no dialog is open** (a Mantine
+  Modal or Drawer on screen: `[role="dialog"][aria-modal="true"]`), so nothing is read again under the reader's feet. The
+  selection survives it.
+- **No drag-and-drop, on purpose**: every move writes a movement with its dates, so every move goes through the Next step
+  dialogs.
+- **The answer carries only what the board, the List and the drawer read, without its empty fields** (5,000 cards are
+  3.6 MB of JSON; they were 11.9 MB, 45% of it nulls): an absent field reads as null - test with `??` or truthiness,
+  never `=== null`.
+
+### Only part of a movement arrived (script 82: the split choice in three dialogs)
+
+A movement in progress can be completed for **some** of its containers: those get their own movement - a copy with the
+same header and start date, already in progress - which is completed (a Delivery drafts only their goods receipts); the
+others stay on it, in progress. The server says whether a container can leave its movement and why not (`canSplitOff` /
+`splitOffBlockedReason` on the next step, the preview's rows and the movement's containers; `splitPossible` /
+`splitBlockedReason` on a preview group); the dialogs show it before the click and send the choice. **"All" stays the
+default everywhere.**
+
+- **`NextStepModal`**, a Complete of a movement that carries other containers: "Which containers?" - "All 12 containers of
+  MOV-2026-000046" (the default, with the orange "…arrive too: …") / "Only KTG-2026-0031: it leaves MOV-2026-000046 and
+  gets its own movement" (disabled, the server's reason as its description, when it cannot). Chosen, a blue line says "the
+  11 others stay on MOV-…, in progress", the Delivery preview names this container only, and the group goes with
+  `splitOff: true`; the Then leg works as after any arrival.
+- **`NextStepBulkModal`**, a Complete group where only part of the movement is ticked: "Complete MOV-… for all its 30
+  containers" (default) / "Only the 20 ticked (they get their own movement)" ("Only the ticked one (it gets its own
+  movement)" for one); chosen, the row's Movements cell says what happens to the movements - "A new movement, completed;
+  MOV-2026-000046 stays in progress with the 10 others" ("…with the other container" for one), never "Completed", which
+  read as if MOV-… itself were completed; its result row reads "{step} (only the ticked)". When the ticked cannot arrive alone the phase 2
+  sentence stays ("…the 10 not ticked arrive too.", "the one not ticked arrives too.") with "Only the ticked cannot
+  arrive on their own: {reason}" ("Only the ticked one cannot arrive on its own: {reason}").
+- **The movement page's Complete dialog** (`MovementStatusModal` with `allowSplit`, a movement in progress carrying
+  several): the switch "Only some containers arrived" turns on a checklist of its containers (ticked = arrived, a
+  container that cannot leave disabled with its reason), "Arrived: 2 of 12", and the button "Complete 2 of 12
+  containers" (`POST …/movements/{id}/complete-some`). None ticked: "Tick the containers that arrived."; every one:
+  "Every container of MOV-… is ticked: complete the movement itself (turn off "Only some containers arrived")." - the
+  button waits. While the switch is on the dialog is the movement's: its title is "Complete MOV-…" (never the container
+  it was opened from) and "All 12 containers of MOV-… arrive too" is not said. After it the page reads its movement
+  again (the others, still in progress) and offers "Continue: Next step…" for the ones that arrived. The page's buttons
+  that open these dialogs read "Start…", "Complete…" and "Cancel…". On a phone (36em and below) the dialog does not
+  focus its date when it opens: the calendar that focus opens covered the switch and the checklist above the date, where
+  a tap picked a day instead.
+- **The notifications are the server's**: "KTG-2026-0031: arrived at Dar es Salaam on 17/10/2026 with MOV-2026-000052
+  (split off MOV-2026-000046). Now At Port. The 11 others are still on MOV-2026-000046." with "Open MOV-…", then the
+  Delivery's draft goods receipts (`showDeliveryResult`). **Split but not completed** (`ok` false with
+  `splitFromMovementId`, rare: the date is checked before anything is split) is **a warning, never a failure**: an orange
+  notification "MOV-… was split off MOV-… but not completed: {reason}. Complete it on its page." with that movement's link
+  (the host reloads); in the bulk results the row reads "Refused" with that sentence in orange, and its containers stay
+  ticked - so does the container of the selection bar's one-container step (`NextStepModal` calls `onDone(false)`). A
+  refusal before the split is the usual error, in the dialog. No answer at all from `complete-some` (a server error, a
+  lost connection: no 4xx) is never read as "nothing split": an orange notification says it is not known whether the
+  ticked containers left the movement, and the page reads its movement again (`onSplitDone(null)`). The API answers
+  every split it committed, even when the completion failed for no business reason ("…but not completed: the database
+  did not answer (see the API log)."); `movementId` / `movementNo` name the new movement when it could not be read
+  back.
+- **The movement page** shows "Split from" with the original movement linked (`splitFromMovementId`), and its history
+  (`history`: "Split off" in orange, "Split from" in violet, "Split undone" in orange, with their details) among the
+  stamps in the Activity card.
+- **Cancelling a split-off movement undoes the split** (the server's rule: its containers go back onto the movement they
+  were split from). Its **Cancel dialog says it first**, in an orange Alert above the reason (`splitUndoText`,
+  `components/logistics/splitUndo.ts`, from the movement's `splitUndo…`: that movement's number, status, end date, To
+  and stage, and the dialog's own containers): "Cancelling MOV-2026-000073 puts KTG-2026-0030 and KTG-2026-0031 back on
+  MOV-2026-000044, which is still in progress." / "…, which arrived at Dar es Salaam on 17/10/2026: they arrive with it."
+  (by the stage: "cleared customs at …: they are cleared with it", "…reached Lubumbashi on …: KTG-… is delivered
+  with it, without a draft goods receipt. Use Receive goods… on it") / "…, which is cancelled: they go back to where they
+  were before it." - above a Delivery's own list of the draft goods receipts deleted with it. **The notification after
+  it is the server's** (`splitUndone.message`, green, with "Open MOV-…" that keeps the page's way back), worked out when
+  the cancel ran - that movement may have moved on while the dialog was open. The cancelled record's red Alert adds the
+  line "Split undone: KTG-… back on MOV-…" from its history (it has no container left).
+
+### Row menus of the order's and the invoice's Containers cards (script 82)
+
+`ContainerRowMenu` (`components/logistics/`) is the "…" `ActionIcon` at the end of each container row of
+`OrderContainersCard` and `ShippedInvoiceContainersCard` (the first row of a container on the invoice, beside Unlink):
+"Next step: {label}" first - phase 2's dialog through `useNextStep(…, 'container')`, read from the container list row
+(the order's list, or `containersApi.list({ purchaseDocumentId })` for the invoice, every page, with `containers.view`);
+hidden without the right to take it, disabled with its reason under the label (a disabled menu item has no tooltip) -
+then "Open container". **A click on the menu is the menu's**: it stops there and never reaches the row. After a step the
+card reads its containers again (the order's host reloads the order; the invoice's card its summary and its rows). The
+order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_BADGE`) beside the extra column.
+
+## Item Definition: the sticky item header, Previous / Next, Note and Link (script 87)
+
+- **The whole page header is frozen** under the app's fixed header (`top: var(--app-shell-header-offset, 64px)`,
+  `zIndex: 3`, the page's own `CONTENT_BG` stretched over the page padding, a thin line under it): breadcrumbs, the
+  code with its Active / Inactive and BIVAC badges (`PageHeader`'s `titleExtra`), "{name} · {family} · {brand}", and
+  the actions. `PageHeader truncateTitle` keeps the code and the name on one line each, cut with an ellipsis. Nothing
+  above the page may clip overflow, or `position: sticky` stops working.
+- **Previous / Next sit first among the actions**, before Edit Item, in view mode only: moving away from half-typed
+  changes is what Cancel / Save is for. Below 576 px the header keeps one row of buttons: the arrows without their
+  words (the target code is their tooltip / `aria-label`), Edit Item, and a compact "…" (`MoreActionsMenu compact`)
+  that also holds Copy Item and Back to list.
+- **An item opens at the top** (`window.scrollTo(0, 0)` in a layout effect, once per item): the router keeps the
+  window's scroll, so an item opened from far down the list used to open half-way down.
+- **Previous / Next follow the list the reader came from** (`pages/inventory/itemSequence.ts`): `ItemsPage` writes its
+  filtered, sorted rows (id, code, active) to sessionStorage on every change; the item page steps to the nearest
+  ACTIVE row either side, disabled at both ends (no wrap-around). An item that list does not hold (opened from a link,
+  a document, a new tab) steps through every active item by code, placed by its own code, so an inactive item still
+  finds its neighbours. Activate / Deactivate / Delete on the item page update the remembered list.
+- **Note**: a textarea (2,000 characters, counter) right under the Description (same column, a 2 px gap in edit mode),
+  shown read-only with its line breaks (`Field multiline`).
+- **Tracking (script 93)**: the Inventory Parameters row after the Min / Max hint, before BIVAC / Active - Tracking,
+  Serial no. length (Serial only), Requires expiry date (span sm 4 each, sm 6 each without the length; the hints under
+  the boxes so the row lines up), the dimmed line saying they are asked on transfer dispatches only, and in view mode
+  "Tracking: Serial numbers (17 characters) · expiry date required". The header shows `TrackingBadge` after BIVAC. See
+  **Batch, serial and expiry on transfers**.
+- **Link**: beside the Default Warehouse, with its "Open link" button; `type="url"`, checked when leaving the field and on Save: an absolute `http://` / `https://` address with a
+  host and no spaces (`isWebAddress`; the API and `inventory.usp_Item_SetNotes` refuse the rest). "Open link" is
+  disabled while the field is empty or invalid and opens a new tab with `noopener,noreferrer`; in view mode the address
+  is also a plain link with `rel="noopener noreferrer"`.
+
+## The container's journey, BIVAC charges and lead times (scripts 95-98)
+
+- **Journey columns on the Containers list**: "From → To" (`journeyLegText`) and "Journey" (a badge in
+  `JOURNEY_COLOURS`, "since {date}" under it), both from the server's journey fields, never worked out from the
+  container's status in the page; the funnel is `JourneyFilterPopover` (`components/logistics/journey.ts`).
+- **Receive goods… reads `receiveBlockedReason`** from the container (list row, page, Next step): disabled with that
+  sentence, never a rule re-written in the page. On an order or an invoice the button is hidden (not disabled) when its
+  reason is the "travels in containers" one (`ORDER_IN_CONTAINERS_TEXT`, `INVOICE_IN_CONTAINERS_TEXT`).
+- **A BIVAC charge in New charge**: when the charge type's code is `BIVAC_CHARGE_CODE`, "Which BIVAC?" replaces the
+  currency, rate, amount and split; the per-container amounts come from the item's port costs, the total is read-only, and
+  the options are re-read when the containers change (answers kept with the key they were read for, never cleared in an
+  effect). The charge drawer shows "BIVAC item" and "BIVAC Out" (a link with View BIVAC Out).
+- **Cards that save on their own** on Item Definition ("BIVAC cost per port", like "Stock levels per warehouse"): plain
+  buttons, a "Save costs" disabled with its reason until something changed and every row is complete.
+- **Lead time per shortage line**: each line's NumberInput holds only a typed value; its placeholder is the worked-out one
+  (`lineLeadTime`), and a dimmed line under it says where it comes from (`leadTimeSourceText`). A line whose lead time is
+  the plan's follows the header as it is typed. Only the typed value is sent (`leadTimeMonths` on the line).
+
+
 
 - [ ] Route added in `src/App.tsx` behind `ProtectedRoute` with the right permission.
 - [ ] Menu entry in `src/navigation.ts` with its permission code (breadcrumb comes from the model). That entry

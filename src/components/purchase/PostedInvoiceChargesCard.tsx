@@ -31,6 +31,11 @@ interface PostedInvoiceChargesCardProps {
   canView: boolean
   canAdd: boolean
   canPost: boolean
+  /**
+   * (79) Why this invoice takes no late charge: posted without changing item costs (its document type), so an
+   * adjustment would change no cost (67013). Its own charges are still listed; nothing is loaded or offered.
+   */
+  lateChargesBlockedReason?: string | null
   /** A late charge was posted: the invoice's landed costs changed, so the page reads it again. */
   onPosted: () => void
 }
@@ -57,6 +62,7 @@ export function PostedInvoiceChargesCard({
   canView,
   canAdd,
   canPost,
+  lateChargesBlockedReason = null,
   onPosted,
 }: PostedInvoiceChargesCardProps) {
   const [late, setLate] = useState<LateChargesDto | null>(null)
@@ -81,7 +87,7 @@ export function PostedInvoiceChargesCard({
   }, [invoiceId, showLoaded, showLoadError])
 
   useEffect(() => {
-    if (!canView) return
+    if (!canView || lateChargesBlockedReason) return
     const controller = new AbortController()
     lateChargesApi
       .get(invoiceId, controller.signal)
@@ -90,7 +96,7 @@ export function PostedInvoiceChargesCard({
         if (!controller.signal.aborted) showLoadError(err)
       })
     return () => controller.abort()
-  }, [canView, invoiceId, showLoaded, showLoadError])
+  }, [canView, lateChargesBlockedReason, invoiceId, showLoaded, showLoadError])
 
   const draft = late?.draftAdjustment ?? null
   const draftCharges = draft ? (late?.charges ?? []).filter((c) => c.adjustmentId === draft.id) : []
@@ -166,7 +172,7 @@ export function PostedInvoiceChargesCard({
               Post late charges ({draftCharges.length})
             </Button>
           )}
-          {canAdd && (
+          {canAdd && !lateChargesBlockedReason && (
             <Button variant="default" leftSection={<IconPlus size={16} />} onClick={() => setDialog({ kind: 'add' })} data-add-charge>
               Add charge
             </Button>
@@ -183,7 +189,13 @@ export function PostedInvoiceChargesCard({
           </Alert>
         )}
 
-        {canView && late === null && !loadError ? (
+        {lateChargesBlockedReason && (
+          <Text fz="sm" c="dimmed" data-late-charges-blocked>
+            {lateChargesBlockedReason}
+          </Text>
+        )}
+
+        {canView && !lateChargesBlockedReason && late === null && !loadError ? (
           <Group justify="center" py="md">
             <Loader size="sm" />
           </Group>

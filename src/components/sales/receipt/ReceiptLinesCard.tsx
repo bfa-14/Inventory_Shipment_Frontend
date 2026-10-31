@@ -16,8 +16,6 @@ interface ReceiptLinesCardProps {
   methods: PaymentMethodLookupDto[]
   accounts: CashBankAccountLookupDto[]
   currencies: CurrencyLookupDto[]
-  /** Accounts of other branches are not offered; an account with no branch belongs to all. */
-  branchId: number | null
   baseCurrencyCode: string
   headerBase: number
   linesBase: number
@@ -34,7 +32,7 @@ interface ReceiptLinesCardProps {
  * header amount is what they must add up to, in the base currency.
  *
  * AN ACCOUNT HOLDS ONE CURRENCY, so the account list on a row is filtered by that row's currency
- * (and branch). Changing the currency clears an account that no longer fits instead of leaving a
+ * (an account belongs to no branch). Changing the currency clears an account that no longer fits instead of leaving a
  * USD cash box on a CDF row.
  */
 export function ReceiptLinesCard({
@@ -46,7 +44,6 @@ export function ReceiptLinesCard({
   methods,
   accounts,
   currencies,
-  branchId,
   baseCurrencyCode,
   headerBase,
   linesBase,
@@ -98,7 +95,7 @@ export function ReceiptLinesCard({
               const fitting = accounts.filter(
                 (a) =>
                   String(a.id) === line.cashBankAccountId ||
-                  (a.isActive && String(a.currencyId) === line.currencyId && (a.branchId === null || branchId === null || a.branchId === branchId)),
+                  (a.isActive && String(a.currencyId) === line.currencyId),
               )
               const rate = isBase ? 1 : line.exchangeRate
               const error = rowErrors[line.key]

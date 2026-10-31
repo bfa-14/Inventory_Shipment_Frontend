@@ -84,16 +84,117 @@ export interface ContainerReceiptRef {
   goodsReceiptStatusName?: string | null
 }
 
+/**
+ * (script 80) The next step of a container's journey, worked out by the server: Complete (a movement in progress carries
+ * it), Start (its next planned movement waits), Ship (it never moved), NextLeg (its last movement is completed). Null
+ * once received, closed or cancelled.
+ */
+export type ContainerShipStep = 'Ship' | 'Start' | 'Complete' | 'NextLeg'
+
+/**
+ * (script 80) Where a container is and the movements that decide its next step, the same on the list row and the
+ * container: the button on its page and the row's "…" menu read it. Optional: an older API sends none of it.
+ */
+export interface ContainerShipState {
+  /** Its movements, cancelled ones left out: 0 = never moved. */
+  movementCount?: number
+  /** Where its next leg leaves from: the To of its latest movement, else its port of loading; null = any place fits it. */
+  placeId?: number | null
+  placeName?: string | null
+  /** The end date of that latest movement once completed: "at Dar es Salaam since 12/10/2026". */
+  placeSince?: string | null
+  /** The movement in progress carrying it, and how many containers it carries. */
+  activeMovementId?: number | null
+  activeMovementNo?: string | null
+  activeMovementTypeName?: string | null
+  activeMovementStage?: string | null
+  activeMovementFromName?: string | null
+  activeMovementToName?: string | null
+  activeMovementStartDate?: string | null
+  activeMovementEta?: string | null
+  activeMovementContainerCount?: number | null
+  /** Its next planned movement ("Planned: MOV-…" on the list). */
+  plannedMovementId?: number | null
+  plannedMovementNo?: string | null
+  plannedMovementTypeName?: string | null
+  plannedMovementStage?: string | null
+  plannedMovementFromName?: string | null
+  plannedMovementToName?: string | null
+  plannedMovementDate?: string | null
+  plannedMovementContainerCount?: number | null
+  /** Why that planned movement cannot start yet (the refusal Start would give); null when it can. */
+  plannedMovementBlockedReason?: string | null
+  /** Its earliest start: the end date of the previous leg. */
+  plannedMovementNotBefore?: string | null
+  lastMovementId?: number | null
+  lastMovementNo?: string | null
+  lastMovementEndDate?: string | null
+  shipStep?: ContainerShipStep | null
+  /** Why the next step cannot be taken now (journey over, a draft, the planned movement's refusal); null when it can. */
+  shipStepBlockedReason?: string | null
+  /**
+   * (script 81) The next step, the first that applies: Done (received, closed, cancelled), Complete (a movement in progress
+   * carries it), OpenReceipt (a draft goods receipt waits), StartPlanned (its next planned movement), Ship (never moved),
+   * Receive (its last leg is a completed Delivery), NextLeg (its last leg is completed). `shipStep` stays for phase 1.
+   */
+  nextStepKind?: ContainerNextStepKind | null
+  /** Why the step cannot be taken ("Received into Lubumbashi Warehouse: the journey is over."); null when it can. */
+  nextStepBlockedReason?: string | null
+  /** The proposed new leg (Ship, NextLeg): "Inland transport to Kasumbalesa…", "Customs clearance at Kasumbalesa…". */
+  proposedTypeId?: number | null
+  proposedTypeCode?: string | null
+  proposedTypeName?: string | null
+  proposedStage?: string | null
+  proposedFromPlaceId?: number | null
+  proposedFromName?: string | null
+  /** Null on a leg that moves: "Next leg from {place}…" (no To to suggest). */
+  proposedToPlaceId?: number | null
+  proposedToName?: string | null
+  /** History, Ports, Stages or None. */
+  proposalSource?: NextLegProposalSource | null
+  proposalLegs?: number | null
+  /** A stay (Port, Customs, Border): "{Type} at {place}…". */
+  proposedIsStay?: boolean | null
+}
+
+/** (script 81) See `ContainerShipState.nextStepKind`. */
+export type ContainerNextStepKind = 'Done' | 'Complete' | 'OpenReceipt' | 'StartPlanned' | 'Ship' | 'Receive' | 'NextLeg'
+
+/** (script 81) The values of the Containers list's Next step filter (Receive also lists the open draft receipts). */
+export type ContainerNextStepFilter = 'Ship' | 'StartPlanned' | 'Complete' | 'NextLeg' | 'Receive'
+
+/**
+ * (script 95) Where a container is on its journey (logistics.fn_Container_Journey): its latest leg that started.
+ * NotDispatched (no leg yet), OnTheWay (a leg in progress that moves), Arrived (the leg completed, or a stay in
+ * progress), Received (offloaded or closed). Also the Containers list's Journey filter.
+ */
+export type ContainerJourneyStatus = 'NotDispatched' | 'OnTheWay' | 'Arrived' | 'Received'
+
+/** (script 81) Where a proposed leg comes from: the usual next leg from here, the container's own ports, the stage order. */
+export type NextLegProposalSource = 'History' | 'Ports' | 'Stages' | 'None'
+
 /** What the STATUS allows. Whether the reader may is a permission, checked beside it. */
-export interface ContainerFlags extends ContainerReceiptRef {
+export interface ContainerFlags extends ContainerReceiptRef, ContainerShipState {
   status: ContainerStatusCode
   statusName: string
   canEdit: boolean
   canConfirm: boolean
   /** Always false since goods receipts (kept for old clients): the goods are received with "Receive goods…". */
   canOffload: boolean
-  /** Confirmed … Cleared and no open goods receipt (draft or posted): "Receive goods…" can create its draft. */
+  /**
+   * Confirmed … Cleared, no open goods receipt (draft or posted) and (script 95) delivered - a container that travels
+   * with movements is received once a Delivery leg is completed: "Receive goods…" can create its draft.
+   */
   canReceive?: boolean
+  /** (script 95) Why "Receive goods…" cannot be used now ("KTG-2026-0031 has not been delivered yet: …"). */
+  receiveBlockedReason?: string | null
+  /** (script 95) The journey: null for a cancelled container. */
+  journeyStatus?: ContainerJourneyStatus | null
+  journeyFromName?: string | null
+  journeyToName?: string | null
+  /** Since when: the leg's start (on the way, a stay), its end (arrived), the receipt (received). */
+  journeySince?: string | null
+  journeyMovementNo?: string | null
   /** 'GRN' or 'Offload' once received; null before. */
   receivedBy?: ContainerReceivedBy | null
   /** False once a goods receipt (draft or posted) exists: the loaded lines are fixed (rule 21). */
@@ -710,6 +811,13 @@ export interface ContainerQuery {
   dateTo?: string
   /** A completed Delivery-stage movement, still in status 2-5 with no posted goods receipt (the drafts included). */
   deliveredNotReceived?: boolean
+  /**
+   * (script 81) The logistics to-do list, worked out on the server: Ship ("Start shipment"), StartPlanned ("Start planned
+   * leg"), Complete ("Arrival due"), NextLeg ("Next leg to plan"), Receive ("Receive goods", open drafts included).
+   */
+  nextStep?: ContainerNextStepFilter
+  /** (script 95) Where the containers are on their journey. */
+  journey?: ContainerJourneyStatus
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number
@@ -722,6 +830,8 @@ export interface AvailablePoLineQuery {
   search?: string
   /** The container being edited: what it holds counts apart. */
   containerId?: number
+  /** At most this many lines (1-500, the server's default 200). */
+  top?: number
 }
 
 export interface InvoiceCandidateQuery {
@@ -826,6 +936,47 @@ export interface AttachmentCreatedDto {
 }
 
 /* ── many containers per order: auto-plan and bulk actions ────────────────────────────────── */
+
+/**
+ * What Auto-plan containers… and Add Container… fill in by themselves for an order (script 78): the order's supplier
+ * (shown read-only: a container's goods come from its order lines), the forwarder (of the order's most recent container
+ * that has one, else the supplier; the dialog keeps it editable) and the country of origin (the supplier's).
+ */
+export interface ContainerOrderDefaultsDto {
+  purchaseOrderId: number
+  purchaseOrderNumber: string | null
+  supplierId: number
+  supplierCode: string
+  supplierName: string
+  /** ISO 3166-1 alpha-2, null when the supplier has none. */
+  countryOfOrigin: string | null
+  forwarderId: number
+  forwarderCode: string
+  forwarderName: string
+  /** LastContainer: the forwarder of lastContainerRef; Supplier: the order's supplier. */
+  forwarderSource: 'LastContainer' | 'Supplier'
+  lastContainerRef: string | null
+}
+
+/** A container in a picker (script 78): what a charge's "By pieces" split needs too. */
+export interface ContainerLookupDto {
+  id: number
+  containerRef: string
+  containerNo: string | null
+  status: number
+  /** Pieces loaded (base units). */
+  pieces: number
+  purchaseOrderId: number | null
+}
+
+/** `ids`: those containers, any number; otherwise at most `top` (default 50, at most 200) matching `search`, newest first. */
+export interface ContainerLookupRequest {
+  ids?: number[]
+  search?: string
+  /** 6 = the containers a charge can still be typed for (Draft … Offloaded). */
+  maxStatus?: number
+  top?: number
+}
 
 export interface AutoPlanRequest {
   purchaseOrderId: number
@@ -1067,7 +1218,15 @@ export const containersApi = {
   removeAttachment: (attachmentId: number, allShared: boolean) =>
     request<void>(`${BASE}/attachments/${attachmentId}?allShared=${allShared}`, { method: 'DELETE' }),
 
-  /** The proposed containers of an approved order for one container type; nothing is saved. */
+  /** What the container dialogs fill in by themselves for an order: supplier, forwarder, country of origin. */
+  orderDefaults: (purchaseOrderId: number, signal?: AbortSignal) =>
+    request<ContainerOrderDefaultsDto>(`${BASE}/order-defaults/${purchaseOrderId}`, { signal }),
+
+  /** The container pickers: the given ids in one call, or the newest matching what is typed. */
+  lookup: (payload: ContainerLookupRequest, signal?: AbortSignal) =>
+    request<ContainerLookupDto[]>(`${BASE}/lookup`, { method: 'POST', body: payload, signal }),
+
+  /** The proposed containers of an approved order for one container type (any number of them, script 78); nothing is saved. */
   autoPlan: (payload: AutoPlanRequest, signal?: AbortSignal) =>
     request<AutoPlanDto>(`${BASE}/auto-plan`, { method: 'POST', body: payload, signal }),
 
