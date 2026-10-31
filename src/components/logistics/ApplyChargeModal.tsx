@@ -88,7 +88,8 @@ export function ApplyChargeModal({ charge, onClose, onCopied }: ApplyChargeModal
   const [listError, setListError] = useState<string | null>(null)
   const [ticked, setTicked] = useState<Set<number>>(new Set())
 
-  const [amount, setAmount] = useState<number | ''>(charge.amount)
+  // A deduction is stored negative (script 102); the copy is typed as its size and signed by the server from the type.
+  const [amount, setAmount] = useState<number | ''>(Math.abs(charge.amount))
   const [chargeDate, setChargeDate] = useState<string | null>(charge.chargeDate.slice(0, 10))
   const [method, setMethod] = useState<CopyMethod | null>(
     COPY_METHODS.includes(charge.allocationMethod as CopyMethod) ? (charge.allocationMethod as CopyMethod) : null,
@@ -309,7 +310,7 @@ export function ApplyChargeModal({ charge, onClose, onCopied }: ApplyChargeModal
 
         <SimpleGrid cols={{ base: 1, sm: 3 }}>
           <NumberInput
-            label="Amount per container"
+            label={charge.amount < 0 ? 'Amount deducted per container' : 'Amount per container'}
             withAsterisk
             min={0}
             decimalScale={2}

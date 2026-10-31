@@ -90,14 +90,15 @@ function headerOf(dto: ContainerChargeDto): Header {
     date: dto.chargeDate.slice(0, 10),
     currencyId: String(dto.currencyId),
     rate: dto.exchangeRate,
-    amount: dto.amount,
+    // A deduction is stored negative (script 102) and typed positive: the server signs it from its type.
+    amount: Math.abs(dto.amount),
     notes: dto.notes ?? '',
     movementId: dto.movementId === null ? null : String(dto.movementId),
   }
 }
 
 function manualOf(dto: ContainerChargeDto): Record<number, number | null> {
-  return Object.fromEntries(dto.allocations.map((a) => [a.containerLineId, a.amountBase]))
+  return Object.fromEntries(dto.allocations.map((a) => [a.containerLineId, Math.abs(a.amountBase)]))
 }
 
 function round2(value: number): number {
@@ -543,7 +544,7 @@ function ChargeBody({
               />
             )}
             <NumberInput
-              label={`Amount (${code})`}
+              label={chargeType?.isDeduction ? `Amount deducted (${code})` : `Amount (${code})`}
               withAsterisk
               value={header.amount ?? ''}
               min={0}
@@ -607,7 +608,7 @@ function ChargeBody({
                 }
               />
             )}
-            <Field label="Amount" value={formatMoney(dto.amount, dto.currencyCode)} />
+            <Field label={dto.amount < 0 ? 'Amount (deduction)' : 'Amount'} value={formatMoney(dto.amount, dto.currencyCode)} />
             <Field label={`Amount (${baseCode})`} value={formatNumber(dto.amountBase, 2)} />
             <Field label="Exchange rate" value={formatNumber(dto.exchangeRate, 6)} />
             <Field label="Description" value={dto.description} />

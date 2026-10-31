@@ -52,7 +52,8 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
   )
   const [rate, setRate] = useState<number | null>(charge ? charge.exchangeRate : 1)
   const [rateLoading, setRateLoading] = useState(false)
-  const [amount, setAmount] = useState<number | null>(charge ? charge.amount : null)
+  // A deduction is stored negative (script 102) and typed as its size: the server signs it from its type.
+  const [amount, setAmount] = useState<number | null>(charge ? Math.abs(charge.amount) : null)
   const [method, setMethod] = useState<ChargeAllocationMethod>(
     charge && charge.allocationMethod !== 'Manual' ? charge.allocationMethod : 'Value',
   )
@@ -102,7 +103,7 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
     else if (date > todayDateOnly()) found.date = 'The date cannot be in the future.'
     if (!currencyId) found.currencyId = 'Choose a currency.'
     if (!isBase && (rate === null || rate <= 0)) found.rate = 'Enter the exchange rate.'
-    if (amount === null || amount <= 0) found.amount = 'Enter an amount above zero.'
+    if (amount === null || amount <= 0) found.amount = type?.isDeduction ? 'Enter the amount deducted.' : 'Enter an amount above zero.'
     return found
   }
 
@@ -233,7 +234,7 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
             />
           )}
           <NumberInput
-            label={`Amount${currency ? ` (${currency.currencyCode})` : ''}`}
+            label={`${type?.isDeduction ? 'Amount deducted' : 'Amount'}${currency ? ` (${currency.currencyCode})` : ''}`}
             withAsterisk
             value={amount ?? ''}
             min={0}

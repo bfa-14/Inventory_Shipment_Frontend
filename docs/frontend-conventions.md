@@ -2791,3 +2791,34 @@ order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_
 - [ ] A page routed outside `AppShell` (a print page, a public page) renders `<TestingMarker />` first (see
       **Environments (Production / Testing)**).
 - [ ] `npm run typecheck`, `npm run lint`, `npm run build` all clean; no `any`, no TODOs, no mock data.
+
+## A report that runs on demand and downloads files (script 101: Reports › Attachment Report)
+
+`pages/reports/AttachmentReportPage.tsx`, the pattern for a report whose result is files rather than figures:
+
+- **The filters live in the address** (`?types=3,7&docFrom=…&docTo=…&upFrom=…&upTo=…&page=2&size=25&run=1`): a refresh, a
+  bookmark or a shared link reruns the same report. What is typed in the filter bar counts only once **Run report** is
+  clicked (it writes the address); a "from" after its "to" shows under the "to" field and disables Run report - no query.
+- **Paged on the server** (`totalRecords`, `page`, `recordsPerPage` and `onRecordsPerPageChange` on `DataTable`): the
+  browser never holds the whole set; the header shows the count and total size of every match.
+- **Selection:** the grid's checkboxes (`selectedRecords`, `idAccessor="key"`); its header box ticks the current page only;
+  "Select all N matching" is a separate checkbox that makes the download take every match on the server.
+- **Downloads** go through `postForBlob` + `saveBlob`, under the name the API gives each row (`downloadName`) or the
+  report (`zipFileName`). A blue "Preparing download" Alert with a Loader shows while the server builds the ZIP, and the
+  buttons are disabled meanwhile. The page checks the limits it was given (`maxFiles` / `maxBytes`) before asking; the
+  server checks again and its 409 message is shown as it comes.
+- What each reader may see is the server's to decide; the page never filters rows by permission itself.
+
+
+## Deduction charges: typed positive, shown negative (script 102)
+
+A charge type with `isDeduction` (Configuration › Charge Types, DED "Deduction / refund") lowers the cost. The rule on
+every charge form (New charge, the charge drawer, Apply to other containers, the invoice's own charges, late charges):
+
+- **The form holds sizes.** The amount and a manual split are typed without a minus, under "Amount deducted"; a saved
+  deduction comes back negative and is read with `Math.abs` (`chargeFromDto`, `headerOf`, `manualOf`). The server signs
+  it from the type, so a form never sends a negative number and `min={0}` stays.
+- **The read side shows the sign.** Amounts below zero are drawn in red with their minus (Container Charges list, the
+  New charge preview and its result, the invoice charges' base column); totals add the signed value (`signedAmountBase`).
+- **Badges:** "lowers the item cost" (red) when the type is picked, "deduction" on an invoice charge row.
+- **Payment status** 'Deduction' (`paymentStatusLabel`, grape): it is paid to nobody and no payment offers it.

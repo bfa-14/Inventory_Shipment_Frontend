@@ -10,12 +10,15 @@ const LABELS: Record<string, string> = {
   Unpaid: 'Unpaid',
   Partial: 'Partially Paid',
   Paid: 'Fully Paid',
+  // Script 102: a container charge that lowers the cost is not paid to anybody.
+  Deduction: 'Deduction',
 }
 
 const COLOURS: Record<string, string> = {
   Unpaid: 'gray',
   Partial: 'orange',
   Paid: 'green',
+  Deduction: 'grape',
 }
 
 export function paymentStatusLabel(status: string | null | undefined): string {

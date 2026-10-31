@@ -40,6 +40,8 @@ export interface ChargeTypeDto {
   allocationMethod: ChargeAllocationMethod
   includeInLandedCost: boolean
   isRecoverableTax: boolean
+  /** Script 102: a deduction lowers the cost (spare parts taken out, a refund); its charges are stored negative. */
+  isDeduction: boolean
   description: string | null
   isActive: boolean
   /** How many charge lines use it. Zero is what makes it deletable. */
@@ -59,6 +61,8 @@ export interface ChargeTypeLookupDto {
   includeInLandedCost: boolean
   isRecoverableTax: boolean
   isActive: boolean
+  /** A deduction: the amount is typed positive and taken off the cost. */
+  isDeduction: boolean
 }
 
 export interface ChargeTypeQuery {
@@ -79,6 +83,7 @@ export interface SaveChargeTypeRequest {
   allocationMethod: ChargeAllocationMethod
   includeInLandedCost: boolean
   isRecoverableTax: boolean
+  isDeduction: boolean
   description: string | null
   isActive: boolean
   rowVersion?: string | null

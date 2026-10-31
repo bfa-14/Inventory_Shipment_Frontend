@@ -187,6 +187,8 @@ function NewChargeDialog({
   const isBase = currency?.isBaseCurrency ?? true
   const chargeType = chargeTypes.find((t) => String(t.id) === chargeTypeId)
   const isBivac = chargeType?.chargeCode.trim().toUpperCase() === BIVAC_CHARGE_CODE
+  // Script 102: a deduction (spare parts taken out, a refund) is typed positive; the server stores it negative.
+  const isDeduction = chargeType?.isDeduction === true
 
   const remember = useCallback((rows: ContainerOption[]) => {
     setKnown((current) => {
@@ -359,7 +361,7 @@ function NewChargeDialog({
     }
     if (!currencyId) found.currencyId = 'Choose a currency.'
     if (!isBase && (rate === null || rate <= 0)) found.rate = 'Enter the exchange rate.'
-    if (total === null || total <= 0) found.total = 'Enter an amount above zero.'
+    if (total === null || total <= 0) found.total = isDeduction ? 'Enter the amount deducted.' : 'Enter an amount above zero.'
     return found
   }
 
@@ -438,8 +440,8 @@ function NewChargeDialog({
               {created.map((row) => (
                 <Table.Tr key={row.id}>
                   <Table.Td>{row.containerRef}</Table.Td>
-                  <Table.Td ta="right">{formatMoney(row.amount, isBivac ? baseCode : code)}</Table.Td>
-                  <Table.Td ta="right">{formatNumber(row.amountBase, 2)}</Table.Td>
+                  <Table.Td ta="right" c={row.amount < 0 ? 'red' : undefined}>{formatMoney(row.amount, isBivac ? baseCode : code)}</Table.Td>
+                  <Table.Td ta="right" c={row.amountBase < 0 ? 'red' : undefined}>{formatNumber(row.amountBase, 2)}</Table.Td>
                   <Table.Td>
                     <Badge variant="light" color={posted ? 'green' : 'gray'}>{posted ? 'Posted' : row.statusName}</Badge>
                   </Table.Td>
@@ -534,9 +536,13 @@ function NewChargeDialog({
               <Text fz="xs" c="dimmed">
                 Default: {allocationMethodLabel(chargeType.allocationMethod)}
               </Text>
-              <Badge size="xs" variant="light" color={chargeType.includeInLandedCost ? 'blue' : 'gray'}>
-                {chargeType.includeInLandedCost ? 'enters the item cost' : 'not in cost'}
-              </Badge>
+              {chargeType.isDeduction ? (
+                <Badge size="xs" variant="light" color="red">lowers the item cost</Badge>
+              ) : (
+                <Badge size="xs" variant="light" color={chargeType.includeInLandedCost ? 'blue' : 'gray'}>
+                  {chargeType.includeInLandedCost ? 'enters the item cost' : 'not in cost'}
+                </Badge>
+              )}
             </Group>
           )}
         </Stack>
@@ -629,7 +635,7 @@ function NewChargeDialog({
           )}
 
           <NumberInput
-            label={`Total amount (${code})`}
+            label={isDeduction ? `Amount deducted (${code})` : `Total amount (${code})`}
             withAsterisk
             placeholder="0.00"
             value={total ?? ''}
@@ -638,7 +644,13 @@ function NewChargeDialog({
             fixedDecimalScale
             thousandSeparator=","
             onChange={(next) => setTotal(numberInputValue(next))}
-            description={!isBase && totalBase !== null ? `≈ ${formatMoney(totalBase, baseCode)}` : undefined}
+            description={
+              isDeduction
+                ? `Typed without a minus: taken off the cost of the goods${!isBase && totalBase !== null ? ` (≈ ${formatMoney(totalBase, baseCode)})` : ''}.`
+                : !isBase && totalBase !== null
+                  ? `≈ ${formatMoney(totalBase, baseCode)}`
+                  : undefined
+            }
             error={errors.total}
           />
           </>
@@ -695,7 +707,11 @@ function NewChargeDialog({
                         return cost !== undefined ? formatNumber(cost, 2) : <Text span fz="sm" c="red">no cost for this port</Text>
                       })()
                     ) : preview ? (
-                      formatNumber(preview[index], 2)
+                      isDeduction ? (
+                        <Text span fz="sm" c="red">{formatNumber(-preview[index], 2)}</Text>
+                      ) : (
+                        formatNumber(preview[index], 2)
+                      )
                     ) : (
                       <Text span fz="sm" c="dimmed">
                         {splitRule === 'Value' ? 'computed on save' : 'no pieces loaded'}
