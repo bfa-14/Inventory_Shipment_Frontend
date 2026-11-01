@@ -3,7 +3,46 @@ import { authApi } from '../api/auth'
 import { ApiError, configureHttp } from '../api/http'
 import type { UserDto } from '../api/types'
 import { AuthContext, type AuthContextValue, type AuthStatus } from './AuthContext'
-import { loadSession, saveSession, toSession, type StoredSession } from './session'
+import { hasTabMark, loadSession, parseSession, saveSession, STORAGE_KEY, toSession, type StoredSession } from './session'
+
+/** Where the tabs of the app speak to each other: "is anyone signed in?" and its answer. */
+const CHANNEL_NAME = 'inventory_shipment.auth'
+/** The browser lock one tab holds while it rotates the refresh token. */
+const REFRESH_LOCK = 'inventory_shipment.auth.refresh'
+/** How long a new tab waits for an open tab to answer for the stored session. */
+const PING_TIMEOUT_MS = 700
+
+type AuthMessage = { type: 'ping'; id: string } | { type: 'pong'; id: string }
+
+function openChannel(): BroadcastChannel | null {
+  return typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(CHANNEL_NAME)
+}
+
+/** True when another open tab of the app answers that it is signed in, within {@link PING_TIMEOUT_MS}. */
+function anotherTabIsSignedIn(): Promise<boolean> {
+  const channel = openChannel()
+  if (!channel) return Promise.resolve(false)
+  const id = Math.random().toString(36).slice(2)
+  return new Promise((resolve) => {
+    const done = (answer: boolean) => {
+      window.clearTimeout(timer)
+      channel.close()
+      resolve(answer)
+    }
+    const timer = window.setTimeout(() => done(false), PING_TIMEOUT_MS)
+    channel.onmessage = (event: MessageEvent<AuthMessage>) => {
+      if (event.data?.type === 'pong' && event.data.id === id) done(true)
+    }
+    channel.postMessage({ type: 'ping', id } satisfies AuthMessage)
+  })
+}
+
+/** Runs `task` while holding the refresh lock across every tab (Web Locks); alone where the browser has none. */
+function withRefreshLock<T>(task: () => Promise<T>): Promise<T> {
+  return typeof navigator !== 'undefined' && navigator.locks
+    ? navigator.locks.request(REFRESH_LOCK, task)
+    : task()
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
@@ -29,8 +68,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const current = sessionRef.current
     if (!current) return Promise.resolve(null)
 
-    const task = (async () => {
+    // ONE TAB ROTATES AT A TIME, and never a token another tab already rotated: the API would take a rotated token
+    // presented again for a stolen one and sign the user out everywhere. So under the lock the shared store is read
+    // first: a session newer than ours (another tab refreshed meanwhile) is taken as it is, without asking the API.
+    const task = withRefreshLock(async () => {
       try {
+        const latest = loadSession()
+        if (!latest) {
+          applySession(null)
+          return null
+        }
+        if (latest.refreshToken !== current.refreshToken) {
+          applySession(latest)
+          return latest.accessToken
+        }
         const response = await authApi.refresh(current.refreshToken)
         const next = toSession(response)
         applySession(next)
@@ -38,10 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         applySession(null)
         return null
-      } finally {
-        refreshInFlight.current = null
       }
-    })()
+    }).finally(() => {
+      refreshInFlight.current = null
+    })
 
     refreshInFlight.current = task
     return task
@@ -57,14 +108,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => configureHttp(null)
   }, [refreshAccessToken, applySession])
 
+  // THE OTHER TABS: one that signs in, refreshes or signs out writes the shared store, and this tab follows it (the
+  // `storage` event fires in every tab but the writer). Signing out in one tab signs out them all: they share one session.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY && event.key !== null) return
+      const next = event.key === null ? null : parseSession(event.newValue)
+      if (next?.refreshToken === sessionRef.current?.refreshToken) return
+      applySession(next)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [applySession])
+
+  // A NEW TAB ASKS "is anyone signed in?": this tab answers while it is.
+  useEffect(() => {
+    const channel = openChannel()
+    if (!channel) return
+    channel.onmessage = (event: MessageEvent<AuthMessage>) => {
+      if (event.data?.type === 'ping' && sessionRef.current) {
+        channel.postMessage({ type: 'pong', id: event.data.id } satisfies AuthMessage)
+      }
+    }
+    return () => channel.close()
+  }, [])
+
   // On start-up: restore the stored session and confirm it with the API.
   useEffect(() => {
     let cancelled = false
 
     async function restore() {
-      const stored = loadSession()
+      let stored = loadSession()
+      // A TAB OPENED AFRESH takes the session over only from a tab still open: with every tab closed (the browser
+      // closed) the stored session is left behind, and cleared, so closing the browser still signs out.
+      if (stored && !hasTabMark() && !(await anotherTabIsSignedIn())) {
+        if (cancelled) return
+        if (loadSession()?.refreshToken === stored.refreshToken) saveSession(null)
+        stored = null
+      }
+      if (cancelled) return
       if (!stored) {
-        if (!cancelled) setStatus('anonymous')
+        setStatus('anonymous')
         return
       }
 
