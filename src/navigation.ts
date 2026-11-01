@@ -17,6 +17,8 @@ export const PERMISSIONS = {
   containerReportView: 'containers.report.view',
   /** Reports › Attachment Report (script 101): each reader still sees only the files of documents they may open. */
   attachmentReportView: 'reports.attachments.view',
+  // (103) Each item's opening, movements and closing per warehouse; its amounts also need costsView.
+  itemBalanceReportView: 'reports.itembalance.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -266,6 +268,8 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Shortages', to: '/inventory/shortages', permission: PERMISSIONS.shortagesView, icon: 'shortage' },
       // What the shelves are worth: the item list with its money shown, behind the same permission.
       { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.valuationView, icon: 'balance' },
+      // (103) Opening, movements and closing of each item per warehouse over a period: month-end.
+      { label: 'Item Balance by Warehouse', to: '/reports/item-balance', permission: PERMISSIONS.itemBalanceReportView, icon: 'balance' },
       // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       // (95) Every container and order still to load, by where the goods are: the purchasing team's tracking sheet.

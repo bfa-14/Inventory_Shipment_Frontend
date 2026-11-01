@@ -771,6 +771,14 @@ export function DataTable<T>({
 
           {engine ? (
             <Group gap={4} wrap="nowrap">
+              {/* The chooser is also on a header's right-click; this is the way a reader finds it without knowing that. */}
+              {choosableColumns.length > 0 ? (
+                <Tooltip label="Choose columns (also on a header's right-click)" withArrow>
+                  <ActionIcon variant="subtle" aria-label="Choose columns" onClick={() => setChooserOpen(true)}>
+                    <IconColumns3 size={16} />
+                  </ActionIcon>
+                </Tooltip>
+              ) : null}
               {engine.tree ? null : (
               <Menu position="bottom-end" shadow="md" width={220} withinPortal>
                 <Menu.Target>

@@ -2822,3 +2822,39 @@ every charge form (New charge, the charge drawer, Apply to other containers, the
   New charge preview and its result, the invoice charges' base column); totals add the signed value (`signedAmountBase`).
 - **Badges:** "lowers the item cost" (red) when the type is picked, "deduction" on an invoice charge row.
 - **Payment status** 'Deduction' (`paymentStatusLabel`, grape): it is paid to nobody and no payment offers it.
+
+
+## A balance report with grouped columns (script 103: Reports › Item Balance by Warehouse)
+
+`ItemBalanceReportPage`, `ItemBalanceReportPrintPage` and `itemBalanceColumns.ts` in `src/pages/reports/`.
+
+- **Runs on demand, filters in the address**, like the Attachment Report (`toParams` / `queryFromParams` in
+  `src/api/reports/itemBalance.ts`): the draft counts once "Run report" is clicked. Dates default to the first of the month
+  and today. The warehouse picker lists only the reader's warehouses (the API's `/warehouses`), indented by the tree.
+- **One column list for screen, print and Excel.** `balanceColumns(report, hideEmpty)` builds the columns once; the screen
+  and the print page draw it, and the API's export builds the same list, so the three match in rows, columns and totals.
+  On paper each figure column sits under a group header (Opening, a kind of movement, Total in / out, Closing) with its
+  Qty / Amount (`headerGroups` gives the top row's spans).
+- **On screen, the grid engine** (`useDataGrid` + `DataTable`, store key `reports.itemBalance`): the same columns
+  flattened ("Sales delivery · Qty", accessors made plain by `accessorOf`), plus Family and a Check column (OK, Negative,
+  Does not add up, On the way) to filter and group by; **no Warehouse column** (the owner's wish: Location names the
+  warehouse the stock is in - a warehouse at the top of its tree is its own location in the grid; print and Excel keep
+  both). Sort, funnels and the filter row, the column chooser, Group by with each group's subtotals, footer sums over the
+  rows left, CSV of the grid as shown. **Grouped by Location to start** (the owner's wish), sorted by location then item.
+  A search box above it narrows by item, family, warehouse or location. The server's totals and the Excel / print stay over every row; the grid's footer follows its filters.
+- **Not paged on the server:** the answer holds every row (the totals and the integrity check are over all of them); the
+  grid pages them 100 at a time.
+- **The Columns button** in every engine grid's toolbar (next to Group by) opens the column chooser, which was only on a
+  header's right-click before.
+- **Hide empty columns redraws at once** (the answer says which kinds of movement have activity); Show zero-balance items
+  reruns (the server leaves those rows out).
+- **Amounts are the server's to strip:** without View item costs the answer says `seesAmounts: false` and every amount is
+  null; the page then draws quantities only and hides the currency filters.
+- **Signs and flags:** quantities and amounts out are negative and red; a row with negative stock is tinted red, a row whose
+  integrity check failed orange with a "Does not add up" badge; both are counted above or below the table, with the
+  server's rounding notes.
+- **Drill-down:** a movement figure is a link-styled button that opens a drawer of its documents
+  (`/item-balance/movements`); each document number links through `stockDocumentRoute` (shared with the item's stock
+  statement), and only when the reader may open that kind of document.
+- **PDF = print page:** "Print / PDF" opens `/reports/item-balance/print?…` (outside the shell, A4 landscape, prints on load);
+  the browser's "Save as PDF" gives the PDF. There is no PDF library.

@@ -78,6 +78,8 @@ import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
 import { AttachmentReportPage } from './pages/reports/AttachmentReportPage'
+import { ItemBalanceReportPage } from './pages/reports/ItemBalanceReportPage'
+import { ItemBalanceReportPrintPage } from './pages/reports/ItemBalanceReportPrintPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -117,6 +119,10 @@ export default function App() {
             {/* A transfer's dispatch note on paper, for the truck (script 90): no costs, three signatures. */}
             <Route element={<ProtectedRoute permission={PERMISSIONS.transfersView} />}>
               <Route path="/inventory/transfers/:id/dispatches/:postingId/print" element={<TransferDispatchPrintPage />} />
+            </Route>
+            {/* (103) The Item Balance Report on paper, or saved as a PDF from the print dialog. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.itemBalanceReportView} />}>
+              <Route path="/reports/item-balance/print" element={<ItemBalanceReportPrintPage />} />
             </Route>
 
             <Route element={<AppShell />}>
@@ -334,6 +340,10 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.attachmentReportView} />}>
                 <Route path="/reports/attachments" element={<AttachmentReportPage />} />
+              </Route>
+              {/* (103) Item balance per warehouse over a period; the print page is the PDF (the browser's Save as PDF). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.itemBalanceReportView} />}>
+                <Route path="/reports/item-balance" element={<ItemBalanceReportPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
