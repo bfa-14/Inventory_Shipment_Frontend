@@ -909,7 +909,7 @@ export function ContainerPage() {
             <Section title="1. Identification">
               <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
                 <ViewField label="Container Ref." value={container?.containerRef ?? 'Assigned on save'} dimmed={!container} />
-                {textField('containerNo', 'Container No.', 20, 'MSKU1234567')}
+                {textField('containerNo', 'Container No.', 30, 'MSKU1234567')}
                 {selectField('containerTypeId', 'Container Type', typeOptions, { required: true })}
                 {textField('sealNo', 'Seal No.', 30)}
                 {textField('customsSealNo', 'Customs Seal No.', 30)}

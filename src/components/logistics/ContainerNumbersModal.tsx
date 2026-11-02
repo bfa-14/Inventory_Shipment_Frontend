@@ -180,7 +180,7 @@ export function ContainerNumbersModal({ containers, onClose, onSaved }: Containe
                       <Table.Td>
                         <TextInput
                           size="xs"
-                          maxLength={20}
+                          maxLength={30}
                           placeholder="MSKU1234565"
                           value={row.containerNo}
                           onChange={(e) => patch(row.id, { containerNo: e.currentTarget.value.toUpperCase() })}

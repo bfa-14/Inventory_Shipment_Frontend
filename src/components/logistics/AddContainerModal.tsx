@@ -396,7 +396,7 @@ export function AddContainerModal({ opened, onClose, order, invoice, canOverCapa
               nothingFoundMessage="Nothing matches"
               data-autofocus
             />
-            <TextInput label="Container No." placeholder="MSKU1234567" maxLength={20} value={containerNo} onChange={(e) => setContainerNo(e.currentTarget.value)} />
+            <TextInput label="Container No." placeholder="MSKU1234567" maxLength={30} value={containerNo} onChange={(e) => setContainerNo(e.currentTarget.value)} />
             <TextInput label="Seal No." maxLength={30} value={sealNo} onChange={(e) => setSealNo(e.currentTarget.value)} />
             <DateInput
               label="Order Date"
