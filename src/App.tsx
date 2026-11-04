@@ -78,6 +78,7 @@ import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
 import { AttachmentReportPage } from './pages/reports/AttachmentReportPage'
+import { ContainerChargesReportPage } from './pages/reports/ContainerChargesReportPage'
 import { ItemBalanceReportPage } from './pages/reports/ItemBalanceReportPage'
 import { ItemBalanceReportPrintPage } from './pages/reports/ItemBalanceReportPrintPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
@@ -344,6 +345,10 @@ export default function App() {
               {/* (103) Item balance per warehouse over a period; the print page is the PDF (the browser's Save as PDF). */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.itemBalanceReportView} />}>
                 <Route path="/reports/item-balance" element={<ItemBalanceReportPage />} />
+              </Route>
+              {/* (105) Each container of a period with each charge type entered or missing, its amount and its payments. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesReportView} />}>
+                <Route path="/reports/container-charges" element={<ContainerChargesReportPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
