@@ -1,5 +1,5 @@
 import { Badge, Grid, Group, NumberInput, Paper, Select, Text, Textarea, TextInput, Title } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../ui/DateInput'
 import { SUPPLIER_PAYMENT_TYPES, type SupplierPaymentType } from '../../../api/purchase/payments'
 import type { BranchLookupDto, CurrencyLookupDto, PartyLookupDto } from '../../../api/types'
 import { fromIsoDate, isoDate, STATUS_COLOURS } from '../../documents/documentKind'

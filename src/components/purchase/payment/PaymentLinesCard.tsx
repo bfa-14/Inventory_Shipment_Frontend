@@ -1,5 +1,5 @@
 import { ActionIcon, Alert, Badge, Button, Group, NumberInput, Paper, Select, Table, Text, TextInput, Title, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../ui/DateInput'
 import { IconPlus, IconTrash } from '@tabler/icons-react'
 import type { CashBankAccountLookupDto } from '../../../api/masterdata/cashBankAccounts'
 import type { PaymentMethodLookupDto } from '../../../api/masterdata/paymentMethods'

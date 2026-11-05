@@ -17,7 +17,8 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core'
-import { DateInput, MonthPickerInput } from '@mantine/dates'
+import { MonthPickerInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import {
   IconAdjustmentsHorizontal,
   IconBan,
@@ -46,8 +47,10 @@ import {
   type ContainerListDto,
   type ContainerNextStepFilter,
   type ContainerJourneyStatus,
+  type ContainerPaymentStatus,
   type ContainerStatusCode,
 } from '../../api/logistics/containers'
+import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import type { ItemLookupDto, PartyLookupDto } from '../../api/types'
@@ -79,6 +82,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 export const CONTAINERS_ROUTE = '/logistics/containers'
 
@@ -91,6 +95,8 @@ interface Filters {
   nextStep: ContainerNextStepFilter | null
   /** (95) Where they are on their journey: the Journey column's funnel, filtered on the server. */
   journey: ContainerJourneyStatus | null
+  /** (108) What their supplier invoices are paid. */
+  paymentStatus: ContainerPaymentStatus | null
   /** 'YYYY-MM-01' of the picked month. */
   orderMonth: string | null
   // advanced
@@ -111,6 +117,7 @@ const NO_FILTERS: Filters = {
   status: null,
   nextStep: null,
   journey: null,
+  paymentStatus: null,
   orderMonth: null,
   purchaseOrderId: null,
   purchaseDocumentId: null,
@@ -154,6 +161,8 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'invoiceNumbers', text: (r) => r.invoiceNumbers ?? '' },
   { accessor: 'commercialInvoiceNos', text: (r) => r.commercialInvoiceNos ?? '' },
   { accessor: 'invoicingStatus', kind: 'list', text: (r) => INVOICING_STATUSES[r.invoicingStatus]?.label ?? '' },
+  // (108) filtered on the server (the Payment filter above the list), so its funnel is off
+  { accessor: 'paymentStatus', text: (r) => paymentText(r.paymentStatus), filterable: false },
   { accessor: 'itemSummary', text: (r) => r.itemSummary ?? '' },
   { accessor: 'totalQtyBase', kind: 'number', summary: 'sum' },
   { accessor: 'fillPct', kind: 'number', text: (r) => (r.fillPct === null ? '' : formatNumber(r.fillPct, 1)) },
@@ -172,6 +181,15 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'nextStep', text: nextStepColumnText, filterable: false },
   { accessor: 'goodsReceiptNumber', text: receiptText },
 ]
+
+/** (108) "Fully Paid", "Not invoiced": the purchase invoice list's words, and one for goods no posted invoice covers. */
+function paymentText(status: ContainerPaymentStatus | null | undefined): string {
+  if (!status) return ''
+  return status === 'NotInvoiced' ? 'Not invoiced' : paymentStatusLabel(status)
+}
+
+/** The Payment filter's choices: the purchase invoice list's three, and Not invoiced. */
+const PAYMENT_FILTERS = [...PAYMENT_STATUS_OPTIONS, { value: 'NotInvoiced', label: 'Not invoiced' }]
 
 /** 'YYYY-MM-..' -> 202609 */
 function monthKey(value: string | null): number | undefined {
@@ -201,6 +219,8 @@ export function ContainersPage() {
   const canCancel = hasPermission(PERMISSIONS.containersCancel)
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
   const canImportCharges = hasPermission(PERMISSIONS.containerChargesCreate)
+  // (108) the Payment column and filter: the server sends the status empty without View Supplier Payments
+  const canSeePayments = hasPermission(PERMISSIONS.paymentsView)
   // The order and PI filters list documents the reader may not see: asked for only with their view permission.
   const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
@@ -236,6 +256,7 @@ export function ContainersPage() {
               deliveredNotReceived: filters.status === DELIVERED_NOT_RECEIVED || undefined,
               nextStep: filters.nextStep ?? undefined,
               journey: filters.journey ?? undefined,
+              paymentStatus: filters.paymentStatus ?? undefined,
               orderMonthKey: monthKey(filters.orderMonth),
               purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
               purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
@@ -356,10 +377,10 @@ export function ContainersPage() {
     downloadCsv(
       'containers.csv',
       ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
-        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'From → To', 'Journey', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
+        'Payment', 'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'From → To', 'Journey', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
       engine.rows.map((r) => [
         r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
-        r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
+        r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', paymentText(r.paymentStatus), r.itemSummary ?? '', String(r.totalQtyBase),
         formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
         journeyLegText(r), journeyStatusText(r), r.currentLocation ?? '', r.statusName, nextStepColumnText(r), receiptText(r),
       ]),
@@ -426,6 +447,29 @@ export function ContainersPage() {
         )
       },
     },
+    ...(canSeePayments
+      ? [{
+          accessor: 'paymentStatus',
+          title: 'Payment',
+          width: 140,
+          // What the posted supplier invoices of its goods are paid, its share of each (script 73's split by container).
+          render: (row: ContainerListDto) =>
+            row.paymentStatus ? (
+              <Tooltip
+                label={row.paymentStatus === 'NotInvoiced'
+                  ? 'No posted supplier invoice covers its goods yet.'
+                  : `Paid ${formatNumber(row.paidAmountBase ?? 0, 2)} of ${formatNumber(row.invoicedAmountBase ?? 0, 2)} (base currency) invoiced for it`}
+                withArrow
+              >
+                <Badge size="sm" variant="light" color={row.paymentStatus === 'NotInvoiced' ? 'gray' : paymentStatusColour(row.paymentStatus)} style={{ whiteSpace: 'nowrap' }}>
+                  {paymentText(row.paymentStatus)}
+                </Badge>
+              </Tooltip>
+            ) : (
+              dash
+            ),
+        } satisfies DataTableColumn<ContainerListDto>]
+      : []),
     { accessor: 'itemSummary', title: 'Model / Item', width: 160, render: (row) => text(row.itemSummary) },
     {
       accessor: 'totalQtyBase',
@@ -721,19 +765,27 @@ export function ContainersPage() {
 
       <div className="no-print">
         <FilterBar>
-          <FilterBar.Col span={2}>
+          {/* (108) With Payment on the line the spans are 1.75 + 1.75 + 2 + 2 + 2 + 1.5 + 1: a picked month ("Sep 2026") still
+              fits beside its clear button. */}
+          <FilterBar.Col span={canSeePayments ? 1.75 : 2}>
             <TextInput label="Container No." placeholder="MSKU..." value={filters.containerNo} onChange={(e) => setFilter('containerNo', e.currentTarget.value)} onKeyDown={(e) => { if (e.key === 'Enter') grid.commitFilters() }} />
           </FilterBar.Col>
-          <FilterBar.Col span={2}>
+          <FilterBar.Col span={canSeePayments ? 1.75 : 2}>
             <TextInput label="Container Ref." placeholder="KTG-..." value={filters.containerRef} onChange={(e) => setFilter('containerRef', e.currentTarget.value)} onKeyDown={(e) => { if (e.key === 'Enter') grid.commitFilters() }} />
           </FilterBar.Col>
-          <FilterBar.Col span={3}>
+          <FilterBar.Col span={canSeePayments ? 2 : 3}>
             <Select label="Supplier" placeholder="All suppliers" data={supplierOptions} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable nothingFoundMessage="No supplier matches" />
           </FilterBar.Col>
           <FilterBar.Col span={2}>
             <Select label="Status" placeholder="All" data={STATUS_FILTER_OPTIONS} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
           </FilterBar.Col>
-          <FilterBar.Col span={2}>
+          {/* (108) On the same line: Supplier and Order Month give it a column each. */}
+          {canSeePayments && (
+            <FilterBar.Col span={2}>
+              <Select label="Payment" placeholder="All" data={PAYMENT_FILTERS} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next as ContainerPaymentStatus | null)} clearable />
+            </FilterBar.Col>
+          )}
+          <FilterBar.Col span={canSeePayments ? 1.5 : 2}>
             <MonthPickerInput label="Order Month" placeholder="Any" valueFormat="MMM YYYY" value={filters.orderMonth} onChange={(next) => setFilter('orderMonth', next ? String(next).slice(0, 10) : null)} clearable />
           </FilterBar.Col>
           <FilterBar.Col span={1}>
@@ -813,7 +865,7 @@ export function ContainersPage() {
               <Select label="Location / Port" placeholder="Any port" data={portOptions} value={filters.portId} onChange={(next) => setFilter('portId', next)} clearable searchable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
-              <DateInput label="Order date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
+              <DateInput label="Order date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => { setFilter('dateFrom', next ? isoDate(next) : null); if (next) setFilter('dateTo', monthEnd(isoDate(next))) }} clearable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
               <DateInput label="Order date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />

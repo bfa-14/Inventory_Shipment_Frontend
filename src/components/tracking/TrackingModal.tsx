@@ -28,7 +28,7 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconBarcode, IconClipboardText, IconListCheck, IconPlus, IconTrash } from '@tabler/icons-react'
 import type { TrackingKind } from '../../api/types'

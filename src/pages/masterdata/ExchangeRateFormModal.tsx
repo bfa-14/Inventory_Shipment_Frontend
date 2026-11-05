@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, Group, NumberInput, Select, Text, Textarea } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { useForm } from '@mantine/form'
 import { ApiError } from '../../api/http'
 import { currenciesApi } from '../../api/masterdata/currencies'

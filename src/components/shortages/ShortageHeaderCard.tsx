@@ -1,5 +1,5 @@
 import { Badge, Grid, Group, NumberInput, Paper, Select, Text, Textarea, TextInput, Title } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import type { BranchLookupDto, PartyLookupDto, WarehouseLookupDto } from '../../api/types'
 import { dateLabel, fromIsoDate, isoDate, stamp } from '../documents/documentKind'
 import { formatNumber, numberInputValue } from '../format'

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Alert, Checkbox, NumberInput, Select, SimpleGrid, Stack, Text, Textarea, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { ApiError } from '../../api/http'
 import { allocationMethodLabel, METHODS_NEEDING_ITEM_DATA, type ChargeAllocationMethod, type ChargeTypeLookupDto } from '../../api/purchase/chargeTypes'
 import { purchaseDocumentsApi } from '../../api/purchase/documents'

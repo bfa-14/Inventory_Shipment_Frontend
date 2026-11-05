@@ -213,7 +213,17 @@ export interface ContainerFlags extends ContainerReceiptRef, ContainerShipState 
   canDelete: boolean
 }
 
+/**
+ * (script 108) What the posted supplier invoices of a container's goods are paid, from its share of each: Unpaid, Partial,
+ * Paid or NotInvoiced. The first three are the purchase invoice list's words (paymentStatusLabel draws them).
+ */
+export type ContainerPaymentStatus = 'Unpaid' | 'Partial' | 'Paid' | 'NotInvoiced'
+
 export interface ContainerListDto extends ContainerFlags {
+  /** (script 108) Null, with the two amounts, without View Supplier Payments. */
+  paymentStatus?: ContainerPaymentStatus | null
+  invoicedAmountBase?: number | null
+  paidAmountBase?: number | null
   id: number
   containerRef: string
   containerNo: string | null
@@ -818,6 +828,8 @@ export interface ContainerQuery {
   nextStep?: ContainerNextStepFilter
   /** (script 95) Where the containers are on their journey. */
   journey?: ContainerJourneyStatus
+  /** (script 108) What their supplier invoices are paid; ignored without View Supplier Payments. */
+  paymentStatus?: ContainerPaymentStatus
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number

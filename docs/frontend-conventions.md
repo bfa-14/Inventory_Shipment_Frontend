@@ -2144,6 +2144,14 @@ how the date is shown. Mantine's own parser ignored the format (dayjs has no `cu
   alike). Store it with `isoDate(next)` (`documentKind.ts`, which takes the string or a Date) or `String(next)`, and
   give the field back the string (`value={filters.dateFrom}`) or `fromIsoDate(...)`, a Date at local midnight.
 - `DatePickerInput` and `MonthPickerInput` are picked from a calendar, never typed: nothing to parse.
+- **Import `DateInput` from `components/ui/DateInput`, never from `@mantine/dates`** (only `theme.ts` does). It is
+  Mantine's field plus two habits of the people typing: entering it (a click or Tab) selects the whole date, so what
+  is typed replaces it; and a short date is finished when the field is left or Enter is pressed - a day alone ("5")
+  takes the current month and year, a day and a month ("5/11", "5 nov") the current year (`completeTypedDate`). Never
+  while typing: "1" is the start of "15/10/2026" (the rule above).
+- **A Date From sets its Date To to the end of its month** (`monthEnd`, `typedDate.ts`), on every page with a date
+  range, at every change of the From (typed, finished or picked); the To can then be changed. Clearing the From leaves
+  the To. So a From never carries a `maxDate` of its To: that would refuse a From in a later month.
 - Shown outside an input, a document date reads `DD/MM/YYYY` through `dateLabel`; a moment goes through
   `formatDateTime` (see `format.ts`): **`DD/MM/YYYY HH:mm`, day first and 24-hour, in the reader's local time**
   ("2026-10-11T22:35:40Z" reads "12/10/2026 01:35" at UTC+3), whatever the browser's language - never

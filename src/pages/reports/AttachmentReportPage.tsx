@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { ActionIcon, Alert, Anchor, Button, Checkbox, Group, Loader, MultiSelect, Paper, Stack, Text, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconDownload, IconFileZip, IconPlayerPlay, IconFilterOff } from '@tabler/icons-react'
 import { saveBlob } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'
@@ -19,6 +19,7 @@ import { FilterBar } from '../../components/ui/FilterBar'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { PAGE_SIZE_OPTIONS } from '../../config'
+import { monthEnd } from '../../components/typedDate'
 
 const PAGE_SIZE = 50
 /** The page sizes the grid offers (config.ts). */
@@ -276,7 +277,7 @@ export function AttachmentReportPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={draft.documentDateFrom}
-            onChange={(next) => setDraft((d) => ({ ...d, documentDateFrom: next ? isoDate(next) : null }))}
+            onChange={(next) => setDraft((d) => ({ ...d, documentDateFrom: next ? isoDate(next) : null, ...(next ? { documentDateTo: monthEnd(isoDate(next)) } : {}) }))}
             clearable
           />
         </FilterBar.Col>
@@ -297,7 +298,7 @@ export function AttachmentReportPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={draft.uploadedFrom}
-            onChange={(next) => setDraft((d) => ({ ...d, uploadedFrom: next ? isoDate(next) : null }))}
+            onChange={(next) => setDraft((d) => ({ ...d, uploadedFrom: next ? isoDate(next) : null, ...(next ? { uploadedTo: monthEnd(isoDate(next)) } : {}) }))}
             clearable
           />
         </FilterBar.Col>

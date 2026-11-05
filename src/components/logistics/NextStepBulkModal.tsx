@@ -16,7 +16,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconPencil } from '@tabler/icons-react'
 import type { BulkActionItemResult, BulkActionResult } from '../../api/documents'

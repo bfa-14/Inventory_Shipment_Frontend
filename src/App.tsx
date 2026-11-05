@@ -79,6 +79,7 @@ import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
 import { AttachmentReportPage } from './pages/reports/AttachmentReportPage'
 import { ContainerChargesReportPage } from './pages/reports/ContainerChargesReportPage'
+import { DispatchedItemsReportPage } from './pages/reports/DispatchedItemsReportPage'
 import { ItemBalanceReportPage } from './pages/reports/ItemBalanceReportPage'
 import { ItemBalanceReportPrintPage } from './pages/reports/ItemBalanceReportPrintPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
@@ -349,6 +350,9 @@ export default function App() {
               {/* (105) Each container of a period with each charge type entered or missing, its amount and its payments. */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesReportView} />}>
                 <Route path="/reports/container-charges" element={<ContainerChargesReportPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.dispatchedItemsReportView} />}>
+                <Route path="/reports/dispatched-items" element={<DispatchedItemsReportPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>

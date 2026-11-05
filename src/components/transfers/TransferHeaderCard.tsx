@@ -14,7 +14,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { Link } from 'react-router'
 import type { TransferOrderDto } from '../../api/inventory/transfers'
 import { routes } from '../../routes'

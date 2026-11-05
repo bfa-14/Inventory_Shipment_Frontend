@@ -20,6 +20,7 @@ export const PERMISSIONS = {
   // (103) Each item's opening, movements and closing per warehouse; its amounts also need costsView.
   itemBalanceReportView: 'reports.itembalance.view',
   containerChargesReportView: 'reports.containercharges.view',
+  dispatchedItemsReportView: 'reports.dispatcheditems.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -277,6 +278,7 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Container Report', to: '/logistics/container-report', permission: PERMISSIONS.containerReportView, icon: 'reports' },
       // (105) Each container offloaded or dispatched in a period with each charge type entered or missing, and its payments.
       { label: 'Container Charges', to: '/reports/container-charges', permission: PERMISSIONS.containerChargesReportView, icon: 'reports' },
+      { label: 'Dispatched Items', to: '/reports/dispatched-items', permission: PERMISSIONS.dispatchedItemsReportView, icon: 'reports' },
       // Every module's attachments by type and date, downloaded one, several or all at once (script 101).
       { label: 'Attachment Report', to: '/reports/attachments', permission: PERMISSIONS.attachmentReportView, icon: 'documents' },
       { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },

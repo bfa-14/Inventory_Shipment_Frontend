@@ -4,7 +4,7 @@ import {
   Alert, Anchor, Badge, Button, Drawer, Group, Loader, MultiSelect, Paper, Select, Stack, Switch, Table, Text, TextInput,
   Tooltip, UnstyledButton,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconAlertTriangle, IconFileExport, IconFilterOff, IconPlayerPlay, IconPrinter, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
@@ -32,6 +32,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { familyOptions } from '../inventory/lookups'
 import { balanceColumns, cellText, rateText, type BalanceColumn } from './itemBalanceColumns'
+import { monthEnd } from '../../components/typedDate'
 
 /** A row of the grid: the answer's row with the texts the grid sorts, filters and groups by. */
 type GridRow = ItemBalanceRowDto & { key: string; warehouse: string; location: string; status: string }
@@ -356,7 +357,7 @@ export function ItemBalanceReportPage() {
             required
             valueFormat="DD/MM/YYYY"
             value={draft.dateFrom || null}
-            onChange={(next) => setDraft((d) => ({ ...d, dateFrom: next ?? '' }))}
+            onChange={(next) => setDraft((d) => ({ ...d, dateFrom: next ?? '', ...(next ? { dateTo: monthEnd(next) } : {}) }))}
             error={dateError && !draft.dateFrom ? dateError : undefined}
           />
         </FilterBar.Col>

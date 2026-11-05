@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Alert, Badge, Button, Checkbox, Group, Loader, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconArrowBackUp, IconEye, IconFilterOff, IconPrinter, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionItemResult, BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
@@ -52,6 +52,7 @@ import { useGridQuery } from '../../hooks/useGridQuery'
 import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -616,7 +617,10 @@ function GoodsReceiptsList({ initialStatus }: { initialStatus: string | null }) 
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

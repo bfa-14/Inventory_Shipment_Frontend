@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Loader, Paper, SimpleGrid, Table, Text } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconArrowLeft } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
@@ -14,6 +14,7 @@ import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
 import { stockDocumentRoute } from '../../components/documents/stockDocumentRoute'
+import { monthEnd } from '../../components/typedDate'
 
 /**
  * One item's stock statement - where the item card's "Stock Movement" quick link goes.
@@ -108,8 +109,10 @@ export function ItemStockMovementsPage() {
             placeholder="The first movement"
             valueFormat="DD/MM/YYYY"
             value={fromIsoDate(from)}
-            maxDate={to ? (fromIsoDate(to) ?? undefined) : undefined}
-            onChange={(next) => setFilter('from', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('from', next ? isoDate(next) : null)
+              if (next) setFilter('to', monthEnd(isoDate(next)))
+            }}
             clearable
           />
           <DateInput

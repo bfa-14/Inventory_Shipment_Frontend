@@ -16,7 +16,7 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { useMediaQuery } from '@mantine/hooks'
 import { ApiError } from '../../api/http'
 import type { ContainerDto, ContainerLineDto } from '../../api/logistics/containers'

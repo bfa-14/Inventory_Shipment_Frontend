@@ -19,7 +19,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { useForm } from '@mantine/form'
 import { useMediaQuery } from '@mantine/hooks'
 import {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Alert, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
@@ -37,6 +37,7 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { useSeesItemCosts } from '../../hooks/useSeesItemCosts'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -454,7 +455,10 @@ export function StockDocumentsPage({ kind }: { kind: DocumentKind }) {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

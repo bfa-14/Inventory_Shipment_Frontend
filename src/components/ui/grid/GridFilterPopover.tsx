@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Checkbox, Divider, Group, ScrollArea, Select, Stack, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../DateInput'
 import { IconSearch } from '@tabler/icons-react'
 import { fromIsoDate, isoDate } from '../../documents/documentKind'
 import {

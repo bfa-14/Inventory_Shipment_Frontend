@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Select, Stack, Text } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { ApiError } from '../../api/http'
 import type { StockLevelRowDto } from '../../api/inventory/stockLevels'
 import { transferLevelsApi, type CreateTransferFromLevelsResult } from '../../api/inventory/transfers'

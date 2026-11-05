@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, SimpleGrid, Switch, Text, TextInput, UnstyledButton } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconFileExport, IconFilterOff, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
@@ -24,6 +24,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { familyOptions } from '../inventory/lookups'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -465,7 +466,10 @@ export function ContainerReportPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.orderDateFrom}
-            onChange={(next) => setFilter('orderDateFrom', next)}
+            onChange={(next) => {
+              setFilter('orderDateFrom', next)
+              if (next) setFilter('orderDateTo', monthEnd(next))
+            }}
             clearable
           />
         </FilterBar.Col>
@@ -485,7 +489,10 @@ export function ContainerReportPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.offloadedFrom}
-            onChange={(next) => setFilter('offloadedFrom', next)}
+            onChange={(next) => {
+              setFilter('offloadedFrom', next)
+              if (next) setFilter('offloadedTo', monthEnd(next))
+            }}
             clearable
           />
         </FilterBar.Col>

@@ -72,3 +72,37 @@ function realDate(y: number, month: number, day: number): string | null {
   if (day > new Date(Date.UTC(y, month, 0)).getUTCDate()) return null
   return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
+
+/**
+ * A short date finished when the field is left (blur, Enter): "5" is the 5th of the current month, "5/11" (or "5 nov")
+ * the 5th of November this year - or null when the text is not one of those shapes or the day does not exist then.
+ *
+ * ONLY ON LEAVING THE FIELD, never in parseTypedDate: "1" is the start of "15/10/2026", so a parser that read it would
+ * set the 1st at the first key and keep it when the rest of the text turns out wrong. `today` is the reader's day.
+ */
+export function completeTypedDate(value: string, today: Date = new Date()): string | null {
+  const text = value.trim().replace(/\s+/g, ' ')
+  const thisYear = today.getFullYear()
+
+  const dayOnly = /^(\d{1,2})$/.exec(text)
+  if (dayOnly) return realDate(thisYear, today.getMonth() + 1, Number(dayOnly[1]))
+
+  const dayMonth = /^(\d{1,2})([-/. ])(\d{1,2})\2?$/.exec(text)
+  if (dayMonth) return realDate(thisYear, Number(dayMonth[3]), Number(dayMonth[1]))
+
+  const dayMonthName = /^(\d{1,2})[-/. ]([a-z]{3,})\.?[-/. ]?$/i.exec(text)
+  if (dayMonthName) {
+    const word = dayMonthName[2].toLowerCase()
+    const month = MONTHS.findIndex((name) => name.startsWith(word)) + 1
+    return month > 0 ? realDate(thisYear, month, Number(dayMonthName[1])) : null
+  }
+
+  return null
+}
+
+/** The last day of the month of a "YYYY-MM-DD" date: "2026-02-10" gives "2026-02-28". What a Date From sets Date To to. */
+export function monthEnd(value: string): string {
+  const [y, month] = value.slice(0, 10).split('-').map(Number)
+  const day = new Date(Date.UTC(y, month, 0)).getUTCDate()
+  return `${value.slice(0, 7)}-${String(day).padStart(2, '0')}`
+}

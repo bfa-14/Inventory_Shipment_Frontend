@@ -15,7 +15,7 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {

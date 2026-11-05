@@ -23,7 +23,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { IconBoxMultiple, IconPencil, IconPencilOff, IconPlus, IconTrash, IconWand } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {

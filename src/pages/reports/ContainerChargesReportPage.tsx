@@ -4,7 +4,7 @@ import {
   Alert, Anchor, Badge, Button, Drawer, Group, Loader, MultiSelect, Paper, Radio, Select, SimpleGrid, Stack, Table, Text,
   TextInput, Tooltip, UnstyledButton,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconFileExport, IconFilterOff, IconPlayerPlay, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
@@ -28,6 +28,7 @@ import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDa
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 /** A row of the grid: the answer's row with its number and the texts the grid sorts, filters and groups by. */
 type GridRow = ContainerChargeRowDto & { n: number; location: string }
@@ -314,7 +315,7 @@ export function ContainerChargesReportPage() {
             valueFormat="DD/MM/YYYY"
             clearable
             value={draft.dateFrom || null}
-            onChange={(next) => setDraft((d) => ({ ...d, dateFrom: next ?? '' }))}
+            onChange={(next) => setDraft((d) => ({ ...d, dateFrom: next ?? '', ...(next ? { dateTo: monthEnd(next) } : {}) }))}
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
