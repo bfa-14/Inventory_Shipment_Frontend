@@ -21,6 +21,7 @@ export const PERMISSIONS = {
   itemBalanceReportView: 'reports.itembalance.view',
   containerChargesReportView: 'reports.containercharges.view',
   dispatchedItemsReportView: 'reports.dispatcheditems.view',
+  goodsOnOrderReportView: 'reports.goodsonorder.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -279,6 +280,7 @@ export const NAVIGATION: NavSection[] = [
       // (105) Each container offloaded or dispatched in a period with each charge type entered or missing, and its payments.
       { label: 'Container Charges', to: '/reports/container-charges', permission: PERMISSIONS.containerChargesReportView, icon: 'reports' },
       { label: 'Dispatched Items', to: '/reports/dispatched-items', permission: PERMISSIONS.dispatchedItemsReportView, icon: 'reports' },
+      { label: 'Goods on Order', to: '/reports/goods-on-order', permission: PERMISSIONS.goodsOnOrderReportView, icon: 'reports' },
       // Every module's attachments by type and date, downloaded one, several or all at once (script 101).
       { label: 'Attachment Report', to: '/reports/attachments', permission: PERMISSIONS.attachmentReportView, icon: 'documents' },
       { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },

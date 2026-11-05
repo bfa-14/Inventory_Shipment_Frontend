@@ -80,6 +80,7 @@ import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
 import { AttachmentReportPage } from './pages/reports/AttachmentReportPage'
 import { ContainerChargesReportPage } from './pages/reports/ContainerChargesReportPage'
 import { DispatchedItemsReportPage } from './pages/reports/DispatchedItemsReportPage'
+import { GoodsOnOrderReportPage } from './pages/reports/GoodsOnOrderReportPage'
 import { ItemBalanceReportPage } from './pages/reports/ItemBalanceReportPage'
 import { ItemBalanceReportPrintPage } from './pages/reports/ItemBalanceReportPrintPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
@@ -353,6 +354,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.dispatchedItemsReportView} />}>
                 <Route path="/reports/dispatched-items" element={<DispatchedItemsReportPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.goodsOnOrderReportView} />}>
+                <Route path="/reports/goods-on-order" element={<GoodsOnOrderReportPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>
