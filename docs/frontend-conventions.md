@@ -2008,6 +2008,10 @@ tracking sheet worked out by the system: one row per container line and per appr
 order, PI, invoices, payments, journey, charges and cost. `containerReportApi.report` answers the WHOLE report
 (`paging: 'client'`); the page never pages the server.
 
+- **"With charges"** (script 110), a switch beside "Received containers", off by default: off, the server reads no
+  charge (the slow part), so the transport, charge and TOTAL EXPENSES columns are left out (`withCharges` on the result)
+  and the stage tiles add the FOB, marked "FOB". COST PER UNIT stays: it is the line's own.
+
 - **Grouped by stage from the start**: `useDataGrid({ groupBy: 'stageLabel' })` - the grid engine's new `groupBy` option,
   the column a fresh grid starts grouped by (the reader may still change or clear it from the Group by menu; it is not
   remembered). The stage column's `value` is the server's `stageSort` and its `text` the `stageLabel`, so the groups come

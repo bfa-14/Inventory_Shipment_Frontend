@@ -94,6 +94,8 @@ export interface ContainerReportResult {
   /** One column each: the charge types the rows carry, the transport ones excepted. */
   chargeTypes: ContainerReportChargeTypeDto[]
   chargesVisible: boolean
+  /** False when run without charges (script 110): no charge column and no total expenses. */
+  withCharges: boolean
   paymentsVisible: boolean
 }
 
@@ -110,12 +112,15 @@ export interface ContainerReportQuery {
   offloadedTo?: string
   includePending: boolean
   includeReceived: boolean
+  /** (110) False: the server reads no charge, so the report comes faster. */
+  withCharges: boolean
 }
 
 function toParams(query: ContainerReportQuery): URLSearchParams {
   const params = new URLSearchParams({
     includePending: String(query.includePending),
     includeReceived: String(query.includeReceived),
+    withCharges: String(query.withCharges),
   })
   if (query.search) params.set('search', query.search)
   if (query.supplierId !== undefined) params.set('supplierId', String(query.supplierId))

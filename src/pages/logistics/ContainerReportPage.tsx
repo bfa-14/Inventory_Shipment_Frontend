@@ -37,6 +37,7 @@ interface Filters {
   offloadedTo: string | null
   includePending: boolean
   includeReceived: boolean
+  withCharges: boolean
 }
 
 const NO_FILTERS: Filters = {
@@ -51,6 +52,8 @@ const NO_FILTERS: Filters = {
   offloadedTo: null,
   includePending: true,
   includeReceived: true,
+  // Off by default: reading every charge is the slow part of the report (script 110).
+  withCharges: false,
 }
 
 const numberOrUndefined = (value: string | null) => (value === null ? undefined : Number(value))
@@ -68,6 +71,7 @@ function toQuery(filters: Filters): ContainerReportQuery {
     offloadedTo: filters.offloadedTo ?? undefined,
     includePending: filters.includePending,
     includeReceived: filters.includeReceived,
+    withCharges: filters.withCharges,
   }
 }
 
@@ -190,6 +194,7 @@ export function ContainerReportPage() {
   const allRows = useMemo(() => result?.rows ?? [], [result])
   const chargeTypes = useMemo(() => result?.chargeTypes ?? [], [result])
   const chargesVisible = result?.chargesVisible ?? false
+  const withCharges = result?.withCharges ?? false
   const paymentsVisible = result?.paymentsVisible ?? false
 
   useEffect(() => {
@@ -208,7 +213,8 @@ export function ContainerReportPage() {
       }
       tile.lines += 1
       tile.quantity += row.quantity
-      tile.value += row.totalExpensesBase ?? 0
+      // Without charges there are no total expenses: the tile adds the FOB instead (and says so).
+      tile.value += row.totalExpensesBase ?? row.fobAmountBase ?? 0
       if (row.containerId !== null) tile.ids.add(row.containerId)
       tile.containers = tile.ids.size
       tile.sort = Math.min(tile.sort, row.stageSort)
@@ -251,7 +257,6 @@ export function ContainerReportPage() {
       { accessor: 'offloadedDate', kind: 'date', value: (r) => dateValue(r.offloadedDate), text: (r) => dateText(r.offloadedDate) },
       { accessor: 'leadTimeMonths', kind: 'number', text: (r) => (r.leadTimeMonths === null ? '' : formatNumber(r.leadTimeMonths, 2)) },
       { accessor: 'blNo' },
-      { accessor: 'feriNo' },
       ...(chargesVisible
         ? [
             { accessor: 'transportReferences' },
@@ -267,7 +272,9 @@ export function ContainerReportPage() {
             { accessor: 'chargesBase', kind: 'number' as const, summary: 'sum' as const, text: (r: ContainerReportRowDto) => amount(r.chargesBase) },
           ]
         : []),
-      { accessor: 'totalExpensesBase', kind: 'number', summary: 'sum', text: (r) => amount(r.totalExpensesBase) },
+      ...(withCharges
+        ? [{ accessor: 'totalExpensesBase', kind: 'number' as const, summary: 'sum' as const, text: (r: ContainerReportRowDto) => amount(r.totalExpensesBase) }]
+        : []),
       { accessor: 'costPerUnitBase', kind: 'number', text: (r) => amount(r.costPerUnitBase) },
       { accessor: 'statusName', kind: 'list' },
       { accessor: 'poNumber' },
@@ -277,7 +284,7 @@ export function ContainerReportPage() {
       { accessor: 'warehouseCode', kind: 'list' },
       { accessor: 'alerts', kind: 'list', text: (r) => r.alerts.join(', '), sortable: false },
     ],
-    [chargeTypes, chargesVisible, paymentsVisible],
+    [chargeTypes, chargesVisible, withCharges, paymentsVisible],
   )
 
   const engine = useDataGrid({
@@ -371,7 +378,6 @@ export function ContainerReportPage() {
         ),
     },
     { accessor: 'blNo', title: 'B.L.', width: 150 },
-    { accessor: 'feriNo', title: 'FERI', width: 110 },
     ...(chargesVisible
       ? ([
           { accessor: 'transportReferences', title: 'F.A. INVOICE REFERENCE', width: 150, render: (r) => text(r.transportReferences, 150) },
@@ -389,13 +395,17 @@ export function ContainerReportPage() {
           { accessor: 'chargesBase', title: 'TOTAL CHARGES', width: 130, textAlign: 'right', render: (r) => amount(r.chargesBase) },
         ] satisfies DataTableColumn<ContainerReportRowDto>[])
       : []),
-    {
-      accessor: 'totalExpensesBase',
-      title: 'TOTAL EXPENSES',
-      width: 140,
-      textAlign: 'right',
-      render: (r) => <Estimate value={r.totalExpensesBase} estimate={r.fobIsEstimate} />,
-    },
+    ...(withCharges
+      ? ([
+          {
+            accessor: 'totalExpensesBase',
+            title: 'TOTAL EXPENSES',
+            width: 140,
+            textAlign: 'right',
+            render: (r) => <Estimate value={r.totalExpensesBase} estimate={r.fobIsEstimate} />,
+          },
+        ] satisfies DataTableColumn<ContainerReportRowDto>[])
+      : []),
     {
       accessor: 'costPerUnitBase',
       title: 'COST PER UNIT',
@@ -559,6 +569,11 @@ export function ContainerReportPage() {
               checked={filters.includeReceived}
               onChange={(event) => setFilter('includeReceived', event.currentTarget.checked)}
             />
+            <Switch
+              label="With charges"
+              checked={filters.withCharges}
+              onChange={(event) => setFilter('withCharges', event.currentTarget.checked)}
+            />
           </Group>
         </FilterBar.Col>
         <FilterBar.Col span={6}>
@@ -603,6 +618,7 @@ export function ContainerReportPage() {
                   </Text>
                   <Text fw={700} fz="md">
                     {formatNumber(tile.value, 2)}
+                    {!withCharges && <Text span size="xs" c="dimmed" fw={400}> FOB</Text>}
                   </Text>
                 </Paper>
               </UnstyledButton>
