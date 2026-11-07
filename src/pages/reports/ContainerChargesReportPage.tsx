@@ -60,7 +60,7 @@ const statusText = (cell: ContainerChargeCellDto) => `${cell.status}${cell.count
  * Amount, Paid and Payment (Paid / Partly paid / Unpaid). The logistics team's "charge per CONTAINER" sheet, worked out
  * by the system, with the count and the total above it.
  *
- * THE FILTERS LIVE IN THE ADDRESS, as on the other reports: what is typed counts once "Run report" is clicked. The grid
+ * THE FILTERS LIVE IN THE ADDRESS, as on the other reports: what is typed counts once "Run Report" is clicked. The grid
  * starts grouped by current location, as the Container Report; a row opens a drawer with each charge and its payments.
  * The payment columns need View Supplier Payments: the server sends them empty to others and the page draws none.
  */
@@ -380,10 +380,10 @@ export function ContainerChargesReportPage() {
         </FilterBar.Col>
         <FilterBar.Col span={12}>
           <Group justify="flex-end" gap="xs">
-            <Button variant="subtle" leftSection={<IconFilterOff size={16} />} onClick={reset}>Reset</Button>
+            <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={reset}>Clear Filters</Button>
             <Tooltip label={formError ?? ''} disabled={!formError}>
               <Button leftSection={<IconPlayerPlay size={16} />} onClick={run} disabled={formError !== null} loading={loading}>
-                Run report
+                Run Report
               </Button>
             </Tooltip>
           </Group>
@@ -393,7 +393,7 @@ export function ContainerChargesReportPage() {
       {error && <Alert color="red" mb="md">{error}</Alert>}
 
       {!applied && !report && (
-        <Text c="dimmed" ta="center" py="xl">Choose the charge types, the date and the period, then Run report.</Text>
+        <Text c="dimmed" ta="center" py="xl">Choose the charge types, the date and the period, then Run Report.</Text>
       )}
 
       {loading && !report && <Group justify="center" py="xl"><Loader /></Group>}

@@ -275,8 +275,8 @@ export function GoodsOnOrderReportPage() {
               />
             </Group>
             <Group gap="xs">
-              <Button variant="subtle" leftSection={<IconFilterOff size={16} />} onClick={() => { setDraft(NO_FILTERS); setApplied(NO_FILTERS) }}>
-                Reset
+              <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={() => { setDraft(NO_FILTERS); setApplied(NO_FILTERS) }}>
+                Clear Filters
               </Button>
               <Button leftSection={<IconRefresh size={16} />} onClick={() => setApplied({ ...draft })} loading={loading}>
                 Refresh

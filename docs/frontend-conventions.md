@@ -2800,13 +2800,24 @@ order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_
       **Environments (Production / Testing)**).
 - [ ] `npm run typecheck`, `npm run lint`, `npm run build` all clean; no `any`, no TODOs, no mock data.
 
+## Reports: Run Report and Clear Filters
+
+The reports that run on demand - Container Report, Container Charges, Dispatched Items, Item Balance by Warehouse,
+Attachment Report - have the same two buttons at the right of their filter bar: **Clear Filters** (`variant="default"`,
+`IconFilterOff`: the criteria back to their defaults and the result gone) and **Run Report** (the primary button,
+`IconPlayerPlay`). They ask the server for nothing when they open - the criteria count once Run Report is clicked (Enter in
+a search box too), and Export to Excel exports the report on screen; until then the page says "Choose …, then Run Report."
+The clear button is called Clear Filters on every report and list, never "Reset". Goods on Order loads on open (a snapshot
+with no required criteria) and keeps Refresh; Shortages, Stock Valuation, Sales Profit and Customer Statement still load on
+open and refilter as their filters change.
+
 ## A report that runs on demand and downloads files (script 101: Reports › Attachment Report)
 
 `pages/reports/AttachmentReportPage.tsx`, the pattern for a report whose result is files rather than figures:
 
 - **The filters live in the address** (`?types=3,7&docFrom=…&docTo=…&upFrom=…&upTo=…&page=2&size=25&run=1`): a refresh, a
-  bookmark or a shared link reruns the same report. What is typed in the filter bar counts only once **Run report** is
-  clicked (it writes the address); a "from" after its "to" shows under the "to" field and disables Run report - no query.
+  bookmark or a shared link reruns the same report. What is typed in the filter bar counts only once **Run Report** is
+  clicked (it writes the address); a "from" after its "to" shows under the "to" field and disables Run Report - no query.
 - **Paged on the server** (`totalRecords`, `page`, `recordsPerPage` and `onRecordsPerPageChange` on `DataTable`): the
   browser never holds the whole set; the header shows the count and total size of every match.
 - **Selection:** the grid's checkboxes (`selectedRecords`, `idAccessor="key"`); its header box ticks the current page only;
@@ -2837,7 +2848,7 @@ every charge form (New charge, the charge drawer, Apply to other containers, the
 `ItemBalanceReportPage`, `ItemBalanceReportPrintPage` and `itemBalanceColumns.ts` in `src/pages/reports/`.
 
 - **Runs on demand, filters in the address**, like the Attachment Report (`toParams` / `queryFromParams` in
-  `src/api/reports/itemBalance.ts`): the draft counts once "Run report" is clicked. Dates default to the first of the month
+  `src/api/reports/itemBalance.ts`): the draft counts once "Run Report" is clicked. Dates default to the first of the month
   and today. The warehouse picker lists only the reader's warehouses (the API's `/warehouses`), indented by the tree.
 - **One column list for screen, print and Excel.** `balanceColumns(report, hideEmpty)` builds the columns once; the screen
   and the print page draw it, and the API's export builds the same list, so the three match in rows, columns and totals.

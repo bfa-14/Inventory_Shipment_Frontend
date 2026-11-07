@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, SimpleGrid, Switch, Text, TextInput, UnstyledButton } from '@mantine/core'
 import { DateInput } from '../../components/ui/DateInput'
-import { IconFileExport, IconFilterOff, IconSearch } from '@tabler/icons-react'
+import { IconFileExport, IconFilterOff, IconPlayerPlay, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import {
@@ -22,7 +22,6 @@ import { FilterBar } from '../../components/ui/FilterBar'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { useGridQuery } from '../../hooks/useGridQuery'
 import { familyOptions } from '../inventory/lookups'
 import { monthEnd } from '../../components/typedDate'
 
@@ -128,6 +127,9 @@ interface StageTile {
  *
  * The endpoint answers with the whole report: the grid groups it by stage (each group with its own totals), the tiles
  * above narrow it to one stage, and the footer totals every row the filters left.
+ *
+ * RUN ON DEMAND (the owner: "the page will not get all data on page load"): nothing is asked when the page opens; the
+ * criteria count once "Run Report" is clicked (or Enter in Search), and Export to Excel exports the report on screen.
  */
 export function ContainerReportPage() {
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
@@ -136,17 +138,55 @@ export function ContainerReportPage() {
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [stage, setStage] = useState<string | null>(null)
 
-  const grid = useGridQuery<Filters, ContainerReportRowDto, ContainerReportResult>({
-    initialFilters: NO_FILTERS,
-    debounced: ['search'],
-    initialSort: { columnAccessor: 'stageLabel', direction: 'asc' },
-    paging: 'client',
-    errorMessage: 'The container report could not be loaded.',
-    fetcher: useCallback(({ filters: applied, signal }) => containerReportApi.report(toQuery(applied), signal), []),
-  })
+  /** What the inputs show; `ran` is what the report on screen was run with (null: not run yet). */
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS)
+  const [ran, setRan] = useState<Filters | null>(null)
+  const [runToken, setRunToken] = useState(0)
+  const [result, setResult] = useState<ContainerReportResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const { filters, setFilter, loading, error } = grid
-  const result = grid.data
+  const setFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((current) => ({ ...current, [key]: value }))
+  }, [])
+
+  useEffect(() => {
+    if (ran === null) return
+    const controller = new AbortController()
+    // Fetching is the "synchronize with an external system" case: loading has to show before the await.
+    // eslint-disable-next-line react/set-state-in-effect
+    setLoading(true)
+    setError(null)
+    containerReportApi
+      .report(toQuery(ran), controller.signal)
+      .then((loaded) => {
+        if (!controller.signal.aborted) setResult(loaded)
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return
+        setError(err instanceof ApiError ? err.messages.join(' ') : 'The container report could not be loaded.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [ran, runToken])
+
+  /** Run Report: the criteria typed now; a second click runs them again (the data may have moved on). */
+  function run() {
+    setRan({ ...filters })
+    setRunToken((token) => token + 1)
+  }
+
+  function clearFilters() {
+    setFilters(NO_FILTERS)
+    setRan(null)
+    setResult(null)
+    setError(null)
+    setStage(null)
+  }
+
+  const isDefault = JSON.stringify(filters) === JSON.stringify(NO_FILTERS)
   const allRows = useMemo(() => result?.rows ?? [], [result])
   const chargeTypes = useMemo(() => result?.chargeTypes ?? [], [result])
   const chargesVisible = result?.chargesVisible ?? false
@@ -251,7 +291,7 @@ export function ContainerReportPage() {
 
   async function exportToExcel() {
     try {
-      await containerReportApi.exportToExcel(toQuery(filters))
+      if (ran) await containerReportApi.exportToExcel(toQuery(ran))
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The report could not be exported.')
     }
@@ -400,7 +440,7 @@ export function ContainerReportPage() {
         title="Container Report"
         subtitle="Every container and every order still to load, with its order, invoices, payments, journey, charges and cost, by where the goods are now. Amounts in the base currency; est. = an estimate until the goods are received."
         actions={
-          <Button variant="default" leftSection={<IconFileExport size={16} />} onClick={() => void exportToExcel()}>
+          <Button variant="default" leftSection={<IconFileExport size={16} />} onClick={() => void exportToExcel()} disabled={!result}>
             Export to Excel
           </Button>
         }
@@ -414,6 +454,7 @@ export function ContainerReportPage() {
             leftSection={<IconSearch size={16} />}
             value={filters.search}
             onChange={(event) => setFilter('search', event.currentTarget.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') run() }}
           />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
@@ -449,7 +490,7 @@ export function ContainerReportPage() {
             searchable
           />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
+        <FilterBar.Col span={4}>
           <Select
             label="Branch"
             placeholder="All branches"
@@ -506,21 +547,6 @@ export function ContainerReportPage() {
             clearable
           />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
-          <Button
-            variant="default"
-            fullWidth
-            mt={25}
-            leftSection={<IconFilterOff size={16} />}
-            disabled={grid.isDefault && activeStage === null}
-            onClick={() => {
-              grid.clearFilters()
-              setStage(null)
-            }}
-          >
-            Clear Filters
-          </Button>
-        </FilterBar.Col>
         <FilterBar.Col span={6}>
           <Group gap="lg" mt={8}>
             <Switch
@@ -535,12 +561,27 @@ export function ContainerReportPage() {
             />
           </Group>
         </FilterBar.Col>
+        <FilterBar.Col span={6}>
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={clearFilters}
+              disabled={isDefault && result === null && activeStage === null}>
+              Clear Filters
+            </Button>
+            <Button leftSection={<IconPlayerPlay size={16} />} onClick={run} loading={loading}>
+              Run Report
+            </Button>
+          </Group>
+        </FilterBar.Col>
       </FilterBar>
 
       {error && (
         <Alert color="red" mb="md">
           {error}
         </Alert>
+      )}
+
+      {ran === null && !result && (
+        <Text c="dimmed" ta="center" py="xl">Choose the criteria, then Run Report.</Text>
       )}
 
       {tiles.length > 0 && (
@@ -570,24 +611,28 @@ export function ContainerReportPage() {
         </SimpleGrid>
       )}
 
-      <Text fz="xs" c="dimmed" mb="xs">
-        {activeStage === null
-          ? 'Click a stage to show only its rows. Grey "est." figures move until the goods are received; a lead time "so far" is counted to today.'
-          : `Showing ${activeStage} only. Click it again to show every stage.`}
-      </Text>
+      {result && (
+        <>
+        <Text fz="xs" c="dimmed" mb="xs">
+          {activeStage === null
+            ? 'Click a stage to show only its rows. Grey "est." figures move until the goods are received; a lead time "so far" is counted to today.'
+            : `Showing ${activeStage} only. Click it again to show every stage.`}
+        </Text>
 
-      <Paper radius="lg" withBorder>
-        <DataTable
-          storeKey="logistics.containerReport"
-          engine={engine}
-          exportFileName="container-report"
-          columns={columns}
-          idAccessor="rowKey"
-          fetching={loading}
-          pinFirstColumn
-          noRecordsText="No container or order matches these filters."
-        />
-      </Paper>
+        <Paper radius="lg" withBorder>
+          <DataTable
+            storeKey="logistics.containerReport"
+            engine={engine}
+            exportFileName="container-report"
+            columns={columns}
+            idAccessor="rowKey"
+            fetching={loading}
+            pinFirstColumn
+            noRecordsText="No container or order matches these filters."
+          />
+        </Paper>
+        </>
+      )}
     </div>
   )
 }

@@ -30,7 +30,7 @@ const PAGE_SIZES: number[] = [...PAGE_SIZE_OPTIONS]
  * from the server, downloaded one, several or all at once.
  *
  * THE FILTERS LIVE IN THE ADDRESS (?types=3,7&docFrom=...&run=1), so a refresh, a bookmark or a link to a colleague opens
- * the same report. What is typed in the filter bar only counts once "Run report" is clicked.
+ * the same report. What is typed in the filter bar only counts once "Run Report" is clicked.
  */
 export function AttachmentReportPage() {
   const [params, setParams] = useSearchParams()
@@ -323,7 +323,7 @@ export function AttachmentReportPage() {
                 Clear Filters
               </Button>
               <Button leftSection={<IconPlayerPlay size={16} />} onClick={run} disabled={dateErrors.any} loading={loading}>
-                Run report
+                Run Report
               </Button>
             </Group>
           </Group>
@@ -345,7 +345,7 @@ export function AttachmentReportPage() {
       {!ran ? (
         <Paper withBorder radius="lg" p="xl">
           <Text c="dimmed" ta="center">
-            Choose the attachment types and dates, then click Run report.
+            Choose the attachment types and dates, then click Run Report.
           </Text>
         </Paper>
       ) : (

@@ -101,7 +101,7 @@ function warehouseOptions(warehouses: ItemBalanceWarehouseDto[]) {
  * what the average cost did, and the closing on Date To - at the company's average cost, translated into the currency
  * chosen (the opening at the rate of the day before Date From, each movement at its day's, the closing at Date To's).
  *
- * THE FILTERS LIVE IN THE ADDRESS, as on the Attachment Report: what is typed counts once "Run report" is clicked, and a
+ * THE FILTERS LIVE IN THE ADDRESS, as on the Attachment Report: what is typed counts once "Run Report" is clicked, and a
  * refresh or a shared link reruns it. Each run is logged by the API with its filters and user.
  *
  * A movement figure opens the documents behind it; a warehouse a sub-location stands under is shown beside it, never
@@ -440,9 +440,9 @@ export function ItemBalanceReportPage() {
         </FilterBar.Col>
         <FilterBar.Col span={12}>
           <Group justify="flex-end" gap="xs">
-            <Button variant="subtle" leftSection={<IconFilterOff size={16} />} onClick={reset}>Reset</Button>
+            <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={reset}>Clear Filters</Button>
             <Button leftSection={<IconPlayerPlay size={16} />} onClick={run} disabled={dateError !== null} loading={loading}>
-              Run report
+              Run Report
             </Button>
           </Group>
         </FilterBar.Col>
@@ -451,7 +451,7 @@ export function ItemBalanceReportPage() {
       {error && <Alert color="red" mb="md">{error}</Alert>}
 
       {!applied && !report && (
-        <Text c="dimmed" ta="center" py="xl">Choose the warehouses and the period, then Run report.</Text>
+        <Text c="dimmed" ta="center" py="xl">Choose the warehouses and the period, then Run Report.</Text>
       )}
 
       {loading && !report && (
