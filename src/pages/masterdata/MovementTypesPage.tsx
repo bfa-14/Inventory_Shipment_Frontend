@@ -175,7 +175,7 @@ export function MovementTypesPage() {
     },
     {
       accessor: 'stage',
-      title: 'Stage',
+      title: 'Effect on container',
       width: 320,
       render: (row) => (
         <Group gap="xs" wrap="nowrap" align="flex-start">
@@ -258,7 +258,7 @@ export function MovementTypesPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <Select label="Stage" placeholder="All stages" data={STAGE_OPTIONS} value={filters.stage} onChange={(value) => setFilter('stage', value)} clearable />
+          <Select label="Effect on container" placeholder="All effects" data={STAGE_OPTIONS} value={filters.stage} onChange={(value) => setFilter('stage', value)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Status" placeholder="All" data={STATUS_OPTIONS} value={filters.isActive} onChange={(value) => setFilter('isActive', value)} clearable />
