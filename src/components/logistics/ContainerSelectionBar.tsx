@@ -27,6 +27,8 @@ interface ContainerSelectionBarProps<T extends SelectableContainer> {
    * so Back on the movement returns to the page the step was taken on. None: they go back to the Movements list.
    */
   returnQuery?: string
+  /** (111) "Update stage…" for the ticked containers: shown when the host gives it (Manage Shipment Movements). */
+  onUpdateStage?(rows: T[]): void
 }
 
 /**
@@ -54,8 +56,11 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
   onSelectedChange,
   onChanged,
   returnQuery,
+  onUpdateStage,
 }: ContainerSelectionBarProps<T>) {
   const { hasPermission } = useAuth()
+  // (111) Containers move by their stage; Next step, movement by movement, stays for the advanced readers.
+  const advanced = hasPermission(PERMISSIONS.movementsAdvanced)
   const canConfirm = hasPermission(PERMISSIONS.containersConfirm)
   const canNumbers = hasPermission(PERMISSIONS.containersCreate)
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
@@ -173,7 +178,12 @@ export function ContainerSelectionBar<T extends SelectableContainer>({
                   Container numbers…
                 </Button>
               )}
-              {canShip && (
+              {onUpdateStage && (
+                <Button size="xs" variant="light" leftSection={<IconRoute size={14} />} disabled={busy !== null} onClick={() => onUpdateStage(selected)} data-update-stage-button>
+                  Update stage…
+                </Button>
+              )}
+              {canShip && (advanced || !onUpdateStage) && (
                 <Tooltip label={stepBlockedReason} disabled={!stepBlocked} withArrow multiline maw={320}>
                   <Button
                     size="xs"

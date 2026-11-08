@@ -2804,6 +2804,33 @@ order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_
       **Environments (Production / Testing)**).
 - [ ] `npm run typecheck`, `npm run lint`, `npm run build` all clean; no `any`, no TODOs, no mock data.
 
+## Shipment stages: Update stage… and the forwarder's list (script 111)
+
+A container moves on by its **stage** (`src/api/logistics/shipmentStages.ts`), never by a movement the user builds: the
+server makes, starts and completes the movements behind the stage. Everywhere a container can move, the action is
+**Update stage…** (`UpdateStageModal`): the Containers list's selection bar and row menu, and the container's own page
+(in its action bar, repeated in the route card on a phone).
+
+- **Pick, then see**: the stage picker asks the server what the stage does to each container (`preview`) as soon as it
+  is picked - Will move / Already there / Cannot move with the server's reason - and only the ones that will move are
+  sent. A leg may carry its vessel or truck no. and ETA (one for every container: a truck each comes with the import).
+  An Offload stage says first that it posts each goods receipt for the full quantity.
+- **The forwarder's list** (`ImportStagesModal`, "Update stages from Excel…" on the Containers list): Container no.
+  (or ref) | New stage (its name; case, spaces and "->" do not matter) | Date (empty: today; 05/11/2026 or an Excel
+  date) | Truck / vessel no. | ETA, from a file or pasted. Every row is checked before anything moves (the match of the
+  number, the stage, the date, then the server's preview per stage); the template is built in the browser with the
+  stage names on its second sheet.
+- **One result per container**, Moved / Already there / Refused, with the goods receipt's refusal as an orange warning
+  under a container that moved: it is delivered with its draft, which the warehouse finishes.
+- **Where it stands**: the Containers list's Stage column (`StageBadge`: gray Pending, blue on a leg, teal arrived,
+  green offloaded, orange not on a stage) and the Stage filter in the first filter line (Status moved to the advanced
+  filters).
+- **The movement tools are for the advanced readers** (`PERMISSIONS.movementsAdvanced`): the Shipments, Movements and
+  Tracking menus, the Next step button, entry, column and filter, and the route card's "New movement". Their pages and
+  permissions are unchanged.
+- Backoffice › Master Data › **Shipment Stages** (`ShipmentStagesPage`, `masterdata.shipmentstages.manage`): the
+  stages in their order with how many containers stand at each, and the containers whose route the stages do not describe.
+
 ## Reports: Run Report and Clear Filters
 
 The reports that run on demand - Container Report, Container Charges, Dispatched Items, Item Balance by Warehouse,

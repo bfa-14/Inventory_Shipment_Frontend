@@ -63,6 +63,9 @@ import { containerReceiptOf, receiptBlocksCancelText, RECEIVABLE_STATUSES } from
 import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
 import { useNextStep } from '../../components/logistics/useNextStep'
+import { ImportStagesModal } from '../../components/logistics/ImportStagesModal'
+import { StageBadge, UpdateStageModal } from '../../components/logistics/UpdateStageModal'
+import { shipmentStagesApi, type ShipmentStageDto } from '../../api/logistics/shipmentStages'
 import { NEXT_STEP_FILTERS, nextStepColumnText, nextStepOf } from '../../components/logistics/nextStep'
 import { NextStepFilterPopover } from '../../components/logistics/NextStepFilterPopover'
 import { JourneyFilterPopover } from '../../components/logistics/JourneyFilterPopover'
@@ -97,6 +100,8 @@ interface Filters {
   journey: ContainerJourneyStatus | null
   /** (108) What their supplier invoices are paid. */
   paymentStatus: ContainerPaymentStatus | null
+  /** (111) Where they stand: a stage's id, '0' Pending, '-1' not on a stage. */
+  stageId: string | null
   /** 'YYYY-MM-01' of the picked month. */
   orderMonth: string | null
   // advanced
@@ -118,6 +123,7 @@ const NO_FILTERS: Filters = {
   nextStep: null,
   journey: null,
   paymentStatus: null,
+  stageId: null,
   orderMonth: null,
   purchaseOrderId: null,
   purchaseDocumentId: null,
@@ -129,7 +135,7 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-const ADVANCED: (keyof Filters)[] = ['nextStep', 'journey', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
+const ADVANCED: (keyof Filters)[] = ['status', 'nextStep', 'journey', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
 /**
  * The Status filter's own choice beside the statuses: a completed Delivery-stage movement and no posted goods receipt
@@ -172,6 +178,8 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'blNo', text: (r) => r.blNo ?? '' },
   { accessor: 'dispatchDate', kind: 'date' },
   { accessor: 'eta', kind: 'date' },
+  // (111) where it stands, filtered on the server (the Stage filter above the list)
+  { accessor: 'stageName', text: (r) => r.stageName ?? '', filterable: false },
   // (95) the latest leg that started, and whether it is on its way or arrived (filtered on the server: its funnel)
   { accessor: 'journeyLeg', text: journeyLegText },
   { accessor: 'journeyStatus', text: journeyStatusText, filterable: false },
@@ -224,6 +232,9 @@ export function ContainersPage() {
   // The order and PI filters list documents the reader may not see: asked for only with their view permission.
   const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
+  // (111) Containers move by their stage; the movement-by-movement Next step stays for the advanced readers.
+  const canMove = hasPermission(PERMISSIONS.movementsManage)
+  const advanced = hasPermission(PERMISSIONS.movementsAdvanced)
 
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
@@ -233,6 +244,9 @@ export function ContainersPage() {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [selected, setSelected] = useState<ContainerListDto[]>([])
   const [importingCharges, setImportingCharges] = useState(false)
+  const [stages, setStages] = useState<ShipmentStageDto[]>([])
+  const [updatingStage, setUpdatingStage] = useState<{ id: number; containerRef: string }[] | null>(null)
+  const [importingStages, setImportingStages] = useState(false)
 
   const grid = useGridQuery<Filters, ContainerListDto, AllRows<ContainerListDto>>({
     initialFilters: NO_FILTERS,
@@ -257,6 +271,7 @@ export function ContainersPage() {
               nextStep: filters.nextStep ?? undefined,
               journey: filters.journey ?? undefined,
               paymentStatus: filters.paymentStatus ?? undefined,
+              stageId: filters.stageId === null ? undefined : Number(filters.stageId),
               orderMonthKey: monthKey(filters.orderMonth),
               purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
               purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
@@ -300,6 +315,7 @@ export function ContainersPage() {
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
     itemsApi.lookup(false).then(setItems).catch(() => {})
+    shipmentStagesApi.list(false).then(setStages).catch(() => {})
   }, [])
 
   // The PO and PI filters search the server as they are typed (script 78), where they held the 200 newest. Each needs
@@ -315,6 +331,16 @@ export function ContainersPage() {
   const supplierOptions = useMemo(() => suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) })), [suppliers])
   const portOptions = useMemo(() => ports.map((p) => ({ value: String(p.id), label: portLabel(p) })), [ports])
   const itemOptions = useMemo(() => items.map((i) => ({ value: String(i.id), label: `${i.itemCode} - ${i.itemName}` })), [items])
+  // (111) Pending first, the stages in their order, then the containers whose route the stages do not describe.
+  const stageOptions = useMemo(
+    () => [
+      { value: '0', label: 'Pending' },
+      ...stages.map((s) => ({ value: String(s.id), label: s.isActive ? s.stageName : `${s.stageName} (inactive)` })),
+      { value: '-1', label: 'Not on a stage' },
+    ],
+    [stages],
+  )
+  const stageKind = (id: number | null) => stages.find((s) => s.id === id)?.kind ?? null
 
   async function exportOne(row: ContainerListDto) {
     try {
@@ -517,6 +543,12 @@ export function ContainersPage() {
     { accessor: 'dispatchDate', title: 'Dispatch Date', width: 140, render: (row) => dateLabel(row.dispatchDate) },
     { accessor: 'eta', title: 'ETA', width: 105, render: (row) => dateLabel(row.eta) },
     {
+      accessor: 'stageName',
+      title: 'Stage',
+      width: 200,
+      render: (row) => <StageBadge name={row.stageName} kind={stageKind(row.stageId)} receiptPending={row.stageReceiptPending} />,
+    },
+    {
       accessor: 'journeyLeg',
       title: 'From → To',
       width: 220,
@@ -649,7 +681,17 @@ export function ContainersPage() {
         // Delivered: the next step IS the goods receipt - its own entry would say it twice.
         const receiptIsNext = step?.kind === 'Receive' || step?.kind === 'OpenReceipt'
         const entries = [
-          stepEntry,
+          {
+            key: 'updateStage',
+            show: canMove,
+            label: 'Update stage…',
+            icon: <IconRoute size={16} />,
+            disabled: row.status === 8,
+            reason: row.status === 8 ? 'This container is cancelled.' : undefined,
+            color: undefined as string | undefined,
+            onClick: () => setUpdatingStage([{ id: row.id, containerRef: row.containerRef }]),
+          },
+          { ...stepEntry, show: stepEntry.show && advanced },
           {
             key: 'receive',
             // (95) shown, disabled with the server's reason, until the container is delivered
@@ -749,6 +791,11 @@ export function ContainersPage() {
             <Button variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>
               Print
             </Button>
+            {canMove ? (
+              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => setImportingStages(true)}>
+                Update stages from Excel…
+              </Button>
+            ) : null}
             {canImportCharges ? (
               <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => setImportingCharges(true)}>
                 Import charges from Excel…
@@ -776,8 +823,9 @@ export function ContainersPage() {
           <FilterBar.Col span={canSeePayments ? 2 : 3}>
             <Select label="Supplier" placeholder="All suppliers" data={supplierOptions} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable nothingFoundMessage="No supplier matches" />
           </FilterBar.Col>
+          {/* (111) Where they stand: the stage, the way the team follows its containers. Status is in the advanced panel. */}
           <FilterBar.Col span={2}>
-            <Select label="Status" placeholder="All" data={STATUS_FILTER_OPTIONS} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+            <Select label="Stage" placeholder="All" data={stageOptions} value={filters.stageId} onChange={(next) => setFilter('stageId', next)} clearable data-stage-filter-select />
           </FilterBar.Col>
           {/* (108) On the same line: Supplier and Order Month give it a column each. */}
           {canSeePayments && (
@@ -807,16 +855,21 @@ export function ContainersPage() {
         <Collapse expanded={advancedShown}>
           <FilterBar>
             <FilterBar.Col span={3}>
-              <Select
-                label="Next step"
-                placeholder="Any step"
-                data={NEXT_STEP_FILTERS}
-                value={filters.nextStep}
-                onChange={(next) => setFilter('nextStep', next as ContainerNextStepFilter | null)}
-                clearable
-                data-next-step-filter-select
-              />
+              <Select label="Status" placeholder="All" data={STATUS_FILTER_OPTIONS} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
             </FilterBar.Col>
+            {advanced ? (
+              <FilterBar.Col span={3}>
+                <Select
+                  label="Next step"
+                  placeholder="Any step"
+                  data={NEXT_STEP_FILTERS}
+                  value={filters.nextStep}
+                  onChange={(next) => setFilter('nextStep', next as ContainerNextStepFilter | null)}
+                  clearable
+                  data-next-step-filter-select
+                />
+              </FilterBar.Col>
+            ) : null}
             <FilterBar.Col span={3}>
               <Select
                 label="Journey"
@@ -899,7 +952,13 @@ export function ContainersPage() {
         </Alert>
       ) : null}
 
-      <ContainerSelectionBar rows={data?.items ?? []} selected={selectedRows} onSelectedChange={setSelected} onChanged={load} />
+      <ContainerSelectionBar
+        rows={data?.items ?? []}
+        selected={selectedRows}
+        onSelectedChange={setSelected}
+        onChanged={load}
+        onUpdateStage={canMove ? (rows) => setUpdatingStage(rows.map((r) => ({ id: r.id, containerRef: r.containerRef }))) : undefined}
+      />
 
       <Paper radius="lg" withBorder>
         <DataTable<ContainerListDto>
@@ -908,7 +967,7 @@ export function ContainersPage() {
           exportFileName="containers"
           selectedRecords={selectedRows}
           onSelectedRecordsChange={setSelected}
-          columns={columns}
+          columns={advanced ? columns : columns.filter((c) => c.accessor !== 'nextStep')}
           fetching={loading}
           noRecordsText={grid.isDefault ? 'No containers yet.' : 'No containers match these filters.'}
           pinLastColumn
@@ -927,6 +986,11 @@ export function ContainersPage() {
       />
 
       {nextStep.dialogs}
+
+      {updatingStage ? (
+        <UpdateStageModal containers={updatingStage} onClose={() => setUpdatingStage(null)} onDone={() => void load()} />
+      ) : null}
+      {importingStages ? <ImportStagesModal onClose={() => setImportingStages(false)} onDone={() => void load()} /> : null}
 
       {/* One row of the file = one charge on one container; the Charges column changes with what is posted. */}
       <ImportContainerChargesWizard

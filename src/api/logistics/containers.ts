@@ -296,7 +296,12 @@ export interface ContainerListDto extends ContainerFlags {
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
-  rowVersion: string
+  rowVersion: string
+  /** (111) Where it stands: the shipment stage, else "Pending", "Followed by typed dates", "Offloaded" or "Not on a stage". */
+  stageId: number | null
+  stageName: string | null
+  /** Delivered at the offload place, its goods receipt not posted yet. */
+  stageReceiptPending: boolean
 }
 
 /** One loaded line: an ORDER line, pieces, how far it is invoiced and what it really costs. */
@@ -833,7 +838,9 @@ export interface ContainerQuery {
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number
-  pageSize?: number
+  pageSize?: number
+  /** (111) A shipment stage's id; 0 Pending (never moved), -1 not on a stage. */
+  stageId?: number
 }
 
 export interface AvailablePoLineQuery {

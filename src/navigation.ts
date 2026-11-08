@@ -177,6 +177,9 @@ export const PERMISSIONS = {
   portsManage: 'masterdata.ports.manage',
   attachmentTypesManage: 'masterdata.attachmenttypes.manage',
   movementTypesManage: 'masterdata.movementtypes.manage',
+  // (111) The stages a container moves through; and the three menus hidden from everyone else (containers move by stage).
+  shipmentStagesManage: 'masterdata.shipmentstages.manage',
+  movementsAdvanced: 'containers.movements.advanced',
   paymentMethodsManage: 'masterdata.paymentmethods.manage',
   cashBankAccountsManage: 'masterdata.cashbankaccounts.manage',
 } as const
@@ -291,15 +294,17 @@ export const NAVIGATION: NavSection[] = [
   {
     // THE SHIPMENT BETWEEN THE ORDER AND THE WAREHOUSE: containers loaded from purchase orders, the
     // movements they travel with, the charges that make their real cost, and the tracking board. The Shipments board
-    // comes first (script 82): where every container is, by stage, and what each does next.
+    // comes first (script 82): where every container is, by stage, and what each does next. (111) Containers move by
+    // their stage now (Update stage… on the Containers list): Shipments, Movements and Tracking are shown only with
+    // Show Shipments, Movements and Tracking - their pages keep their own permissions, for an administrator's corrections.
     title: 'LOGISTICS',
     breadcrumb: 'Logistics',
     items: [
-      { label: 'Shipments', to: '/logistics/shipments', permission: PERMISSIONS.shipmentsView, icon: 'board' },
+      { label: 'Shipments', to: '/logistics/shipments', permission: PERMISSIONS.movementsAdvanced, icon: 'board' },
       { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
-      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsView, icon: 'ship' },
+      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsAdvanced, icon: 'ship' },
       { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
-      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.trackingView, icon: 'route' },
+      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.movementsAdvanced, icon: 'route' },
     ],
   },
   {
@@ -410,6 +415,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Ports & Places', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
           { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
+          { label: 'Shipment Stages', to: '/setup/master-data/shipment-stages', permission: PERMISSIONS.shipmentStagesManage },
           // The lists a customer receipt line picks from.
           { label: 'Payment Methods', to: '/setup/master-data/payment-methods', permission: PERMISSIONS.paymentMethodsManage },
           { label: 'Cash / Bank Accounts', to: '/setup/master-data/cash-bank-accounts', permission: PERMISSIONS.cashBankAccountsManage },

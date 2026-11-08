@@ -92,6 +92,7 @@ import {
 import { ReceiveContainerModal } from '../../components/logistics/ReceiveContainerModal'
 import { isMovementStep } from '../../components/logistics/nextStep'
 import { useNextStep } from '../../components/logistics/useNextStep'
+import { UpdateStageModal } from '../../components/logistics/UpdateStageModal'
 import { cancelDescription } from '../../components/purchase/goodsReceipts/goodsReceiptModel'
 import { supplierLabel } from '../../components/purchase/purchaseKind'
 import { confirm } from '../../components/ui/confirm'
@@ -148,6 +149,8 @@ export function ContainerPage() {
     overCapacity: hasPermission(PERMISSIONS.containersOverCapacity),
     invoice: hasPermission(PERMISSIONS.purchaseInvoicesCreate),
     movements: hasPermission(PERMISSIONS.movementsManage),
+    // (111) Containers move by their stage; Next step, movement by movement, stays for the advanced readers.
+    advanced: hasPermission(PERMISSIONS.movementsAdvanced),
     attachments: hasPermission(PERMISSIONS.containerAttachmentsManage),
     receive: hasPermission(PERMISSIONS.goodsReceiptsCreate),
     postReceipt: hasPermission(PERMISSIONS.goodsReceiptsPost),
@@ -237,6 +240,7 @@ export function ContainerPage() {
      at Dar es Salaam…", "Cleared customs at Kasumbalesa…", "Inland transport to Kasumbalesa…" - one dialog, already
      filled in, the same as the row's "…" menu on the Containers list. */
   const nextStep = useNextStep(() => void load(), 'container')
+  const [updatingStage, setUpdatingStage] = useState(false)
 
   /* A FILE ADDED, EDITED OR DELETED (the Documents card, a charge's drawer) changes only what the page shows about
      files: the list, the counts on the route and on the charges, the audit trail. Those come from a fresh read; the
@@ -809,11 +813,24 @@ export function ContainerPage() {
       },
       variant: 'light',
       colour: 'indigo',
-      // Hidden without containers.movements.manage; disabled with the reason once the journey is over.
-      visible: saved && stepIsMovement,
+      // Hidden without containers.movements.manage; disabled with the reason once the journey is over. (111) Advanced only.
+      visible: saved && stepIsMovement && perm.advanced,
       disabled: stepBlocked !== null,
       disabledReason: stepBlocked ?? undefined,
       pinnedOnPhone: true,
+    },
+    {
+      key: 'stage',
+      label: 'Update stage…',
+      icon: <IconRoute size={16} />,
+      onClick: () => setUpdatingStage(true),
+      variant: 'light',
+      colour: 'indigo',
+      // (111) Until its goods are received; the dialog says why a stage cannot be taken.
+      visible: saved && perm.movements && container.status < 6,
+      disabled: dirty.current,
+      disabledReason: dirty.current ? 'Save your changes first.' : undefined,
+      pinnedOnPhone: !perm.advanced,
     },
     { key: 'save', label: 'Save', icon: <IconDeviceFloppy size={16} />, onClick: () => void save(), variant: 'filled', loading: saving, visible: !readOnly },
   ]
@@ -822,16 +839,18 @@ export function ContainerPage() {
   const journey = container ? (
     <ContainerRouteTimeline
       container={container}
-      canManage={perm.movements && container.status < 6}
+      canManage={perm.movements && perm.advanced && container.status < 6}
       onChanged={() => void load()}
       // NARROW SCREENS: the Route card is the top of the page and the action bar its bottom, a whole page away (6,400 px
       // on a phone). The next step is repeated in the card, so it is in the first screen the user sees.
       step={
         wide
           ? null
-          : stepIsMovement && step
+          : stepIsMovement && step && perm.advanced
             ? { label: step.label, disabledReason: stepBlocked, onClick: () => nextStep.run(container) }
-            : receiptStep
+            : !perm.advanced && perm.movements && container.status < 6
+              ? { label: 'Update stage…', disabledReason: null, onClick: () => setUpdatingStage(true) }
+              : receiptStep
       }
     />
   ) : null
@@ -1123,6 +1142,13 @@ export function ContainerPage() {
       ) : null}
 
       {nextStep.dialogs}
+      {updatingStage && container ? (
+        <UpdateStageModal
+          containers={[{ id: container.id, containerRef: container.containerRef }]}
+          onClose={() => setUpdatingStage(false)}
+          onDone={() => void load()}
+        />
+      ) : null}
 
       {receiveOpen && container ? (
         <ReceiveContainerModal

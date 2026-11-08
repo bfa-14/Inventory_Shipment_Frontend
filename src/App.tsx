@@ -52,6 +52,7 @@ import { MovementsPage } from './pages/logistics/MovementsPage'
 import { ShipmentsBoardPage } from './pages/logistics/ShipmentsBoardPage'
 import { TrackingPage } from './pages/logistics/TrackingPage'
 import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
+import { ShipmentStagesPage } from './pages/masterdata/ShipmentStagesPage'
 import { PaymentMethodsPage } from './pages/masterdata/PaymentMethodsPage'
 import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
@@ -171,6 +172,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementTypesManage} />}>
                 <Route path="/setup/master-data/movement-types" element={<MovementTypesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.shipmentStagesManage} />}>
+                <Route path="/setup/master-data/shipment-stages" element={<ShipmentStagesPage />} />
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.paymentMethodsManage} />}>
                 <Route path="/setup/master-data/payment-methods" element={<PaymentMethodsPage />} />
