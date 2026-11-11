@@ -221,6 +221,8 @@ export interface PaymentDto {
   updatedBy: number | null
   updatedByName: string | null
   rowVersion: string
+  /** (113) Made by posting a container charge paid cash: reversed only by cancelling the charge. */
+  fromChargePost: boolean
   lines: PaymentLineDto[]
   allocations: PaymentAllocationDto[]
   files: PaymentFileDto[]

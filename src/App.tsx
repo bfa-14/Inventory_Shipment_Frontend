@@ -47,6 +47,7 @@ import { PortsPage } from './pages/masterdata/PortsPage'
 import { ContainerPage } from './pages/logistics/ContainerPage'
 import { ContainersPage } from './pages/logistics/ContainersPage'
 import { ContainerChargesPage } from './pages/logistics/ContainerChargesPage'
+import { ImportContainerChargesPage } from './pages/logistics/ImportContainerChargesPage'
 import { MovementPage } from './pages/logistics/MovementPage'
 import { MovementsPage } from './pages/logistics/MovementsPage'
 import { ShipmentsBoardPage } from './pages/logistics/ShipmentsBoardPage'
@@ -208,6 +209,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesView} />}>
                 <Route path="/logistics/container-charges" element={<ContainerChargesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesCreate} />}>
+                <Route path="/logistics/container-charges/import" element={<ImportContainerChargesPage />} />
               </Route>
 
               {/* Creating an item needs its own guard: a reader who may only view items must not

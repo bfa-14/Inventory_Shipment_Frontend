@@ -304,6 +304,7 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
       { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsAdvanced, icon: 'ship' },
       { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
+      { label: 'Import Charges', to: '/logistics/container-charges/import', permission: PERMISSIONS.containerChargesCreate, icon: 'coins' },
       { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.movementsAdvanced, icon: 'route' },
     ],
   },

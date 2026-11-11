@@ -43,6 +43,8 @@ import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
 import { SearchMultiSelect, SearchSelect, type SearchOption, type SearchOptionsLoader } from '../ui/SearchSelect'
 import { containerLabel } from '../purchase/documentSearch'
+import { ChargePaymentPanel } from './ChargePaymentPanel'
+import { ON_ACCOUNT, chargePaymentErrors, chargePaymentRequest, type ChargePaymentForm } from './chargePayment'
 
 interface NewChargeModalProps {
   opened: boolean
@@ -168,6 +170,8 @@ function NewChargeDialog({
   const [total, setTotal] = useState<number | null>(null)
   const [splitRule, setSplitRule] = useState<SplitRule>(presetSplitRule)
   const [notes, setNotes] = useState('')
+  // (113) Cash: posting the charge also pays its provider; On account: payable to it.
+  const [payment, setPayment] = useState<ChargePaymentForm>(ON_ACCOUNT)
   // (97) A BIVAC / Inspection charge names its BIVAC item and takes that item's cost at each container's port.
   const [bivacItemId, setBivacItemId] = useState<string | null>(null)
   // Each answer is kept with what it was read for, so a stale one is never shown (and no effect has to clear it).
@@ -357,12 +361,19 @@ function NewChargeDialog({
       else if (bivacOption && bivacOption.priced < bivacOption.containers)
         found.bivacItemId = `${bivacOption.itemCode} has no BIVAC cost for ${bivacOption.missingPorts ?? 'some ports'}: set it on Item Definition (BIVAC cost per port).`
       else if (bivacOption && (bivacOption.totalBase ?? 0) <= 0) found.bivacItemId = `${bivacOption.itemCode} costs 0 at these ports: nothing to charge.`
-      return found
+      return { ...found, ...paymentFound() }
     }
     if (!currencyId) found.currencyId = 'Choose a currency.'
     if (!isBase && (rate === null || rate <= 0)) found.rate = 'Enter the exchange rate.'
     if (total === null || total <= 0) found.total = isDeduction ? 'Enter the amount deducted.' : 'Enter an amount above zero.'
-    return found
+    return { ...found, ...paymentFound() }
+  }
+
+  /** (113) The panel's own errors, keyed apart so the panel shows them under its fields. */
+  function paymentFound(): Record<string, string> {
+    if (isDeduction) return {}
+    const p = chargePaymentErrors(payment, providerId !== null)
+    return Object.fromEntries(Object.entries(p).map(([k, v]) => ['payment.' + k, v as string]))
   }
 
   async function save() {
@@ -388,6 +399,7 @@ function NewChargeDialog({
         allocationMethod: method,
         notes: notes.trim() || null,
         bivacItemId: isBivac && bivacItemId !== null ? Number(bivacItemId) : null,
+        ...chargePaymentRequest(isDeduction ? ON_ACCOUNT : payment),
       })
       setCreated(drafts)
       notify.success(drafts.length === 1 ? 'Draft charge created.' : `${formatNumber(drafts.length)} draft charges created.`)
@@ -454,6 +466,12 @@ function NewChargeDialog({
           <Alert color="blue">
             Posting a BIVAC charge also posts a BIVAC Out of 1 pc of {bivacOption?.itemCode ?? 'the BIVAC item'} from each container's
             warehouse; cancelling the charge cancels it.
+          </Alert>
+        )}
+        {payment.paymentType === 1 && !isDeduction && !posted && (
+          <Alert color="blue">
+            Paid cash: posting {created.length === 1 ? 'the charge' : 'the charges'} also makes and posts one supplier payment to the
+            provider for {created.length === 1 ? 'it' : 'all of them'}.
           </Alert>
         )}
         {method === 'Manual' && !posted && (
@@ -665,6 +683,20 @@ function NewChargeDialog({
         )}
         <Textarea label="Notes" autosize minRows={1} maxLength={500} value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
       </SimpleGrid>
+
+      <ChargePaymentPanel
+        value={payment}
+        onChange={(patch) => setPayment((prev) => ({ ...prev, ...patch }))}
+        currencyId={isBivac ? (baseCurrency?.id ?? null) : currencyId === null ? null : Number(currencyId)}
+        currencyCode={isBivac ? baseCode : code}
+        deduction={isDeduction}
+        errors={{
+          paymentType: errors['payment.paymentType'],
+          methodId: errors['payment.methodId'],
+          accountId: errors['payment.accountId'],
+        }}
+        postVerb="Posting the charge"
+      />
 
       {!isBivac && (
       <Radio.Group

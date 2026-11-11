@@ -60,7 +60,6 @@ import { ContainerSelectionBar } from '../../components/logistics/ContainerSelec
 import { ContainerFillCell } from '../../components/logistics/ContainerFillLine'
 import { ContainerReceiptCell } from '../../components/logistics/ContainerReceiptCell'
 import { containerReceiptOf, receiptBlocksCancelText, RECEIVABLE_STATUSES } from '../../components/logistics/containerReceipt'
-import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
 import { useNextStep } from '../../components/logistics/useNextStep'
 import { ImportStagesModal } from '../../components/logistics/ImportStagesModal'
@@ -88,6 +87,8 @@ import { PERMISSIONS } from '../../navigation'
 import { monthEnd } from '../../components/typedDate'
 
 export const CONTAINERS_ROUTE = '/logistics/containers'
+/** (113) Import charges from Excel… is a page of its own. */
+const IMPORT_CHARGES_ROUTE = '/logistics/container-charges/import'
 
 interface Filters {
   containerNo: string
@@ -243,7 +244,6 @@ export function ContainersPage() {
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
   const [selected, setSelected] = useState<ContainerListDto[]>([])
-  const [importingCharges, setImportingCharges] = useState(false)
   const [stages, setStages] = useState<ShipmentStageDto[]>([])
   const [updatingStage, setUpdatingStage] = useState<{ id: number; containerRef: string }[] | null>(null)
   const [importingStages, setImportingStages] = useState(false)
@@ -797,7 +797,7 @@ export function ContainersPage() {
               </Button>
             ) : null}
             {canImportCharges ? (
-              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => setImportingCharges(true)}>
+              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => void navigate(IMPORT_CHARGES_ROUTE)}>
                 Import charges from Excel…
               </Button>
             ) : null}
@@ -991,13 +991,6 @@ export function ContainersPage() {
         <UpdateStageModal containers={updatingStage} onClose={() => setUpdatingStage(null)} onDone={() => void load()} />
       ) : null}
       {importingStages ? <ImportStagesModal onClose={() => setImportingStages(false)} onDone={() => void load()} /> : null}
-
-      {/* One row of the file = one charge on one container; the Charges column changes with what is posted. */}
-      <ImportContainerChargesWizard
-        opened={importingCharges}
-        onClose={() => setImportingCharges(false)}
-        onImported={() => void load()}
-      />
     </div>
   )
 }

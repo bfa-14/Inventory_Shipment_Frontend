@@ -73,7 +73,7 @@ function isChange(row: StockLevelImportRow): boolean {
 /**
  * "IMPORT FROM EXCEL…" ON INVENTORY › STOCK LEVELS (script 91, rules S11-S13): stock levels from a file, in three steps -
  * choose the file, check what the server made of every row, then import - the steps and rules of the container charges'
- * import (ImportContainerChargesWizard).
+ * import (ImportContainerChargesPage).
  *
  * ONE ROW = ONE ITEM IN ONE WAREHOUSE: Item Code / Barcode, Warehouse (code, or a name no other warehouse has), Min
  * (pcs), Max (pcs), Remove (Yes). Other columns are ignored, so an export of the page can be edited and imported back:

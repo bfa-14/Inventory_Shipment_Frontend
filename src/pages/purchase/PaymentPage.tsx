@@ -762,7 +762,17 @@ export function PaymentPage() {
     : [
         print,
         ...documentActions,
-        { key: 'reverse', label: 'Reverse', icon: DocumentIcons.cancel, colour: 'red', visible: canReverse && status === 'Posted', onClick: () => setReverseOpen(true) },
+        {
+          key: 'reverse',
+          label: 'Reverse',
+          icon: DocumentIcons.cancel,
+          colour: 'red',
+          visible: canReverse && status === 'Posted',
+          // (113) a cash charge's own payment goes with the charge
+          disabled: payment?.fromChargePost === true,
+          disabledReason: payment?.fromChargePost ? 'Made when a container charge paid cash was posted: cancel the charge instead.' : undefined,
+          onClick: () => setReverseOpen(true),
+        },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(PAYMENTS_ROUTE) },
       ]
 

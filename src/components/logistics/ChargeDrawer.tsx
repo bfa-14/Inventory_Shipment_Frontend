@@ -50,6 +50,8 @@ import { currencyLabel, formatMoney, formatNumber, numberInputValue } from '../f
 import { confirm } from '../ui/confirm'
 import { notify } from '../ui/notify'
 import { ApplyChargeModal } from './ApplyChargeModal'
+import { ChargePaymentPanel } from './ChargePaymentPanel'
+import { chargePaymentErrors, chargePaymentForm, chargePaymentRequest, ON_ACCOUNT, type ChargePaymentForm } from './chargePayment'
 
 interface ChargeDrawerProps {
   chargeId: number | null
@@ -161,6 +163,7 @@ function ChargeBody({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [header, setHeader] = useState<Header | null>(null)
   const [manual, setManual] = useState<Record<number, number | null>>({})
+  const [payment, setPayment] = useState<ChargePaymentForm>(ON_ACCOUNT)
   const [dirty, setDirty] = useState(false)
 
   const [chargeTypes, setChargeTypes] = useState<ChargeTypeLookupDto[]>([])
@@ -177,6 +180,7 @@ function ChargeBody({
     setDto(next)
     setHeader(headerOf(next))
     setManual(manualOf(next))
+    setPayment(chargePaymentForm(next))
     setDirty(false)
   }, [])
 
@@ -238,6 +242,7 @@ function ChargeBody({
   const isBase = currency ? currency.isBaseCurrency : header?.rate === 1
   const baseCode = currencies.find((c) => c.isBaseCurrency)?.currencyCode ?? 'USD'
   const code = currency?.currencyCode ?? dto?.currencyCode ?? baseCode
+  const deduction = (dto?.amount ?? 0) < 0 || chargeTypes.find((t) => String(t.id) === header?.chargeTypeId)?.isDeduction === true
 
   const amountBase = useMemo(() => {
     if (!header || header.amount === null) return null
@@ -289,6 +294,11 @@ function ChargeBody({
       notify.error('Enter the exchange rate.')
       return
     }
+    const paymentProblem = deduction ? undefined : Object.values(chargePaymentErrors(payment, header.providerId !== null))[0]
+    if (paymentProblem) {
+      notify.error(paymentProblem)
+      return
+    }
     setBusy('save')
     try {
       const next = await containerChargesApi.update(dto.id, {
@@ -310,6 +320,7 @@ function ChargeBody({
               .map(([lineId, value]) => ({ containerLineId: Number(lineId), amountBase: value ?? 0 }))
           : [],
         rowVersion: dto.rowVersion,
+        ...chargePaymentRequest(deduction ? ON_ACCOUNT : payment),
       })
       adopt(next)
       notify.success('Charge saved.')
@@ -326,9 +337,12 @@ function ChargeBody({
     const go = await confirm({
       title: 'Post charge',
       message:
-        dto.containerStatus === OFFLOADED
+        (dto.containerStatus === OFFLOADED
           ? 'Post this charge? The goods are received: the item costs will be adjusted.'
-          : 'Post this charge? It is locked once posted and counts in the item costs.',
+          : 'Post this charge? It is locked once posted and counts in the item costs.')
+        + (dto.paymentType === 1 && dto.amount > 0
+          ? ` Paid cash: a supplier payment to ${dto.providerName ?? 'the provider'} is made and posted with it.`
+          : ''),
       confirmLabel: 'Post',
     })
     if (!go) return
@@ -617,6 +631,19 @@ function ChargeBody({
           </SimpleGrid>
         )}
       </Paper>
+
+      <ChargePaymentPanel
+        value={payment}
+        onChange={(next) => {
+          setPayment((prev) => ({ ...prev, ...next }))
+          setDirty(true)
+        }}
+        currencyId={header?.currencyId ? Number(header.currencyId) : dto.currencyId}
+        currencyCode={code}
+        disabled={!editable}
+        deduction={deduction}
+        cashPayment={dto.cashPaymentId !== null ? { id: dto.cashPaymentId, number: dto.cashPaymentNumber } : null}
+      />
 
       <div>
         <Group justify="space-between" mb={4} wrap="wrap">
