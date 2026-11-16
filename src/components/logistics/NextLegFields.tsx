@@ -1,5 +1,5 @@
 import { Checkbox, Group, Radio, Select, SimpleGrid, Stack, Textarea, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import type { MovementTypeLookupDto } from '../../api/masterdata/movementTypes'
 import { portLabel, type PortLookupDto } from '../../api/masterdata/ports'
 import { loadCarriers } from '../purchase/documentSearch'

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, FileInput, MultiSelect, Select, SimpleGrid, Text, Textarea } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { IconPaperclip } from '@tabler/icons-react'
 import type { AttachmentDocumentKind, DocumentFileFields } from '../../api/documentFiles'
 import { ApiError } from '../../api/http'

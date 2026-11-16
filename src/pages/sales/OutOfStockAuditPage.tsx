@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconSearch } from '@tabler/icons-react'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { warehousesApi } from '../../api/masterdata/warehouses'
@@ -15,6 +15,7 @@ import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDa
 import { PageHeader } from '../../components/ui/PageHeader'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -223,7 +224,10 @@ export function OutOfStockAuditPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

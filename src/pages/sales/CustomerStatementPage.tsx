@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Alert, Badge, Button, Group, Paper, Select, SimpleGrid, Text } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconPrinter } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -16,6 +16,7 @@ import { FilterBar } from '../../components/ui/FilterBar'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { STATEMENT_ROUTE } from '../../components/sales/receipt/receiptModel'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
+import { monthEnd } from '../../components/typedDate'
 
 /** What each entry did to the balance: owed more is orange, owed less is green. */
 const TYPE_COLOURS: Record<string, string> = {
@@ -143,7 +144,10 @@ export function CustomerStatementPage() {
           <Select label="Customer" placeholder="Choose a customer" data={clients.map((c) => ({ value: String(c.id), label: partyLabel(c) }))} value={clientId} onChange={setClientId} searchable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="From" placeholder="Beginning" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateFrom)} onChange={(next) => setDateFrom(next ? isoDate(next) : null)} clearable />
+          <DateInput label="From" placeholder="Beginning" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateFrom)} onChange={(next) => {
+            setDateFrom(next ? isoDate(next) : null)
+            if (next) setDateTo(monthEnd(isoDate(next)))
+          }} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <DateInput label="To" placeholder="Today" valueFormat="DD/MM/YYYY" value={fromIsoDate(dateTo)} onChange={(next) => setDateTo(next ? isoDate(next) : null)} clearable />

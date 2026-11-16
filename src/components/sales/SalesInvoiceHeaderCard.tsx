@@ -1,5 +1,5 @@
 import { Grid, NumberInput, Paper, Select, Text, Textarea, TextInput, Title } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import {
   salesRateTypeLabel,
   type RateResolutionDto,

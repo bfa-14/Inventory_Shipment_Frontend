@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Group, Modal, Stack, Text, Textarea } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { todayDateOnly } from '../format'
 import { useCalendarEscape } from '../ui/useCalendarEscape'
 import { fromIsoDate, isoDate } from './documentKind'

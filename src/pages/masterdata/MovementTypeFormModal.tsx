@@ -54,7 +54,7 @@ export function MovementTypeFormModal({ mode, movementType, onClose, onSaved }: 
         if (name.length > MAX_NAME) return `Name cannot be longer than ${MAX_NAME} characters.`
         return null
       },
-      stage: (value) => (value ? null : 'Stage is required.'),
+      stage: (value) => (value ? null : 'Choose its effect on the container.'),
     },
   })
 
@@ -124,7 +124,7 @@ export function MovementTypeFormModal({ mode, movementType, onClose, onSaved }: 
 
       <Group grow align="flex-start">
         <Select
-          label="Stage"
+          label="Effect on container"
           withAsterisk
           data={STAGE_OPTIONS}
           allowDeselect={false}

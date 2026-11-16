@@ -1872,40 +1872,52 @@ only drops the two buttons (`.no-print`), the page is A4 landscape, and `window.
 plan has loaded (a draft with unsaved changes is asked to save first). Export downloads `Shortage_<number>.xlsx`.
 Both are on the list's row actions and on the document.
 
-## Import container charges from Excel
+## Import container charges from Excel (script 113: a page of its own)
 
-**Import charges from Excel…** in the Containers page header (`ContainersPage`; shown with
-`containers.charges.create`, hidden without it) opens **`ImportContainerChargesWizard`**
-(`src/components/logistics/`). Every call of the feature is in `src/api/logistics/containerChargeImport.ts`
-(`api/logistics/container-charges/import`: `GET template`, `POST validate` multipart, `POST` the import,
-`POST error-report`), so aligning it with the API is one file.
+**Logistics › Import Charges** (`/logistics/container-charges/import`, `ImportContainerChargesPage`; behind
+`containers.charges.create`, which also shows the menu entry and the Containers header's **Import charges from Excel…**,
+now a link to the page). Every call of the feature is in `src/api/logistics/containerChargeImport.ts`
+(`api/logistics/container-charges/import`: `GET template`, `POST parse` multipart, `POST validate-rows`, `POST` the
+import, `POST error-report`; the old file `POST validate` stays on the API for any other caller).
 
-- **One row = one charge on one container**: the row's whole amount on that container, divided over its items by
-  the row's allocation method (the charge type's when blank; Manual is refused). There is no split over several
-  containers here; that is **Add charge**.
-- **The same three steps and rules as `ImportInvoiceItemsWizard`**, in a component of its own: .xlsx up to 5 MB
-  (the API's limit) checked before the upload, chosen by drag and drop, a click in the drop zone, or its
-  **Choose a file…** button (the way in from the keyboard); the server judges every row (Valid / Warning / Error) and keeps nothing; the wizard
-  holds the judged rows (the import is sent them back as they came, with the file name), and **Download the error
-  report** posts them back too. A Warning (a duplicate, a late charge…) is imported as its own charge, never merged.
-  The reader's today goes with the file (`today`): it is what a blank Charge Date means.
-- **Step 2** shows every row: Container (ref, no. and status; the file's text in red when it matched nothing),
-  Charge Type, Date ("today" under a blank one), Amount (with "≈ 1,630.43 USD" and "rate 0.92 of the date"
-  under another currency), Provider (with "Inv. {no.}", and "One group with row 3" when the rows of one provider
-  invoice share a charge group), Allocation ("the type's default" under a blank one), Status, Message. "Continue
-  with {n} charges"; "Choose another file" starts again.
-- **Step 3** says what will be created (charges, containers, charge groups, totals per currency ≈ base). The
-  **Post the charges** switch (off by default) is offered only with `containers.charges.post`, which the server
-  checks again; without it a line says the charges stay drafts. The button reads "Import {n} charges", or
-  "Import {n}, skip {m}" when rows have errors.
-- **Each row is imported on its own.** The result lists every row with a link to its container: Posted, Draft,
-  "Draft, not posted" (outcome Draft with a message when posting was asked: the draft stays) or Refused (outcome
-  Failed), with the API's reason as it came. **Download the refused rows** (shown only when a row was refused) is
-  the error report of the Refused rows only, with their reasons, to correct and import again. A "Draft, not
-  posted" row is never in it: its charge exists, and importing it again would add a second one (the duplicate
-  check is only a warning); the result says to post it from the container or Logistics › Container Charges. The
-  Containers list reloads as soon as one charge was created.
-- The dialog is 1280 px wide and full screen below 768 px; its tables scroll sideways inside it.
+- **One row = one charge on one container**, the rows of one provider invoice in one charge group: the import
+  service's rules, unchanged. There is no split over several containers here; that is **Add charge**.
+- **Read once, judge as often as needed.** The file is read by `parse` (the .xlsx up to 5 MB is checked before the
+  upload) and its rows stay on the page as the file says them; `validate-rows` judges the rows the page holds, with
+  what it validates on and its Payment panel, and keeps nothing.
+- **Validate on**: chips **Container no.**, **Container reference** (what the Container column is looked up as; at least
+  one) and **Charge reference** (with it a row is a Duplicate when its container already has the same charge type and
+  provider invoice no., or another row has; without it, the same type, amount, currency and date). Changing the chips,
+  the payment or the rows makes the last validation stale: an orange line says so and Apply waits for **Validate
+  again**.
+- **The grid colours what needs a look**: Error rows red (`--mantine-color-red-light`), Duplicate rows violet,
+  Warning rows yellow, Valid rows plain; the badge is the same colour, the message under Message. Counts per status,
+  a filter (All / Error / Duplicate / Warning / Valid), **Tick the duplicates**, **Tick the errors**, a checkbox per
+  row and **Delete n** (confirmed; the file itself is not changed). 200 rows are drawn at a time ("Show 200 more").
+- **Errors and Duplicates are never imported**: Apply is disabled, its tooltip saying what is left ("Delete the 2 error
+  rows and 1 duplicate row first, then validate again."), until a current validation has neither.
+- **One Payment panel for the file** (`ChargePaymentPanel`, below): Cash needs every row's provider and an account in
+  the row's currency (the validation says so per row, "Paid cash: …"); with **Post the charges** (offered with
+  `containers.charges.post` only) the charges of one provider invoice are posted together, so one supplier payment
+  pays them.
+- **Apply** says what it will do and creates each row on its own; the result lists every row (Posted, Draft, "Draft,
+  not posted", Refused with the API's reason, a link to its container), then **Open Container Charges** or **Import
+  another file**. **Error report** downloads the rows that are not Valid.
+
+## A container charge paid cash or on account (script 113)
+
+`ChargePaymentPanel` (`src/components/logistics/`, its form and helpers in `chargePayment.ts`) is the sales invoice's
+Payment panel on a charge, in **New charge**, the charge drawer (editable on a draft, read-only after) and the import page:
+
+- **Payment Type**: **On account** (the default, and every charge before script 113: payable to its provider, paid
+  later with Purchase › Supplier Payments) or **Cash**: then **Payment Method** (cheques are not offered: a cheque's
+  details are typed on a supplier payment), **Cash / Bank Account** (active, in the charge's currency, of the method's
+  kind) and an optional **Payment Reference**. A deduction shows "A deduction is not paid" and nothing to choose.
+- **Nothing in the panel makes a payment**: the server does, once, when the charge is posted (a Container Charge
+  Payment to the provider, posted, the charge then Paid). The post confirmation says so; a posted cash charge shows
+  "Paid by PAY-…" with a link, and cancelling the charge reverses that payment.
+- On the payment page an automatic payment's **Reverse** is disabled: "Made when a container charge paid cash was
+  posted: cancel the charge instead."
 
 ## Charge types & landed cost
 
@@ -2007,6 +2019,10 @@ rather than a row of dashes, which would leak the permission as a shrug.
 tracking sheet worked out by the system: one row per container line and per approved order line still to load, with its
 order, PI, invoices, payments, journey, charges and cost. `containerReportApi.report` answers the WHOLE report
 (`paging: 'client'`); the page never pages the server.
+
+- **"With charges"** (script 110), a switch beside "Received containers", off by default: off, the server reads no
+  charge (the slow part), so the transport, charge and TOTAL EXPENSES columns are left out (`withCharges` on the result)
+  and the stage tiles add the FOB, marked "FOB". COST PER UNIT stays: it is the line's own.
 
 - **Grouped by stage from the start**: `useDataGrid({ groupBy: 'stageLabel' })` - the grid engine's new `groupBy` option,
   the column a fresh grid starts grouped by (the reader may still change or clear it from the Group by menu; it is not
@@ -2144,6 +2160,14 @@ how the date is shown. Mantine's own parser ignored the format (dayjs has no `cu
   alike). Store it with `isoDate(next)` (`documentKind.ts`, which takes the string or a Date) or `String(next)`, and
   give the field back the string (`value={filters.dateFrom}`) or `fromIsoDate(...)`, a Date at local midnight.
 - `DatePickerInput` and `MonthPickerInput` are picked from a calendar, never typed: nothing to parse.
+- **Import `DateInput` from `components/ui/DateInput`, never from `@mantine/dates`** (only `theme.ts` does). It is
+  Mantine's field plus two habits of the people typing: entering it (a click or Tab) selects the whole date, so what
+  is typed replaces it; and a short date is finished when the field is left or Enter is pressed - a day alone ("5")
+  takes the current month and year, a day and a month ("5/11", "5 nov") the current year (`completeTypedDate`). Never
+  while typing: "1" is the start of "15/10/2026" (the rule above).
+- **A Date From sets its Date To to the end of its month** (`monthEnd`, `typedDate.ts`), on every page with a date
+  range, at every change of the From (typed, finished or picked); the To can then be changed. Clearing the From leaves
+  the To. So a From never carries a `maxDate` of its To: that would refuse a From in a later month.
 - Shown outside an input, a document date reads `DD/MM/YYYY` through `dateLabel`; a moment goes through
   `formatDateTime` (see `format.ts`): **`DD/MM/YYYY HH:mm`, day first and 24-hour, in the reader's local time**
   ("2026-10-11T22:35:40Z" reads "12/10/2026 01:35" at UTC+3), whatever the browser's language - never
@@ -2791,3 +2815,108 @@ order card's Ref. never wraps and its Status badge keeps its whole word (`WHOLE_
 - [ ] A page routed outside `AppShell` (a print page, a public page) renders `<TestingMarker />` first (see
       **Environments (Production / Testing)**).
 - [ ] `npm run typecheck`, `npm run lint`, `npm run build` all clean; no `any`, no TODOs, no mock data.
+
+## Shipment stages: Update stage… and the forwarder's list (script 111)
+
+A container moves on by its **stage** (`src/api/logistics/shipmentStages.ts`), never by a movement the user builds: the
+server makes, starts and completes the movements behind the stage. Everywhere a container can move, the action is
+**Update stage…** (`UpdateStageModal`): the Containers list's selection bar and row menu, and the container's own page
+(in its action bar, repeated in the route card on a phone).
+
+- **Pick, then see**: the stage picker asks the server what the stage does to each container (`preview`) as soon as it
+  is picked - Will move / Already there / Cannot move with the server's reason - and only the ones that will move are
+  sent. A leg may carry its vessel or truck no. and ETA (one for every container: a truck each comes with the import).
+  An Offload stage says first that it posts each goods receipt for the full quantity.
+- **The forwarder's list** (`ImportStagesModal`, "Update stages from Excel…" on the Containers list): Container no.
+  (or ref) | New stage (its name; case, spaces and "->" do not matter) | Date (empty: today; 05/11/2026 or an Excel
+  date) | Truck / vessel no. | ETA, from a file or pasted. Every row is checked before anything moves (the match of the
+  number, the stage, the date, then the server's preview per stage); the template is built in the browser with the
+  stage names on its second sheet.
+- **One result per container**, Moved / Already there / Refused, with the goods receipt's refusal as an orange warning
+  under a container that moved: it is delivered with its draft, which the warehouse finishes.
+- **Where it stands**: the Containers list's Stage column (`StageBadge`: gray Pending, blue on a leg, teal arrived,
+  green offloaded, orange not on a stage) and the Stage filter in the first filter line (Status moved to the advanced
+  filters).
+- **The movement tools are for the advanced readers** (`PERMISSIONS.movementsAdvanced`): the Shipments, Movements and
+  Tracking menus, the Next step button, entry, column and filter, and the route card's "New movement". Their pages and
+  permissions are unchanged.
+- Backoffice › Master Data › **Shipment Stages** (`ShipmentStagesPage`, `masterdata.shipmentstages.manage`): the
+  stages in their order with how many containers stand at each, and the containers whose route the stages do not describe.
+
+## Reports: Run Report and Clear Filters
+
+The reports that run on demand - Container Report, Container Charges, Dispatched Items, Item Balance by Warehouse,
+Attachment Report - have the same two buttons at the right of their filter bar: **Clear Filters** (`variant="default"`,
+`IconFilterOff`: the criteria back to their defaults and the result gone) and **Run Report** (the primary button,
+`IconPlayerPlay`). They ask the server for nothing when they open - the criteria count once Run Report is clicked (Enter in
+a search box too), and Export to Excel exports the report on screen; until then the page says "Choose …, then Run Report."
+The clear button is called Clear Filters on every report and list, never "Reset". Goods on Order loads on open (a snapshot
+with no required criteria) and keeps Refresh; Shortages, Stock Valuation, Sales Profit and Customer Statement still load on
+open and refilter as their filters change.
+
+## A report that runs on demand and downloads files (script 101: Reports › Attachment Report)
+
+`pages/reports/AttachmentReportPage.tsx`, the pattern for a report whose result is files rather than figures:
+
+- **The filters live in the address** (`?types=3,7&docFrom=…&docTo=…&upFrom=…&upTo=…&page=2&size=25&run=1`): a refresh, a
+  bookmark or a shared link reruns the same report. What is typed in the filter bar counts only once **Run Report** is
+  clicked (it writes the address); a "from" after its "to" shows under the "to" field and disables Run Report - no query.
+- **Paged on the server** (`totalRecords`, `page`, `recordsPerPage` and `onRecordsPerPageChange` on `DataTable`): the
+  browser never holds the whole set; the header shows the count and total size of every match.
+- **Selection:** the grid's checkboxes (`selectedRecords`, `idAccessor="key"`); its header box ticks the current page only;
+  "Select all N matching" is a separate checkbox that makes the download take every match on the server.
+- **Downloads** go through `postForBlob` + `saveBlob`, under the name the API gives each row (`downloadName`) or the
+  report (`zipFileName`). A blue "Preparing download" Alert with a Loader shows while the server builds the ZIP, and the
+  buttons are disabled meanwhile. The page checks the limits it was given (`maxFiles` / `maxBytes`) before asking; the
+  server checks again and its 409 message is shown as it comes.
+- What each reader may see is the server's to decide; the page never filters rows by permission itself.
+
+
+## Deduction charges: typed positive, shown negative (script 102)
+
+A charge type with `isDeduction` (Configuration › Charge Types, DED "Deduction / refund") lowers the cost. The rule on
+every charge form (New charge, the charge drawer, Apply to other containers, the invoice's own charges, late charges):
+
+- **The form holds sizes.** The amount and a manual split are typed without a minus, under "Amount deducted"; a saved
+  deduction comes back negative and is read with `Math.abs` (`chargeFromDto`, `headerOf`, `manualOf`). The server signs
+  it from the type, so a form never sends a negative number and `min={0}` stays.
+- **The read side shows the sign.** Amounts below zero are drawn in red with their minus (Container Charges list, the
+  New charge preview and its result, the invoice charges' base column); totals add the signed value (`signedAmountBase`).
+- **Badges:** "lowers the item cost" (red) when the type is picked, "deduction" on an invoice charge row.
+- **Payment status** 'Deduction' (`paymentStatusLabel`, grape): it is paid to nobody and no payment offers it.
+
+
+## A balance report with grouped columns (script 103: Reports › Item Balance by Warehouse)
+
+`ItemBalanceReportPage`, `ItemBalanceReportPrintPage` and `itemBalanceColumns.ts` in `src/pages/reports/`.
+
+- **Runs on demand, filters in the address**, like the Attachment Report (`toParams` / `queryFromParams` in
+  `src/api/reports/itemBalance.ts`): the draft counts once "Run Report" is clicked. Dates default to the first of the month
+  and today. The warehouse picker lists only the reader's warehouses (the API's `/warehouses`), indented by the tree.
+- **One column list for screen, print and Excel.** `balanceColumns(report, hideEmpty)` builds the columns once; the screen
+  and the print page draw it, and the API's export builds the same list, so the three match in rows, columns and totals.
+  On paper each figure column sits under a group header (Opening, a kind of movement, Total in / out, Closing) with its
+  Qty / Amount (`headerGroups` gives the top row's spans).
+- **On screen, the grid engine** (`useDataGrid` + `DataTable`, store key `reports.itemBalance`): the same columns
+  flattened ("Sales delivery · Qty", accessors made plain by `accessorOf`), plus Family and a Check column (OK, Negative,
+  Does not add up, On the way) to filter and group by; **no Warehouse column** (the owner's wish: Location names the
+  warehouse the stock is in - a warehouse at the top of its tree is its own location in the grid; print and Excel keep
+  both). Sort, funnels and the filter row, the column chooser, Group by with each group's subtotals, footer sums over the
+  rows left, CSV of the grid as shown. **Grouped by Location to start** (the owner's wish), sorted by location then item.
+  A search box above it narrows by item, family, warehouse or location. The server's totals and the Excel / print stay over every row; the grid's footer follows its filters.
+- **Not paged on the server:** the answer holds every row (the totals and the integrity check are over all of them); the
+  grid pages them 100 at a time.
+- **The Columns button** in every engine grid's toolbar (next to Group by) opens the column chooser, which was only on a
+  header's right-click before.
+- **Hide empty columns redraws at once** (the answer says which kinds of movement have activity); Show zero-balance items
+  reruns (the server leaves those rows out).
+- **Amounts are the server's to strip:** without View item costs the answer says `seesAmounts: false` and every amount is
+  null; the page then draws quantities only and hides the currency filters.
+- **Signs and flags:** quantities and amounts out are negative and red; a row with negative stock is tinted red, a row whose
+  integrity check failed orange with a "Does not add up" badge; both are counted above or below the table, with the
+  server's rounding notes.
+- **Drill-down:** a movement figure is a link-styled button that opens a drawer of its documents
+  (`/item-balance/movements`); each document number links through `stockDocumentRoute` (shared with the item's stock
+  statement), and only when the reader may open that kind of document.
+- **PDF = print page:** "Print / PDF" opens `/reports/item-balance/print?…` (outside the shell, A4 landscape, prints on load);
+  the browser's "Save as PDF" gives the PDF. There is no PDF library.

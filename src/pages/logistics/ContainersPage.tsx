@@ -17,7 +17,8 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core'
-import { DateInput, MonthPickerInput } from '@mantine/dates'
+import { MonthPickerInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import {
   IconAdjustmentsHorizontal,
   IconBan,
@@ -46,8 +47,10 @@ import {
   type ContainerListDto,
   type ContainerNextStepFilter,
   type ContainerJourneyStatus,
+  type ContainerPaymentStatus,
   type ContainerStatusCode,
 } from '../../api/logistics/containers'
+import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { partiesApi } from '../../api/masterdata/parties'
 import { portLabel, portsApi, type PortLookupDto } from '../../api/masterdata/ports'
 import type { ItemLookupDto, PartyLookupDto } from '../../api/types'
@@ -57,9 +60,11 @@ import { ContainerSelectionBar } from '../../components/logistics/ContainerSelec
 import { ContainerFillCell } from '../../components/logistics/ContainerFillLine'
 import { ContainerReceiptCell } from '../../components/logistics/ContainerReceiptCell'
 import { containerReceiptOf, receiptBlocksCancelText, RECEIVABLE_STATUSES } from '../../components/logistics/containerReceipt'
-import { ImportContainerChargesWizard } from '../../components/logistics/ImportContainerChargesWizard'
 import { refreshSelection } from '../../components/logistics/containerSelection'
 import { useNextStep } from '../../components/logistics/useNextStep'
+import { ImportStagesModal } from '../../components/logistics/ImportStagesModal'
+import { StageBadge, UpdateStageModal } from '../../components/logistics/UpdateStageModal'
+import { shipmentStagesApi, type ShipmentStageDto } from '../../api/logistics/shipmentStages'
 import { NEXT_STEP_FILTERS, nextStepColumnText, nextStepOf } from '../../components/logistics/nextStep'
 import { NextStepFilterPopover } from '../../components/logistics/NextStepFilterPopover'
 import { JourneyFilterPopover } from '../../components/logistics/JourneyFilterPopover'
@@ -79,8 +84,11 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 export const CONTAINERS_ROUTE = '/logistics/containers'
+/** (113) Import charges from Excel… is a page of its own. */
+const IMPORT_CHARGES_ROUTE = '/logistics/container-charges/import'
 
 interface Filters {
   containerNo: string
@@ -91,6 +99,10 @@ interface Filters {
   nextStep: ContainerNextStepFilter | null
   /** (95) Where they are on their journey: the Journey column's funnel, filtered on the server. */
   journey: ContainerJourneyStatus | null
+  /** (108) What their supplier invoices are paid. */
+  paymentStatus: ContainerPaymentStatus | null
+  /** (111) Where they stand: a stage's id, '0' Pending, '-1' not on a stage. */
+  stageId: string | null
   /** 'YYYY-MM-01' of the picked month. */
   orderMonth: string | null
   // advanced
@@ -111,6 +123,8 @@ const NO_FILTERS: Filters = {
   status: null,
   nextStep: null,
   journey: null,
+  paymentStatus: null,
+  stageId: null,
   orderMonth: null,
   purchaseOrderId: null,
   purchaseDocumentId: null,
@@ -122,7 +136,7 @@ const NO_FILTERS: Filters = {
   dateTo: null,
 }
 
-const ADVANCED: (keyof Filters)[] = ['nextStep', 'journey', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
+const ADVANCED: (keyof Filters)[] = ['status', 'nextStep', 'journey', 'purchaseOrderId', 'purchaseDocumentId', 'commercialInvoiceNo', 'itemId', 'blNo', 'portId', 'dateFrom', 'dateTo']
 
 /**
  * The Status filter's own choice beside the statuses: a completed Delivery-stage movement and no posted goods receipt
@@ -154,6 +168,8 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'invoiceNumbers', text: (r) => r.invoiceNumbers ?? '' },
   { accessor: 'commercialInvoiceNos', text: (r) => r.commercialInvoiceNos ?? '' },
   { accessor: 'invoicingStatus', kind: 'list', text: (r) => INVOICING_STATUSES[r.invoicingStatus]?.label ?? '' },
+  // (108) filtered on the server (the Payment filter above the list), so its funnel is off
+  { accessor: 'paymentStatus', text: (r) => paymentText(r.paymentStatus), filterable: false },
   { accessor: 'itemSummary', text: (r) => r.itemSummary ?? '' },
   { accessor: 'totalQtyBase', kind: 'number', summary: 'sum' },
   { accessor: 'fillPct', kind: 'number', text: (r) => (r.fillPct === null ? '' : formatNumber(r.fillPct, 1)) },
@@ -163,6 +179,8 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'blNo', text: (r) => r.blNo ?? '' },
   { accessor: 'dispatchDate', kind: 'date' },
   { accessor: 'eta', kind: 'date' },
+  // (111) where it stands, filtered on the server (the Stage filter above the list)
+  { accessor: 'stageName', text: (r) => r.stageName ?? '', filterable: false },
   // (95) the latest leg that started, and whether it is on its way or arrived (filtered on the server: its funnel)
   { accessor: 'journeyLeg', text: journeyLegText },
   { accessor: 'journeyStatus', text: journeyStatusText, filterable: false },
@@ -172,6 +190,15 @@ const GRID_COLUMNS: GridColumnMeta<ContainerListDto>[] = [
   { accessor: 'nextStep', text: nextStepColumnText, filterable: false },
   { accessor: 'goodsReceiptNumber', text: receiptText },
 ]
+
+/** (108) "Fully Paid", "Not invoiced": the purchase invoice list's words, and one for goods no posted invoice covers. */
+function paymentText(status: ContainerPaymentStatus | null | undefined): string {
+  if (!status) return ''
+  return status === 'NotInvoiced' ? 'Not invoiced' : paymentStatusLabel(status)
+}
+
+/** The Payment filter's choices: the purchase invoice list's three, and Not invoiced. */
+const PAYMENT_FILTERS = [...PAYMENT_STATUS_OPTIONS, { value: 'NotInvoiced', label: 'Not invoiced' }]
 
 /** 'YYYY-MM-..' -> 202609 */
 function monthKey(value: string | null): number | undefined {
@@ -201,9 +228,14 @@ export function ContainersPage() {
   const canCancel = hasPermission(PERMISSIONS.containersCancel)
   const canDelete = hasPermission(PERMISSIONS.containersDelete)
   const canImportCharges = hasPermission(PERMISSIONS.containerChargesCreate)
+  // (108) the Payment column and filter: the server sends the status empty without View Supplier Payments
+  const canSeePayments = hasPermission(PERMISSIONS.paymentsView)
   // The order and PI filters list documents the reader may not see: asked for only with their view permission.
   const canViewOrders = hasPermission(PERMISSIONS.purchaseOrdersView)
   const canViewInvoices = hasPermission(PERMISSIONS.purchaseInvoicesView)
+  // (111) Containers move by their stage; the movement-by-movement Next step stays for the advanced readers.
+  const canMove = hasPermission(PERMISSIONS.movementsManage)
+  const advanced = hasPermission(PERMISSIONS.movementsAdvanced)
 
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
   const [ports, setPorts] = useState<PortLookupDto[]>([])
@@ -212,7 +244,9 @@ export function ContainersPage() {
   const [cancelling, setCancelling] = useState<ContainerListDto | null>(null)
   const [cancelBusy, setCancelBusy] = useState(false)
   const [selected, setSelected] = useState<ContainerListDto[]>([])
-  const [importingCharges, setImportingCharges] = useState(false)
+  const [stages, setStages] = useState<ShipmentStageDto[]>([])
+  const [updatingStage, setUpdatingStage] = useState<{ id: number; containerRef: string }[] | null>(null)
+  const [importingStages, setImportingStages] = useState(false)
 
   const grid = useGridQuery<Filters, ContainerListDto, AllRows<ContainerListDto>>({
     initialFilters: NO_FILTERS,
@@ -236,6 +270,8 @@ export function ContainersPage() {
               deliveredNotReceived: filters.status === DELIVERED_NOT_RECEIVED || undefined,
               nextStep: filters.nextStep ?? undefined,
               journey: filters.journey ?? undefined,
+              paymentStatus: filters.paymentStatus ?? undefined,
+              stageId: filters.stageId === null ? undefined : Number(filters.stageId),
               orderMonthKey: monthKey(filters.orderMonth),
               purchaseOrderId: filters.purchaseOrderId === null ? undefined : Number(filters.purchaseOrderId),
               purchaseDocumentId: filters.purchaseDocumentId === null ? undefined : Number(filters.purchaseDocumentId),
@@ -279,6 +315,7 @@ export function ContainersPage() {
     partiesApi.lookup({ partyType: 'Supplier', activeOnly: false }).then(setSuppliers).catch(() => {})
     portsApi.lookup(false).then(setPorts).catch(() => {})
     itemsApi.lookup(false).then(setItems).catch(() => {})
+    shipmentStagesApi.list(false).then(setStages).catch(() => {})
   }, [])
 
   // The PO and PI filters search the server as they are typed (script 78), where they held the 200 newest. Each needs
@@ -294,6 +331,16 @@ export function ContainersPage() {
   const supplierOptions = useMemo(() => suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) })), [suppliers])
   const portOptions = useMemo(() => ports.map((p) => ({ value: String(p.id), label: portLabel(p) })), [ports])
   const itemOptions = useMemo(() => items.map((i) => ({ value: String(i.id), label: `${i.itemCode} - ${i.itemName}` })), [items])
+  // (111) Pending first, the stages in their order, then the containers whose route the stages do not describe.
+  const stageOptions = useMemo(
+    () => [
+      { value: '0', label: 'Pending' },
+      ...stages.map((s) => ({ value: String(s.id), label: s.isActive ? s.stageName : `${s.stageName} (inactive)` })),
+      { value: '-1', label: 'Not on a stage' },
+    ],
+    [stages],
+  )
+  const stageKind = (id: number | null) => stages.find((s) => s.id === id)?.kind ?? null
 
   async function exportOne(row: ContainerListDto) {
     try {
@@ -356,10 +403,10 @@ export function ContainersPage() {
     downloadCsv(
       'containers.csv',
       ['Container Ref.', 'Container No.', 'Order Month', 'Order No.', 'Supplier', 'PI No.', 'Commercial Invoice No.', 'Invoicing',
-        'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'From → To', 'Journey', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
+        'Payment', 'Model / Item', 'Qty', 'Charges', 'Movement', 'B/L No.', 'Dispatch Date', 'ETA', 'From → To', 'Journey', 'Current Location', 'Status', 'Next step', 'Goods receipt'],
       engine.rows.map((r) => [
         r.containerRef, r.containerNo ?? '', r.orderMonth, r.orderNumbers ?? '', r.supplierNames ?? '', r.invoiceNumbers ?? '',
-        r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', r.itemSummary ?? '', String(r.totalQtyBase),
+        r.commercialInvoiceNos ?? '', INVOICING_STATUSES[r.invoicingStatus]?.label ?? '', paymentText(r.paymentStatus), r.itemSummary ?? '', String(r.totalQtyBase),
         formatNumber(r.chargesPostedBase, 2), r.currentMovementNo ?? '', r.blNo ?? '', dateLabel(r.dispatchDate), dateLabel(r.eta),
         journeyLegText(r), journeyStatusText(r), r.currentLocation ?? '', r.statusName, nextStepColumnText(r), receiptText(r),
       ]),
@@ -426,6 +473,29 @@ export function ContainersPage() {
         )
       },
     },
+    ...(canSeePayments
+      ? [{
+          accessor: 'paymentStatus',
+          title: 'Payment',
+          width: 140,
+          // What the posted supplier invoices of its goods are paid, its share of each (script 73's split by container).
+          render: (row: ContainerListDto) =>
+            row.paymentStatus ? (
+              <Tooltip
+                label={row.paymentStatus === 'NotInvoiced'
+                  ? 'No posted supplier invoice covers its goods yet.'
+                  : `Paid ${formatNumber(row.paidAmountBase ?? 0, 2)} of ${formatNumber(row.invoicedAmountBase ?? 0, 2)} (base currency) invoiced for it`}
+                withArrow
+              >
+                <Badge size="sm" variant="light" color={row.paymentStatus === 'NotInvoiced' ? 'gray' : paymentStatusColour(row.paymentStatus)} style={{ whiteSpace: 'nowrap' }}>
+                  {paymentText(row.paymentStatus)}
+                </Badge>
+              </Tooltip>
+            ) : (
+              dash
+            ),
+        } satisfies DataTableColumn<ContainerListDto>]
+      : []),
     { accessor: 'itemSummary', title: 'Model / Item', width: 160, render: (row) => text(row.itemSummary) },
     {
       accessor: 'totalQtyBase',
@@ -472,6 +542,12 @@ export function ContainersPage() {
     { accessor: 'blNo', title: 'B/L No.', width: 110, render: (row) => text(row.blNo) },
     { accessor: 'dispatchDate', title: 'Dispatch Date', width: 140, render: (row) => dateLabel(row.dispatchDate) },
     { accessor: 'eta', title: 'ETA', width: 105, render: (row) => dateLabel(row.eta) },
+    {
+      accessor: 'stageName',
+      title: 'Stage',
+      width: 200,
+      render: (row) => <StageBadge name={row.stageName} kind={stageKind(row.stageId)} receiptPending={row.stageReceiptPending} />,
+    },
     {
       accessor: 'journeyLeg',
       title: 'From → To',
@@ -605,7 +681,17 @@ export function ContainersPage() {
         // Delivered: the next step IS the goods receipt - its own entry would say it twice.
         const receiptIsNext = step?.kind === 'Receive' || step?.kind === 'OpenReceipt'
         const entries = [
-          stepEntry,
+          {
+            key: 'updateStage',
+            show: canMove,
+            label: 'Update stage…',
+            icon: <IconRoute size={16} />,
+            disabled: row.status === 8,
+            reason: row.status === 8 ? 'This container is cancelled.' : undefined,
+            color: undefined as string | undefined,
+            onClick: () => setUpdatingStage([{ id: row.id, containerRef: row.containerRef }]),
+          },
+          { ...stepEntry, show: stepEntry.show && advanced },
           {
             key: 'receive',
             // (95) shown, disabled with the server's reason, until the container is delivered
@@ -705,8 +791,13 @@ export function ContainersPage() {
             <Button variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>
               Print
             </Button>
+            {canMove ? (
+              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => setImportingStages(true)}>
+                Update stages from Excel…
+              </Button>
+            ) : null}
             {canImportCharges ? (
-              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => setImportingCharges(true)}>
+              <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => void navigate(IMPORT_CHARGES_ROUTE)}>
                 Import charges from Excel…
               </Button>
             ) : null}
@@ -721,19 +812,28 @@ export function ContainersPage() {
 
       <div className="no-print">
         <FilterBar>
-          <FilterBar.Col span={2}>
+          {/* (108) With Payment on the line the spans are 1.75 + 1.75 + 2 + 2 + 2 + 1.5 + 1: a picked month ("Sep 2026") still
+              fits beside its clear button. */}
+          <FilterBar.Col span={canSeePayments ? 1.75 : 2}>
             <TextInput label="Container No." placeholder="MSKU..." value={filters.containerNo} onChange={(e) => setFilter('containerNo', e.currentTarget.value)} onKeyDown={(e) => { if (e.key === 'Enter') grid.commitFilters() }} />
           </FilterBar.Col>
-          <FilterBar.Col span={2}>
+          <FilterBar.Col span={canSeePayments ? 1.75 : 2}>
             <TextInput label="Container Ref." placeholder="KTG-..." value={filters.containerRef} onChange={(e) => setFilter('containerRef', e.currentTarget.value)} onKeyDown={(e) => { if (e.key === 'Enter') grid.commitFilters() }} />
           </FilterBar.Col>
-          <FilterBar.Col span={3}>
+          <FilterBar.Col span={canSeePayments ? 2 : 3}>
             <Select label="Supplier" placeholder="All suppliers" data={supplierOptions} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable nothingFoundMessage="No supplier matches" />
           </FilterBar.Col>
+          {/* (111) Where they stand: the stage, the way the team follows its containers. Status is in the advanced panel. */}
           <FilterBar.Col span={2}>
-            <Select label="Status" placeholder="All" data={STATUS_FILTER_OPTIONS} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
+            <Select label="Stage" placeholder="All" data={stageOptions} value={filters.stageId} onChange={(next) => setFilter('stageId', next)} clearable data-stage-filter-select />
           </FilterBar.Col>
-          <FilterBar.Col span={2}>
+          {/* (108) On the same line: Supplier and Order Month give it a column each. */}
+          {canSeePayments && (
+            <FilterBar.Col span={2}>
+              <Select label="Payment" placeholder="All" data={PAYMENT_FILTERS} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next as ContainerPaymentStatus | null)} clearable />
+            </FilterBar.Col>
+          )}
+          <FilterBar.Col span={canSeePayments ? 1.5 : 2}>
             <MonthPickerInput label="Order Month" placeholder="Any" valueFormat="MMM YYYY" value={filters.orderMonth} onChange={(next) => setFilter('orderMonth', next ? String(next).slice(0, 10) : null)} clearable />
           </FilterBar.Col>
           <FilterBar.Col span={1}>
@@ -755,16 +855,21 @@ export function ContainersPage() {
         <Collapse expanded={advancedShown}>
           <FilterBar>
             <FilterBar.Col span={3}>
-              <Select
-                label="Next step"
-                placeholder="Any step"
-                data={NEXT_STEP_FILTERS}
-                value={filters.nextStep}
-                onChange={(next) => setFilter('nextStep', next as ContainerNextStepFilter | null)}
-                clearable
-                data-next-step-filter-select
-              />
+              <Select label="Status" placeholder="All" data={STATUS_FILTER_OPTIONS} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
             </FilterBar.Col>
+            {advanced ? (
+              <FilterBar.Col span={3}>
+                <Select
+                  label="Next step"
+                  placeholder="Any step"
+                  data={NEXT_STEP_FILTERS}
+                  value={filters.nextStep}
+                  onChange={(next) => setFilter('nextStep', next as ContainerNextStepFilter | null)}
+                  clearable
+                  data-next-step-filter-select
+                />
+              </FilterBar.Col>
+            ) : null}
             <FilterBar.Col span={3}>
               <Select
                 label="Journey"
@@ -813,7 +918,7 @@ export function ContainersPage() {
               <Select label="Location / Port" placeholder="Any port" data={portOptions} value={filters.portId} onChange={(next) => setFilter('portId', next)} clearable searchable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
-              <DateInput label="Order date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
+              <DateInput label="Order date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => { setFilter('dateFrom', next ? isoDate(next) : null); if (next) setFilter('dateTo', monthEnd(isoDate(next))) }} clearable />
             </FilterBar.Col>
             <FilterBar.Col span={2}>
               <DateInput label="Order date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />
@@ -847,7 +952,13 @@ export function ContainersPage() {
         </Alert>
       ) : null}
 
-      <ContainerSelectionBar rows={data?.items ?? []} selected={selectedRows} onSelectedChange={setSelected} onChanged={load} />
+      <ContainerSelectionBar
+        rows={data?.items ?? []}
+        selected={selectedRows}
+        onSelectedChange={setSelected}
+        onChanged={load}
+        onUpdateStage={canMove ? (rows) => setUpdatingStage(rows.map((r) => ({ id: r.id, containerRef: r.containerRef }))) : undefined}
+      />
 
       <Paper radius="lg" withBorder>
         <DataTable<ContainerListDto>
@@ -856,7 +967,7 @@ export function ContainersPage() {
           exportFileName="containers"
           selectedRecords={selectedRows}
           onSelectedRecordsChange={setSelected}
-          columns={columns}
+          columns={advanced ? columns : columns.filter((c) => c.accessor !== 'nextStep')}
           fetching={loading}
           noRecordsText={grid.isDefault ? 'No containers yet.' : 'No containers match these filters.'}
           pinLastColumn
@@ -876,12 +987,10 @@ export function ContainersPage() {
 
       {nextStep.dialogs}
 
-      {/* One row of the file = one charge on one container; the Charges column changes with what is posted. */}
-      <ImportContainerChargesWizard
-        opened={importingCharges}
-        onClose={() => setImportingCharges(false)}
-        onImported={() => void load()}
-      />
+      {updatingStage ? (
+        <UpdateStageModal containers={updatingStage} onClose={() => setUpdatingStage(null)} onDone={() => void load()} />
+      ) : null}
+      {importingStages ? <ImportStagesModal onClose={() => setImportingStages(false)} onDone={() => void load()} /> : null}
     </div>
   )
 }

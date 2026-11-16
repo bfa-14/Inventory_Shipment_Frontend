@@ -99,7 +99,7 @@ src/
   auth/         session state
     AuthProvider.tsx   holds tokens + user, restores the session on reload, single-flight refresh
     ProtectedRoute.tsx route guard (optionally by role)
-    session.ts         sessionStorage persistence
+    session.ts         the session every tab shares
   components/   Layout (top bar + nav), Alert, formatting helpers
   pages/        LoginPage, DashboardPage (profile, token actions, change password), UsersPage (Admin)
   App.tsx       routes:  /login  ·  /  (dashboard)  ·  /users (Admin only)
@@ -112,7 +112,7 @@ src/
 3. On the first `401`, the client calls `POST /api/auth/refresh` once (rotating the refresh token) and replays the request; if that fails the user is sent back to `/login`.
 4. `Sign out` revokes the refresh token; `Sign out everywhere` revokes all of the user's tokens.
 
-Tokens are kept in `sessionStorage` (cleared when the tab closes). For a hardened production setup, keep the access token in memory only and let the API issue the refresh token as an `HttpOnly` cookie.
+Tokens are kept in `localStorage`, shared by every tab of the browser: a tab opened from a signed-in tab is signed in too. One tab at a time rotates the refresh token (a browser lock; the API signs a user out everywhere when a rotated token is presented again), and the others follow it; signing out in one tab signs out them all. A tab opened afresh takes the session over only when another open tab of the app answers for it, so closing the browser still signs out. For a hardened production setup, keep the access token in memory only and let the API issue the refresh token as an `HttpOnly` cookie.
 
 ## Production build
 

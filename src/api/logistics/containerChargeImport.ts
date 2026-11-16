@@ -1,5 +1,5 @@
 import { fetchBlob, postForBlob, postForm, request } from '../http'
-import type { AllocationMethod } from './containerCharges'
+import type { AllocationMethod, ChargePaymentType } from './containerCharges'
 import { saveBlob } from './containers'
 
 /**
@@ -19,8 +19,46 @@ const BASE = '/api/logistics/container-charges/import'
 export const CHARGE_IMPORT_TEMPLATE_FILE = 'Import_Container_Charges_Template.xlsx'
 export const CHARGE_IMPORT_ERRORS_FILE = 'Import_Container_Charges_Errors.xlsx'
 
-/** Valid and Warning rows are imported (a Warning is worth a look: a duplicate, a late charge…); Error rows are skipped. */
-export type ChargeImportRowStatus = 'Valid' | 'Warning' | 'Error'
+/**
+ * Valid and Warning rows are imported (a Warning is worth a look: a late charge, a box number on two containers…); Error
+ * rows are skipped. (113) A Duplicate - the same charge as another row or one already entered, by the keys the page
+ * validates on - is never imported either.
+ */
+export type ChargeImportRowStatus = 'Valid' | 'Warning' | 'Duplicate' | 'Error'
+
+/** (113) A row of the file as it says it, before anything is judged: what the Import Container Charges page keeps. */
+export interface ChargeImportFileRow {
+  rowNumber: number
+  container: string | null
+  chargeType: string | null
+  amount: number | null
+  rawAmount: string | null
+  currency: string | null
+  /** "yyyy-MM-dd". */
+  chargeDate: string | null
+  rawChargeDate: string | null
+  exchangeRate: number | null
+  rawExchangeRate: string | null
+  provider: string | null
+  providerInvoiceNo: string | null
+  allocation: string | null
+  notes: string | null
+}
+
+/** (113) What the page validates on: the Container column against the no., the ref or both; Charge reference for duplicates. */
+export interface ChargeImportOptions {
+  matchContainerNo: boolean
+  matchContainerRef: boolean
+  matchReference: boolean
+}
+
+/** (113) The file's one Payment panel: Cash pays each charge (one payment per provider invoice) when it is posted. */
+export interface ChargeImportPayment {
+  paymentType: ChargePaymentType
+  paymentMethodId: number | null
+  paymentAccountId: number | null
+  paymentReference: string | null
+}
 
 /**
  * One row of the "Charges" sheet as the server judged it: what the file said (*Input, raw*) and every value
@@ -103,6 +141,8 @@ export interface ChargeImportValidation {
   validRows: number
   warningRows: number
   errorRows: number
+  /** (113) The same charge twice: never imported. */
+  duplicateRows: number
   /** Valid + Warning: what an import would create. */
   importableRows: number
   baseCurrencyCode: string | null
@@ -112,6 +152,8 @@ export interface ChargeImportValidation {
 export interface ImportContainerChargesRequest {
   /** Post each charge right after creating it: needs containers.charges.post (403 before anything is created). */
   post: boolean
+  /** (113) How the charges are paid. */
+  payment: ChargeImportPayment
   /** The file's name, for the log. */
   fileName: string | null
   /** The rows as validate answered them; Error rows are skipped by the server. */
@@ -182,6 +224,19 @@ export const containerChargeImportApi = {
     form.append('today', localToday())
     return postForm<ChargeImportValidation>(`${BASE}/validate`, form, signal)
   },
+
+  /** (113) The file's rows as it says them; a 400 INVALID_FILE is the file's own problem. */
+  parse: (file: File, signal?: AbortSignal) => {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return postForm<{ fileName: string; rows: ChargeImportFileRow[] }>(`${BASE}/parse`, form, signal)
+  },
+
+  /** (113) The page's rows judged with its options and payment; nothing is created. */
+  validateRows: (
+    payload: { fileName: string | null; rows: ChargeImportFileRow[]; options: ChargeImportOptions; payment: ChargeImportPayment },
+    signal?: AbortSignal,
+  ) => request<ChargeImportValidation>(`${BASE}/validate-rows`, { method: 'POST', body: { ...payload, today: localToday() }, signal }),
 
   /** Creates one charge per row (the rows of one provider invoice in one group), as drafts or posted; each row on its own. */
   importRows: (payload: ImportContainerChargesRequest) =>

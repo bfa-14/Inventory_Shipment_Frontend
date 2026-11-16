@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Paper, Select, SimpleGrid, Text, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconFileExport, IconFilterOff } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
@@ -33,6 +33,7 @@ import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { brandLabel, familyOptions } from '../inventory/lookups'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   dateFrom: string | null
@@ -398,7 +399,10 @@ export function SalesProfitPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next)}
+            onChange={(next) => {
+              setFilter('dateFrom', next)
+              if (next) setFilter('dateTo', monthEnd(next))
+            }}
             clearable
           />
         </FilterBar.Col>

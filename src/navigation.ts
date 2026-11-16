@@ -15,6 +15,13 @@ export const PERMISSIONS = {
   shipmentsView: 'containers.shipments.view',
   // Reports › Container Report, the tracking sheet worked out by the system (script 95).
   containerReportView: 'containers.report.view',
+  /** Reports › Attachment Report (script 101): each reader still sees only the files of documents they may open. */
+  attachmentReportView: 'reports.attachments.view',
+  // (103) Each item's opening, movements and closing per warehouse; its amounts also need costsView.
+  itemBalanceReportView: 'reports.itembalance.view',
+  containerChargesReportView: 'reports.containercharges.view',
+  dispatchedItemsReportView: 'reports.dispatcheditems.view',
+  goodsOnOrderReportView: 'reports.goodsonorder.view',
   usersView: 'security.users.view',
   usersCreate: 'security.users.create',
   usersEdit: 'security.users.edit',
@@ -170,6 +177,9 @@ export const PERMISSIONS = {
   portsManage: 'masterdata.ports.manage',
   attachmentTypesManage: 'masterdata.attachmenttypes.manage',
   movementTypesManage: 'masterdata.movementtypes.manage',
+  // (111) The stages a container moves through; and the three menus hidden from everyone else (containers move by stage).
+  shipmentStagesManage: 'masterdata.shipmentstages.manage',
+  movementsAdvanced: 'containers.movements.advanced',
   paymentMethodsManage: 'masterdata.paymentmethods.manage',
   cashBankAccountsManage: 'masterdata.cashbankaccounts.manage',
 } as const
@@ -264,10 +274,18 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Shortages', to: '/inventory/shortages', permission: PERMISSIONS.shortagesView, icon: 'shortage' },
       // What the shelves are worth: the item list with its money shown, behind the same permission.
       { label: 'Stock Valuation', to: '/inventory/valuation', permission: PERMISSIONS.valuationView, icon: 'balance' },
+      // (103) Opening, movements and closing of each item per warehouse over a period: month-end.
+      { label: 'Item Balance by Warehouse', to: '/reports/item-balance', permission: PERMISSIONS.itemBalanceReportView, icon: 'balance' },
       // Net sales less the cost frozen on each line. Its own permission: a margin is not a price.
       { label: 'Sales Profit', to: '/sales/profit', permission: PERMISSIONS.salesProfitView, icon: 'reports' },
       // (95) Every container and order still to load, by where the goods are: the purchasing team's tracking sheet.
       { label: 'Container Report', to: '/logistics/container-report', permission: PERMISSIONS.containerReportView, icon: 'reports' },
+      // (105) Each container offloaded or dispatched in a period with each charge type entered or missing, and its payments.
+      { label: 'Container Charges', to: '/reports/container-charges', permission: PERMISSIONS.containerChargesReportView, icon: 'reports' },
+      { label: 'Dispatched Items', to: '/reports/dispatched-items', permission: PERMISSIONS.dispatchedItemsReportView, icon: 'reports' },
+      { label: 'Goods on Order', to: '/reports/goods-on-order', permission: PERMISSIONS.goodsOnOrderReportView, icon: 'reports' },
+      // Every module's attachments by type and date, downloaded one, several or all at once (script 101).
+      { label: 'Attachment Report', to: '/reports/attachments', permission: PERMISSIONS.attachmentReportView, icon: 'documents' },
       { label: 'Customer Statement', to: '/sales/receipts/statement', permission: PERMISSIONS.statementView, icon: 'reports' },
       // Who confirmed selling below zero stock, and when: the audit of the Allow Selling Out of Stock setting.
       { label: 'Out-of-Stock Sales', to: '/sales/out-of-stock-audit', permission: PERMISSIONS.outOfStockAuditView, icon: 'reports' },
@@ -276,15 +294,18 @@ export const NAVIGATION: NavSection[] = [
   {
     // THE SHIPMENT BETWEEN THE ORDER AND THE WAREHOUSE: containers loaded from purchase orders, the
     // movements they travel with, the charges that make their real cost, and the tracking board. The Shipments board
-    // comes first (script 82): where every container is, by stage, and what each does next.
+    // comes first (script 82): where every container is, by stage, and what each does next. (111) Containers move by
+    // their stage now (Update stage… on the Containers list): Shipments, Movements and Tracking are shown only with
+    // Show Shipments, Movements and Tracking - their pages keep their own permissions, for an administrator's corrections.
     title: 'LOGISTICS',
     breadcrumb: 'Logistics',
     items: [
-      { label: 'Shipments', to: '/logistics/shipments', permission: PERMISSIONS.shipmentsView, icon: 'board' },
+      { label: 'Shipments', to: '/logistics/shipments', permission: PERMISSIONS.movementsAdvanced, icon: 'board' },
       { label: 'Containers', to: '/logistics/containers', permission: PERMISSIONS.containersView, icon: 'truck' },
-      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsView, icon: 'ship' },
+      { label: 'Movements', to: '/logistics/movements', permission: PERMISSIONS.movementsAdvanced, icon: 'ship' },
       { label: 'Container Charges', to: '/logistics/container-charges', permission: PERMISSIONS.containerChargesView, icon: 'coins' },
-      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.trackingView, icon: 'route' },
+      { label: 'Import Charges', to: '/logistics/container-charges/import', permission: PERMISSIONS.containerChargesCreate, icon: 'coins' },
+      { label: 'Tracking', to: '/logistics/tracking', permission: PERMISSIONS.movementsAdvanced, icon: 'route' },
     ],
   },
   {
@@ -395,6 +416,7 @@ export const NAVIGATION: NavSection[] = [
           { label: 'Ports & Places', to: '/setup/master-data/ports', permission: PERMISSIONS.portsManage },
           { label: 'Attachment Types', to: '/setup/master-data/attachment-types', permission: PERMISSIONS.attachmentTypesManage },
           { label: 'Movement Types', to: '/setup/master-data/movement-types', permission: PERMISSIONS.movementTypesManage },
+          { label: 'Shipment Stages', to: '/setup/master-data/shipment-stages', permission: PERMISSIONS.shipmentStagesManage },
           // The lists a customer receipt line picks from.
           { label: 'Payment Methods', to: '/setup/master-data/payment-methods', permission: PERMISSIONS.paymentMethodsManage },
           { label: 'Cash / Bank Accounts', to: '/setup/master-data/cash-bank-accounts', permission: PERMISSIONS.cashBankAccountsManage },

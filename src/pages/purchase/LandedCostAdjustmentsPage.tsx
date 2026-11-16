@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { routes } from '../../routes'
 import { Alert, Anchor, Badge, Button, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconEye, IconFileExport, IconFilterOff, IconPlus, IconSearch, IconSend, IconX } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
@@ -29,6 +29,7 @@ import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 export const LANDED_COSTS_ROUTE = '/purchase/landed-cost-adjustments'
 
@@ -319,7 +320,10 @@ export function LandedCostAdjustmentsPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

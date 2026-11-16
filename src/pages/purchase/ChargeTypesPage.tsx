@@ -193,6 +193,12 @@ export function ChargeTypesPage() {
       render: (c) => <YesNo value={c.isRecoverableTax} />,
     },
     {
+      accessor: 'isDeduction',
+      title: 'Deduction',
+      width: 120,
+      render: (c) => <YesNo value={c.isDeduction} />,
+    },
+    {
       accessor: 'isActive',
       title: 'Status',
       width: 120,
@@ -394,6 +400,7 @@ const GRID_COLUMNS: GridColumnMeta<ChargeTypeDto>[] = [
   { accessor: 'allocationMethod', text: (c) => allocationMethodLabel(c.allocationMethod) },
   { accessor: 'includeInLandedCost', kind: 'boolean', text: (c) => (c.includeInLandedCost ? 'Yes' : 'No') },
   { accessor: 'isRecoverableTax', kind: 'boolean', text: (c) => (c.isRecoverableTax ? 'Yes' : 'No') },
+  { accessor: 'isDeduction', kind: 'boolean', text: (c) => (c.isDeduction ? 'Yes' : 'No') },
   { accessor: 'isActive', kind: 'boolean', text: (c) => (c.isActive ? 'Active' : 'Inactive') },
   { accessor: 'description', text: (c) => c.description ?? '' },
 ]

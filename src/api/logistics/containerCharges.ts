@@ -90,6 +90,8 @@ export interface ContainerChargeListDto extends ChargeFlags {
   outstandingAmount: number | null
   /** Unpaid, Partial or Paid. */
   paymentStatus: string | null
+  /** (113) 1 Cash, 2 On account. */
+  paymentType: ChargePaymentType
   postedAtUtc: string | null
   createdAtUtc: string
   createdByName: string | null
@@ -198,6 +200,16 @@ export interface ContainerChargeDto extends ChargeFlags {
   bivacOutDocumentId: number | null
   bivacOutNumber: string | null
   bivacOutStatus: number | null
+  /** (113) 1 Cash, 2 On account; a cash charge: how and from where it was paid, and the payment its posting made. */
+  paymentType: ChargePaymentType
+  paymentMethodId: number | null
+  paymentMethodName: string | null
+  paymentAccountId: number | null
+  paymentAccountCode: string | null
+  paymentAccountName: string | null
+  paymentReference: string | null
+  cashPaymentId: number | null
+  cashPaymentNumber: string | null
   /** Every line of the container with this charge's share (0 when it took none). */
   allocations: ContainerChargeShareDto[]
   attachments: ContainerChargeAttachmentDto[]
@@ -224,6 +236,11 @@ export interface CreateContainerChargeRequest {
   notes: string | null
   /** (97) Required for a BIV charge: each container then takes the item's cost at its port (base currency). */
   bivacItemId?: number | null
+  /** (113) 1 Cash, 2 On account (null = On account). Cash: posting the charge also pays it (a supplier payment). */
+  paymentType?: ChargePaymentType | null
+  paymentMethodId?: number | null
+  paymentAccountId?: number | null
+  paymentReference?: string | null
 }
 
 /** (97) A BIVAC item a BIVAC charge on the chosen containers may name. */
@@ -250,6 +267,14 @@ export interface BivacChargeOptionsDto {
   containers: BivacContainerPortDto[]
 }
 
+/** (113) How a container charge is paid: 1 Cash (posting it pays it), 2 On account (payable to its provider). */
+export type ChargePaymentType = 1 | 2
+
+export const CHARGE_PAYMENT_TYPES: { value: ChargePaymentType; label: string }[] = [
+  { value: 1, label: 'Cash' },
+  { value: 2, label: 'On account' },
+]
+
 /** The charge type whose charges name a BIVAC item (script 97). */
 export const BIVAC_CHARGE_CODE = 'BIV'
 
@@ -269,6 +294,11 @@ export interface UpdateContainerChargeRequest {
   /** Method Manual: the shares per container line; they must add up to the amount (base). */
   manual: { containerLineId: number; amountBase: number }[]
   rowVersion: string | null
+  /** (113) 1 Cash, 2 On account (null = On account). Cash: posting the charge also pays it (a supplier payment). */
+  paymentType?: ChargePaymentType | null
+  paymentMethodId?: number | null
+  paymentAccountId?: number | null
+  paymentReference?: string | null
 }
 
 export interface ContainerChargeQuery {

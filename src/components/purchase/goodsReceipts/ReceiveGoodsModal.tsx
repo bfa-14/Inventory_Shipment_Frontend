@@ -17,7 +17,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../ui/DateInput'
 import { useMediaQuery } from '@mantine/hooks'
 import { ApiError } from '../../../api/http'
 import { warehousesApi } from '../../../api/masterdata/warehouses'

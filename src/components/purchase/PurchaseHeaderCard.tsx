@@ -1,5 +1,5 @@
 import { Anchor, Badge, Grid, Group, NumberInput, Paper, Select, Switch, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { IconLink } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import { routes } from '../../routes'

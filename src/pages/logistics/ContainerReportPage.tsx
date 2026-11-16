@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, SimpleGrid, Switch, Text, TextInput, UnstyledButton } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
-import { IconFileExport, IconFilterOff, IconSearch } from '@tabler/icons-react'
+import { DateInput } from '../../components/ui/DateInput'
+import { IconFileExport, IconFilterOff, IconPlayerPlay, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { itemsApi } from '../../api/inventory/items'
 import {
@@ -22,8 +22,8 @@ import { FilterBar } from '../../components/ui/FilterBar'
 import { useDataGrid, type GridColumnMeta } from '../../components/ui/grid/useDataGrid'
 import { notify } from '../../components/ui/notify'
 import { PageHeader } from '../../components/ui/PageHeader'
-import { useGridQuery } from '../../hooks/useGridQuery'
 import { familyOptions } from '../inventory/lookups'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -37,6 +37,7 @@ interface Filters {
   offloadedTo: string | null
   includePending: boolean
   includeReceived: boolean
+  withCharges: boolean
 }
 
 const NO_FILTERS: Filters = {
@@ -51,6 +52,8 @@ const NO_FILTERS: Filters = {
   offloadedTo: null,
   includePending: true,
   includeReceived: true,
+  // Off by default: reading every charge is the slow part of the report (script 110).
+  withCharges: false,
 }
 
 const numberOrUndefined = (value: string | null) => (value === null ? undefined : Number(value))
@@ -68,6 +71,7 @@ function toQuery(filters: Filters): ContainerReportQuery {
     offloadedTo: filters.offloadedTo ?? undefined,
     includePending: filters.includePending,
     includeReceived: filters.includeReceived,
+    withCharges: filters.withCharges,
   }
 }
 
@@ -127,6 +131,9 @@ interface StageTile {
  *
  * The endpoint answers with the whole report: the grid groups it by stage (each group with its own totals), the tiles
  * above narrow it to one stage, and the footer totals every row the filters left.
+ *
+ * RUN ON DEMAND (the owner: "the page will not get all data on page load"): nothing is asked when the page opens; the
+ * criteria count once "Run Report" is clicked (or Enter in Search), and Export to Excel exports the report on screen.
  */
 export function ContainerReportPage() {
   const [suppliers, setSuppliers] = useState<PartyLookupDto[]>([])
@@ -135,20 +142,59 @@ export function ContainerReportPage() {
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
   const [stage, setStage] = useState<string | null>(null)
 
-  const grid = useGridQuery<Filters, ContainerReportRowDto, ContainerReportResult>({
-    initialFilters: NO_FILTERS,
-    debounced: ['search'],
-    initialSort: { columnAccessor: 'stageLabel', direction: 'asc' },
-    paging: 'client',
-    errorMessage: 'The container report could not be loaded.',
-    fetcher: useCallback(({ filters: applied, signal }) => containerReportApi.report(toQuery(applied), signal), []),
-  })
+  /** What the inputs show; `ran` is what the report on screen was run with (null: not run yet). */
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS)
+  const [ran, setRan] = useState<Filters | null>(null)
+  const [runToken, setRunToken] = useState(0)
+  const [result, setResult] = useState<ContainerReportResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const { filters, setFilter, loading, error } = grid
-  const result = grid.data
+  const setFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((current) => ({ ...current, [key]: value }))
+  }, [])
+
+  useEffect(() => {
+    if (ran === null) return
+    const controller = new AbortController()
+    // Fetching is the "synchronize with an external system" case: loading has to show before the await.
+    // eslint-disable-next-line react/set-state-in-effect
+    setLoading(true)
+    setError(null)
+    containerReportApi
+      .report(toQuery(ran), controller.signal)
+      .then((loaded) => {
+        if (!controller.signal.aborted) setResult(loaded)
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return
+        setError(err instanceof ApiError ? err.messages.join(' ') : 'The container report could not be loaded.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [ran, runToken])
+
+  /** Run Report: the criteria typed now; a second click runs them again (the data may have moved on). */
+  function run() {
+    setRan({ ...filters })
+    setRunToken((token) => token + 1)
+  }
+
+  function clearFilters() {
+    setFilters(NO_FILTERS)
+    setRan(null)
+    setResult(null)
+    setError(null)
+    setStage(null)
+  }
+
+  const isDefault = JSON.stringify(filters) === JSON.stringify(NO_FILTERS)
   const allRows = useMemo(() => result?.rows ?? [], [result])
   const chargeTypes = useMemo(() => result?.chargeTypes ?? [], [result])
   const chargesVisible = result?.chargesVisible ?? false
+  const withCharges = result?.withCharges ?? false
   const paymentsVisible = result?.paymentsVisible ?? false
 
   useEffect(() => {
@@ -167,7 +213,8 @@ export function ContainerReportPage() {
       }
       tile.lines += 1
       tile.quantity += row.quantity
-      tile.value += row.totalExpensesBase ?? 0
+      // Without charges there are no total expenses: the tile adds the FOB instead (and says so).
+      tile.value += row.totalExpensesBase ?? row.fobAmountBase ?? 0
       if (row.containerId !== null) tile.ids.add(row.containerId)
       tile.containers = tile.ids.size
       tile.sort = Math.min(tile.sort, row.stageSort)
@@ -210,7 +257,6 @@ export function ContainerReportPage() {
       { accessor: 'offloadedDate', kind: 'date', value: (r) => dateValue(r.offloadedDate), text: (r) => dateText(r.offloadedDate) },
       { accessor: 'leadTimeMonths', kind: 'number', text: (r) => (r.leadTimeMonths === null ? '' : formatNumber(r.leadTimeMonths, 2)) },
       { accessor: 'blNo' },
-      { accessor: 'feriNo' },
       ...(chargesVisible
         ? [
             { accessor: 'transportReferences' },
@@ -226,7 +272,9 @@ export function ContainerReportPage() {
             { accessor: 'chargesBase', kind: 'number' as const, summary: 'sum' as const, text: (r: ContainerReportRowDto) => amount(r.chargesBase) },
           ]
         : []),
-      { accessor: 'totalExpensesBase', kind: 'number', summary: 'sum', text: (r) => amount(r.totalExpensesBase) },
+      ...(withCharges
+        ? [{ accessor: 'totalExpensesBase', kind: 'number' as const, summary: 'sum' as const, text: (r: ContainerReportRowDto) => amount(r.totalExpensesBase) }]
+        : []),
       { accessor: 'costPerUnitBase', kind: 'number', text: (r) => amount(r.costPerUnitBase) },
       { accessor: 'statusName', kind: 'list' },
       { accessor: 'poNumber' },
@@ -236,7 +284,7 @@ export function ContainerReportPage() {
       { accessor: 'warehouseCode', kind: 'list' },
       { accessor: 'alerts', kind: 'list', text: (r) => r.alerts.join(', '), sortable: false },
     ],
-    [chargeTypes, chargesVisible, paymentsVisible],
+    [chargeTypes, chargesVisible, withCharges, paymentsVisible],
   )
 
   const engine = useDataGrid({
@@ -250,7 +298,7 @@ export function ContainerReportPage() {
 
   async function exportToExcel() {
     try {
-      await containerReportApi.exportToExcel(toQuery(filters))
+      if (ran) await containerReportApi.exportToExcel(toQuery(ran))
     } catch (err) {
       notify.error(err instanceof ApiError ? err.message : 'The report could not be exported.')
     }
@@ -330,7 +378,6 @@ export function ContainerReportPage() {
         ),
     },
     { accessor: 'blNo', title: 'B.L.', width: 150 },
-    { accessor: 'feriNo', title: 'FERI', width: 110 },
     ...(chargesVisible
       ? ([
           { accessor: 'transportReferences', title: 'F.A. INVOICE REFERENCE', width: 150, render: (r) => text(r.transportReferences, 150) },
@@ -348,13 +395,17 @@ export function ContainerReportPage() {
           { accessor: 'chargesBase', title: 'TOTAL CHARGES', width: 130, textAlign: 'right', render: (r) => amount(r.chargesBase) },
         ] satisfies DataTableColumn<ContainerReportRowDto>[])
       : []),
-    {
-      accessor: 'totalExpensesBase',
-      title: 'TOTAL EXPENSES',
-      width: 140,
-      textAlign: 'right',
-      render: (r) => <Estimate value={r.totalExpensesBase} estimate={r.fobIsEstimate} />,
-    },
+    ...(withCharges
+      ? ([
+          {
+            accessor: 'totalExpensesBase',
+            title: 'TOTAL EXPENSES',
+            width: 140,
+            textAlign: 'right',
+            render: (r) => <Estimate value={r.totalExpensesBase} estimate={r.fobIsEstimate} />,
+          },
+        ] satisfies DataTableColumn<ContainerReportRowDto>[])
+      : []),
     {
       accessor: 'costPerUnitBase',
       title: 'COST PER UNIT',
@@ -399,7 +450,7 @@ export function ContainerReportPage() {
         title="Container Report"
         subtitle="Every container and every order still to load, with its order, invoices, payments, journey, charges and cost, by where the goods are now. Amounts in the base currency; est. = an estimate until the goods are received."
         actions={
-          <Button variant="default" leftSection={<IconFileExport size={16} />} onClick={() => void exportToExcel()}>
+          <Button variant="default" leftSection={<IconFileExport size={16} />} onClick={() => void exportToExcel()} disabled={!result}>
             Export to Excel
           </Button>
         }
@@ -413,6 +464,7 @@ export function ContainerReportPage() {
             leftSection={<IconSearch size={16} />}
             value={filters.search}
             onChange={(event) => setFilter('search', event.currentTarget.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') run() }}
           />
         </FilterBar.Col>
         <FilterBar.Col span={3}>
@@ -448,7 +500,7 @@ export function ContainerReportPage() {
             searchable
           />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
+        <FilterBar.Col span={4}>
           <Select
             label="Branch"
             placeholder="All branches"
@@ -465,7 +517,10 @@ export function ContainerReportPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.orderDateFrom}
-            onChange={(next) => setFilter('orderDateFrom', next)}
+            onChange={(next) => {
+              setFilter('orderDateFrom', next)
+              if (next) setFilter('orderDateTo', monthEnd(next))
+            }}
             clearable
           />
         </FilterBar.Col>
@@ -485,7 +540,10 @@ export function ContainerReportPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.offloadedFrom}
-            onChange={(next) => setFilter('offloadedFrom', next)}
+            onChange={(next) => {
+              setFilter('offloadedFrom', next)
+              if (next) setFilter('offloadedTo', monthEnd(next))
+            }}
             clearable
           />
         </FilterBar.Col>
@@ -499,21 +557,6 @@ export function ContainerReportPage() {
             clearable
           />
         </FilterBar.Col>
-        <FilterBar.Col span={2}>
-          <Button
-            variant="default"
-            fullWidth
-            mt={25}
-            leftSection={<IconFilterOff size={16} />}
-            disabled={grid.isDefault && activeStage === null}
-            onClick={() => {
-              grid.clearFilters()
-              setStage(null)
-            }}
-          >
-            Clear Filters
-          </Button>
-        </FilterBar.Col>
         <FilterBar.Col span={6}>
           <Group gap="lg" mt={8}>
             <Switch
@@ -526,6 +569,22 @@ export function ContainerReportPage() {
               checked={filters.includeReceived}
               onChange={(event) => setFilter('includeReceived', event.currentTarget.checked)}
             />
+            <Switch
+              label="With charges"
+              checked={filters.withCharges}
+              onChange={(event) => setFilter('withCharges', event.currentTarget.checked)}
+            />
+          </Group>
+        </FilterBar.Col>
+        <FilterBar.Col span={6}>
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" leftSection={<IconFilterOff size={16} />} onClick={clearFilters}
+              disabled={isDefault && result === null && activeStage === null}>
+              Clear Filters
+            </Button>
+            <Button leftSection={<IconPlayerPlay size={16} />} onClick={run} loading={loading}>
+              Run Report
+            </Button>
           </Group>
         </FilterBar.Col>
       </FilterBar>
@@ -534,6 +593,10 @@ export function ContainerReportPage() {
         <Alert color="red" mb="md">
           {error}
         </Alert>
+      )}
+
+      {ran === null && !result && (
+        <Text c="dimmed" ta="center" py="xl">Choose the criteria, then Run Report.</Text>
       )}
 
       {tiles.length > 0 && (
@@ -555,6 +618,7 @@ export function ContainerReportPage() {
                   </Text>
                   <Text fw={700} fz="md">
                     {formatNumber(tile.value, 2)}
+                    {!withCharges && <Text span size="xs" c="dimmed" fw={400}> FOB</Text>}
                   </Text>
                 </Paper>
               </UnstyledButton>
@@ -563,24 +627,28 @@ export function ContainerReportPage() {
         </SimpleGrid>
       )}
 
-      <Text fz="xs" c="dimmed" mb="xs">
-        {activeStage === null
-          ? 'Click a stage to show only its rows. Grey "est." figures move until the goods are received; a lead time "so far" is counted to today.'
-          : `Showing ${activeStage} only. Click it again to show every stage.`}
-      </Text>
+      {result && (
+        <>
+        <Text fz="xs" c="dimmed" mb="xs">
+          {activeStage === null
+            ? 'Click a stage to show only its rows. Grey "est." figures move until the goods are received; a lead time "so far" is counted to today.'
+            : `Showing ${activeStage} only. Click it again to show every stage.`}
+        </Text>
 
-      <Paper radius="lg" withBorder>
-        <DataTable
-          storeKey="logistics.containerReport"
-          engine={engine}
-          exportFileName="container-report"
-          columns={columns}
-          idAccessor="rowKey"
-          fetching={loading}
-          pinFirstColumn
-          noRecordsText="No container or order matches these filters."
-        />
-      </Paper>
+        <Paper radius="lg" withBorder>
+          <DataTable
+            storeKey="logistics.containerReport"
+            engine={engine}
+            exportFileName="container-report"
+            columns={columns}
+            idAccessor="rowKey"
+            fetching={loading}
+            pinFirstColumn
+            noRecordsText="No container or order matches these filters."
+          />
+        </Paper>
+        </>
+      )}
     </div>
   )
 }

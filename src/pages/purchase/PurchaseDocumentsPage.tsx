@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { routes } from '../../routes'
 import { Alert, Anchor, Badge, Button, Checkbox, Group, Paper, Progress, Select, Text, TextInput, Tooltip } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconArrowBackUp, IconEye, IconFileInvoice, IconFilterOff, IconInfoCircle, IconPackageImport, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
@@ -42,8 +42,9 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { useDocumentTypes } from '../../hooks/useDocumentTypes'
 import { PERMISSIONS } from '../../navigation'
-import { paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
+import { PAYMENT_STATUS_OPTIONS, paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { useGridQuery } from '../../hooks/useGridQuery'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -54,9 +55,11 @@ interface Filters {
   dateTo: string | null
   /** Orders "To receive" / invoices "Not fully received" (goods receipts). */
   toReceive: boolean
+  /** Supplier invoices (script 107): Unpaid / Partial / Paid, the Payment column. */
+  paymentStatus: string | null
 }
 
-const NO_FILTERS: Filters = { search: '', branchId: null, supplierId: null, status: null, dateFrom: null, dateTo: null, toReceive: false }
+const NO_FILTERS: Filters = { search: '', branchId: null, supplierId: null, status: null, dateFrom: null, dateTo: null, toReceive: false, paymentStatus: null }
 
 /** The invoice list's banner, once per viewer: remembered in this browser, per user, when it is closed. */
 const switchBannerKey = (userId: number | undefined) => `inventory_shipment.purchaseInvoices.goodsReceiptsBannerClosed.${userId ?? 0}`
@@ -260,6 +263,7 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
               dateTo: filters.dateTo ?? undefined,
               toReceive: kind.code === 'PO' && filters.toReceive ? true : undefined,
               notFullyReceived: kind.code === 'PINV' && filters.toReceive ? true : undefined,
+              paymentStatus: kind.code === 'PINV' ? filters.paymentStatus ?? undefined : undefined,
               sortBy: 'DocumentDate',
               sortDir: 'desc',
               page,
@@ -614,20 +618,26 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
       />
 
       <FilterBar>
-        <FilterBar.Col span={3}>
+        {/* Supplier invoices fit Payment on the same line: Search and Supplier give it a column each. */}
+        <FilterBar.Col span={kind.code === 'PINV' ? 2 : 3}>
           <TextInput label="Search" placeholder={kind.code === 'PINV' ? 'Number, supplier, exporter ref., commercial invoice no., item code' : 'Number, supplier reference or supplier'} leftSection={<IconSearch size={16} />} value={filters.search} onChange={(event) => setFilter('search', event.currentTarget.value)} />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Branch" placeholder="All branches" data={branches.map((b) => ({ value: String(b.id), label: b.branchName }))} value={filters.branchId} onChange={(next) => setFilter('branchId', next)} clearable searchable />
         </FilterBar.Col>
-        <FilterBar.Col span={3}>
+        <FilterBar.Col span={kind.code === 'PINV' ? 2 : 3}>
           <Select label="Supplier" placeholder="All suppliers" data={suppliers.map((s) => ({ value: String(s.id), label: supplierLabel(s) }))} value={filters.supplierId} onChange={(next) => setFilter('supplierId', next)} clearable searchable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <Select label="Status" placeholder="All" data={purchaseStatusFilters(kind.code).map(({ value, label }) => ({ value, label }))} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
         </FilterBar.Col>
+        {kind.code === 'PINV' && (
+          <FilterBar.Col span={2}>
+            <Select label="Payment" placeholder="All" data={PAYMENT_STATUS_OPTIONS} value={filters.paymentStatus} onChange={(next) => setFilter('paymentStatus', next)} clearable />
+          </FilterBar.Col>
+        )}
         <FilterBar.Col span={1}>
-          <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
+          <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => { setFilter('dateFrom', next ? isoDate(next) : null); if (next) setFilter('dateTo', monthEnd(isoDate(next))) }} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="To" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />

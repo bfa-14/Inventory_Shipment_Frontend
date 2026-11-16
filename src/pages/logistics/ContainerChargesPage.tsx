@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconEye, IconFileExport, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
@@ -37,6 +37,7 @@ import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { paymentStatusColour, paymentStatusLabel } from '../../components/sales/paymentStatus'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 export const CONTAINER_CHARGES_ROUTE = '/logistics/container-charges'
 
@@ -302,14 +303,14 @@ export function ContainerChargesPage() {
         title: 'Amount',
         width: 150,
         textAlign: 'right',
-        render: (row) => <Text fz="sm" style={{ whiteSpace: 'nowrap' }}>{formatMoney(row.amount, row.currencyCode)}</Text>,
+        render: (row) => <Text fz="sm" c={row.amount < 0 ? 'red' : undefined} style={{ whiteSpace: 'nowrap' }}>{formatMoney(row.amount, row.currencyCode)}</Text>,
       },
       {
         accessor: 'amountBase',
         title: `Amount (${baseCode})`,
         width: 140,
         textAlign: 'right',
-        render: (row) => <Text fz="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>{formatNumber(row.amountBase, 2)}</Text>,
+        render: (row) => <Text fz="sm" fw={500} c={row.amountBase < 0 ? 'red' : undefined} style={{ whiteSpace: 'nowrap' }}>{formatNumber(row.amountBase, 2)}</Text>,
       },
       { accessor: 'allocationMethod', title: 'Method', width: 140, render: (row) => allocationMethodLabel(row.allocationMethod) },
       { accessor: 'includeInLandedCost', title: 'In cost', width: 80, render: (row) => (row.includeInLandedCost ? 'Yes' : 'No') },
@@ -427,7 +428,10 @@ export function ContainerChargesPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

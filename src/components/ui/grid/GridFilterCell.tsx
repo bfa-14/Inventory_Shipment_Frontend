@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ActionIcon, Group, Menu, Select, TextInput, Tooltip } from '@mantine/core'
 import { IconCheck, IconFilter } from '@tabler/icons-react'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../DateInput'
 import { fromIsoDate, isoDate } from '../../documents/documentKind'
 import { defaultOperator, isEmptyFilter, OPERATORS, parseNumberExpression, type ColumnKind, type FilterOp, type FilterValue } from './gridModel'
 

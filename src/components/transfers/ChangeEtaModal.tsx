@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Alert } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { ApiError } from '../../api/http'
 import {
   transfersApi,

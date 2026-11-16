@@ -147,6 +147,11 @@ export function PurchaseChargesGrid({
                           aria-label={`Charge type of charge ${index + 1}`}
                         />
                       )}
+                      {line.isDeduction && (
+                        <Tooltip label="Typed without a minus: taken off the cost of the goods" withArrow>
+                          <Badge size="xs" variant="light" color="red" mt={4}>deduction</Badge>
+                        </Tooltip>
+                      )}
                       {notInCost && (
                         <Tooltip label="Recorded and paid, but it does not make the goods worth more" withArrow>
                           <Badge size="xs" variant="light" color="gray" mt={4}>not in cost</Badge>
@@ -257,8 +262,8 @@ export function PurchaseChargesGrid({
                     </Table.Td>
 
                     <Table.Td ta="right">
-                      <Text fz="sm" fw={500} c={base === null ? 'dimmed' : undefined}>
-                        {base === null ? '—' : formatNumber(base, 2)}
+                      <Text fz="sm" fw={500} c={base === null ? 'dimmed' : line.isDeduction ? 'red' : undefined}>
+                        {base === null ? '—' : formatNumber(line.isDeduction ? -base : base, 2)}
                       </Text>
                     </Table.Td>
 

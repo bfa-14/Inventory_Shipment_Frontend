@@ -15,7 +15,7 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import {
@@ -43,6 +43,8 @@ import { FormModal } from '../ui/FormModal'
 import { notify } from '../ui/notify'
 import { SearchMultiSelect, SearchSelect, type SearchOption, type SearchOptionsLoader } from '../ui/SearchSelect'
 import { containerLabel } from '../purchase/documentSearch'
+import { ChargePaymentPanel } from './ChargePaymentPanel'
+import { ON_ACCOUNT, chargePaymentErrors, chargePaymentRequest, type ChargePaymentForm } from './chargePayment'
 
 interface NewChargeModalProps {
   opened: boolean
@@ -168,6 +170,8 @@ function NewChargeDialog({
   const [total, setTotal] = useState<number | null>(null)
   const [splitRule, setSplitRule] = useState<SplitRule>(presetSplitRule)
   const [notes, setNotes] = useState('')
+  // (113) Cash: posting the charge also pays its provider; On account: payable to it.
+  const [payment, setPayment] = useState<ChargePaymentForm>(ON_ACCOUNT)
   // (97) A BIVAC / Inspection charge names its BIVAC item and takes that item's cost at each container's port.
   const [bivacItemId, setBivacItemId] = useState<string | null>(null)
   // Each answer is kept with what it was read for, so a stale one is never shown (and no effect has to clear it).
@@ -187,6 +191,8 @@ function NewChargeDialog({
   const isBase = currency?.isBaseCurrency ?? true
   const chargeType = chargeTypes.find((t) => String(t.id) === chargeTypeId)
   const isBivac = chargeType?.chargeCode.trim().toUpperCase() === BIVAC_CHARGE_CODE
+  // Script 102: a deduction (spare parts taken out, a refund) is typed positive; the server stores it negative.
+  const isDeduction = chargeType?.isDeduction === true
 
   const remember = useCallback((rows: ContainerOption[]) => {
     setKnown((current) => {
@@ -355,12 +361,19 @@ function NewChargeDialog({
       else if (bivacOption && bivacOption.priced < bivacOption.containers)
         found.bivacItemId = `${bivacOption.itemCode} has no BIVAC cost for ${bivacOption.missingPorts ?? 'some ports'}: set it on Item Definition (BIVAC cost per port).`
       else if (bivacOption && (bivacOption.totalBase ?? 0) <= 0) found.bivacItemId = `${bivacOption.itemCode} costs 0 at these ports: nothing to charge.`
-      return found
+      return { ...found, ...paymentFound() }
     }
     if (!currencyId) found.currencyId = 'Choose a currency.'
     if (!isBase && (rate === null || rate <= 0)) found.rate = 'Enter the exchange rate.'
-    if (total === null || total <= 0) found.total = 'Enter an amount above zero.'
-    return found
+    if (total === null || total <= 0) found.total = isDeduction ? 'Enter the amount deducted.' : 'Enter an amount above zero.'
+    return { ...found, ...paymentFound() }
+  }
+
+  /** (113) The panel's own errors, keyed apart so the panel shows them under its fields. */
+  function paymentFound(): Record<string, string> {
+    if (isDeduction) return {}
+    const p = chargePaymentErrors(payment, providerId !== null)
+    return Object.fromEntries(Object.entries(p).map(([k, v]) => ['payment.' + k, v as string]))
   }
 
   async function save() {
@@ -386,6 +399,7 @@ function NewChargeDialog({
         allocationMethod: method,
         notes: notes.trim() || null,
         bivacItemId: isBivac && bivacItemId !== null ? Number(bivacItemId) : null,
+        ...chargePaymentRequest(isDeduction ? ON_ACCOUNT : payment),
       })
       setCreated(drafts)
       notify.success(drafts.length === 1 ? 'Draft charge created.' : `${formatNumber(drafts.length)} draft charges created.`)
@@ -438,8 +452,8 @@ function NewChargeDialog({
               {created.map((row) => (
                 <Table.Tr key={row.id}>
                   <Table.Td>{row.containerRef}</Table.Td>
-                  <Table.Td ta="right">{formatMoney(row.amount, isBivac ? baseCode : code)}</Table.Td>
-                  <Table.Td ta="right">{formatNumber(row.amountBase, 2)}</Table.Td>
+                  <Table.Td ta="right" c={row.amount < 0 ? 'red' : undefined}>{formatMoney(row.amount, isBivac ? baseCode : code)}</Table.Td>
+                  <Table.Td ta="right" c={row.amountBase < 0 ? 'red' : undefined}>{formatNumber(row.amountBase, 2)}</Table.Td>
                   <Table.Td>
                     <Badge variant="light" color={posted ? 'green' : 'gray'}>{posted ? 'Posted' : row.statusName}</Badge>
                   </Table.Td>
@@ -452,6 +466,12 @@ function NewChargeDialog({
           <Alert color="blue">
             Posting a BIVAC charge also posts a BIVAC Out of 1 pc of {bivacOption?.itemCode ?? 'the BIVAC item'} from each container's
             warehouse; cancelling the charge cancels it.
+          </Alert>
+        )}
+        {payment.paymentType === 1 && !isDeduction && !posted && (
+          <Alert color="blue">
+            Paid cash: posting {created.length === 1 ? 'the charge' : 'the charges'} also makes and posts one supplier payment to the
+            provider for {created.length === 1 ? 'it' : 'all of them'}.
           </Alert>
         )}
         {method === 'Manual' && !posted && (
@@ -534,9 +554,13 @@ function NewChargeDialog({
               <Text fz="xs" c="dimmed">
                 Default: {allocationMethodLabel(chargeType.allocationMethod)}
               </Text>
-              <Badge size="xs" variant="light" color={chargeType.includeInLandedCost ? 'blue' : 'gray'}>
-                {chargeType.includeInLandedCost ? 'enters the item cost' : 'not in cost'}
-              </Badge>
+              {chargeType.isDeduction ? (
+                <Badge size="xs" variant="light" color="red">lowers the item cost</Badge>
+              ) : (
+                <Badge size="xs" variant="light" color={chargeType.includeInLandedCost ? 'blue' : 'gray'}>
+                  {chargeType.includeInLandedCost ? 'enters the item cost' : 'not in cost'}
+                </Badge>
+              )}
             </Group>
           )}
         </Stack>
@@ -629,7 +653,7 @@ function NewChargeDialog({
           )}
 
           <NumberInput
-            label={`Total amount (${code})`}
+            label={isDeduction ? `Amount deducted (${code})` : `Total amount (${code})`}
             withAsterisk
             placeholder="0.00"
             value={total ?? ''}
@@ -638,7 +662,13 @@ function NewChargeDialog({
             fixedDecimalScale
             thousandSeparator=","
             onChange={(next) => setTotal(numberInputValue(next))}
-            description={!isBase && totalBase !== null ? `≈ ${formatMoney(totalBase, baseCode)}` : undefined}
+            description={
+              isDeduction
+                ? `Typed without a minus: taken off the cost of the goods${!isBase && totalBase !== null ? ` (≈ ${formatMoney(totalBase, baseCode)})` : ''}.`
+                : !isBase && totalBase !== null
+                  ? `≈ ${formatMoney(totalBase, baseCode)}`
+                  : undefined
+            }
             error={errors.total}
           />
           </>
@@ -653,6 +683,20 @@ function NewChargeDialog({
         )}
         <Textarea label="Notes" autosize minRows={1} maxLength={500} value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
       </SimpleGrid>
+
+      <ChargePaymentPanel
+        value={payment}
+        onChange={(patch) => setPayment((prev) => ({ ...prev, ...patch }))}
+        currencyId={isBivac ? (baseCurrency?.id ?? null) : currencyId === null ? null : Number(currencyId)}
+        currencyCode={isBivac ? baseCode : code}
+        deduction={isDeduction}
+        errors={{
+          paymentType: errors['payment.paymentType'],
+          methodId: errors['payment.methodId'],
+          accountId: errors['payment.accountId'],
+        }}
+        postVerb="Posting the charge"
+      />
 
       {!isBivac && (
       <Radio.Group
@@ -695,7 +739,11 @@ function NewChargeDialog({
                         return cost !== undefined ? formatNumber(cost, 2) : <Text span fz="sm" c="red">no cost for this port</Text>
                       })()
                     ) : preview ? (
-                      formatNumber(preview[index], 2)
+                      isDeduction ? (
+                        <Text span fz="sm" c="red">{formatNumber(-preview[index], 2)}</Text>
+                      ) : (
+                        formatNumber(preview[index], 2)
+                      )
                     ) : (
                       <Text span fz="sm" c="dimmed">
                         {splitRule === 'Value' ? 'computed on save' : 'no pieces loaded'}

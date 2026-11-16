@@ -300,6 +300,8 @@ export interface PurchaseDocumentQuery {
   toReceive?: boolean
   /** Supplier invoices: posted invoices whose received pieces are fewer than the invoiced ones. */
   notFullyReceived?: boolean
+  /** Supplier invoices (script 107): Unpaid | Partial | Paid, posted invoices only. */
+  paymentStatus?: string
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number
@@ -714,6 +716,7 @@ export const purchaseDocumentsApi = {
     if (query.dateTo) params.set('dateTo', query.dateTo)
     if (query.toReceive) params.set('toReceive', 'true')
     if (query.notFullyReceived) params.set('notFullyReceived', 'true')
+    if (query.paymentStatus) params.set('paymentStatus', query.paymentStatus)
     if (query.sortBy) params.set('sortBy', query.sortBy)
     if (query.sortDir) params.set('sortDir', query.sortDir)
     if (query.page !== undefined) params.set('page', String(query.page))

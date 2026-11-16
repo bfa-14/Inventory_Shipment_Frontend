@@ -47,11 +47,13 @@ import { PortsPage } from './pages/masterdata/PortsPage'
 import { ContainerPage } from './pages/logistics/ContainerPage'
 import { ContainersPage } from './pages/logistics/ContainersPage'
 import { ContainerChargesPage } from './pages/logistics/ContainerChargesPage'
+import { ImportContainerChargesPage } from './pages/logistics/ImportContainerChargesPage'
 import { MovementPage } from './pages/logistics/MovementPage'
 import { MovementsPage } from './pages/logistics/MovementsPage'
 import { ShipmentsBoardPage } from './pages/logistics/ShipmentsBoardPage'
 import { TrackingPage } from './pages/logistics/TrackingPage'
 import { MovementTypesPage } from './pages/masterdata/MovementTypesPage'
+import { ShipmentStagesPage } from './pages/masterdata/ShipmentStagesPage'
 import { PaymentMethodsPage } from './pages/masterdata/PaymentMethodsPage'
 import { CashBankAccountsPage } from './pages/masterdata/CashBankAccountsPage'
 import { ChargeTypesPage } from './pages/purchase/ChargeTypesPage'
@@ -77,6 +79,12 @@ import { ReceiptsPage } from './pages/sales/ReceiptsPage'
 import { SalesInvoicesPage } from './pages/sales/SalesInvoicesPage'
 import { SalesProfitPage } from './pages/sales/SalesProfitPage'
 import { ContainerReportPage } from './pages/logistics/ContainerReportPage'
+import { AttachmentReportPage } from './pages/reports/AttachmentReportPage'
+import { ContainerChargesReportPage } from './pages/reports/ContainerChargesReportPage'
+import { DispatchedItemsReportPage } from './pages/reports/DispatchedItemsReportPage'
+import { GoodsOnOrderReportPage } from './pages/reports/GoodsOnOrderReportPage'
+import { ItemBalanceReportPage } from './pages/reports/ItemBalanceReportPage'
+import { ItemBalanceReportPrintPage } from './pages/reports/ItemBalanceReportPrintPage'
 import { LoginAuditPage } from './pages/security/LoginAuditPage'
 import { PermissionsPage } from './pages/security/PermissionsPage'
 import { RolePermissionsPage } from './pages/security/RolePermissionsPage'
@@ -116,6 +124,10 @@ export default function App() {
             {/* A transfer's dispatch note on paper, for the truck (script 90): no costs, three signatures. */}
             <Route element={<ProtectedRoute permission={PERMISSIONS.transfersView} />}>
               <Route path="/inventory/transfers/:id/dispatches/:postingId/print" element={<TransferDispatchPrintPage />} />
+            </Route>
+            {/* (103) The Item Balance Report on paper, or saved as a PDF from the print dialog. */}
+            <Route element={<ProtectedRoute permission={PERMISSIONS.itemBalanceReportView} />}>
+              <Route path="/reports/item-balance/print" element={<ItemBalanceReportPrintPage />} />
             </Route>
 
             <Route element={<AppShell />}>
@@ -162,6 +174,9 @@ export default function App() {
               <Route element={<ProtectedRoute permission={PERMISSIONS.movementTypesManage} />}>
                 <Route path="/setup/master-data/movement-types" element={<MovementTypesPage />} />
               </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.shipmentStagesManage} />}>
+                <Route path="/setup/master-data/shipment-stages" element={<ShipmentStagesPage />} />
+              </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.paymentMethodsManage} />}>
                 <Route path="/setup/master-data/payment-methods" element={<PaymentMethodsPage />} />
               </Route>
@@ -194,6 +209,9 @@ export default function App() {
               </Route>
               <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesView} />}>
                 <Route path="/logistics/container-charges" element={<ContainerChargesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesCreate} />}>
+                <Route path="/logistics/container-charges/import" element={<ImportContainerChargesPage />} />
               </Route>
 
               {/* Creating an item needs its own guard: a reader who may only view items must not
@@ -330,6 +348,23 @@ export default function App() {
               {/* (95) The container report: every container and order still to load, by stage. */}
               <Route element={<ProtectedRoute permission={PERMISSIONS.containerReportView} />}>
                 <Route path="/logistics/container-report" element={<ContainerReportPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.attachmentReportView} />}>
+                <Route path="/reports/attachments" element={<AttachmentReportPage />} />
+              </Route>
+              {/* (103) Item balance per warehouse over a period; the print page is the PDF (the browser's Save as PDF). */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.itemBalanceReportView} />}>
+                <Route path="/reports/item-balance" element={<ItemBalanceReportPage />} />
+              </Route>
+              {/* (105) Each container of a period with each charge type entered or missing, its amount and its payments. */}
+              <Route element={<ProtectedRoute permission={PERMISSIONS.containerChargesReportView} />}>
+                <Route path="/reports/container-charges" element={<ContainerChargesReportPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.dispatchedItemsReportView} />}>
+                <Route path="/reports/dispatched-items" element={<DispatchedItemsReportPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission={PERMISSIONS.goodsOnOrderReportView} />}>
+                <Route path="/reports/goods-on-order" element={<GoodsOnOrderReportPage />} />
               </Route>
 
               <Route element={<ProtectedRoute permission={PERMISSIONS.outOfStockAuditView} />}>

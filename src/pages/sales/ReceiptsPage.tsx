@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconArrowBackUp, IconEye, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
@@ -24,6 +24,7 @@ import { RowActions } from '../../components/ui/RowActions'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -293,7 +294,7 @@ export function ReceiptsPage() {
           <Select label="Status" placeholder="All" data={STATUSES} value={filters.status} onChange={(next) => setFilter('status', next)} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
-          <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
+          <DateInput label="From" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => { setFilter('dateFrom', next ? isoDate(next) : null); if (next) setFilter('dateTo', monthEnd(isoDate(next))) }} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={1}>
           <DateInput label="To" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />

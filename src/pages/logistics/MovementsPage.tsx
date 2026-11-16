@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Alert, Anchor, Badge, Button, Group, Paper, Select, Text, TextInput } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { useDebouncedValue } from '@mantine/hooks'
 import { IconArrowRight, IconCheck, IconFileSpreadsheet, IconFilterOff, IconPlayerPlay, IconPlus, IconSearch } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
@@ -32,6 +32,7 @@ import { PageHeader } from '../../components/ui/PageHeader'
 import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
+import { monthEnd } from '../../components/typedDate'
 
 export const MOVEMENTS_ROUTE = '/logistics/movements'
 
@@ -389,7 +390,7 @@ export function MovementsPage() {
           />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
-          <DateInput label="Date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)} clearable />
+          <DateInput label="Date from" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateFrom} onChange={(next) => { setFilter('dateFrom', next ? isoDate(next) : null); if (next) setFilter('dateTo', monthEnd(isoDate(next))) }} clearable />
         </FilterBar.Col>
         <FilterBar.Col span={2}>
           <DateInput label="Date to" placeholder="Any" valueFormat="DD/MM/YYYY" value={filters.dateTo} onChange={(next) => setFilter('dateTo', next ? isoDate(next) : null)} clearable />

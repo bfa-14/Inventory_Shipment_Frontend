@@ -18,7 +18,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconFilterOff, IconSearch } from '@tabler/icons-react'
 import {
@@ -53,6 +53,7 @@ import { rowNumberColumn } from '../../components/ui/rowNumberColumn'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -525,7 +526,10 @@ export function TransferOrdersPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

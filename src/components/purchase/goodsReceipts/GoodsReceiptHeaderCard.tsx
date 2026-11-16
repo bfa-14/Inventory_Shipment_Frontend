@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Badge, Grid, Group, Paper, Select, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../ui/DateInput'
 import { IconLink } from '@tabler/icons-react'
 import { Link } from 'react-router'
 import type { GoodsReceiptDto, GoodsReceiptSourceKind } from '../../../api/purchase/goodsReceipts'

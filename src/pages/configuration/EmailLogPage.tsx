@@ -14,7 +14,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../../components/ui/DateInput'
 import { IconMailForward, IconRefresh, IconSearch } from '@tabler/icons-react'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { ApiError } from '../../api/http'
@@ -39,6 +39,7 @@ import { useAuth } from '../../auth/useAuth'
 import { useGridQuery } from '../../hooks/useGridQuery'
 import { PERMISSIONS } from '../../navigation'
 import { routes } from '../../routes'
+import { monthEnd } from '../../components/typedDate'
 
 interface Filters {
   search: string
@@ -252,7 +253,10 @@ export function EmailLogPage() {
             placeholder="Any"
             valueFormat="DD/MM/YYYY"
             value={filters.dateFrom}
-            onChange={(next) => setFilter('dateFrom', next ? isoDate(next) : null)}
+            onChange={(next) => {
+              setFilter('dateFrom', next ? isoDate(next) : null)
+              if (next) setFilter('dateTo', monthEnd(isoDate(next)))
+            }}
             clearable
           />
         </FilterBar.Col>

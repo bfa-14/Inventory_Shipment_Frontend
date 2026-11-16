@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Alert, Anchor, Button, Checkbox, Group, Loader, Modal, ScrollArea, Stack, Switch, Text } from '@mantine/core'
-import { DateInput } from '@mantine/dates'
+import { DateInput } from '../ui/DateInput'
 import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { IconCheck, IconPlayerPlay } from '@tabler/icons-react'

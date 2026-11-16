@@ -222,7 +222,6 @@ export function DashboardPage() {
       {data && (
         <NeedsAttention
           data={data}
-          ccy={ccy}
           approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null}
           branchId={branchId}
         />
@@ -492,18 +491,15 @@ function Line({ to, label, sub, value, colour }: { to: string; label: string; su
 
 function NeedsAttention({
   data,
-  ccy,
   approvalsPending,
   branchId,
 }: {
   data: DashboardSummaryDto
-  ccy: string
   approvalsPending: number | null
   /** The branch chosen at the top (null: the company): the stock-level links open Stock Levels on it (script 91). */
   branchId: string | null
 }) {
   const { hasPermission } = useAuth()
-  const money = (value: number | null | undefined) => `${formatNumber(value ?? 0, 2)} ${ccy}`
   const cards: ReactNode[] = []
 
   if (approvalsPending !== null) {
@@ -584,33 +580,6 @@ function NeedsAttention({
               value={<span className={css.badge} style={{ color: reason.colour, background: `${reason.colour}22` }}>{reason.text}</span>} />
           )
         })}
-      </AttentionCard>,
-    )
-  }
-
-  if (data.overdueInvoices && data.receivables) {
-    cards.push(
-      <AttentionCard key="overdue" title="Overdue customer invoices" count={data.receivables.overdueCount} clear="No customer invoice is past its due date.">
-        {data.overdueInvoices.map((i) => (
-          <Line key={i.documentId} to={`/sales/invoices/${i.documentId}`} label={i.documentNumber ?? `#${i.documentId}`}
-            sub={`${i.clientName} · due ${showDate(i.dueDate)}, ${i.daysOverdue} day${i.daysOverdue === 1 ? '' : 's'} ago`}
-            value={money(i.outstandingBase)} colour="#ff6b8a" />
-        ))}
-      </AttentionCard>,
-    )
-  }
-
-  if (data.cheques) {
-    const q = data.cheques
-    cards.push(
-      <AttentionCard key="cheques" title="Cheques pending clearance" count={q.pendingCount} clear="Every cheque given to a supplier is cleared.">
-        <div className={css.sub} style={{ marginBottom: 4, color: q.dueCount > 0 ? '#ff6b8a' : undefined }}>
-          {`${money(q.pendingBase)} in total${q.dueCount > 0 ? `, ${q.dueCount} already due` : ''}`}
-        </div>
-        {(data.chequeList ?? []).map((c) => (
-          <Line key={`${c.paymentId}-${c.chequeNo}`} to={`/purchase/payments/${c.paymentId}`} label={c.paymentNumber ?? `#${c.paymentId}`}
-            sub={`${c.payeeName} · cheque ${c.chequeNo ?? '-'} · due ${showDate(c.chequeDueDate)}`} value={money(c.amountBase)} />
-        ))}
       </AttentionCard>,
     )
   }

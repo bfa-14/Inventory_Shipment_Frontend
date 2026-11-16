@@ -27,6 +27,7 @@ interface FormValues {
   allocationMethod: ChargeAllocationMethod
   includeInLandedCost: boolean
   isRecoverableTax: boolean
+  isDeduction: boolean
   description: string
   isActive: boolean
 }
@@ -37,6 +38,9 @@ const MAX_DESCRIPTION = 500
 
 /** Why a recoverable tax cannot also be part of the cost - said in the form, not only in the API's refusal. */
 const RECOVERABLE_HINT = 'A recoverable tax is never part of the item cost'
+
+/** Script 102: a deduction lowers the item cost, so it is always in the landed cost. */
+const DEDUCTION_HINT = 'A deduction always lowers the item cost'
 
 const ALLOCATION_OPTIONS = CHARGE_ALLOCATION_METHODS.map((method) => ({
   value: method,
@@ -56,6 +60,7 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
       allocationMethod: chargeType?.allocationMethod ?? 'Value',
       includeInLandedCost: chargeType?.includeInLandedCost ?? true,
       isRecoverableTax: chargeType?.isRecoverableTax ?? false,
+      isDeduction: chargeType?.isDeduction ?? false,
       description: chargeType?.description ?? '',
       isActive: chargeType?.isActive ?? true,
     },
@@ -82,6 +87,9 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
   // The hint the chosen method carries, if it is one of the two that read a figure off the item.
   const methodHint = METHODS_NEEDING_ITEM_DATA[form.values.allocationMethod]
   const recoverable = form.values.isRecoverableTax
+  const deduction = form.values.isDeduction
+  // The server refuses to turn a type into a deduction (or back) once charges use it: their signs were set by it.
+  const deductionLocked = mode === 'edit' && (chargeType?.usageCount ?? 0) > 0
 
   function buildPayload(values: FormValues): SaveChargeTypeRequest {
     return {
@@ -92,6 +100,7 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
       // "recoverable AND in the cost" would be refused by the server rather than silently corrected.
       includeInLandedCost: values.isRecoverableTax ? false : values.includeInLandedCost,
       isRecoverableTax: values.isRecoverableTax,
+      isDeduction: values.isDeduction,
       description: values.description.trim() ? values.description.trim() : null,
       isActive: values.isActive,
       ...(mode === 'edit' ? { rowVersion } : {}),
@@ -171,6 +180,7 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
         allocationMethod: fresh.allocationMethod,
         includeInLandedCost: fresh.includeInLandedCost,
         isRecoverableTax: fresh.isRecoverableTax,
+        isDeduction: fresh.isDeduction,
         description: fresh.description ?? '',
         isActive: fresh.isActive,
       })
@@ -245,8 +255,14 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
         <Grid.Col span={{ base: 12, sm: 6 }}>
           <Switch
             label="Include in Landed Cost"
-            description={recoverable ? RECOVERABLE_HINT : 'The charge is added to the cost of the goods.'}
-            disabled={recoverable}
+            description={
+              recoverable
+                ? RECOVERABLE_HINT
+                : deduction
+                  ? DEDUCTION_HINT
+                  : 'The charge is added to the cost of the goods.'
+            }
+            disabled={recoverable || deduction}
             {...form.getInputProps('includeInLandedCost', { type: 'checkbox' })}
           />
         </Grid.Col>
@@ -255,6 +271,7 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
           <Switch
             label="Recoverable Tax"
             description="Reclaimed from the authority rather than borne by the goods."
+            disabled={deduction}
             {...form.getInputProps('isRecoverableTax', { type: 'checkbox' })}
             onChange={(event) => {
               const on = event.currentTarget.checked
@@ -262,6 +279,28 @@ export function ChargeTypeFormModal({ mode, chargeType, onClose, onSaved }: Char
               // Turning it back off re-enables the other switch but leaves it off: the reader
               // decides whether this charge belongs in the cost, not the switch they just released.
               if (on) form.setFieldValue('includeInLandedCost', false)
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={12}>
+          <Switch
+            label="Deduction (lowers the cost)"
+            description={
+              deductionLocked
+                ? 'Charges already use this type: it cannot become a deduction, or stop being one.'
+                : 'For an amount taken off the goods, such as spare parts removed from the box and sold apart, or a refund. The amount is typed without a minus and taken off the cost.'
+            }
+            disabled={deductionLocked}
+            {...form.getInputProps('isDeduction', { type: 'checkbox' })}
+            onChange={(event) => {
+              const on = event.currentTarget.checked
+              form.setFieldValue('isDeduction', on)
+              // A deduction is part of the cost by definition, and never a tax claimed back.
+              if (on) {
+                form.setFieldValue('includeInLandedCost', true)
+                form.setFieldValue('isRecoverableTax', false)
+              }
             }}
           />
         </Grid.Col>

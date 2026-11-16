@@ -28,6 +28,7 @@ import {
   rateTypeColor,
   rateTypeLabel,
 } from './rateTypes'
+import { monthEnd } from '../../components/typedDate'
 
 /** The filters the reader edits. Paging and sorting are the grid's own, held by useGridQuery. */
 interface Filters {
@@ -311,9 +312,11 @@ export function ExchangeRatesPage() {
             placeholder="Any"
             clearable
             valueFormat="DD MMM YYYY"
-            maxDate={filters.dateTo ?? undefined}
             value={filters.dateFrom}
-            onChange={(value) => setFilter('dateFrom', value)}
+            onChange={(value) => {
+              setFilter('dateFrom', value)
+              if (value) setFilter('dateTo', monthEnd(value))
+            }}
           />
         </FilterBar.Col>
 

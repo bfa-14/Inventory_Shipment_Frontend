@@ -31,6 +31,11 @@ export interface ChargeLine {
   allocationMethod: ChargeAllocationMethod
   /** Copied from the type when it was picked; a charge that is not in the landed cost costs the goods nothing. */
   includeInLandedCost: boolean
+  /**
+   * Script 102: a deduction (spare parts taken out, a refund) lowers the cost. Its amount and manual split
+   * are kept here as SIZES, typed without a minus; the server stores them negative from the type.
+   */
+  isDeduction: boolean
   includedInSupplierInvoice: boolean
   notes: string
   /** Manual method only: invoice line id -> amount in the base currency. */
@@ -60,6 +65,7 @@ export function emptyCharge(defaultCurrencyId: number | null): ChargeLine {
     amount: null,
     allocationMethod: 'Value',
     includeInLandedCost: true,
+    isDeduction: false,
     includedInSupplierInvoice: false,
     notes: '',
     allocations: {},
@@ -81,9 +87,11 @@ export function chargeFromDto(dto: PurchaseChargeDto, allocations: Record<number
     currencyId: String(dto.currencyId),
     rateType: dto.rateType,
     exchangeRate: dto.exchangeRate,
-    amount: dto.amount,
+    amount: Math.abs(dto.amount),
     allocationMethod: dto.allocationMethod,
     includeInLandedCost: dto.includeInLandedCost,
+    // Only a deduction type stores a charge below zero.
+    isDeduction: dto.amount < 0,
     includedInSupplierInvoice: dto.includedInSupplierInvoice,
     notes: dto.notes ?? '',
     allocations,
@@ -100,6 +108,7 @@ export function withChargeType(line: ChargeLine, type: ChargeTypeLookupDto): Cha
     chargeName: type.chargeName,
     allocationMethod: type.allocationMethod,
     includeInLandedCost: type.includeInLandedCost,
+    isDeduction: type.isDeduction,
     // A method the reader has not chosen follows the type; a manual split made for another method
     // would point at the wrong thing, so it goes.
     allocations: type.allocationMethod === 'Manual' ? line.allocations : {},
@@ -133,12 +142,18 @@ export function isUnallocated(line: ChargeLine): boolean {
   return Math.abs(remainingToAllocate(line)) > 0.01
 }
 
-/** The charges that reach the item cost, and everything else — the footer says both. */
+/** The charge in the base currency with its sign: a deduction counts below zero. */
+export function signedAmountBase(line: ChargeLine): number | null {
+  const base = amountBase(line)
+  return base === null ? null : line.isDeduction ? -base : base
+}
+
+/** The charges that reach the item cost, and everything else — the footer says both. A deduction takes off. */
 export function chargeTotals(lines: ChargeLine[]): { total: number; landed: number } {
   let total = 0
   let landed = 0
   for (const line of lines) {
-    const value = amountBase(line) ?? 0
+    const value = signedAmountBase(line) ?? 0
     total += value
     if (line.includeInLandedCost) landed += value
   }
