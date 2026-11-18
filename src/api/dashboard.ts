@@ -80,6 +80,69 @@ export interface DashboardSummaryDto {
   stockByWarehouse: { label: string; valueBase: number }[] | null
   /** dayNo 1 = Monday. */
   salesByWeekday: { dayNo: number; invoiceCount: number; salesBase: number }[] | null
+
+  /* (115) the cards; each is missing from an older API, null when the reader may not see it */
+  /** Containers by shipment stage (script 111), in the stages' order. Null without View Containers. */
+  containerStages?: DashboardStageDto[] | null
+  /** What we owe by payment status: the invoice half or the charge half is null when the reader may not see it. */
+  payablesDetail?: {
+    unpaidInvoiceCount: number | null
+    unpaidInvoicesBase: number | null
+    partialInvoiceCount: number | null
+    partialInvoicesBase: number | null
+    unpaidChargeCount: number | null
+    unpaidChargesBase: number | null
+    partialChargeCount: number | null
+    partialChargesBase: number | null
+  } | null
+  /** The five creditors owed the most, on the halves the reader may see (partyId null: charges without a provider). */
+  creditors?: { partyId: number | null; partyName: string; invoicesBase: number; invoiceCount: number; chargesBase: number; chargeCount: number }[] | null
+  /** What customers owe by days past the due date (on the reader's today). */
+  receivablesAging?: {
+    notDueCount: number
+    notDueBase: number
+    days1To30Count: number
+    days1To30Base: number
+    days31To60Count: number
+    days31To60Base: number
+    days61To90Count: number
+    days61To90Base: number
+    over90Count: number
+    over90Base: number
+    debtorCount: number
+  } | null
+  /** The five customers owing the most. */
+  debtors?: { clientId: number; clientName: string; outstandingBase: number; overdueBase: number; invoiceCount: number; oldestDueDate: string | null }[] | null
+  /** The twelve months to the period's end; each figure null when the reader may not see it. */
+  purchasesByMonth?: {
+    monthStart: string
+    /** Supplier invoices less returns (View Purchase Invoices). */
+    invoicedBase: number | null
+    /** Posted goods receipts at their value at receipt (View Goods Receipts and View item costs). */
+    receivedBase: number | null
+    /** Their pieces (View Goods Receipts). */
+    receivedPieces: number | null
+    /** Container charges posted (View Container Charges). */
+    chargesBase: number | null
+  }[] | null
+}
+
+/**
+ * (115) One shipment stage and its containers. filterId is the Containers list's Stage filter (a stage's id, 0 Pending,
+ * -1 not on a stage; null: received without an Offload stage). Open: not delivered yet; toReceive: delivered, goods
+ * receipt not posted; received: received in the period.
+ */
+export interface DashboardStageDto {
+  filterId: number | null
+  stageName: string
+  /** 0 Pending, 1 Leg, 2 Arrive, 3 Offload; null: not on a stage. */
+  stageKind: number | null
+  openContainers: number
+  openPieces: number
+  toReceiveContainers: number
+  toReceivePieces: number
+  receivedContainers: number
+  receivedPieces: number
 }
 
 export interface DashboardSummaryQuery {

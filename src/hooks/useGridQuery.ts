@@ -33,6 +33,11 @@ export interface UseGridQueryOptions<TFilters extends object, TRecord, TResult> 
   /** What a fresh page starts with, and exactly what Clear Filters returns to. */
   initialFilters: TFilters
   /**
+   * Filters a link opened the page with (read once from the address, e.g. the Dashboard's "Unpaid" line): the page
+   * starts with them over `initialFilters`, and Clear Filters still goes back to `initialFilters`.
+   */
+  presetFilters?: Partial<TFilters>
+  /**
    * The filters that are TYPED into. Only these are debounced: a dropdown, switch or date picker is
    * a finished choice the moment it changes, and waiting on it would feel broken.
    */
@@ -85,6 +90,7 @@ function sameFilters<T extends object>(a: T, b: T): boolean {
 
 export function useGridQuery<TFilters extends object, TRecord, TResult>({
   initialFilters,
+  presetFilters,
   debounced = [],
   initialSort,
   pageSize: initialPageSize = PAGE_SIZE_DEFAULT,
@@ -93,9 +99,9 @@ export function useGridQuery<TFilters extends object, TRecord, TResult>({
   errorMessage,
 }: UseGridQueryOptions<TFilters, TRecord, TResult>): GridQuery<TFilters, TRecord, TResult> {
   /** What the inputs show. */
-  const [filters, setFiltersState] = useState<TFilters>(initialFilters)
+  const [filters, setFiltersState] = useState<TFilters>(() => ({ ...initialFilters, ...presetFilters }))
   /** What the fetch uses - a snapshot of the above, taken when an edit settles. */
-  const [applied, setApplied] = useState<TFilters>(initialFilters)
+  const [applied, setApplied] = useState<TFilters>(() => ({ ...initialFilters, ...presetFilters }))
 
   const [page, setPageState] = useState(1)
   const [pageSize, setPageSizeState] = useState(initialPageSize)

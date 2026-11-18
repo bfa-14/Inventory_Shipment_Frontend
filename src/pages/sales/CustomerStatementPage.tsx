@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { Alert, Badge, Button, Group, Paper, Select, SimpleGrid, Text } from '@mantine/core'
 import { DateInput } from '../../components/ui/DateInput'
 import { IconPrinter } from '@tabler/icons-react'
@@ -55,7 +55,12 @@ const GRID_COLUMNS: GridColumnMeta<Row>[] = [
 export function CustomerStatementPage() {
   const navigate = useNavigate()
   const [clients, setClients] = useState<PartyLookupDto[]>([])
-  const [clientId, setClientId] = useState<string | null>(null)
+  const location = useLocation()
+  // (115) A link may open the statement of one customer (the Dashboard's "Owing the most"): read once, when it opens.
+  const [clientId, setClientId] = useState<string | null>(() => {
+    const id = new URLSearchParams(location.search).get('clientId')
+    return id && /^\d+$/.test(id) ? id : null
+  })
   const [dateFrom, setDateFrom] = useState<string | null>(null)
   const [dateTo, setDateTo] = useState<string | null>(null)
   const [loaded, setStatement] = useState<CustomerStatementDto | null>(null)

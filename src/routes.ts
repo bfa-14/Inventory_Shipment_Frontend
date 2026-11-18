@@ -29,6 +29,43 @@ export interface StockLevelsLink {
   itemId?: number | null
 }
 
+/** What a link to a list may preset (script 115: the Dashboard's lines); the list reads them once, when it opens. */
+export interface ListLink {
+  /** 'Unpaid' | 'Partial' | 'Paid': the Payment filter of the supplier and sales invoice lists. */
+  paymentStatus?: string | null
+  branchId?: number | string | null
+  /** The Containers list's Stage filter: a stage's id, 0 Pending, -1 not on a stage. */
+  stageId?: number | null
+}
+
+/** The address of a list with what a link presets; nothing to preset, the bare list. */
+function listLink(path: string, link: ListLink): string {
+  const params = new URLSearchParams()
+  if (link.paymentStatus) params.set('paymentStatus', link.paymentStatus)
+  if (link.branchId !== undefined && link.branchId !== null && link.branchId !== '') params.set('branchId', String(link.branchId))
+  if (link.stageId !== undefined && link.stageId !== null) params.set('stageId', String(link.stageId))
+  const qs = params.toString()
+  return qs ? `${path}?${qs}` : path
+}
+
+/**
+ * The presets a link put in the address, read once by the list it opens: only the names the list asks for, and a
+ * value it does not know is left out (a hand-typed address never sets a filter the page cannot show).
+ */
+export function listPreset(search: string, names: (keyof ListLink)[]): ListLink {
+  const params = new URLSearchParams(search)
+  const preset: ListLink = {}
+  const paymentStatus = params.get('paymentStatus')
+  if (names.includes('paymentStatus') && paymentStatus && ['Unpaid', 'Partial', 'Paid'].includes(paymentStatus)) {
+    preset.paymentStatus = paymentStatus
+  }
+  const branchId = params.get('branchId')
+  if (names.includes('branchId') && branchId && /^\d+$/.test(branchId)) preset.branchId = branchId
+  const stageId = params.get('stageId')
+  if (names.includes('stageId') && stageId && /^-?\d+$/.test(stageId)) preset.stageId = Number(stageId)
+  return preset
+}
+
 export const routes = {
   purchaseOrders: PURCHASE_LISTS.PO,
   purchaseOrder: (id: number) => `${PURCHASE_LISTS.PO}/${id}`,
@@ -73,6 +110,13 @@ export const routes = {
     const qs = params.toString()
     return qs ? `${STOCK_LEVELS}?${qs}` : STOCK_LEVELS
   },
+
+  /** (115) The lists the Dashboard's lines open, already filtered. */
+  purchaseInvoicesLink: (link: ListLink = {}) => listLink(PURCHASE_LISTS.PINV, link),
+  salesInvoicesLink: (link: ListLink = {}) => listLink('/sales/invoices', link),
+  containersLink: (link: ListLink = {}) => listLink('/logistics/containers', link),
+  /** The Customer Statement, opened on one customer. */
+  customerStatement: (clientId: number) => `/sales/receipts/statement?clientId=${clientId}`,
 
   container: (id: number) => `/logistics/containers/${id}`,
   movement: (id: number) => `/logistics/movements/${id}`,

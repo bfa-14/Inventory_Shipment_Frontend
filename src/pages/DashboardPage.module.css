@@ -328,3 +328,108 @@
   border-radius: 6px;
   white-space: nowrap;
 }
+
+/* (115) the cards: containers by stage, what we owe, what customers owe, purchases by month */
+.cards {
+  display: grid;
+  gap: 16px;
+  /* two money cards side by side on a wide screen, one under the other below about 800 px */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+/* the stages, one after the other: a row of tiles that wraps; on a phone two a row */
+.stages {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+@media (max-width: 48em) {
+  .stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stage {
+  border: 1px solid var(--db-line);
+  border-top: 4px solid var(--stage-colour, var(--db-blue));
+  border-radius: var(--mantine-radius-md);
+  padding: 10px 12px;
+  color: inherit;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+a.stage:hover {
+  background: var(--db-card-2);
+}
+
+.stageName {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  min-height: 2.6em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.stageValue {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stageEmpty .stageValue {
+  color: var(--db-dim);
+}
+
+/* the total of a money card, then its lines */
+.bigFigure {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+
+.groupTitle {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--db-dim);
+  margin: 12px 0 2px;
+}
+
+/* the age of what customers owe: one bar in parts, oldest in red */
+.agingBar {
+  display: flex;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--mantine-color-gray-1);
+  margin: 4px 0 8px;
+}
+
+.agingBar > span {
+  display: block;
+  height: 100%;
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+  flex: none;
+}

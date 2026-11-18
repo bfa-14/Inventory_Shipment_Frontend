@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
-import { routes } from '../../routes'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { listPreset, routes } from '../../routes'
 import {
   ActionIcon,
   Alert,
@@ -248,8 +248,17 @@ export function ContainersPage() {
   const [updatingStage, setUpdatingStage] = useState<{ id: number; containerRef: string }[] | null>(null)
   const [importingStages, setImportingStages] = useState(false)
 
+  /* (115) A link may preset the Stage filter (the Dashboard's "Containers by stage"): read once, when the list opens;
+     Clear Filters still clears it. */
+  const location = useLocation()
+  const [preset] = useState(() => {
+    const link = listPreset(location.search, ['stageId'])
+    return (link.stageId !== undefined && link.stageId !== null ? { stageId: String(link.stageId) } : {}) satisfies Partial<Filters>
+  })
+
   const grid = useGridQuery<Filters, ContainerListDto, AllRows<ContainerListDto>>({
     initialFilters: NO_FILTERS,
+    presetFilters: preset,
     debounced: ['containerNo', 'containerRef', 'commercialInvoiceNo', 'blNo'],
     initialSort: { columnAccessor: 'orderMonth', direction: 'desc' },
     // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.

@@ -5,6 +5,7 @@ import { DateInput } from '../../components/ui/DateInput'
 import { IconEye, IconFilterOff, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
 import type { BulkActionResult } from '../../api/documents'
 import { ApiError } from '../../api/http'
+import { listPreset } from '../../routes'
 import { fetchAllPages, type AllRows } from '../../api/fetchAllPages'
 import { branchesApi } from '../../api/masterdata/branches'
 import { partiesApi } from '../../api/masterdata/parties'
@@ -103,8 +104,19 @@ export function SalesInvoicesPage() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkResult, setBulkResult] = useState<{ title: string; successLabel: string; result: BulkActionResult } | null>(null)
 
+  /* (115) A link may preset the branch and the Payment filter (the Dashboard's receivables lines): read once, when the
+     list opens; Clear Filters still clears them. */
+  const [preset] = useState(() => {
+    const link = listPreset(location.search, ['branchId', 'paymentStatus'])
+    return {
+      ...(link.branchId ? { branchId: String(link.branchId) } : {}),
+      ...(link.paymentStatus ? { paymentStatus: link.paymentStatus } : {}),
+    } satisfies Partial<Filters>
+  })
+
   const grid = useGridQuery<Filters, SalesInvoiceListDto, AllRows<SalesInvoiceListDto>>({
     initialFilters: NO_FILTERS,
+    presetFilters: preset,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
     // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.

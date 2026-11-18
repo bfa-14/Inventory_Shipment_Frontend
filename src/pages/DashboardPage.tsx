@@ -14,7 +14,7 @@ import { dashboardApi, type DashboardSummaryDto } from '../api/dashboard'
 import { branchesApi } from '../api/masterdata/branches'
 import type { BranchLookupDto } from '../api/types'
 import { containerStatusLabel } from '../api/logistics/containers'
-import { formatDateOnly, formatNumber, todayDateOnly } from '../components/format'
+import { formatNumber, todayDateOnly } from '../components/format'
 import { PageHeader } from '../components/ui/PageHeader'
 import { useAuth } from '../auth/useAuth'
 import { PERMISSIONS } from '../navigation'
@@ -22,6 +22,8 @@ import { routes } from '../routes'
 import { useApprovalsMe } from '../hooks/useApprovalsMe'
 import { useSeesItemCosts } from '../hooks/useSeesItemCosts'
 import css from './DashboardPage.module.css'
+import { CHART, MONTHS, compact, showDate } from './dashboardShared'
+import { DashboardCards } from './DashboardCards'
 
 /** The periods every widget answers for, and what each one is compared with. */
 const DASHBOARD_PERIODS = [
@@ -48,18 +50,7 @@ const DRAFT_TYPES: Record<string, { label: string; to: string; permission: strin
   PAY: { label: 'Supplier payments', to: '/purchase/payments', permission: PERMISSIONS.paymentsView },
 }
 
-/** The board's palette for the charts, in the order slices take them. */
-const CHART = {
-  violet: '#b26cf2',
-  pink: '#e15ad8',
-  cyan: '#33d6d0',
-  blue: '#3d7ff0',
-  grid: 'var(--mantine-color-gray-2)',
-  text: 'var(--mantine-color-dimmed)',
-  slices: ['#33d6d0', '#3d7ff0', '#b26cf2', '#e15ad8', '#ffb547', '#adb5bd'],
-}
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /* ── dates ─────────────────────────────────────────────────────────────────────────────────────── */
 
@@ -91,17 +82,6 @@ function periodDates(period: DashboardPeriod, todayIso: string) {
     case 'year':
       return { from: iso(new Date(y, 0, 1)), to: iso(today), prevFrom: iso(new Date(y - 1, 0, 1)), prevTo: iso(sameDayIn(y - 1, m - 1, d)) }
   }
-}
-
-/** The API's dates may carry a midnight time; the page shows the calendar date. */
-const showDate = (value: string | null | undefined) => formatDateOnly(value?.slice(0, 10))
-
-/** "85.7k", "1.2M": the axes and donut centres have no room for every digit. */
-function compact(value: number): string {
-  const abs = Math.abs(value)
-  if (abs >= 1_000_000) return `${formatNumber(value / 1_000_000, 1)}M`
-  if (abs >= 1_000) return `${formatNumber(value / 1_000, 1)}k`
-  return formatNumber(value, 0)
 }
 
 /** The change against the previous period, as a chip; nothing to compare with says so. */
@@ -218,6 +198,9 @@ export function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* (115) Containers by stage, what we owe, what customers owe, purchases by month. */}
+      {data && <DashboardCards data={data} ccy={ccy} branchId={branchId} />}
 
       {data && (
         <NeedsAttention

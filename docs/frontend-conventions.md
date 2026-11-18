@@ -510,6 +510,21 @@ it already sent.
 Lists that hold **all** their rows and filter in the browser (Users, Roles) do not need the hook — they are
 already instant. They must simply have no Apply button either.
 
+### A link that opens a list already filtered (script 115)
+
+A line elsewhere (the Dashboard's "Unpaid", a stage tile, a debtor) may open a list **with some filters set**. The link
+is built in `src/routes.ts` (`routes.purchaseInvoicesLink({ paymentStatus, branchId })`, `salesInvoicesLink`,
+`containersLink({ stageId })`, `customerStatement(clientId)`, and the older `stockLevelsLink`), never by hand.
+
+- The list reads the address **once, when it opens** (`listPreset(location.search, ['paymentStatus', 'branchId'])`
+  inside a `useState` initialiser), keeping only the names it asked for and only values it knows: a hand-typed
+  `?paymentStatus=Late` sets nothing. After that the reader owns the filters; the address is not kept in step.
+- The preset goes to `useGridQuery`'s **`presetFilters`**, never into `initialFilters`: the page starts with it, and
+  **Clear Filters still goes back to `initialFilters`** (no filter) and is enabled, since the list is filtered.
+- Today: Purchase Invoices (`paymentStatus`, `branchId`), Sales Invoices (`paymentStatus`, `branchId`), Containers
+  (`stageId`: a stage's id, 0 Pending, -1 not on a stage), Customer Statement (`clientId`), Stock Levels (its own
+  `stockLevelsLink`, script 91). A list that should accept a preset adds its names to `ListLink` and `listPreset`.
+
 ## Error handling
 
 The API returns RFC 9457 problem details. `ApiError` exposes `.status`, `.messages`, `.code`, `.data` and
@@ -2920,3 +2935,33 @@ every charge form (New charge, the charge drawer, Apply to other containers, the
   statement), and only when the reader may open that kind of document.
 - **PDF = print page:** "Print / PDF" opens `/reports/item-balance/print?…` (outside the shell, A4 landscape, prints on load);
   the browser's "Save as PDF" gives the PDF. There is no PDF library.
+
+## The Dashboard's cards (script 115)
+
+Below the board, "Containers, payables and receivables" (`src/pages/DashboardCards.tsx`, one call with the rest:
+`GET api/dashboard/summary`, read by `reporting.usp_Dashboard_Cards`). **Each card shows only when its section came
+back**: the API leaves out what the reader may not open on its own screen (`DashboardService.TrimCards`), and the page
+decides nothing about permissions but where a line links.
+
+- **Containers by stage** (View Containers, full width): one tile per shipment stage in the stages' order, Pending
+  first, "Not on a stage" (orange, with its tooltip) and containers received without an Offload stage last, only when
+  there are some. A tile is the containers standing there and their pieces; the Offload stage's is the containers
+  **to receive** (delivered, goods receipt not posted), with "n received in the period" under it. Each tile opens
+  Containers on its Stage filter. The top colour says what the stage is: grey pending, blue a leg, violet an arrival,
+  green the offload. Two tiles a row on a phone.
+- **We owe** (View Supplier Payments, or View Purchase Invoices / View Container Charges for each half): the total, then
+  Supplier invoices and Container charges on account, Unpaid and Partly paid (a "Partly paid" line only when there is
+  one; its amount is what is left), then "Owed the most" (five creditors, ranked by the server on the halves the reader
+  sees). The invoice lines open Purchase Invoices on that Payment filter and the branch; the charge lines Container
+  Charges; without the list's permission, Supplier Payments.
+- **Customers owe** (View Sales Invoices or View Receipts): the total, one bar in five parts by age (green not due yet
+  to red over 90 days late), the five ages with their invoices and amounts, then "Owing the most" (five customers, the
+  late part in red with the oldest due date). A customer opens the Customer Statement on them (View Customer Statement),
+  else Sales Invoices.
+- **Purchases by month** (full width, twelve months to the period's end): bars Invoiced (supplier invoices less
+  returns), Received (posted goods receipts at their value at receipt) and Container charges (posted), each for a
+  reader who may see it; goods received without their value (no View item costs) are counted in pieces in the note
+  under the chart, and become the only series, in pcs, when no money series is left - pieces and money never share an
+  axis.
+- The money cards stand two side by side above about 800 px (`minmax(min(100%, 380px), 1fr)`), one under the other below.
+

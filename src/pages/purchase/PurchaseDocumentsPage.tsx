@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
-import { routes } from '../../routes'
+import { listPreset, routes } from '../../routes'
 import { Alert, Anchor, Badge, Button, Checkbox, Group, Paper, Progress, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { DateInput } from '../../components/ui/DateInput'
 import { IconArrowBackUp, IconEye, IconFileInvoice, IconFilterOff, IconInfoCircle, IconPackageImport, IconPlus, IconSearch, IconSend } from '@tabler/icons-react'
@@ -239,8 +239,19 @@ function PurchaseDocumentsList({ kind }: { kind: PurchaseKind }) {
   const [invoiceFrom, setInvoiceFrom] = useState<PurchaseDocumentListDto | null>(null)
   const [createdInvoices, setCreatedInvoices] = useState<{ orderId: number; currencyCode: string; invoices: CreatedPurchaseInvoiceDto[] } | null>(null)
 
+  /* (115) A link may preset the branch and, on supplier invoices, the Payment filter (the Dashboard's "Unpaid" line):
+     read once, when the list opens; Clear Filters still clears them. */
+  const [preset] = useState(() => {
+    const link = listPreset(location.search, kind.code === 'PINV' ? ['branchId', 'paymentStatus'] : ['branchId'])
+    return {
+      ...(link.branchId ? { branchId: String(link.branchId) } : {}),
+      ...(link.paymentStatus ? { paymentStatus: link.paymentStatus } : {}),
+    } satisfies Partial<Filters>
+  })
+
   const grid = useGridQuery<Filters, PurchaseDocumentListDto, AllRows<PurchaseDocumentListDto>>({
     initialFilters: NO_FILTERS,
+    presetFilters: preset,
     debounced: ['search'],
     initialSort: { columnAccessor: 'documentDate', direction: 'desc' },
     // The list is loaded whole (newest first, up to the grid's cap) and the grid does the rest.
