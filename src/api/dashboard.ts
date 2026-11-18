@@ -125,6 +125,73 @@ export interface DashboardSummaryDto {
     /** Container charges posted (View Container Charges). */
     chargesBase: number | null
   }[] | null
+
+  /* (116) the insights; each is missing from an older API, null when the reader may not see it */
+  /** The ten items sold the most in the period, net of returns (View Sales Invoices; gross profit: View Sales Profit). */
+  topItems?: { itemId: number; itemCode: string; itemName: string; pieces: number; salesBase: number; grossProfitBase: number | null }[] | null
+  /** The ten customers who bought the most in the period, and what each still owes today. */
+  topCustomers?: { clientId: number; clientName: string; salesBase: number; invoiceCount: number; outstandingBase: number }[] | null
+  /** The period's sales of EVERY branch (the branch filter does not apply). */
+  salesByBranch?: { branchId: number; branchName: string; salesBase: number; grossProfitBase: number | null; invoiceCount: number }[] | null
+  /**
+   * Each cash / bank account in the period (accountId null: lines without an account), base currency. In: posted
+   * receipts (null without View Receipts); out: posted supplier payments (null without View Supplier Payments).
+   */
+  cashAccounts?: {
+    accountId: number | null
+    accountCode: string | null
+    accountName: string
+    accountType: string | null
+    currencyCode: string | null
+    inBase: number | null
+    inCount: number | null
+    outBase: number | null
+    outCount: number | null
+  }[] | null
+  /** Posted transfer dispatches with pieces still on the way (View Transfer Orders); list: the ten due first. */
+  transfers?: {
+    dispatches: number
+    pieces: number
+    late: number
+    list: {
+      postingId: number
+      transferOrderId: number
+      dispatchNumber: string | null
+      orderNumber: string | null
+      fromWarehouse: string
+      toWarehouse: string
+      postingDate: string
+      eta: string | null
+      pieces: number
+      isLate: boolean
+    }[]
+  } | null
+  /**
+   * Items in stock for slowDays days or more without a sale in the last slowDays days (View items). The values are
+   * null without View item costs; the list is then the ten with the most pieces, else the ten worth the most.
+   */
+  slowStock?: {
+    items: number
+    pieces: number
+    valueBase: number | null
+    slowDays: number
+    list: { itemId: number; itemCode: string; itemName: string; onHand: number; valueBase: number | null; lastSaleDate: string | null }[]
+  } | null
+  /** The containers received in the period and their charges (View Container Charges; the list also View Containers). */
+  chargesMissing?: {
+    receivedContainers: number
+    withoutCharge: number
+    draftOnly: number
+    byType: { chargeTypeId: number; chargeName: string; enteredContainers: number; draftContainers: number; missingContainers: number }[]
+    list: { containerId: number; containerRef: string; containerNo: string | null; offloadedDate: string | null; draftCharges: number }[]
+  } | null
+  /** Days from the order date to the date received, last 12 months, weighted by the pieces (View Goods Receipts). */
+  leadTimes?: {
+    days: number | null
+    pieces: number
+    receipts: number
+    suppliers: { supplierId: number; supplierName: string; days: number; pieces: number; receipts: number }[]
+  } | null
 }
 
 /**

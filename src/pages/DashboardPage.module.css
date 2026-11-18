@@ -20,13 +20,29 @@
   color: var(--db-text);
 }
 
+/* The filters, on a line of their own; the period's title and its one line of dates (periodLine) head the period's
+   figures, after Needs attention (the user's layout). */
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  align-items: flex-end;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
   margin-bottom: 18px;
+}
+
+.periodLine {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 48em) {
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .periodLine {
+    white-space: normal;
+  }
 }
 
 .boardTitle {
@@ -432,4 +448,48 @@ a.stage:hover {
   border-radius: 50%;
   margin-right: 6px;
   flex: none;
+}
+
+/* (116) the insights: ranked lines with their share as a thin bar, and the cash card's three totals */
+.rankLine {
+  border-bottom: 1px solid var(--db-line);
+  padding-bottom: 6px;
+}
+
+.rankLine:last-child {
+  border-bottom: none;
+}
+
+.rank {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--mantine-color-gray-1);
+  color: var(--db-dim);
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+}
+
+.bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--mantine-color-gray-1);
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.inOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  margin-bottom: 8px;
 }

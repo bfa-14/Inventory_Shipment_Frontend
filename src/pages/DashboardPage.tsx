@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { Alert, Group, Loader, SegmentedControl, Select, Tooltip } from '@mantine/core'
 import { AreaChart, BarChart, DonutChart, LineChart } from '@mantine/charts'
+import { DatePickerInput } from '@mantine/dates'
 import { useMediaQuery } from '@mantine/hooks'
 import {
   IconAlertTriangle,
@@ -24,6 +25,7 @@ import { useSeesItemCosts } from '../hooks/useSeesItemCosts'
 import css from './DashboardPage.module.css'
 import { CHART, MONTHS, compact, showDate } from './dashboardShared'
 import { DashboardCards } from './DashboardCards'
+import { DashboardInsights } from './DashboardInsights'
 
 /** The periods every widget answers for, and what each one is compared with. */
 const DASHBOARD_PERIODS = [
@@ -31,8 +33,13 @@ const DASHBOARD_PERIODS = [
   { value: 'month', label: 'This month', previous: 'the same days last month' },
   { value: 'lastMonth', label: 'Last month', previous: 'the month before' },
   { value: 'year', label: 'This year', previous: 'the same days last year' },
+  { value: 'custom', label: 'From – to', previous: 'the same number of days just before' },
 ] as const
 type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number]['value']
+
+/** The longest period the API answers for (DashboardService.MaxPeriodDays): a little over a year. */
+const MAX_PERIOD_DAYS = 400
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /** Where the drafts of each document type are listed, what they are called there, and who may open them. */
 const DRAFT_TYPES: Record<string, { label: string; to: string; permission: string }> = {
@@ -67,7 +74,7 @@ function sameDayIn(year: number, month: number, day: number): Date {
  * Each period is compared with the one before it of the same length: up to the same day of the month
  * (or of the year), so the first week of October is not measured against the whole of September.
  */
-function periodDates(period: DashboardPeriod, todayIso: string) {
+function periodDates(period: Exclude<DashboardPeriod, 'custom'>, todayIso: string) {
   const [y, m, d] = todayIso.split('-').map(Number)
   const today = new Date(y, m - 1, d)
   switch (period) {
@@ -82,6 +89,24 @@ function periodDates(period: DashboardPeriod, todayIso: string) {
     case 'year':
       return { from: iso(new Date(y, 0, 1)), to: iso(today), prevFrom: iso(new Date(y - 1, 0, 1)), prevTo: iso(sameDayIn(y - 1, m - 1, d)) }
   }
+}
+
+const toDate = (value: string) => {
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+const daysBetween = (from: string, to: string) => Math.round((toDate(to).getTime() - toDate(from).getTime()) / 86_400_000)
+
+/**
+ * A PERIOD OF THE READER'S OWN ("From – to", both days included), compared with the same number of days just before
+ * it: 10–20 March against 28 February – 9 March.
+ */
+function customDates(from: string, to: string) {
+  const prevTo = toDate(from)
+  prevTo.setDate(prevTo.getDate() - 1)
+  const prevFrom = new Date(prevTo)
+  prevFrom.setDate(prevFrom.getDate() - daysBetween(from, to))
+  return { from, to, prevFrom: iso(prevFrom), prevTo: iso(prevTo) }
 }
 
 /** The change against the previous period, as a chip; nothing to compare with says so. */
@@ -110,16 +135,28 @@ export function DashboardPage() {
   const phone = useMediaQuery('(max-width: 48em)')
 
   const today = todayDateOnly()
-  const dates = useMemo(() => periodDates(period, today), [period, today])
+  // "From – to": the days live in the address (from, to) like the other filters; missing or unreadable, this month.
+  const customFrom = params.get('from')
+  const customTo = params.get('to')
+  const dates = useMemo(() => {
+    if (period === 'custom' && customFrom && customTo && ISO_DATE.test(customFrom) && ISO_DATE.test(customTo) && customFrom <= customTo) {
+      return customDates(customFrom, customTo)
+    }
+    return periodDates(period === 'custom' ? 'month' : period, today)
+  }, [period, customFrom, customTo, today])
+  const tooLong = daysBetween(dates.from, dates.to) > MAX_PERIOD_DAYS
   const key = `${branchId ?? ''}|${dates.from}|${dates.to}`
   const [loaded, setLoaded] = useState<{ key: string; data: DashboardSummaryDto | null; error: string | null } | null>(null)
-  const loading = loaded?.key !== key
+  const loading = loaded?.key !== key && !tooLong
+  // The range being picked: the first day alone until the second is clicked, then it goes to the address.
+  const [picking, setPicking] = useState<[string | null, string | null] | null>(null)
 
   useEffect(() => {
     branchesApi.lookup().then(setBranches).catch(() => {})
   }, [])
 
   useEffect(() => {
+    if (tooLong) return
     const controller = new AbortController()
     dashboardApi
       .summary({ branchId: branchId ? Number(branchId) : null, ...dates, today }, controller.signal)
@@ -129,13 +166,47 @@ export function DashboardPage() {
         setLoaded({ key, data: null, error: error instanceof Error ? error.message : 'The dashboard could not be loaded.' })
       })
     return () => controller.abort()
-  }, [key, branchId, dates, today])
+  }, [key, branchId, dates, today, tooLong])
 
   function setFilter(name: 'branchId' | 'period', value: string | null) {
     setParams((current) => {
       const next = new URLSearchParams(current)
       if (value) next.set(name, value)
       else next.delete(name)
+      return next
+    }, { replace: true })
+  }
+
+  /** A period button: "From – to" starts from the days on screen, so the reader only moves what they want. */
+  function choosePeriod(value: string) {
+    setPicking(null)
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value === 'month') next.delete('period')
+      else next.set('period', value)
+      if (value === 'custom') {
+        next.set('from', dates.from)
+        next.set('to', dates.to)
+      } else {
+        next.delete('from')
+        next.delete('to')
+      }
+      return next
+    }, { replace: true })
+  }
+
+  function chooseRange(range: [string | null, string | null]) {
+    const [from, to] = range
+    if (!from || !to) {
+      setPicking(range)
+      return
+    }
+    setPicking(null)
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('period', 'custom')
+      next.set('from', from)
+      next.set('to', to)
       return next
     }, { replace: true })
   }
@@ -149,13 +220,6 @@ export function DashboardPage() {
 
       <div className={css.board}>
         <div className={css.toolbar}>
-          <div>
-            <div className={css.boardTitle}>{periodInfo.label}</div>
-            <div className={css.dim} style={{ fontSize: 12 }}>
-              {dates.from === dates.to ? showDate(dates.from) : `${showDate(dates.from)} – ${showDate(dates.to)}`}
-              {` · compared with ${periodInfo.previous} · amounts in ${ccy}`}
-            </div>
-          </div>
           {/* On a phone the filters take the whole width, one under the other, and the periods get smaller
               labels: at the normal size "Today / This month / Last month / This year" is 383 px wide, more than a
               390 px screen's column, and the page scrolled sideways. Each period is as wide as its label (flex auto,
@@ -174,17 +238,36 @@ export function DashboardPage() {
             />
             <SegmentedControl
               value={period}
-              onChange={(next) => setFilter('period', next === 'month' ? null : next)}
+              onChange={choosePeriod}
               data={DASHBOARD_PERIODS.map((p) => ({ value: p.value, label: p.label }))}
               fullWidth={phone}
               size={phone ? 'xs' : 'sm'}
               w={phone ? '100%' : undefined}
               styles={phone ? { control: { flex: '1 1 auto', minWidth: 0 } } : undefined}
             />
+            {period === 'custom' && (
+              <DatePickerInput
+                type="range"
+                aria-label="From – to"
+                placeholder="Pick the first and the last day"
+                valueFormat="DD/MM/YYYY"
+                allowSingleDateInRange
+                maxDate={today}
+                value={picking ?? [dates.from, dates.to]}
+                onChange={(range) => chooseRange(range as [string | null, string | null])}
+                w={phone ? '100%' : 240}
+              />
+            )}
           </Group>
         </div>
 
-        {loaded?.error && !loading && (
+        {tooLong && (
+          <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />} mb="md">
+            {`Choose a period of at most ${MAX_PERIOD_DAYS} days: this one has ${daysBetween(dates.from, dates.to) + 1}.`}
+          </Alert>
+        )}
+
+        {loaded?.error && !loading && !tooLong && (
           <Alert color="red" variant="light" icon={<IconAlertTriangle size={18} />} mb="md">{loaded.error}</Alert>
         )}
 
@@ -194,6 +277,19 @@ export function DashboardPage() {
 
         {data && (
           <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 120ms' }}>
+            {/* The user's order: the filters, what to act on, then the period's title over its own figures. */}
+            <NeedsAttention
+              data={data}
+              approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null}
+              branchId={branchId}
+            />
+            <div style={{ marginBottom: 14 }}>
+              <div className={css.boardTitle}>{period === 'custom' ? 'Your period' : periodInfo.label}</div>
+              <div className={`${css.dim} ${css.periodLine}`}>
+                {dates.from === dates.to ? showDate(dates.from) : `${showDate(dates.from)} – ${showDate(dates.to)}`}
+                {` · compared with ${periodInfo.previous} · amounts in ${ccy}`}
+              </div>
+            </div>
             <Board data={data} ccy={ccy} branchChosen={branchId !== null} />
           </div>
         )}
@@ -202,13 +298,8 @@ export function DashboardPage() {
       {/* (115) Containers by stage, what we owe, what customers owe, purchases by month. */}
       {data && <DashboardCards data={data} ccy={ccy} branchId={branchId} />}
 
-      {data && (
-        <NeedsAttention
-          data={data}
-          approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null}
-          branchId={branchId}
-        />
-      )}
+      {/* (116) What sells and who buys, cash and bank, slow stock, the received containers' charges, lead times. */}
+      {data && <DashboardInsights data={data} ccy={ccy} branchId={branchId} />}
     </>
   )
 }
@@ -567,9 +658,32 @@ function NeedsAttention({
     )
   }
 
+  // (116) Transfer dispatches whose goods have not arrived yet, the late ones first (their ETA has passed).
+  if (data.transfers) {
+    const t = data.transfers
+    cards.push(
+      <AttentionCard key="transfers" title="Transfers on the way" count={t.dispatches} clear="No transfer is on the way.">
+        <div className={css.sub} style={{ marginBottom: 4 }}>
+          {`${formatNumber(t.pieces)} pcs on the way · ${formatNumber(t.late)} late`}
+        </div>
+        {t.list.map((row) => (
+          <Line key={row.postingId} to={routes.transferOrder(row.transferOrderId)}
+            label={row.dispatchNumber ?? row.orderNumber ?? 'Dispatch'}
+            sub={`${row.fromWarehouse} → ${row.toWarehouse} · ${formatNumber(row.pieces)} pcs`}
+            value={<span className={css.badge} style={row.isLate
+              ? { color: '#ff6b8a', background: '#ff6b8a22' }
+              : { color: '#3d7ff0', background: '#3d7ff022' }}>
+              {row.isLate ? `Late · ETA ${showDate(row.eta)}` : `ETA ${showDate(row.eta)}`}
+            </span>} />
+        ))}
+      </AttentionCard>,
+    )
+  }
+
   if (cards.length === 0) return null
   return (
-    <div className={css.board} style={{ marginTop: 20 }}>
+    // Inside the period's board, under its filters: no board of its own.
+    <div style={{ marginBottom: 24 }}>
       <div className={css.boardTitle} style={{ marginBottom: 14 }}>Needs attention</div>
       <div className={css.attention}>{cards}</div>
     </div>
