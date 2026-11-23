@@ -18,6 +18,11 @@ interface LoadedItemsSectionProps {
   /** Line numbers the server refused ("Line 2: ..."), highlighted with the message. */
   lineErrors: Record<number, string>
   baseCurrencyCode: string
+  /**
+   * (prompt 53) Per saved container line, what the charges posted after the goods were received put on it
+   * (lateChargesByLine): shown under Landed / unit, which already includes it, as "incl. late +10.00".
+   */
+  lateByLine?: ReadonlyMap<number, number>
 }
 
 const FOB_SOURCE_COLOURS: Record<FobSource, string> = { Order: 'gray', Invoice: 'blue', Offload: 'green', Received: 'green' }
@@ -31,7 +36,7 @@ const FOB_SOURCE_COLOURS: Record<FobSource, string> = { Order: 'gray', Invoice: 
  * A LINE THAT IS INVOICED IS HELD: its quantity cannot go below what is invoiced (the server says
  * LINE_INVOICED) and it cannot be removed. The input's minimum says so before the server does.
  */
-export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems, lineErrors, baseCurrencyCode }: LoadedItemsSectionProps) {
+export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems, lineErrors, baseCurrencyCode, lateByLine }: LoadedItemsSectionProps) {
   const received = lines.some((l) => l.receivedQuantityBase !== null)
   const columnCount = 13 + (editable ? 1 : 0)
 
@@ -180,16 +185,37 @@ export function LoadedItemsSection({ lines, editable, onLinesChange, onAddItems,
                       <Table.Td ta="right">{saved ? formatNumber(saved.chargesPerUnitBase ?? 0, 2) : '—'}</Table.Td>
                       <Table.Td ta="right">
                         {saved?.landedCostBase != null ? (
-                          <Group gap={4} justify="flex-end" wrap="nowrap">
-                            <Text fz="sm" fw={saved.isLandedFinal ? 700 : 400}>
-                              {formatNumber(saved.landedCostBase, 2)}
-                            </Text>
-                            {saved.isLandedFinal ? null : (
-                              <Text fz="xs" c="dimmed">
-                                est.
+                          <>
+                            <Group gap={4} justify="flex-end" wrap="nowrap">
+                              <Text fz="sm" fw={saved.isLandedFinal ? 700 : 400}>
+                                {formatNumber(saved.landedCostBase, 2)}
                               </Text>
-                            )}
-                          </Group>
+                              {saved.isLandedFinal ? null : (
+                                <Text fz="xs" c="dimmed">
+                                  est.
+                                </Text>
+                              )}
+                            </Group>
+                            {(() => {
+                              // (prompt 53) the part of it the charges posted after the receipt added, per piece received
+                              const late = lateByLine?.get(saved.id)
+                              const pcs = line.receivedQuantityBase
+                              if (!late || !pcs) return null
+                              const perPiece = late / pcs
+                              return (
+                                <Tooltip
+                                  withArrow
+                                  multiline
+                                  maw={320}
+                                  label={`Charges posted after the goods were received: ${formatNumber(late, 2)} ${baseCurrencyCode} over ${formatNumber(pcs)} pcs. They are in this landed cost; the pieces still in stock took them in their average cost, the pieces already sold in cost of sales.`}
+                                >
+                                  <Text fz="xs" c="dimmed" ta="right" style={{ whiteSpace: 'nowrap' }} data-late-charges>
+                                    incl. late {perPiece < 0 ? '−' : '+'}{formatNumber(Math.abs(perPiece), 2)}
+                                  </Text>
+                                </Tooltip>
+                              )
+                            })()}
+                          </>
                         ) : (
                           '—'
                         )}

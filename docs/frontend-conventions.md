@@ -2901,6 +2901,33 @@ every charge form (New charge, the charge drawer, Apply to other containers, the
 - **Payment status** 'Deduction' (`paymentStatusLabel`, grape): it is paid to nobody and no payment offers it.
 
 
+## A late container charge says what it will do (script 118, prompt 53)
+
+A charge posted after the container's goods were received (the container Offloaded) adjusts the cost of goods already
+in the company's hands: the pieces still in stock take it in their average cost, the pieces already sold in cost of
+sales, and the container line's landed cost follows it (the server's `usp_ContainerCharge_ApplyCost`, unchanged).
+`src/components/logistics/lateCharges.ts` holds what the pages say about it (unit tests in
+`scripts/tests/lateCharges.test.ts`):
+
+- **The split before the click.** Every post of a charge on an Offloaded container - the container page's Charges card,
+  the charge drawer, Logistics › Container Charges (a row's Post, and the bulk Post of the ticked rows, whatever their
+  containers) - first asks `containerChargesApi.postPreview(ids)` (POST `post-preview`, which writes nothing) and puts
+  `lateChargeSentence` in its confirmation: "KTG-2026-0031's goods are received: 84 pcs, 80 of them still in stock.
+  2,800.00 goes to their average cost and 140.00 to cost of sales (the pieces already sold)." A deduction "comes off";
+  several charges give their totals. A refusal the post would give (`postPreviewProblem`: a missing weight, manual shares
+  that do not add up...) is shown with `notify.error` instead of the dialog. An API without the preview leaves the old
+  sentence ("the item costs will be adjusted").
+- **The late part of the landed cost.** The container page's Loaded items show "incl. late +9.80" under Landed / unit,
+  which already includes it: `lateChargesByLine(container.charges, container.allocations)` (posted, in the cost, after
+  the receipt) ÷ the pieces received, its tooltip saying where it went. Nothing is re-computed in the page: the figure is
+  the server's, the note only explains it (the goods receipt keeps its cost at receipt beside it).
+- **A closed container takes a late charge in one step.** Its Charges card keeps "Add charge": with Close Containers it
+  asks "KTG-2026-0031 is closed. Reopen it and add the charge? It goes back to Offloaded: close it again once the charge
+  is posted." (Reopen and add), reopens it (`containersApi.reopen`) and opens New charge; without it the button is
+  disabled with "This container is closed: reopening it for a late charge needs the Close Containers permission." The
+  page reads the container again only when New charge closes: a reload shows the page's loader, which would unmount
+  the card and its dialog.
+
 ## A balance report with grouped columns (script 103: Reports › Item Balance by Warehouse)
 
 `ItemBalanceReportPage`, `ItemBalanceReportPrintPage` and `itemBalanceColumns.ts` in `src/pages/reports/`.

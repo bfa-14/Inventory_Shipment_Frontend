@@ -52,6 +52,7 @@ import { notify } from '../ui/notify'
 import { ApplyChargeModal } from './ApplyChargeModal'
 import { ChargePaymentPanel } from './ChargePaymentPanel'
 import { chargePaymentErrors, chargePaymentForm, chargePaymentRequest, ON_ACCOUNT, type ChargePaymentForm } from './chargePayment'
+import { lateChargeSentence, postPreviewProblem } from './lateCharges'
 
 interface ChargeDrawerProps {
   chargeId: number | null
@@ -334,12 +335,29 @@ function ChargeBody({
 
   async function post() {
     if (!dto) return
+    let first =
+      dto.containerStatus === OFFLOADED
+        ? 'Post this charge? The goods are received: the item costs will be adjusted.'
+        : 'Post this charge? It is locked once posted and counts in the item costs.'
+    if (dto.containerStatus === OFFLOADED) {
+      // (118) the split before the click (lateCharges.ts); a refusal the post would give is said now
+      try {
+        const previews = await containerChargesApi.postPreview([dto.id])
+        const problem = postPreviewProblem(previews)
+        if (problem) {
+          notify.error(problem)
+          return
+        }
+        const sentence = lateChargeSentence(previews)
+        if (sentence) first = `Post this charge? ${sentence}`
+      } catch {
+        // an API without the preview: the usual sentence
+      }
+    }
     const go = await confirm({
       title: 'Post charge',
       message:
-        (dto.containerStatus === OFFLOADED
-          ? 'Post this charge? The goods are received: the item costs will be adjusted.'
-          : 'Post this charge? It is locked once posted and counts in the item costs.')
+        first
         + (dto.paymentType === 1 && dto.amount > 0
           ? ` Paid cash: a supplier payment to ${dto.providerName ?? 'the provider'} is made and posted with it.`
           : ''),

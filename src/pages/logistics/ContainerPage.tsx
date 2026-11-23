@@ -61,6 +61,7 @@ import { AddPoLinesModal } from '../../components/logistics/AddPoLinesModal'
 import { ContainerCapacityCard } from '../../components/logistics/ContainerCapacityCard'
 import { overCapacityMessage } from '../../components/logistics/containerFill'
 import { ContainerChargesCard } from '../../components/logistics/ContainerChargesCard'
+import { lateChargesByLine } from '../../components/logistics/lateCharges'
 import { ContainerCostCard } from '../../components/logistics/ContainerCostCard'
 import { ContainerDocumentsCard } from '../../components/logistics/ContainerDocumentsCard'
 import {
@@ -345,6 +346,8 @@ export function ContainerPage() {
   const freeTimeEnd = container?.deliveredDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
   const freeDayPassed = freeDay !== null && container !== null && [4, 5].includes(container.status) && freeDay < freeTimeEnd
   const suppliersOnBoard = useMemo(() => [...new Set(lines.map((l) => l.supplierName))], [lines])
+  // (prompt 53) the part of each line's landed cost that charges posted after the goods receipt added
+  const lateByLine = useMemo(() => (container ? lateChargesByLine(container.charges, container.allocations) : undefined), [container])
   /** Travelled with a movement: the four milestone dates are the movements', shown read-only. */
   const datesLocked = container?.datesFromMovements === true
 
@@ -1034,6 +1037,7 @@ export function ContainerPage() {
               }}
               lineErrors={lineErrors}
               baseCurrencyCode="USD"
+              lateByLine={lateByLine}
             />
 
             {container ? (

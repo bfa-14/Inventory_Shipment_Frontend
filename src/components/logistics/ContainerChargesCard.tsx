@@ -1,9 +1,9 @@
 import { Fragment, useState } from 'react'
-import { Anchor, Badge, Button, Group, Paper, Table, Text, Title } from '@mantine/core'
+import { Anchor, Badge, Button, Group, Paper, Table, Text, Title, Tooltip } from '@mantine/core'
 import { IconCopy, IconEye, IconPlus, IconSend } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { canCopyCharge, chargeStatusColour, containerChargesApi } from '../../api/logistics/containerCharges'
-import type { ContainerChargeRowDto, ContainerDto } from '../../api/logistics/containers'
+import { containersApi, type ContainerChargeRowDto, type ContainerDto } from '../../api/logistics/containers'
 import { allocationMethodLabel } from '../../api/purchase/chargeTypes'
 import { useAuth } from '../../auth/useAuth'
 import { PERMISSIONS } from '../../navigation'
@@ -14,6 +14,7 @@ import { notify } from '../ui/notify'
 import { RowActions } from '../ui/RowActions'
 import { ApplyChargeModal } from './ApplyChargeModal'
 import { ChargeDrawer } from './ChargeDrawer'
+import { lateChargeSentence, postPreviewProblem } from './lateCharges'
 import { NewChargeModal } from './NewChargeModal'
 import { WHOLE_BADGE } from './movementContainers'
 
@@ -26,6 +27,7 @@ interface ContainerChargesCardProps {
 
 const DRAFT = 1
 const OFFLOADED = 6
+const CLOSED = 7
 const COLUMNS = 10
 
 /**
@@ -38,20 +40,74 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
   const { hasPermission } = useAuth()
   const canCreate = hasPermission(PERMISSIONS.containerChargesCreate)
   const canPost = hasPermission(PERMISSIONS.containerChargesPost)
+  // (prompt 53) a closed container takes a late charge once reopened: the card does both, for a reader who may reopen
+  const canReopen = hasPermission(PERMISSIONS.containersClose)
+  const closed = container.status === CLOSED
 
   const [adding, setAdding] = useState(false)
   const [openId, setOpenId] = useState<number | null>(null)
   const [copying, setCopying] = useState<ContainerChargeRowDto | null>(null)
+  const [reopening, setReopening] = useState(false)
+  /** Reopened for the dialog now open: the page reads the container again when it closes (a reload unmounts this card). */
+  const [reopened, setReopened] = useState(false)
+
+  /** (prompt 53) "Add charge" on a closed container: reopened first (back to Offloaded), then the dialog opens. */
+  async function addCharge() {
+    if (!closed) {
+      setAdding(true)
+      return
+    }
+    const go = await confirm({
+      title: 'Add a late charge',
+      message: `${container.containerRef} is closed. Reopen it and add the charge? It goes back to Offloaded: close it again once the charge is posted.`,
+      confirmLabel: 'Reopen and add',
+    })
+    if (!go) return
+    setReopening(true)
+    try {
+      await containersApi.reopen(container.id, container.rowVersion)
+      notify.success(`${container.containerRef} reopened.`)
+      setReopened(true)
+      setAdding(true)
+    } catch (err) {
+      notify.error(err instanceof ApiError ? err.message : 'The container could not be reopened.')
+      onChanged()
+    } finally {
+      setReopening(false)
+    }
+  }
+
+  function closeNewCharge() {
+    setAdding(false)
+    if (reopened) {
+      setReopened(false)
+      onChanged()
+    }
+  }
 
   async function post(row: ContainerChargeRowDto) {
-    const go = await confirm({
-      title: 'Post charge',
-      message:
-        container.status === OFFLOADED
-          ? `Post ${row.chargeName}? The goods are received: the item costs will be adjusted.`
-          : `Post ${row.chargeName}? It is locked once posted and counts in the item costs.`,
-      confirmLabel: 'Post',
-    })
+    let message =
+      container.status === OFFLOADED
+        ? `Post ${row.chargeName}? The goods are received: the item costs will be adjusted.`
+        : `Post ${row.chargeName}? It is locked once posted and counts in the item costs.`
+    if (container.status === OFFLOADED) {
+      // (118) the split before the click: what goes to the average cost of the pieces still in stock, what to cost of
+      // sales; a refusal the post would give is said now. An API without the preview keeps the sentence above.
+      try {
+        const previews = await containerChargesApi.postPreview([row.id])
+        const problem = postPreviewProblem(previews)
+        if (problem) {
+          notify.error(problem)
+          onChanged()
+          return
+        }
+        const sentence = lateChargeSentence(previews)
+        if (sentence) message = `Post ${row.chargeName}? ${sentence}`
+      } catch {
+        // the usual sentence
+      }
+    }
+    const go = await confirm({ title: 'Post charge', message, confirmLabel: 'Post' })
     if (!go) return
     try {
       await containerChargesApi.post(row.id, row.rowVersion)
@@ -88,10 +144,25 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
             Posted: {formatNumber(container.chargesPostedBase, 2)} · Draft: {formatNumber(container.chargesDraftBase, 2)} (base currency)
           </Text>
         </div>
-        {container.canAddCharge && canCreate && (
-          <Button variant="default" size="xs" leftSection={<IconPlus size={14} />} onClick={() => setAdding(true)}>
-            Add charge
-          </Button>
+        {canCreate && (container.canAddCharge || closed) && (
+          <Tooltip
+            label="This container is closed: reopening it for a late charge needs the Close Containers permission."
+            disabled={!closed || canReopen}
+            withArrow
+            multiline
+            maw={320}
+          >
+            <Button
+              variant="default"
+              size="xs"
+              leftSection={<IconPlus size={14} />}
+              onClick={() => void addCharge()}
+              disabled={closed && !canReopen}
+              loading={reopening}
+            >
+              Add charge
+            </Button>
+          </Tooltip>
         )}
       </Group>
 
@@ -215,7 +286,7 @@ export function ContainerChargesCard({ container, onChanged, onDocumentsChanged 
 
       <NewChargeModal
         opened={adding}
-        onClose={() => setAdding(false)}
+        onClose={closeNewCharge}
         presetContainerIds={[container.id]}
         onCreated={onChanged}
       />

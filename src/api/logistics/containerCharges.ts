@@ -358,6 +358,28 @@ export interface CopiedContainerChargeDto {
   rowVersion: string
 }
 
+/**
+ * (118) What posting a charge will do (POST post-preview, logistics.usp_ContainerCharge_PostPreview), read by the post
+ * confirmations before the click. afterReceipt: a draft that enters the cost, on an Offloaded container - its post adjusts
+ * the cost of goods already received, split into toStockBase (the average cost of the pieces the company still holds,
+ * inStockBase of receivedBase) and toCostOfSalesBase (the pieces already sold). problem: the refusal its post would give,
+ * in the post's words (no split then). Base currency; a deduction's amounts are negative.
+ */
+export interface ChargePostPreviewDto {
+  chargeId: number
+  containerId: number
+  containerRef: string
+  chargeCode: string
+  chargeName: string
+  amountBase: number
+  afterReceipt: boolean
+  receivedBase: number | null
+  inStockBase: number | null
+  toStockBase: number | null
+  toCostOfSalesBase: number | null
+  problem: string | null
+}
+
 export const containerChargesApi = {
   list: (query: ContainerChargeQuery, signal?: AbortSignal) =>
     request<ContainerChargePageDto>(`${BASE}${toQueryString(query)}`, { signal }),
@@ -374,6 +396,10 @@ export const containerChargesApi = {
 
   /** Several drafts, all or nothing. */
   postMany: (ids: number[]) => request<ContainerChargeDto[]>(`${BASE}/post`, { method: 'POST', body: { ids } }),
+
+  /** (118) What posting these drafts will do; writes nothing. Needs containers.charges.post. */
+  postPreview: (ids: number[]) =>
+    request<ChargePostPreviewDto[]>(`${BASE}/post-preview`, { method: 'POST', body: { ids } }),
 
   post: (id: number, rowVersion: string | null) =>
     request<ContainerChargeDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion } }),

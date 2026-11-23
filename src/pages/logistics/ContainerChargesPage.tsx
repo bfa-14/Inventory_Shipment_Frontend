@@ -21,6 +21,7 @@ import { BulkActionsBar } from '../../components/documents/BulkActionsBar'
 import { dateLabel, isoDate } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber } from '../../components/format'
 import { ChargeDrawer } from '../../components/logistics/ChargeDrawer'
+import { lateChargeSentence, postPreviewProblem } from '../../components/logistics/lateCharges'
 import { NewChargeModal } from '../../components/logistics/NewChargeModal'
 import { confirm } from '../../components/ui/confirm'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
@@ -183,12 +184,35 @@ export function ContainerChargesPage() {
     reload()
   }, [reload])
 
+  /**
+   * (118) What posting these charges will do, before the click: the refusal the post would give (it is all or nothing),
+   * else the split of those on goods already received. Undefined = no preview (an API without it): the usual sentence.
+   */
+  async function previewPost(ids: number[]): Promise<{ refused: true } | { refused: false; sentence: string | null } | undefined> {
+    try {
+      const previews = await containerChargesApi.postPreview(ids)
+      const problem = postPreviewProblem(previews)
+      if (problem) {
+        notify.error(problem)
+        return { refused: true }
+      }
+      return { refused: false, sentence: lateChargeSentence(previews, baseCode) }
+    } catch {
+      return undefined
+    }
+  }
+
   async function bulkPost() {
     const count = selection.ids.length
     if (count === 0) return
+    setBulkBusy(true)
+    const preview = await previewPost(selection.ids)
+    setBulkBusy(false)
+    if (preview?.refused) return
+    const late = preview && !preview.refused && preview.sentence ? ` ${preview.sentence}` : ''
     const go = await confirm({
       title: 'Post selected charges',
-      message: `Post ${formatNumber(count)} ${count === 1 ? 'charge' : 'charges'}? All of them are posted, or none if one is refused.`,
+      message: `Post ${formatNumber(count)} ${count === 1 ? 'charge' : 'charges'}? All of them are posted, or none if one is refused.${late}`,
       confirmLabel: 'Post',
     })
     if (!go) return
@@ -206,14 +230,19 @@ export function ContainerChargesPage() {
   }
 
   async function postOne(row: ContainerChargeListDto) {
-    const go = await confirm({
-      title: 'Post charge',
-      message:
-        row.containerStatus === 6
-          ? `Post ${row.chargeName} on ${row.containerRef}? The goods are received: the item costs will be adjusted.`
-          : `Post ${row.chargeName} on ${row.containerRef}? It is locked once posted.`,
-      confirmLabel: 'Post',
-    })
+    let message =
+      row.containerStatus === 6
+        ? `Post ${row.chargeName} on ${row.containerRef}? The goods are received: the item costs will be adjusted.`
+        : `Post ${row.chargeName} on ${row.containerRef}? It is locked once posted.`
+    if (row.containerStatus === 6) {
+      const preview = await previewPost([row.id])
+      if (preview?.refused) {
+        reload()
+        return
+      }
+      if (preview?.sentence) message = `Post ${row.chargeName}? ${preview.sentence}`
+    }
+    const go = await confirm({ title: 'Post charge', message, confirmLabel: 'Post' })
     if (!go) return
     try {
       await containerChargesApi.post(row.id, row.rowVersion)
