@@ -214,6 +214,8 @@ export interface DashboardStageDto {
 
 export interface DashboardSummaryQuery {
   branchId: number | null
+  /** (117) Only this warehouse and the warehouses under it; null: every warehouse. */
+  warehouseId?: number | null
   from: string
   to: string
   prevFrom: string
@@ -231,6 +233,7 @@ export const dashboardApi = {
       today: query.today,
     })
     if (query.branchId !== null) params.set('branchId', String(query.branchId))
+    if (query.warehouseId) params.set('warehouseId', String(query.warehouseId))
     return request<DashboardSummaryDto>(`/api/dashboard/summary?${params}`, { signal })
   },
 }

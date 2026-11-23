@@ -2965,3 +2965,20 @@ decides nothing about permissions but where a line links.
   axis.
 - The money cards stand two side by side above about 800 px (`minmax(min(100%, 380px), 1fr)`), one under the other below.
 
+## The Dashboard's Warehouse filter (script 117)
+
+The filters are, in this order: **Branch** and **Warehouse** on one row, then the period on a row of its own
+(with the From – to dates beside it). All three live in the address (`branchId`,
+`warehouseId`, `period` / `from` / `to`), so a view can be shared.
+
+- The Warehouse select ("All warehouses", clearable, searchable) lists the active warehouses of the branch chosen, or of
+  every branch without one, as "{code} - {name}". Choosing a branch takes off a warehouse of another branch. A parent
+  warehouse is offered too: the server counts the warehouses under it.
+- The page only sends `warehouseId`; what "of the warehouse" means per figure is the server's (script 117's header). No
+  figure is filtered in the page.
+- What has no warehouse is said once, in a dimmed line under the filters, while a warehouse is chosen: "Receipts,
+  payments, cheques, cash and bank and "Items below their minimum" have no warehouse: they stay the branch's figures."
+  ("the company's" without a branch). "Sales by branch" is left out while a warehouse is chosen.
+- "Warehouse levels below Min" opens Stock Levels on the warehouse chosen (`routes.stockLevelsLink({ warehouseId })`).
+  The other links keep the branch only: their lists have no warehouse preset.
+- On a phone the three filters take the whole width, one under the other.

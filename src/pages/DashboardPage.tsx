@@ -13,7 +13,8 @@ import {
 } from '@tabler/icons-react'
 import { dashboardApi, type DashboardSummaryDto } from '../api/dashboard'
 import { branchesApi } from '../api/masterdata/branches'
-import type { BranchLookupDto } from '../api/types'
+import { warehousesApi } from '../api/masterdata/warehouses'
+import type { BranchLookupDto, WarehouseLookupDto } from '../api/types'
 import { containerStatusLabel } from '../api/logistics/containers'
 import { formatNumber, todayDateOnly } from '../components/format'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -119,7 +120,7 @@ function changeChip(current: number, previous: number): { text: string; classNam
 /* ── the page ──────────────────────────────────────────────────────────────────────────────────── */
 
 /**
- * The Dashboard: the business in figures and charts, for the branch and period chosen at the top.
+ * The Dashboard: the business in figures and charts, for the branch, warehouse and period chosen at the top.
  *
  * ONE CALL feeds every widget, and the API leaves out (null) each section the reader may not open on
  * its own screen, so a widget appears only when its section came back. The filters live in the
@@ -128,9 +129,11 @@ function changeChip(current: number, previous: number): { text: string; classNam
 export function DashboardPage() {
   const [params, setParams] = useSearchParams()
   const branchId = params.get('branchId')
+  const warehouseId = params.get('warehouseId')
   const period = (DASHBOARD_PERIODS.some((p) => p.value === params.get('period')) ? params.get('period') : 'month') as DashboardPeriod
   const periodInfo = DASHBOARD_PERIODS.find((p) => p.value === period)!
   const [branches, setBranches] = useState<BranchLookupDto[]>([])
+  const [warehouses, setWarehouses] = useState<WarehouseLookupDto[]>([])
   const approvals = useApprovalsMe()
   const phone = useMediaQuery('(max-width: 48em)')
 
@@ -145,7 +148,7 @@ export function DashboardPage() {
     return periodDates(period === 'custom' ? 'month' : period, today)
   }, [period, customFrom, customTo, today])
   const tooLong = daysBetween(dates.from, dates.to) > MAX_PERIOD_DAYS
-  const key = `${branchId ?? ''}|${dates.from}|${dates.to}`
+  const key = `${branchId ?? ''}|${warehouseId ?? ''}|${dates.from}|${dates.to}`
   const [loaded, setLoaded] = useState<{ key: string; data: DashboardSummaryDto | null; error: string | null } | null>(null)
   const loading = loaded?.key !== key && !tooLong
   // The range being picked: the first day alone until the second is clicked, then it goes to the address.
@@ -153,29 +156,41 @@ export function DashboardPage() {
 
   useEffect(() => {
     branchesApi.lookup().then(setBranches).catch(() => {})
+    warehousesApi.lookup().then(setWarehouses).catch(() => {})
   }, [])
 
   useEffect(() => {
     if (tooLong) return
     const controller = new AbortController()
     dashboardApi
-      .summary({ branchId: branchId ? Number(branchId) : null, ...dates, today }, controller.signal)
+      .summary({ branchId: branchId ? Number(branchId) : null, warehouseId: warehouseId ? Number(warehouseId) : null, ...dates, today }, controller.signal)
       .then((data) => setLoaded({ key, data, error: null }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setLoaded({ key, data: null, error: error instanceof Error ? error.message : 'The dashboard could not be loaded.' })
       })
     return () => controller.abort()
-  }, [key, branchId, dates, today, tooLong])
+  }, [key, branchId, warehouseId, dates, today, tooLong])
 
-  function setFilter(name: 'branchId' | 'period', value: string | null) {
+  function setFilter(name: 'branchId' | 'warehouseId' | 'period', value: string | null) {
     setParams((current) => {
       const next = new URLSearchParams(current)
       if (value) next.set(name, value)
       else next.delete(name)
+      // (117) A warehouse of another branch than the one just chosen would empty the page: it is taken off.
+      if (name === 'branchId' && value) {
+        const chosen = warehouses.find((w) => String(w.id) === next.get('warehouseId'))
+        if (chosen && String(chosen.branchId) !== value) next.delete('warehouseId')
+      }
       return next
     }, { replace: true })
   }
+
+  // (117) The warehouses of the branch chosen (every branch's without one), in the tree's order; a parent takes the
+  // warehouses under it. The one in the address stays in the list even when the lookup does not offer it for the branch.
+  const warehouseOptions = warehouses
+    .filter((w) => !branchId || String(w.branchId) === branchId || String(w.id) === warehouseId)
+    .map((w) => ({ value: String(w.id), label: `${w.warehouseCode} - ${w.warehouseName}` }))
 
   /** A period button: "From – to" starts from the days on screen, so the reader only moves what they want. */
   function choosePeriod(value: string) {
@@ -216,7 +231,7 @@ export function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="Dashboard" subtitle="The business in figures, for the branch and period you choose." />
+      <PageHeader title="Dashboard" subtitle="The business in figures, for the branch, warehouse and period you choose." />
 
       <div className={css.board}>
         <div className={css.toolbar}>
@@ -236,6 +251,20 @@ export function DashboardPage() {
               clearable
               searchable
             />
+            <Select
+              aria-label="Warehouse"
+              placeholder="All warehouses"
+              w={phone ? '100%' : 220}
+              data={warehouseOptions}
+              value={warehouseId}
+              onChange={(next) => setFilter('warehouseId', next)}
+              nothingFoundMessage="No warehouse"
+              clearable
+              searchable
+            />
+          </Group>
+          {/* The period has a row of its own, under the branch and the warehouse. */}
+          <Group gap="sm" wrap="wrap" w={phone ? '100%' : undefined}>
             <SegmentedControl
               value={period}
               onChange={choosePeriod}
@@ -261,6 +290,13 @@ export function DashboardPage() {
           </Group>
         </div>
 
+        {/* (117) What a warehouse cannot narrow is said once, under the filters. */}
+        {warehouseId && (
+          <div className={css.dim} style={{ marginBottom: 12 }}>
+            Receipts, payments, cheques, cash and bank and "Items below their minimum" have no warehouse: they stay the {branchId ? "branch's" : "company's"} figures.
+          </div>
+        )}
+
         {tooLong && (
           <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />} mb="md">
             {`Choose a period of at most ${MAX_PERIOD_DAYS} days: this one has ${daysBetween(dates.from, dates.to) + 1}.`}
@@ -282,6 +318,7 @@ export function DashboardPage() {
               data={data}
               approvalsPending={approvals?.canApproveInApp ? approvals.pendingCount : null}
               branchId={branchId}
+              warehouseId={warehouseId}
             />
             <div style={{ marginBottom: 14 }}>
               <div className={css.boardTitle}>{period === 'custom' ? 'Your period' : periodInfo.label}</div>
@@ -299,7 +336,8 @@ export function DashboardPage() {
       {data && <DashboardCards data={data} ccy={ccy} branchId={branchId} />}
 
       {/* (116) What sells and who buys, cash and bank, slow stock, the received containers' charges, lead times. */}
-      {data && <DashboardInsights data={data} ccy={ccy} branchId={branchId} />}
+      {/* (117) "Sales by branch" compares every branch whatever is chosen: beside one warehouse's figures it is left out. */}
+      {data && <DashboardInsights data={warehouseId ? { ...data, salesByBranch: null } : data} ccy={ccy} branchId={branchId} />}
     </>
   )
 }
@@ -567,11 +605,14 @@ function NeedsAttention({
   data,
   approvalsPending,
   branchId,
+  warehouseId,
 }: {
   data: DashboardSummaryDto
   approvalsPending: number | null
   /** The branch chosen at the top (null: the company): the stock-level links open Stock Levels on it (script 91). */
   branchId: string | null
+  /** (117) The warehouse chosen at the top: "Warehouse levels below Min" opens Stock Levels on it. */
+  warehouseId: string | null
 }) {
   const { hasPermission } = useAuth()
   const cards: ReactNode[] = []
@@ -627,7 +668,7 @@ function NeedsAttention({
         {(a.outOfStockSales ?? 0) > 0 && <Line to="/sales/out-of-stock-audit" label="Out-of-stock sales in the period" value={formatNumber(a.outOfStockSales)} colour="#ffb547" />}
         {belowWarehouseMin > 0 && (
           <Line
-            to={routes.stockLevelsLink({ status: 'BelowMin', branchId })}
+            to={routes.stockLevelsLink({ status: 'BelowMin', branchId, warehouseId: warehouseId ? Number(warehouseId) : undefined })}
             label="Warehouse levels below Min"
             sub="Projected stock below a warehouse's own Min"
             value={formatNumber(belowWarehouseMin)}
