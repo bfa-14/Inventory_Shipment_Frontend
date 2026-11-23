@@ -30,7 +30,6 @@ import {
   IconLock,
   IconPackageImport,
   IconPencil,
-  IconPlus,
   IconPrinter,
   IconRoute,
   IconTableExport,
@@ -808,11 +807,6 @@ export function ContainersPage() {
             {canImportCharges ? (
               <Button variant="default" leftSection={<IconFileImport size={16} />} onClick={() => void navigate(IMPORT_CHARGES_ROUTE)}>
                 Import charges from Excel…
-              </Button>
-            ) : null}
-            {canCreate ? (
-              <Button leftSection={<IconPlus size={16} />} onClick={() => void navigate(`${CONTAINERS_ROUTE}/new`)}>
-                New Container
               </Button>
             ) : null}
           </>
