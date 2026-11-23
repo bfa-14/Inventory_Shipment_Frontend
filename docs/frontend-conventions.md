@@ -2210,7 +2210,7 @@ copied.
 | `DocumentLinesGrid` | The lines, edited in place. A plain Mantine table, not the shared `DataTable`. |
 | `DocumentSummary` | Total items, total quantity in base units, total cost. |
 | `AuditTrail` | What has happened to the document, five entries then the rest on asking. Its badges show readable names for the API's action codes ("CostAdjusted" reads "Cost adjusted", "FileAdded" "File added"): a map (`ACTION_LABELS`) and, for a code not in it, the code split into words. `wrapLabels` (the transfer order's trail) keeps a long label whole and puts the user name under it when there is no room ("Nothing more will be sent" read "Nothing more will be…" on a phone); every other trail keeps its one line. |
-| `DocumentActionBar` | The actions, sticky, collapsing to a menu below 768 px. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. Below 768 px the big button is the action marked `filled`, else the last one shown; `pinnedOnPhone` keeps an action beside it as a button, and `menuWhenDisabled` sends an action into the menu while it is disabled with a reason (a big greyed button says nothing on a phone, which has no tooltip: a completed movement's "Cancel…"), the action before it then taking the big button - also when it is the one marked `filled` or `pinnedOnPhone` (a transfer order marks every action so: its next step, disabled, says why in the menu). With `menuTowardsRoom` the menu opens downwards while the bar is in the upper half of the screen, upwards otherwise, and is never taller than the room it has (it scrolls): a transfer order's ten actions with their reasons, opened upwards from the top of its page, ran off the screen. Opt-in: every other page's menu opens upwards as before. |
+| `DocumentActionBar` | The actions, **at the top of the page on every screen**, sticky just under the application's header (`STICK_BELOW_HEADER`: at top 0 the bar slid under the fixed header once the page scrolled), collapsing to a menu below 768 px, which opens downwards (the bar was at the bottom of a phone's screen before, its menu opening upwards). A page renders it right after its `PageHeader`; inside a wrapper, the wrapper is the sticky one. A disabled action's `disabledReason` is a wrapped tooltip (280 px) on a wide screen and its own dimmed line under the label in the menu, which never grows wider than the screen (`maw="calc(100vw - 32px)"`): a reason on the label's line pushed the menu past a phone's edge and cut it off. Below 768 px the big button is the action marked `filled`, else the last one shown; `pinnedOnPhone` keeps an action beside it as a button, and `menuWhenDisabled` sends an action into the menu while it is disabled with a reason (a big greyed button says nothing on a phone, which has no tooltip: a completed movement's "Cancel…"), the action before it then taking the big button - also when it is the one marked `filled` or `pinnedOnPhone` (a transfer order marks every action so: its next step, disabled, says why in the menu). With `menuTowardsRoom` the menu opens downwards while the bar is in the upper half of the screen, upwards otherwise, and is never taller than the room it has (it scrolls): a transfer order's ten actions with their reasons, opened upwards from the top of its page, ran off the screen. Opt-in: every other page's menu opens downwards from the bar at the top. |
 | `DocumentAttachmentsCard` | The paperwork behind the document: the "Documents" card below the lines (see **Attachments (documents on every page)**). |
 | `CancelReasonModal` | Asks why a posted document is being cancelled. `withDate: { minDate?, label? }` also asks the date it counts on (script 84; `label` names the field when it is not a cancellation's, "Reversal date" of a transfer, script 90). |
 
@@ -2470,7 +2470,7 @@ every step, the proposal, many containers at once and the to-do list.
   row's "…" menu** as "Next step: {label}", its reason under the label like Close and Cancel, and leaves out the receipt
   entry that would say the same thing twice.
 - **On a narrow screen (below 75em) the Route card repeats the step** (`ContainerRouteTimeline`'s `step`): the card is
-  the top of the page there and the action bar its bottom, a whole page of scrolling away (6,400 px on a phone). The
+  the top of the page there (the action bar was at its bottom then; it is now at the top of every page, under the header). The
   card's button is the same label, reason and dialog; a disabled one says its reason under the buttons (a phone shows no
   tooltip). A delivered container's step is its goods receipt: the card then opens with "Open goods receipt (draft)" or
   "Receive goods…" (green, the page's own rules and permissions), before "Add to a movement…" and "New movement for
@@ -3009,3 +3009,13 @@ The filters are, in this order: **Branch** and **Warehouse** on one row, then th
 - "Warehouse levels below Min" opens Stock Levels on the warehouse chosen (`routes.stockLevelsLink({ warehouseId })`).
   The other links keep the branch only: their lists have no warehouse preset.
 - On a phone the three filters take the whole width, one under the other.
+
+## A posted shortage plan's "Back to draft…" (script 119)
+
+A posted plan's action bar has **"Back to draft…"** (orange, with Post Shortage Plans) between Create Purchase Order and
+Back. The server decides (`canUnpost`, `unpostBlockedReason` on the plan): while a purchase order made from the plan is
+alive the button is disabled with the server's sentence, which names the order (a tooltip on a wide screen, under the
+label in the "⋮" menu on a phone: `menuWhenDisabled`). It asks "Bring {No} back to draft? No purchase order was made
+from it: you can then change it and post it again, or delete it." and answers "Shortage plan {No} is a draft again."; the
+page then shows the draft's own actions (Save Draft, Save & Post, Recalculate, Delete). An older API sends no
+`canUnpost`: the button is then left out.

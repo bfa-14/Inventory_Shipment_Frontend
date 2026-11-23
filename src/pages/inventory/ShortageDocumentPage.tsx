@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { routes } from '../../routes'
 import { Alert, Badge, Button, Grid, Group, Loader, Paper, Stack, Text, Title, Tooltip } from '@mantine/core'
-import { IconCalculator, IconDownload, IconPrinter, IconShoppingCart, IconTrash } from '@tabler/icons-react'
+import { IconArrowBackUp, IconCalculator, IconDownload, IconPrinter, IconShoppingCart, IconTrash } from '@tabler/icons-react'
 import { ApiError } from '../../api/http'
 import { shortagesApi, type SaveShortageDocumentRequest, type ShortageDocumentDto, type ShortageLiveRowDto } from '../../api/inventory/shortages'
 import { brandsApi } from '../../api/masterdata/brands'
@@ -286,6 +286,27 @@ export function ShortageDocumentPage() {
     }
   }
 
+  /* (119) BACK TO DRAFT: a posted plan nothing was ordered from yet is unlocked, to change it and post it again, or to
+     delete it (a plan is cancelled by deleting its draft). The server decides whether it may, and says why not. */
+  async function backToDraft() {
+    if (!document) return
+    const go = await confirm({
+      title: 'Back to draft?',
+      message: `Bring ${document.documentNumber} back to draft? No purchase order was made from it: you can then change it and post it again, or delete it.`,
+      confirmLabel: 'Back to draft',
+    })
+    if (!go) return
+    setSaving(true)
+    try {
+      applyDocument(await shortagesApi.backToDraft(document.id, document.rowVersion))
+      notify.success(`Shortage plan ${document.documentNumber} is a draft again.`)
+    } catch (error) {
+      showApiError(error, 'The shortage plan could not be brought back to draft.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function saveAndPost() {
     if (lines.length === 0) {
       notify.error('The plan has no lines. Load items before posting.')
@@ -471,6 +492,18 @@ export function ShortageDocumentPage() {
         { key: 'print', label: 'Print', icon: <IconPrinter size={16} />, onClick: print },
         { key: 'export', label: 'Export to Excel', icon: DocumentIcons.exportFile, onClick: () => void exportToExcel() },
         { key: 'create-po', label: 'Create Purchase Order', icon: <IconShoppingCart size={16} />, variant: 'filled', colour: PURCHASE_ORDER.colour, visible: canOrder && document?.canCreatePurchaseOrder === true, loading: saving, onClick: () => void createPurchaseOrder() },
+        {
+          key: 'back-to-draft',
+          label: 'Back to draft…',
+          icon: <IconArrowBackUp size={16} />,
+          colour: 'orange',
+          // An older API sends no canUnpost: the action is then left out.
+          visible: canPost && document?.canUnpost !== undefined,
+          disabled: saving || document?.canUnpost !== true,
+          disabledReason: document?.canUnpost === true ? undefined : (document?.unpostBlockedReason ?? undefined),
+          menuWhenDisabled: true,
+          onClick: () => void backToDraft(),
+        },
         { key: 'back', label: 'Back', icon: DocumentIcons.back, onClick: () => void navigate(SHORTAGES_ROUTE) },
       ]
     : [

@@ -190,6 +190,10 @@ export interface ShortageDocumentDto {
   canPost: boolean
   canDelete: boolean
   canCreatePurchaseOrder: boolean
+  /** (119) A posted plan may go back to draft: no purchase order made from it is alive. Missing from an older API. */
+  canUnpost?: boolean
+  /** (119) Why it may not, in the server's words (names the purchase order); null when it may, and on a draft. */
+  unpostBlockedReason?: string | null
   lines: ShortageDocumentLineDto[]
   purchaseOrders: ShortagePurchaseOrderDto[]
   audit: ShortageDocumentAuditDto[]
@@ -294,6 +298,10 @@ export const shortagesApi = {
 
   post: (id: number, rowVersion: string | null) =>
     request<ShortageDocumentDto>(`${BASE}/${id}/post`, { method: 'POST', body: { rowVersion } }),
+
+  /** (119) A posted plan back to draft (Post Shortage Plans): it can then be changed, posted again or deleted. */
+  backToDraft: (id: number, rowVersion: string | null) =>
+    request<ShortageDocumentDto>(`${BASE}/${id}/back-to-draft`, { method: 'POST', body: { rowVersion } }),
 
   remove: (id: number) => request<void>(`${BASE}/${id}`, { method: 'DELETE' }),
 
