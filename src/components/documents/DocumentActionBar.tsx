@@ -3,6 +3,12 @@ import { Button, Group, Menu, Paper, Text, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { IconDotsVertical } from '@tabler/icons-react'
 
+/**
+ * Where the bar sticks: just under the application's fixed header (AppShell sets --app-shell-header-offset to its
+ * height). At top 0 the bar slid under that header as soon as the page scrolled and no button could be reached.
+ */
+export const STICK_BELOW_HEADER = 'calc(var(--app-shell-header-offset, 0rem) + 8px)'
+
 export interface DocumentAction {
   key: string
   label: string
@@ -70,8 +76,8 @@ interface DocumentActionBarProps {
 export function DocumentActionBar({ actions, menuTowardsRoom = false }: DocumentActionBarProps) {
   const compact = useMediaQuery('(max-width: 768px)')
   const barRef = useRef<HTMLDivElement>(null)
-  /* THE MENU OPENS TOWARDS THE ROOM (menuTowardsRoom). The phone bar sits at the top of the document until it sticks to
-     the bottom of the screen; a long menu (ten actions, each disabled one with its reason) opened upwards from the top
+  /* THE MENU OPENS TOWARDS THE ROOM (menuTowardsRoom). The phone bar is at the top of the page like the wide one (it
+     stuck to the bottom of the screen before); a long menu (ten actions, each disabled one with its reason) opened upwards from the top
      ran off the screen, out of reach. It opens downwards while the bar is in the upper half, upwards otherwise, and
      never grows taller than the room it has (it scrolls). */
   const [menuPosition, setMenuPosition] = useState<'top-end' | 'bottom-end'>('top-end')
@@ -95,7 +101,7 @@ export function DocumentActionBar({ actions, menuTowardsRoom = false }: Document
     const rest = shown.filter((a) => a.key !== primary.key && !pinned.includes(a))
 
     return (
-      <Paper ref={barRef} radius="lg" p="xs" withBorder pos="sticky" bottom={0} style={{ zIndex: 3 }}>
+      <Paper ref={barRef} radius="lg" p="xs" withBorder pos="sticky" top={STICK_BELOW_HEADER} style={{ zIndex: 3 }}>
         <Group justify="space-between" wrap="nowrap" gap="xs">
           {pinned.map((action) => (
             <Button
@@ -128,7 +134,7 @@ export function DocumentActionBar({ actions, menuTowardsRoom = false }: Document
 
           {rest.length > 0 && (
             <Menu
-              position={menuTowardsRoom ? menuPosition : 'top-end'}
+              position={menuTowardsRoom ? menuPosition : 'bottom-end'}
               withinPortal
               onOpen={menuTowardsRoom ? placeMenu : undefined}
               middlewares={menuTowardsRoom ? { flip: true, shift: true, size: { padding: 8 } } : undefined}
@@ -170,7 +176,7 @@ export function DocumentActionBar({ actions, menuTowardsRoom = false }: Document
   }
 
   return (
-    <Paper radius="lg" p="xs" withBorder pos="sticky" top={0} style={{ zIndex: 3 }}>
+    <Paper radius="lg" p="xs" withBorder pos="sticky" top={STICK_BELOW_HEADER} style={{ zIndex: 3 }}>
       <Group justify="flex-end" gap="xs" wrap="wrap">
         {shown.map((action) =>
           action.disabled && action.disabledReason ? (

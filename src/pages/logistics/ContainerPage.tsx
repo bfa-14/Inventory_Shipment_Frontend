@@ -54,7 +54,7 @@ import type { BranchLookupDto, PartyLookupDto, WarehouseLookupDto } from '../../
 import { useAuth } from '../../auth/useAuth'
 import { AuditTrail } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
-import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
+import { DocumentActionBar, STICK_BELOW_HEADER, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel, isoDate, stamp } from '../../components/documents/documentKind'
 import { formatNumber } from '../../components/format'
 import { AddPoLinesModal } from '../../components/logistics/AddPoLinesModal'
@@ -870,6 +870,12 @@ export function ContainerPage() {
         actions={container ? <Badge size="lg" color={containerStatusColour(container.status)} variant={container.status === 7 ? 'filled' : 'light'}>{container.statusName}</Badge> : undefined}
       />
 
+      {/* The actions are at the top of the page, as on every document, and stay in view while it scrolls: the wrapper
+          is the sticky one (a sticky bar never leaves its parent, and this parent is only as tall as the bar). */}
+      <div className="no-print" style={{ marginBottom: 'var(--mantine-spacing-md)', position: 'sticky', top: STICK_BELOW_HEADER, zIndex: 3 }}>
+        <DocumentActionBar actions={actions} />
+      </div>
+
       {stale ? (
         <Alert color="orange" mb="md" title="Changed by someone else">
           {stale}{' '}
@@ -1099,10 +1105,6 @@ export function ContainerPage() {
           </Stack>
         </Grid.Col>
       </Grid>
-
-      <div className="no-print" style={{ marginTop: 'var(--mantine-spacing-md)' }}>
-        <DocumentActionBar actions={actions} />
-      </div>
 
       {addItemsOpen ? (
         <AddPoLinesModal

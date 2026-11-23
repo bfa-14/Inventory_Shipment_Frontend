@@ -45,7 +45,7 @@ import type { PartyLookupDto } from '../../api/types'
 import { useAuth } from '../../auth/useAuth'
 import { AuditTrail, type AuditEntry } from '../../components/documents/AuditTrail'
 import { CancelReasonModal } from '../../components/documents/CancelReasonModal'
-import { DocumentActionBar, type DocumentAction } from '../../components/documents/DocumentActionBar'
+import { DocumentActionBar, STICK_BELOW_HEADER, type DocumentAction } from '../../components/documents/DocumentActionBar'
 import { dateLabel } from '../../components/documents/documentKind'
 import { formatMoney, formatNumber, todayDateOnly } from '../../components/format'
 import { DeliveryCancelDrafts } from '../../components/logistics/DeliveryReceipts'
@@ -749,6 +749,12 @@ export function MovementPage() {
         }
       />
 
+      {/* The actions are at the top of the page, as on every document, and stay in view while it scrolls: the wrapper
+          is the sticky one (a sticky bar never leaves its parent, and this parent is only as tall as the bar). */}
+      <div className="no-print" style={{ marginBottom: 'var(--mantine-spacing-md)', position: 'sticky', top: STICK_BELOW_HEADER, zIndex: 3 }}>
+        <DocumentActionBar actions={actions} />
+      </div>
+
       {stale ? (
         <Alert color="orange" mb="md" title="Changed by someone else">
           {stale}{' '}
@@ -913,10 +919,6 @@ export function MovementPage() {
           </Stack>
         </Grid.Col>
       </Grid>
-
-      <div className="no-print" style={{ marginTop: 'var(--mantine-spacing-md)' }}>
-        <DocumentActionBar actions={actions} />
-      </div>
 
       {dateDialog && movement ? (
         <MovementStatusModal
