@@ -59,7 +59,7 @@ export interface ShortageDerived {
   shortageBase: number
   /** Null when nothing sells: months of coverage have no meaning then. */
   coverageMonths: number | null
-  /** The shortage rounded up to whole purchase units. */
+  /** The shortage, in the unit the plan orders in: the base unit since script 122 (the purchase unit before). */
   suggestedRequiredQty: number
   requiredBase: number
   /** Null without a PC per container. */

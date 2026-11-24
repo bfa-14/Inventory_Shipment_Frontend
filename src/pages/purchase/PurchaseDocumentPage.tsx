@@ -653,7 +653,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       markDirty()
       try {
         const details = await itemsApi.get(itemId)
-        const unit = purchaseUnitOf(details.units)
+        const unit = purchaseUnitOf(details.units, kind.code === 'PO')
         setLines((current) =>
           current.map((line) =>
             line.key === key
@@ -667,7 +667,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
       }
     },
-    [refreshOnHand, header.exchangeRate, lines, defaultWarehouseId],
+    [refreshOnHand, header.exchangeRate, lines, defaultWarehouseId, kind.code],
   )
 
   const addScanned = useCallback(
@@ -685,7 +685,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
         notify.error(error instanceof ApiError ? error.message : 'The item could not be loaded.')
         return
       }
-      const unit = purchaseUnitOf(details.units)
+      const unit = purchaseUnitOf(details.units, kind.code === 'PO')
       if (!unit) {
         notify.error(`${details.itemCode} has no units configured.`)
         return
@@ -704,7 +704,7 @@ export function PurchaseDocumentPage({ kind }: { kind: PurchaseKind }) {
       void refreshOnHand(key, details.id, defaultWarehouseId)
       focusWhenDrawn(`[data-line-qty="${key}"] input`)
     },
-    [invoiceItemId, lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId],
+    [invoiceItemId, lines, patchLine, refreshOnHand, header.exchangeRate, defaultWarehouseId, kind.code],
   )
 
   async function loadUnits(key: string) {

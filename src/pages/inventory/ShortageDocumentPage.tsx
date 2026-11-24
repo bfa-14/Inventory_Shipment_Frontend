@@ -559,7 +559,7 @@ export function ShortageDocumentPage() {
         <Group justify="space-between" align="center" mb="sm" wrap="wrap">
           <div>
             <Title order={5}>Lines</Title>
-            <Text fz="xs" c="dimmed">Quantities in base units; Required Qty in the purchase unit.</Text>
+            <Text fz="xs" c="dimmed">Quantities in base units, Required Qty too; Containers = Required Qty ÷ PC per container.</Text>
           </div>
           {editable && (
             <Group gap="xs">

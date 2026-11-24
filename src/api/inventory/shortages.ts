@@ -62,7 +62,7 @@ export interface ShortageFigures {
 export interface ShortageLiveRowDto extends ShortageFigures {
   soldInPeriodBase: number
   monthsOfHistory: number
-  /** The shortage rounded up to whole purchase units — the default Required Qty of a new line. */
+  /** The shortage in base units (script 122; whole purchase units before) — the default Required Qty of a new line. */
   suggestedRequiredQty: number
   averageCost: number | null
   leadTimeDays: number | null
@@ -85,7 +85,7 @@ export interface ShortageDocumentLineDto extends ShortageFigures {
   /** (98) The lead time typed on the line; null when it is worked out. */
   leadTimeManual: number | null
   effectiveMonthlySales: number
-  /** Purchase units. */
+  /** Base units (script 122; purchase units before). */
   requiredQty: number
   requiredBase: number
   notes: string | null

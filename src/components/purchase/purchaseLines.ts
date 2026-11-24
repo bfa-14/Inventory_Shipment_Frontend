@@ -11,9 +11,15 @@ export function purchaseLineTotal(line: PurchaseLine): number {
   return line.quantity * (line.unitPrice ?? 0) * (1 - line.discountPercent / 100)
 }
 
-/** The unit a purchase defaults to: the purchase unit, else the base unit. */
-export function purchaseUnitOf(units: ItemUnitDto[]): ItemUnitDto | undefined {
-  return units.find((u) => u.isPurchaseUnit) ?? units.find((u) => u.isBaseUnit) ?? units[0]
+/**
+ * The unit a new purchase line starts in. A PURCHASE ORDER starts in the BASE unit (pieces), as the shortage plan it
+ * often comes from (script 122, the owner: "In purchase order and shortage must calc as base unit"); an invoice or a
+ * return hand-typed keeps the purchase unit, else the base unit. The user may still choose another unit on the line.
+ */
+export function purchaseUnitOf(units: ItemUnitDto[], baseFirst = false): ItemUnitDto | undefined {
+  const base = units.find((u) => u.isBaseUnit)
+  if (baseFirst) return base ?? [...units].sort((x, y) => x.packingFormula - y.packingFormula)[0]
+  return units.find((u) => u.isPurchaseUnit) ?? base ?? units[0]
 }
 
 /**

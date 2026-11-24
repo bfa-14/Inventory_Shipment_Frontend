@@ -1438,7 +1438,8 @@ in **cost mode**:
   A document made from another shows a **source chip** ("From Purchase Order PO-…") that links to it; its
   supplier and branch are fixed, and Add Item / Import are hidden because the lines are the source's.
 - **Lines** (`PurchaseLinesGrid`, helpers in `purchaseLines.ts`): Quick Item Search and "+ Add Item" give a
-  line its **purchase unit** (else the base unit), quantity 1 and a **Unit Cost = last cost × packing formula
+  line its unit - on a **purchase order the base unit** (pieces; script 122, as the shortage plan), on an invoice or a
+  return the **purchase unit** (else the base unit); the user may choose another on the line -, quantity 1 and a **Unit Cost = last cost × packing formula
   × exchange rate** (blank when the item was never bought, or for a reader without View item costs, whose item read has
   no last cost: the page sends null and the server prices the line the same way, last cost × packing × rate - 0 when the
   item has no last cost). The cost column
@@ -1799,7 +1800,7 @@ Period". The pieces live in `src/components/shortages/`.
 
 ### The formulas (`shortageMath.ts` — the same ones the database uses)
 
-Per line, in **base units** (only Required Qty is in the purchase unit, shown as the input's suffix):
+Per line, in **base units**, Required Qty too (script 122: it was in the purchase unit; the unit is the input's suffix):
 
 | Cell | Formula |
 |---|---|
@@ -1809,8 +1810,8 @@ Per line, in **base units** (only Required Qty is in the purchase unit, shown as
 | Expected Requirement | Expected Monthly Sales × Lead Time (Month) |
 | Shortage Qty | max(0, Requirement − Total Expected Stock), rounded up — red when > 0 |
 | Coverage (months) | Total Expected Stock ÷ Expected Monthly Sales — red when < Lead Time, "—" when nothing sells |
-| Required Qty | typed; defaults to the shortage rounded up to whole purchase units |
-| Container Requirement | Required Qty × packing ÷ PC per Container (the item's *PC per Container*, overridable per line) |
+| Required Qty | typed, in base units; defaults to the shortage |
+| Container Requirement | Required Qty ÷ PC per Container (360 pcs ÷ 180 = 2.00) (the item's *PC per Container*, overridable per line) |
 
 The live figures come from `inventory.fn_Shortage_Live` (last changed by script 85, the busiest month; script 65
 brought goods receipts), for the plan's warehouse and every warehouse under it:
@@ -1867,7 +1868,7 @@ utilization (91.88 %, with a bar).
 **Create Purchase Order** is disabled on a draft with the tooltip "Post the plan first" (`DocumentAction.disabledReason`)
 and live on a posted plan: confirm → `POST {id}/create-purchase-order` → a notify naming the PO → the PO draft
 opens. The order takes the plan's supplier and branch and every line with a Required Qty above zero, in the
-purchase unit; NOTHING_TO_ORDER when there is none. Each line goes to the plan's warehouse when it is at the bottom
+base unit (script 122; the purchase unit before); NOTHING_TO_ORDER when there is none. Each line goes to the plan's warehouse when it is at the bottom
 of the tree. For a plan made for a parent warehouse (script 62) each line goes to the item's default warehouse when it
 is an active warehouse at the bottom of the plan's tree, else to the first of those (the plan's branch first, then by
 code); the order's header takes its first line's warehouse and its Notes say so (script 89; before, the purchase
