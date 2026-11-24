@@ -296,7 +296,8 @@ export interface ContainerListDto extends ContainerFlags {
   createdAtUtc: string
   createdByName: string | null
   updatedAtUtc: string | null
-  rowVersion: string
+  rowVersion: string
+
   /** (111) Where it stands: the shipment stage, else "Pending", "Followed by typed dates", "Offloaded" or "Not on a stage". */
   stageId: number | null
   stageName: string | null
@@ -838,7 +839,8 @@ export interface ContainerQuery {
   sortBy?: string
   sortDir?: 'asc' | 'desc'
   page?: number
-  pageSize?: number
+  pageSize?: number
+
   /** (111) A shipment stage's id; 0 Pending (never moved), -1 not on a stage. */
   stageId?: number
 }
@@ -964,6 +966,8 @@ export interface AttachmentCreatedDto {
 export interface ContainerOrderDefaultsDto {
   purchaseOrderId: number
   purchaseOrderNumber: string | null
+  /** (121) The purchase order's date (a plain date): Auto-plan starts the containers' Order date at it. Missing from an older API. */
+  orderDate?: string | null
   supplierId: number
   supplierCode: string
   supplierName: string
@@ -1157,6 +1161,10 @@ export const containersApi = {
 
   confirm: (id: number, rowVersion: string | null) =>
     request<ContainerDto>(`${BASE}/${id}/confirm`, { method: 'POST', body: { rowVersion } }),
+
+  /** (120) Changes the container's ref (Create Containers; any status but Cancelled). The server says why a ref is refused. */
+  setRef: (id: number, containerRef: string, rowVersion: string | null) =>
+    request<ContainerDto>(`${BASE}/${id}/ref`, { method: 'POST', body: { containerRef, rowVersion } }),
 
   /**
    * RETIRED: the server refuses it since goods receipts (69010 "Containers are received with a goods receipt now. Use

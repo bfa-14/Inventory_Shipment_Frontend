@@ -19,6 +19,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
+import { FormModal } from '../../components/ui/FormModal'
 import { DateInput } from '../../components/ui/DateInput'
 import { useForm } from '@mantine/form'
 import { useMediaQuery } from '@mantine/hooks'
@@ -32,6 +33,7 @@ import {
   IconLock,
   IconLockOpen,
   IconPackageImport,
+  IconPencil,
   IconPrinter,
   IconRoute,
   IconTrash,
@@ -180,6 +182,10 @@ export function ContainerPage() {
   const [createdInvoices, setCreatedInvoices] = useState<{ invoices: CreatedPurchaseInvoiceDto[]; orderIds: number[]; onePerItem: boolean } | null>(null)
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [reasonDialog, setReasonDialog] = useState<ReasonDialog>(null)
+  /* (120) "Change ref…": the ref being typed (null: the dialog is closed) and the server's refusal, shown in the dialog. */
+  const [refDraft, setRefDraft] = useState<string | null>(null)
+  const [refError, setRefError] = useState<string | null>(null)
+  const [refSaving, setRefSaving] = useState(false)
   /** The container's goods receipt as the receipt itself says it (dates, who, why it cannot be cancelled). */
   const [receiptDoc, setReceiptDoc] = useState<GoodsReceiptDto | null>(null)
   const [cancelReceiptOpen, setCancelReceiptOpen] = useState(false)
@@ -537,6 +543,26 @@ export function ContainerPage() {
 
   const quiet = (promise: Promise<void>) => promise.catch(() => {})
 
+  /* (120) THE REF IS CHANGED ON ITS OWN, in any status but Cancelled: it is not a field of the form (a received
+     container's form is read-only), and the server decides what a ref may be - unique, and never a number the
+     container numbering has still to give. Its refusal stays in the dialog, beside what was typed. */
+  async function changeRef() {
+    if (!container || refDraft === null) return
+    setRefSaving(true)
+    setRefError(null)
+    try {
+      const updated = await containersApi.setRef(container.id, refDraft, container.rowVersion)
+      show(updated)
+      notify.success(`Ref changed: ${container.containerRef} is now ${updated.containerRef}.`)
+      setRefDraft(null)
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'CONCURRENCY') setStale(err.message)
+      setRefError(err instanceof ApiError ? err.message : 'The ref could not be changed.')
+    } finally {
+      setRefSaving(false)
+    }
+  }
+
   async function confirmPlan() {
     const go = await confirm({
       title: `Confirm ${container?.containerRef}`,
@@ -733,6 +759,20 @@ export function ContainerPage() {
     { key: 'back', label: 'Back', icon: <IconArrowLeft size={16} />, onClick: () => void back(), variant: 'default' },
     { key: 'print', label: 'Print', icon: <IconPrinter size={16} />, onClick: () => window.print(), variant: 'default', visible: saved },
     { key: 'export', label: 'Export', icon: <IconFileSpreadsheet size={16} />, onClick: () => void exportXlsx(), variant: 'default', visible: saved },
+    {
+      key: 'ref',
+      label: 'Change ref…',
+      icon: <IconPencil size={16} />,
+      onClick: () => {
+        setRefError(null)
+        setRefDraft(container?.containerRef ?? '')
+      },
+      variant: 'default',
+      visible: saved && perm.create,
+      disabled: container?.status === 8 || dirty.current,
+      disabledReason: container?.status === 8 ? 'This container is cancelled: its ref can no longer change.' : dirty.current ? 'Save your changes first.' : undefined,
+      menuWhenDisabled: true,
+    },
     { key: 'delete', label: 'Delete', icon: <IconTrash size={16} />, onClick: () => void remove(), variant: 'default', colour: 'red', visible: saved && container.canDelete && perm.delete },
     {
       key: 'cancel',
@@ -1186,6 +1226,32 @@ export function ContainerPage() {
         description={cancelDescription(postedReceipt?.number ?? null, container?.containerRef ?? null)}
         onConfirm={(reason) => void cancelReceipt(reason)}
       />
+
+      {/* (120) Change ref… */}
+      <FormModal
+        opened={refDraft !== null}
+        title={`Change the ref of ${container?.containerRef ?? ''}`}
+        onSubmit={() => void changeRef()}
+        onClose={() => setRefDraft(null)}
+        saving={refSaving}
+        saveLabel="Change ref"
+        size="md"
+      >
+        <Stack gap="sm">
+          <TextInput
+            label="Container ref"
+            description="Its goods, charges, movements, invoices and goods receipts follow the container: only its name changes."
+            value={refDraft ?? ''}
+            onChange={(event) => {
+              setRefDraft(event.currentTarget.value.toUpperCase())
+              setRefError(null)
+            }}
+            maxLength={30}
+            error={refError}
+            data-autofocus
+          />
+        </Stack>
+      </FormModal>
 
       <CancelReasonModal
         opened={reasonDialog !== null}

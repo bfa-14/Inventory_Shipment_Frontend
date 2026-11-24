@@ -174,7 +174,12 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
 
   // settings
   const [typeId, setTypeId] = useState<string | null>(null)
-  const [orderDate, setOrderDate] = useState<string | null>(isoDate(new Date()))
+  /* (121) THE ORDER DATE STARTS AS THE PURCHASE ORDER'S (the owner: "order date must be as purchase order date"), from
+     the order's defaults like the forwarder and the country: undefined = not changed by hand yet, so the order's date
+     arrives when the defaults do; a date picked (or emptied) by hand is kept. Today only while the defaults are
+     loading, or from an older API that does not send the order's date. */
+  const [orderDatePick, setOrderDatePick] = useState<string | null | undefined>(undefined)
+  const setOrderDate = (next: string | null) => setOrderDatePick(next)
   const [warehouseId, setWarehouseId] = useState<string | null>(String(order.warehouseId))
   const [portOfLoadingId, setPortOfLoadingId] = useState<string | null>(null)
   const [portOfDestinationId, setPortOfDestinationId] = useState<string | null>(null)
@@ -186,6 +191,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
   const [countryPick, setCountryPick] = useState<string | null | undefined>(undefined)
   const forwarderId = forwarderPick !== undefined ? forwarderPick : defaults ? String(defaults.forwarderId) : null
   const countryOfOrigin = countryPick !== undefined ? countryPick : (defaults?.countryOfOrigin ?? null)
+  const orderDate = orderDatePick !== undefined ? orderDatePick : (defaults?.orderDate ? defaults.orderDate.slice(0, 10) : isoDate(new Date()))
   const [shippingLine, setShippingLine] = useState('')
   const [mix, setMix] = useState(true)
   const [confirmAfter, setConfirmAfter] = useState(false)
@@ -474,6 +480,7 @@ export function AutoPlanModal({ order, invoice, canOverCapacity, canConfirm, onC
             />
             <DateInput
               label="Order date"
+              description={orderDatePick === undefined && defaults?.orderDate ? "The purchase order's date" : undefined}
               valueFormat="DD/MM/YYYY"
               value={fromIsoDate(orderDate)}
               onChange={(next) => setOrderDate(next ? isoDate(next) : null)}

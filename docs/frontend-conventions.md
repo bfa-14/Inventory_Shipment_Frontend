@@ -3019,3 +3019,21 @@ label in the "⋮" menu on a phone: `menuWhenDisabled`). It asks "Bring {No} bac
 from it: you can then change it and post it again, or delete it." and answers "Shortage plan {No} is a draft again."; the
 page then shows the draft's own actions (Save Draft, Save & Post, Recalculate, Delete). An older API sends no
 `canUnpost`: the button is then left out.
+
+## A container's "Change ref…" (script 120)
+
+The container page's action bar has **"Change ref…"** (pencil, with Create Containers) after Export, on every saved
+container: disabled with "This container is cancelled: its ref can no longer change." on a cancelled one and "Save your
+changes first." while the form has unsaved edits (in the "⋮" menu with its reason on a phone). It opens a small dialog -
+"Change the ref of {ref}", one field "Container ref" (typed in capitals, 30 characters), "Change ref" - and it is NOT a
+field of the container's form: a received container's form is read-only, its ref can still change. The server decides
+what a ref may be; its refusal (already used, a number the numbering has still to give) is shown under the field, in
+the dialog, as it comes. After it: "Ref changed: {old} is now {new}.", and the page shows the container it got back.
+
+## Auto-plan's Order date starts as the purchase order's (script 121)
+
+`AutoPlanModal` (one dialog for a purchase order and for a purchase invoice) starts "Order date" at the order's date,
+which comes with the order's defaults (`useContainerOrderDefaults`: `orderDate`), like the forwarder and the country:
+the pick is `undefined` until the user changes the field, so the order's date arrives when the defaults do, and a date
+picked or emptied by hand is kept. While it is the order's, the field says "The purchase order's date" under its
+label. Today only while the defaults load, or from an older API without `orderDate`.
