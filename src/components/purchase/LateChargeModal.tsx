@@ -59,7 +59,8 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
   )
   const [notes, setNotes] = useState(charge?.notes ?? '')
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  /* The errors are shown only after a first Save, then follow what is typed: a field corrected loses its red at once. */
+  const [attempted, setAttempted] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -93,7 +94,6 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
   function chooseType(next: string | null) {
     setChargeTypeId(next)
     setMethod(methodOf(chargeTypes.find((t) => String(t.id) === next)))
-    setErrors((current) => ({ ...current, chargeTypeId: '' }))
   }
 
   function validate(): Record<string, string> {
@@ -109,7 +109,7 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
 
   async function save() {
     const found = validate()
-    setErrors(found)
+    setAttempted(true)
     setFormError(null)
     if (Object.keys(found).length > 0) return
 
@@ -140,6 +140,8 @@ export function LateChargeModal({ invoiceId, charge, chargeTypes, providers, cur
       setSaving(false)
     }
   }
+
+  const errors: Record<string, string> = attempted ? validate() : {}
 
   return (
     <FormModal

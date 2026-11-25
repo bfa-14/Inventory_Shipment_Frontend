@@ -178,7 +178,8 @@ function NewChargeDialog({
   const [bivacOptionsRead, setBivacOptionsRead] = useState<{ key: string; data: BivacChargeOptionsDto } | null>(null)
   const [bivacCostsRead, setBivacCostsRead] = useState<{ itemId: string; costs: Map<number, number> } | null>(null)
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  /* The errors are shown only after a first Save, then follow what is typed: a field corrected loses its red at once. */
+  const [attempted, setAttempted] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState<ChargeGroupMemberDto[] | null>(null)
@@ -378,7 +379,7 @@ function NewChargeDialog({
 
   async function save() {
     const found = validate()
-    setErrors(found)
+    setAttempted(true)
     setFormError(null)
     if (Object.keys(found).length > 0) return
     setSaving(true)
@@ -487,6 +488,8 @@ function NewChargeDialog({
       </FormModal>
     )
   }
+
+  const errors: Record<string, string> = attempted ? validate() : {}
 
   return (
     <FormModal opened title="New charge" onSubmit={() => void save()} onClose={close} saving={saving} saveLabel="Save as draft" size="xl">
