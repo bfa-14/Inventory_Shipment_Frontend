@@ -22,6 +22,10 @@ export interface ContainerReportRowDto {
   orderDate: string
   purchaseOrderId: number
   poNumber: string | null
+  /** (123) The shortage plan the purchase order was created from; null for an order typed by hand. */
+  shortageId?: number | null
+  shortageNumber?: string | null
+  shortageDescription?: string | null
   /** "Sep-25". */
   orderMonth: string | null
   invoiceDate: string | null

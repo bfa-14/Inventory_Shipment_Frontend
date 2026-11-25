@@ -2060,6 +2060,10 @@ order, PI, invoices, payments, journey, charges and cost. `containerReportApi.re
 - **Export to Excel** is the server's (`/export`): the sheet's layout, one frozen header, a title row and a subtotal per
   stage, the grand total.
 
+**SHORTAGE column** (script 123), after PO N°: the description of the shortage plan the row's purchase order was created
+from (`shortageDescription`), its number dimmed under it, both a link to `/inventory/shortages/{shortageId}`; empty for an
+order typed by hand. Its filter and the CSV read "description · number".
+
 ## Item costs (script 94: inventory.costs.view)
 
 `inventory.costs.view`, "View item costs" (`PERMISSIONS.costsView`), decides who sees **what an item costs**: its

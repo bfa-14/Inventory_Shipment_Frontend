@@ -278,6 +278,7 @@ export function ContainerReportPage() {
       { accessor: 'costPerUnitBase', kind: 'number', text: (r) => amount(r.costPerUnitBase) },
       { accessor: 'statusName', kind: 'list' },
       { accessor: 'poNumber' },
+      { accessor: 'shortageDescription', text: (r) => [r.shortageDescription, r.shortageNumber].filter(Boolean).join(' · ') },
       { accessor: 'invoiceNumbers' },
       { accessor: 'goodsReceiptNumbers' },
       { accessor: 'supplierName', kind: 'list' },
@@ -423,6 +424,21 @@ export function ContainerReportPage() {
           {r.poNumber ?? 'Order'}
         </Anchor>
       ),
+    },
+    {
+      // (123) The shortage plan the row's purchase order was created from: its description, its number under it.
+      accessor: 'shortageDescription',
+      title: 'SHORTAGE',
+      width: 220,
+      render: (r) =>
+        r.shortageId ? (
+          <Anchor component={Link} to={`/inventory/shortages/${r.shortageId}`} fz="sm" title={r.shortageNumber ?? undefined}>
+            <Text span fz="sm" lineClamp={2} maw={220}>{r.shortageDescription || r.shortageNumber}</Text>
+            <Text span fz="xs" c="dimmed" display="block">{r.shortageNumber}</Text>
+          </Anchor>
+        ) : (
+          ''
+        ),
     },
     { accessor: 'invoiceNumbers', title: 'SYSTEM INVOICE N°', width: 170, render: (r) => text(r.invoiceNumbers, 170) },
     { accessor: 'goodsReceiptNumbers', title: 'GOODS RECEIPT N°', width: 170, render: (r) => text(r.goodsReceiptNumbers, 170) },
